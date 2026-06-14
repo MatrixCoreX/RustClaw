@@ -195,6 +195,9 @@ pub(super) async fn call_anthropic_claude(
         request_payload: req_body,
         raw_response: body_text,
         usage,
+        attempts: 1,
+        retryable_error_count: 0,
+        last_retry_error_kind: None,
     })
 }
 

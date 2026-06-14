@@ -59,6 +59,9 @@ fn planner_capability_hint_includes_structured_contract() {
         optional: vec!["names_only".to_string()],
         risk_level: None,
         preferred: true,
+        once_per_task: None,
+        dedup_scope: None,
+        idempotent: None,
     });
     assert_eq!(
         hint,

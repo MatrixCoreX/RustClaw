@@ -97,18 +97,16 @@ impl PromptSurfaceSignals {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for candidate in &self.filename_candidates {
-            if self
-                .dotted_field_selector
-                .as_ref()
-                .is_some_and(|selector| selector.eq_ignore_ascii_case(candidate))
-            {
+            if self.dotted_field_selector.as_ref().is_some_and(|selector| {
+                selector.eq_ignore_ascii_case(candidate)
+                    && !filename_candidate_should_survive_field_selector_filter(candidate)
+            }) {
                 continue;
             }
-            if self
-                .field_selector_mentions
-                .iter()
-                .any(|selector| selector.eq_ignore_ascii_case(candidate))
-            {
+            if self.field_selector_mentions.iter().any(|selector| {
+                selector.eq_ignore_ascii_case(candidate)
+                    && !filename_candidate_should_survive_field_selector_filter(candidate)
+            }) {
                 continue;
             }
             let normalized = candidate.to_ascii_lowercase();
@@ -651,6 +649,11 @@ pub(crate) fn extract_dotted_field_selector(prompt: &str) -> Option<String> {
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(&selector));
         if looks_like_filename_candidate
+            && filename_candidate_should_survive_field_selector_filter(&selector)
+        {
+            return None;
+        }
+        if looks_like_filename_candidate
             && !filename_like_dotted_selector_has_prior_locator_context(
                 prompt,
                 &selector,
@@ -700,6 +703,61 @@ pub(crate) fn extract_field_selector_mentions(prompt: &str) -> Vec<String> {
         }
     }
     selectors
+}
+
+fn filename_candidate_should_survive_field_selector_filter(candidate: &str) -> bool {
+    let Some((_, ext)) = candidate.trim().rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "7z" | "bash"
+            | "cfg"
+            | "conf"
+            | "csv"
+            | "css"
+            | "doc"
+            | "docx"
+            | "env"
+            | "gif"
+            | "gz"
+            | "html"
+            | "ini"
+            | "jpeg"
+            | "jpg"
+            | "js"
+            | "json"
+            | "jsx"
+            | "lock"
+            | "log"
+            | "markdown"
+            | "md"
+            | "mp3"
+            | "mp4"
+            | "pdf"
+            | "png"
+            | "py"
+            | "rar"
+            | "rs"
+            | "sh"
+            | "sql"
+            | "svg"
+            | "tar"
+            | "toml"
+            | "ts"
+            | "tsx"
+            | "txt"
+            | "wav"
+            | "webm"
+            | "webp"
+            | "xls"
+            | "xlsx"
+            | "xml"
+            | "yaml"
+            | "yml"
+            | "zip"
+            | "zsh"
+    )
 }
 
 #[cfg(test)]

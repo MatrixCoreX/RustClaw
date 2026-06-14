@@ -39,6 +39,43 @@ impl LoopBudgetProfile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SemanticRouteAuthority {
+    Legacy,
+    Shadow,
+    AgentLoopCanary,
+    AgentLoopDefault,
+}
+
+impl SemanticRouteAuthority {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Legacy => "legacy",
+            Self::Shadow => "shadow",
+            Self::AgentLoopCanary => "agent_loop_canary",
+            Self::AgentLoopDefault => "agent_loop_default",
+        }
+    }
+
+    fn from_token(token: &str) -> Option<Self> {
+        match token.trim() {
+            "legacy" => Some(Self::Legacy),
+            "shadow" => Some(Self::Shadow),
+            "agent_loop_canary" => Some(Self::AgentLoopCanary),
+            "agent_loop_default" => Some(Self::AgentLoopDefault),
+            _ => None,
+        }
+    }
+
+    fn records_agent_decides_attribution(self) -> bool {
+        !matches!(self, Self::Legacy)
+    }
+
+    pub(super) fn uses_agent_loop_authority(self) -> bool {
+        matches!(self, Self::AgentLoopCanary | Self::AgentLoopDefault)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct AgentLoopGuardPolicy {
     pub(super) max_steps: usize,
@@ -49,6 +86,12 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) no_progress_limit: usize,
     pub(super) multi_round_enabled: bool,
     pub(super) answer_verifier_retry_limit: usize,
+    pub(super) answer_verifier_enforce_required: bool,
+    pub(super) semantic_route_authority: SemanticRouteAuthority,
+    pub(super) agent_decides_semantic_route: bool,
+    pub(super) agent_decides_migration_class: String,
+    pub(super) registry_idempotency_guard: bool,
+    pub(super) structured_evidence_required_for_selected_contracts: bool,
     pub(super) fast_read: LoopRecipeOverrides,
     pub(super) grounded_summary: LoopRecipeOverrides,
     pub(super) multi_step_workspace: LoopRecipeOverrides,
@@ -56,6 +99,63 @@ pub(super) struct AgentLoopGuardPolicy {
 }
 
 impl AgentLoopGuardPolicy {
+    pub(super) fn effective_semantic_route_authority(&self) -> SemanticRouteAuthority {
+        if self.semantic_route_authority == SemanticRouteAuthority::Legacy
+            && self.agent_decides_semantic_route
+        {
+            SemanticRouteAuthority::Shadow
+        } else {
+            self.semantic_route_authority
+        }
+    }
+
+    pub(super) fn records_agent_decides_attribution(&self) -> bool {
+        self.effective_semantic_route_authority()
+            .records_agent_decides_attribution()
+    }
+
+    pub(super) fn uses_agent_loop_semantic_authority(&self) -> bool {
+        self.effective_semantic_route_authority()
+            .uses_agent_loop_authority()
+    }
+
+    pub(super) fn selected_migration_class_for_eligible(
+        &self,
+        eligible_migration_class: &'static str,
+    ) -> &'static str {
+        if eligible_migration_class == "none" {
+            return "none";
+        }
+        if self.effective_semantic_route_authority() == SemanticRouteAuthority::AgentLoopDefault {
+            return eligible_migration_class;
+        }
+        if self.agent_decides_migration_class == eligible_migration_class {
+            eligible_migration_class
+        } else {
+            "none"
+        }
+    }
+
+    pub(super) fn enabled_rollout_switches(&self) -> Vec<&'static str> {
+        let mut switches = Vec::new();
+        if self.answer_verifier_enforce_required {
+            switches.push("answer_verifier_enforce_required");
+        }
+        if self.effective_semantic_route_authority() != SemanticRouteAuthority::Legacy {
+            switches.push("semantic_route_authority");
+        }
+        if self.agent_decides_semantic_route {
+            switches.push("agent_decides_semantic_route");
+        }
+        if self.registry_idempotency_guard {
+            switches.push("registry_idempotency_guard");
+        }
+        if self.structured_evidence_required_for_selected_contracts {
+            switches.push("structured_evidence_required_for_selected_contracts");
+        }
+        switches
+    }
+
     pub(super) fn budget_profile_for_context(
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
         route_result: Option<&crate::RouteResult>,
@@ -243,6 +343,38 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
     cursor.as_bool().unwrap_or(fallback)
 }
 
+fn parse_agent_decides_migration_class(root: &TomlValue) -> String {
+    const ALLOWED: &[&str] = &[
+        "none",
+        "bound_path_summary",
+        "structured_field_read",
+        "exact_path_list",
+        "recent_artifacts_judgment",
+        "scalar_count",
+    ];
+    let mut cursor = root;
+    for key in ["agent", "loop_guard", "agent_decides_migration_class"] {
+        let Some(next) = cursor.get(key) else {
+            return "none".to_string();
+        };
+        cursor = next;
+    }
+    let value = cursor.as_str().unwrap_or("none").trim();
+    if ALLOWED.contains(&value) {
+        value.to_string()
+    } else {
+        "none".to_string()
+    }
+}
+
+fn parse_semantic_route_authority(root: &TomlValue) -> Option<SemanticRouteAuthority> {
+    let mut cursor = root;
+    for key in ["agent", "loop_guard", "semantic_route_authority"] {
+        cursor = cursor.get(key)?;
+    }
+    SemanticRouteAuthority::from_token(cursor.as_str().unwrap_or("legacy"))
+}
+
 fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
     let mut max_steps_path = path.to_vec();
     max_steps_path.push("max_steps");
@@ -285,7 +417,22 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         .ok()
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
         .unwrap_or(TomlValue::Table(Default::default()));
-    AgentLoopGuardPolicy {
+    let legacy_agent_decides_semantic_route = parse_bool_from_toml(
+        &parsed,
+        &["agent", "loop_guard", "agent_decides_semantic_route"],
+        false,
+    );
+    let parsed_semantic_route_authority = parse_semantic_route_authority(&parsed);
+    let semantic_route_authority =
+        parsed_semantic_route_authority.unwrap_or(if legacy_agent_decides_semantic_route {
+            SemanticRouteAuthority::Shadow
+        } else {
+            SemanticRouteAuthority::Legacy
+        });
+    let agent_decides_semantic_route = parsed_semantic_route_authority
+        .map(SemanticRouteAuthority::records_agent_decides_attribution)
+        .unwrap_or(legacy_agent_decides_semantic_route);
+    let policy = AgentLoopGuardPolicy {
         max_steps: parse_usize_from_toml(
             &parsed,
             &["agent", "loop_guard", "max_steps"],
@@ -322,6 +469,28 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &["agent", "loop_guard", "answer_verifier_retry_limit"],
             2,
         ),
+        answer_verifier_enforce_required: parse_bool_from_toml(
+            &parsed,
+            &["agent", "loop_guard", "answer_verifier_enforce_required"],
+            false,
+        ),
+        semantic_route_authority,
+        agent_decides_semantic_route,
+        agent_decides_migration_class: parse_agent_decides_migration_class(&parsed),
+        registry_idempotency_guard: parse_bool_from_toml(
+            &parsed,
+            &["agent", "loop_guard", "registry_idempotency_guard"],
+            false,
+        ),
+        structured_evidence_required_for_selected_contracts: parse_bool_from_toml(
+            &parsed,
+            &[
+                "agent",
+                "loop_guard",
+                "structured_evidence_required_for_selected_contracts",
+            ],
+            false,
+        ),
         fast_read: parse_loop_recipe_overrides(
             &parsed,
             &["agent", "loop_guard", "budget_profiles", "fast_read"],
@@ -343,7 +512,15 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &parsed,
             &["agent", "loop_guard", "ops_closed_loop"],
         ),
+    };
+    let enabled_rollout_switches = policy.enabled_rollout_switches();
+    if !enabled_rollout_switches.is_empty() {
+        info!(
+            rollout_switches = enabled_rollout_switches.join(","),
+            "agent_loop_guard_rollout_switches_enabled"
+        );
     }
+    policy
 }
 
 /// Publish progress hints only. Used for "in progress" UI. Must not contain full raw tool/skill output.
@@ -701,6 +878,100 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
         }
         AgentAction::Think { .. } => "think".to_string(),
     }
+}
+
+pub(super) fn action_fingerprint_for_policy(
+    state: &AppState,
+    policy: &AgentLoopGuardPolicy,
+    action: &AgentAction,
+) -> String {
+    if !policy.registry_idempotency_guard {
+        return action_fingerprint(state, action);
+    }
+    let Some((skill_name, args)) = action_skill_and_args(action) else {
+        return action_fingerprint(state, action);
+    };
+    let normalized_skill = state
+        .resolve_canonical_skill_name(skill_name)
+        .to_ascii_lowercase();
+    let action_token = registry_action_token_from_args(args);
+    let Some(registry) = state.get_skills_registry() else {
+        return action_fingerprint(state, action);
+    };
+    let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
+    let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
+    if once_per_task || dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
+        return format!(
+            "skill:{}:action:{}",
+            normalized_skill,
+            action_token.unwrap_or_else(|| "_default".to_string())
+        );
+    }
+    action_fingerprint(state, action)
+}
+
+pub(super) fn registry_idempotency_guard_attribution(
+    state: &AppState,
+    policy: &AgentLoopGuardPolicy,
+    action: &AgentAction,
+    fingerprint: &str,
+    reason_code: &str,
+    repeat_count: Option<usize>,
+    limit: Option<usize>,
+) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
+    if !policy.registry_idempotency_guard {
+        return None;
+    }
+    let (skill_name, args) = action_skill_and_args(action)?;
+    let normalized_skill = state
+        .resolve_canonical_skill_name(skill_name)
+        .to_ascii_lowercase();
+    let action_token = registry_action_token_from_args(args);
+    let registry = state.get_skills_registry()?;
+    let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
+    let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
+    if !once_per_task && dedup_scope != claw_core::skill_registry::RegistryDedupScope::Action {
+        return None;
+    }
+    Some(
+        crate::task_journal::TaskJournalRolloutAttribution::registry_idempotency_guard_block(
+            reason_code,
+            normalized_skill,
+            action_token,
+            dedup_scope.as_token(),
+            fingerprint,
+            repeat_count,
+            limit,
+        ),
+    )
+}
+
+fn action_skill_and_args(action: &AgentAction) -> Option<(&str, &Value)> {
+    match action {
+        AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
+        AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
+        _ => None,
+    }
+}
+
+fn registry_action_token_from_args(args: &Value) -> Option<String> {
+    args.get("action")
+        .and_then(Value::as_str)
+        .map(|value| {
+            value
+                .trim()
+                .to_ascii_lowercase()
+                .chars()
+                .map(|ch| {
+                    if matches!(ch, '-' | ' ' | '.') {
+                        '_'
+                    } else {
+                        ch
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

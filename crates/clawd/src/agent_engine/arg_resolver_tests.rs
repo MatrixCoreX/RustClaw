@@ -80,6 +80,32 @@ fn auto_locator_rewrites_system_basic_file_path() {
 }
 
 #[test]
+fn auto_locator_rewrites_config_basic_read_field_path() {
+    let root = TempDirGuard::new("config_basic_file");
+    let cargo_toml = root.path.join("Cargo.toml");
+    fs::write(&cargo_toml, "[package]\nversion = \"0.1.0\"\n").expect("write config");
+    let target_path = cargo_toml.display().to_string();
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .output_vars
+        .insert("auto_locator_path".to_string(), target_path.clone());
+    let mut args = json!({
+        "action": "read_field",
+        "path": "/tmp/wrong-Cargo.toml",
+        "field_path": "package.version"
+    });
+    assert!(rewrite_args_with_auto_locator_path(
+        "config_basic",
+        &mut args,
+        &loop_state
+    ));
+    assert_eq!(
+        args.get("path").and_then(|v| v.as_str()),
+        Some(target_path.as_str())
+    );
+}
+
+#[test]
 fn auto_locator_rewrites_directory_root_for_find_path() {
     let root = TempDirGuard::new("workspace_dir");
     let document = root.path.join("document");
@@ -125,6 +151,85 @@ fn fs_search_aliases_normalize_to_supported_contract() {
     assert_eq!(
         args.get("root").and_then(|v| v.as_str()),
         Some("/tmp/stem_unique")
+    );
+}
+
+#[test]
+fn kb_ingest_source_alias_normalizes_to_paths_array() {
+    let mut args = json!({
+        "action": "ingest",
+        "namespace": "demo_docs_nl",
+        "source": "/home/guagua/rustclaw/README.md"
+    });
+
+    assert!(normalize_skill_arg_aliases("kb", &mut args));
+    assert_eq!(
+        args.get("paths").and_then(|value| value.as_array()),
+        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+    );
+}
+
+#[test]
+fn kb_ingest_source_paths_alias_normalizes_to_paths_array() {
+    let mut args = json!({
+        "action": "ingest",
+        "namespace": "demo_docs_nl",
+        "source_paths": ["README.md", "README.zh-CN.md"]
+    });
+
+    assert!(normalize_skill_arg_aliases("kb", &mut args));
+    assert_eq!(
+        args.get("paths").and_then(|value| value.as_array()),
+        Some(&vec![json!("README.md"), json!("README.zh-CN.md")])
+    );
+}
+
+#[test]
+fn kb_ingest_file_path_alias_normalizes_to_paths_array() {
+    let mut args = json!({
+        "action": "ingest",
+        "namespace": "demo_docs_nl",
+        "file_path": "/home/guagua/rustclaw/README.md"
+    });
+
+    assert!(normalize_skill_arg_aliases("kb", &mut args));
+    assert_eq!(
+        args.get("paths").and_then(|value| value.as_array()),
+        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+    );
+}
+
+#[test]
+fn kb_ingest_file_path_and_kb_name_aliases_normalize() {
+    let mut args = json!({
+        "action": "ingest",
+        "file_path": "/home/guagua/rustclaw/README.md",
+        "kb_name": "demo_docs_nl"
+    });
+
+    assert!(normalize_skill_arg_aliases("kb", &mut args));
+    assert_eq!(
+        args.get("namespace").and_then(|value| value.as_str()),
+        Some("demo_docs_nl")
+    );
+    assert_eq!(
+        args.get("paths").and_then(|value| value.as_array()),
+        Some(&vec![json!("/home/guagua/rustclaw/README.md")])
+    );
+}
+
+#[test]
+fn kb_search_kb_name_alias_normalizes_to_namespace() {
+    let mut args = json!({
+        "action": "search",
+        "kb_name": "demo_docs_nl",
+        "query": "deployment"
+    });
+
+    assert!(normalize_skill_arg_aliases("kb", &mut args));
+    assert_eq!(
+        args.get("namespace").and_then(|value| value.as_str()),
+        Some("demo_docs_nl")
     );
 }
 
@@ -309,6 +414,36 @@ fn auto_locator_preserves_explicit_existing_path() {
     assert_eq!(
         args.get("path").and_then(|v| v.as_str()),
         Some(readme.display().to_string().as_str())
+    );
+}
+
+#[test]
+fn auto_locator_preserves_existing_structured_field_path() {
+    let root = TempDirGuard::new("explicit_existing_structured");
+    let package = root.path.join("package.json");
+    let cargo = root.path.join("Cargo.toml");
+    fs::write(&package, r#"{"name":"react-example"}"#).expect("write package");
+    fs::write(&cargo, "[package]\nname=\"clawd\"\n").expect("write cargo");
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "auto_locator_path".to_string(),
+        package.display().to_string(),
+    );
+    let mut args = json!({
+        "action": "extract_field",
+        "path": cargo.display().to_string(),
+        "field_path": "package.name"
+    });
+
+    let rewritten = rewrite_args_with_auto_locator_path("system_basic", &mut args, &loop_state);
+
+    assert!(
+        !rewritten,
+        "explicit existing structured path must not be rewritten"
+    );
+    assert_eq!(
+        args.get("path").and_then(|v| v.as_str()),
+        Some(cargo.display().to_string().as_str())
     );
 }
 

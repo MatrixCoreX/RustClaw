@@ -17,6 +17,173 @@ fn push_unique_trimmed(values: &mut Vec<String>, value: impl AsRef<str>) {
     values.push(value.to_string());
 }
 
+fn locale_i18n_paths(i18n_root: &Path, locale: &str) -> Vec<PathBuf> {
+    let suffix = format!(".{locale}.toml");
+    let schedule_path = i18n_root.join(format!("schedule.{locale}.toml"));
+    let mut paths = Vec::new();
+    match std::fs::read_dir(i18n_root) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if file_name.ends_with(&suffix) {
+                    paths.push(path);
+                }
+            }
+        }
+        Err(err) => {
+            warn!(
+                "read i18n dir failed: path={} err={err}",
+                i18n_root.display()
+            );
+        }
+    }
+    if !paths.iter().any(|path| path == &schedule_path) {
+        paths.push(schedule_path);
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn load_i18n_dict_from_path(path: &Path) -> Option<HashMap<String, String>> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            warn!("read i18n file failed: path={} err={err}", path.display());
+            return None;
+        }
+    };
+    let value = match toml::from_str::<TomlValue>(&raw) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!("parse i18n file failed: path={} err={err}", path.display());
+            return None;
+        }
+    };
+    let Some(table) = value.get("dict").and_then(|v| v.as_table()) else {
+        warn!("i18n file missing [dict]: path={}", path.display());
+        return None;
+    };
+    let mut dict = HashMap::new();
+    for (k, v) in table {
+        collect_i18n_dict_entries(k, v, &mut dict);
+    }
+    Some(dict)
+}
+
+fn collect_i18n_dict_entries(prefix: &str, value: &TomlValue, out: &mut HashMap<String, String>) {
+    if let Some(text) = value.as_str() {
+        out.insert(prefix.to_string(), text.to_string());
+        return;
+    }
+    let Some(table) = value.as_table() else {
+        return;
+    };
+    for (key, child) in table {
+        let child_key = format!("{prefix}.{key}");
+        collect_i18n_dict_entries(&child_key, child, out);
+    }
+}
+
+fn insert_schedule_i18n_defaults(i18n_dict: &mut HashMap<String, String>) {
+    i18n_dict
+        .entry("schedule.desc.daily".to_string())
+        .or_insert_with(|| "daily {time}".to_string());
+    i18n_dict
+        .entry("schedule.desc.weekly".to_string())
+        .or_insert_with(|| "weekly weekday={weekday} {time}".to_string());
+    i18n_dict
+        .entry("schedule.desc.interval".to_string())
+        .or_insert_with(|| "every {minutes}m".to_string());
+    i18n_dict
+        .entry("schedule.desc.once".to_string())
+        .or_insert_with(|| "once".to_string());
+    i18n_dict
+        .entry("schedule.status.enabled".to_string())
+        .or_insert_with(|| "enabled".to_string());
+    i18n_dict
+        .entry("schedule.status.paused".to_string())
+        .or_insert_with(|| "paused".to_string());
+    i18n_dict
+        .entry("schedule.msg.list_empty".to_string())
+        .or_insert_with(|| "There are no scheduled jobs right now.".to_string());
+    i18n_dict
+        .entry("schedule.msg.list_header".to_string())
+        .or_insert_with(|| "Scheduled jobs:\n{lines}".to_string());
+    i18n_dict
+        .entry("schedule.msg.delete_none".to_string())
+        .or_insert_with(|| "There are no scheduled jobs to delete.".to_string());
+    i18n_dict
+        .entry("schedule.msg.job_id_not_found".to_string())
+        .or_insert_with(|| "Job ID not found: {job_id}".to_string());
+    i18n_dict
+        .entry("schedule.msg.delete_all_ok".to_string())
+        .or_insert_with(|| "Deleted all scheduled jobs ({count} total).".to_string());
+    i18n_dict
+        .entry("schedule.msg.delete_one_ok".to_string())
+        .or_insert_with(|| "Deleted scheduled job: {job_id}".to_string());
+    i18n_dict
+        .entry("schedule.msg.update_none".to_string())
+        .or_insert_with(|| "There are no scheduled jobs to update.".to_string());
+    i18n_dict
+        .entry("schedule.msg.resume_all_ok".to_string())
+        .or_insert_with(|| "Resumed all scheduled jobs ({count} total).".to_string());
+    i18n_dict
+        .entry("schedule.msg.pause_all_ok".to_string())
+        .or_insert_with(|| "Paused all scheduled jobs ({count} total).".to_string());
+    i18n_dict
+        .entry("schedule.msg.resume_one_ok".to_string())
+        .or_insert_with(|| "Resumed scheduled job: {job_id}".to_string());
+    i18n_dict
+        .entry("schedule.msg.pause_one_ok".to_string())
+        .or_insert_with(|| "Paused scheduled job: {job_id}".to_string());
+    i18n_dict
+        .entry("schedule.msg.create_fail_task_kind".to_string())
+        .or_insert_with(|| "Create failed: task.kind only supports ask or run_skill.".to_string());
+    i18n_dict
+        .entry("schedule.msg.cron_not_supported".to_string())
+        .or_insert_with(|| {
+            "Cron expressions are not supported in this version yet. Please use daily/weekly/every-N-minutes.".to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.cron_not_supported_with_expr".to_string())
+        .or_insert_with(|| {
+            "Cron expressions are not supported in this version yet ({cron}). Please use daily/weekly/every-N-minutes.".to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.create_fail_invalid_run_at".to_string())
+        .or_insert_with(|| {
+            "Create failed: invalid run_at for one-time job. Expected YYYY-MM-DD HH:MM[:SS]."
+                .to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.create_fail_run_at_must_be_future".to_string())
+        .or_insert_with(|| "Create failed: execution time must be later than now.".to_string());
+    i18n_dict
+        .entry("schedule.msg.create_fail_cannot_compute_next_run".to_string())
+        .or_insert_with(|| {
+            "Create failed: cannot compute next run time; please check the time format.".to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.create_exists_same".to_string())
+        .or_insert_with(|| {
+            "An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.update_existing_ok".to_string())
+        .or_insert_with(|| {
+            "Found an existing job for the same symbol; updated it: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string()
+        });
+    i18n_dict
+        .entry("schedule.msg.create_ok".to_string())
+        .or_insert_with(|| {
+            "Scheduled successfully: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string()
+        });
+}
+
 pub(crate) fn load_command_intent_runtime(
     workspace_root: &Path,
     cfg: &CommandIntentConfig,
@@ -113,138 +280,27 @@ pub(crate) fn load_schedule_runtime(
     } else {
         cfg.i18n_dir.trim().to_string()
     };
-    let i18n_path = workspace_root
-        .join(&i18n_dir)
-        .join(format!("schedule.{locale}.toml"));
+    let i18n_root = workspace_root.join(&i18n_dir);
+    let schedule_file_name = format!("schedule.{locale}.toml");
     let mut i18n_dict = HashMap::new();
-    match std::fs::read_to_string(&i18n_path) {
-        Ok(raw) => match toml::from_str::<TomlValue>(&raw) {
-            Ok(value) => {
-                if let Some(table) = value.get("dict").and_then(|v| v.as_table()) {
-                    for (k, v) in table {
-                        if let Some(text) = v.as_str() {
-                            i18n_dict.insert(k.to_string(), text.to_string());
-                        }
-                    }
-                } else {
-                    warn!(
-                        "schedule i18n file missing [dict]: path={}",
-                        i18n_path.display()
-                    );
-                }
-            }
-            Err(err) => {
-                warn!(
-                    "parse schedule i18n file failed: path={} err={err}",
-                    i18n_path.display()
-                );
-            }
-        },
-        Err(err) => {
-            warn!(
-                "read schedule i18n file failed: path={} err={err}",
-                i18n_path.display()
-            );
+    let mut schedule_i18n_loaded = false;
+    for path in locale_i18n_paths(&i18n_root, &locale) {
+        let is_schedule_file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == schedule_file_name);
+        let Some(entries) = load_i18n_dict_from_path(&path) else {
+            continue;
+        };
+        if is_schedule_file && !entries.is_empty() {
+            schedule_i18n_loaded = true;
+        }
+        for (key, text) in entries {
+            i18n_dict.insert(key, text);
         }
     }
-    if i18n_dict.is_empty() {
-        i18n_dict.insert(
-            "schedule.desc.daily".to_string(),
-            "daily {time}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.desc.weekly".to_string(),
-            "weekly weekday={weekday} {time}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.desc.interval".to_string(),
-            "every {minutes}m".to_string(),
-        );
-        i18n_dict.insert("schedule.desc.once".to_string(), "once".to_string());
-        i18n_dict.insert("schedule.status.enabled".to_string(), "enabled".to_string());
-        i18n_dict.insert("schedule.status.paused".to_string(), "paused".to_string());
-        i18n_dict.insert(
-            "schedule.msg.list_empty".to_string(),
-            "There are no scheduled jobs right now.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.list_header".to_string(),
-            "Scheduled jobs:\n{lines}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.delete_none".to_string(),
-            "There are no scheduled jobs to delete.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.job_id_not_found".to_string(),
-            "Job ID not found: {job_id}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.delete_all_ok".to_string(),
-            "Deleted all scheduled jobs ({count} total).".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.delete_one_ok".to_string(),
-            "Deleted scheduled job: {job_id}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.update_none".to_string(),
-            "There are no scheduled jobs to update.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.resume_all_ok".to_string(),
-            "Resumed all scheduled jobs ({count} total).".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.pause_all_ok".to_string(),
-            "Paused all scheduled jobs ({count} total).".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.resume_one_ok".to_string(),
-            "Resumed scheduled job: {job_id}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.pause_one_ok".to_string(),
-            "Paused scheduled job: {job_id}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_fail_task_kind".to_string(),
-            "Create failed: task.kind only supports ask or run_skill.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.cron_not_supported".to_string(),
-            "Cron expressions are not supported in this version yet. Please use daily/weekly/every-N-minutes.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.cron_not_supported_with_expr".to_string(),
-            "Cron expressions are not supported in this version yet ({cron}). Please use daily/weekly/every-N-minutes.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_fail_invalid_run_at".to_string(),
-            "Create failed: invalid run_at for one-time job. Expected YYYY-MM-DD HH:MM[:SS]."
-                .to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_fail_run_at_must_be_future".to_string(),
-            "Create failed: execution time must be later than now.".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_fail_cannot_compute_next_run".to_string(),
-            "Create failed: cannot compute next run time; please check the time format."
-                .to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_exists_same".to_string(),
-            "An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.update_existing_ok".to_string(),
-            "Found an existing job for the same symbol; updated it: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
-        );
-        i18n_dict.insert(
-            "schedule.msg.create_ok".to_string(),
-            "Scheduled successfully: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
-        );
+    if !schedule_i18n_loaded {
+        insert_schedule_i18n_defaults(&mut i18n_dict);
     }
 
     Ok(ScheduleRuntime {
@@ -253,6 +309,7 @@ pub(crate) fn load_schedule_runtime(
         intent_prompt_source,
         intent_rules_template: Arc::new(RwLock::new(intent_rules_template)),
         locale,
+        i18n_dir,
         i18n_dict,
     })
 }

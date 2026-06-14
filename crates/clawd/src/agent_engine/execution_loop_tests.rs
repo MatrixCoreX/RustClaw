@@ -2,6 +2,77 @@ use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
 };
+use crate::agent_engine::support::SemanticRouteAuthority;
+use claw_core::skill_registry::SkillsRegistry;
+use std::sync::{Arc, RwLock};
+
+fn test_policy(registry_idempotency_guard: bool) -> super::AgentLoopGuardPolicy {
+    super::AgentLoopGuardPolicy {
+        max_steps: 8,
+        max_rounds: 2,
+        max_tool_calls: 12,
+        recoverable_failure_extra_rounds: 0,
+        repeat_action_limit: 1,
+        no_progress_limit: 1,
+        multi_round_enabled: true,
+        answer_verifier_retry_limit: 1,
+        answer_verifier_enforce_required: false,
+        semantic_route_authority: SemanticRouteAuthority::Legacy,
+        agent_decides_semantic_route: false,
+        agent_decides_migration_class: "none".to_string(),
+        registry_idempotency_guard,
+        structured_evidence_required_for_selected_contracts: false,
+        fast_read: Default::default(),
+        grounded_summary: Default::default(),
+        multi_step_workspace: Default::default(),
+        ops_closed_loop: Default::default(),
+    }
+}
+
+fn task_fixture(id: &str) -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: id.to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "telegram".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
+fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-execution-loop-registry-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp registry dir");
+    let path = root.join("skills_registry.toml");
+    std::fs::write(&path, toml).expect("write registry");
+    let registry = Arc::new(SkillsRegistry::load_from_path(&path).expect("load registry"));
+    let _ = std::fs::remove_dir_all(root);
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(registry),
+        skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
+    })));
+    state
+}
+
+fn registry_governance_fixture() -> &'static str {
+    r#"
+[[skills]]
+name = "config_edit"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "config.apply", action = "apply_config_change", effect = "mutate", once_per_task = true, dedup_scope = "action", idempotent = false },
+]
+"#
+}
 
 #[test]
 fn observed_output_alone_does_not_mark_plan_exhausted_user_visible() {
@@ -94,17 +165,7 @@ fn done_recipe_does_not_allow_repeating_successful_observe_effect() {
 #[test]
 fn repeat_guard_allows_repeated_respond_delivery() {
     let state = crate::AppState::test_default_with_fixture_provider();
-    let task = crate::ClaimedTask {
-        task_id: "task-repeat-respond".to_string(),
-        user_id: 1,
-        chat_id: 2,
-        user_key: None,
-        channel: "telegram".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
+    let task = task_fixture("task-repeat-respond");
     let mut loop_state = super::LoopState::new(2);
     let action = crate::AgentAction::Respond {
         content: "final answer".to_string(),
@@ -113,20 +174,7 @@ fn repeat_guard_allows_repeated_respond_delivery() {
     loop_state
         .successful_action_fingerprints
         .insert(fingerprint.clone(), 1);
-    let policy = super::AgentLoopGuardPolicy {
-        max_steps: 8,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 0,
-        repeat_action_limit: 1,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
-        answer_verifier_retry_limit: 1,
-        fast_read: Default::default(),
-        grounded_summary: Default::default(),
-        multi_step_workspace: Default::default(),
-        ops_closed_loop: Default::default(),
-    };
+    let policy = test_policy(false);
 
     assert_eq!(
         check_repeat_action_guard(
@@ -145,37 +193,14 @@ fn repeat_guard_allows_repeated_respond_delivery() {
 #[test]
 fn repeat_guard_blocks_identical_non_respond_after_limit() {
     let state = crate::AppState::test_default_with_fixture_provider();
-    let task = crate::ClaimedTask {
-        task_id: "task-repeat-run-cmd".to_string(),
-        user_id: 1,
-        chat_id: 2,
-        user_key: None,
-        channel: "telegram".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
+    let task = task_fixture("task-repeat-run-cmd");
     let mut loop_state = super::LoopState::new(2);
     let action = crate::AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({"command": "pwd"}),
     };
     let fingerprint = "skill:run_cmd:{\"command\":\"pwd\"}".to_string();
-    let policy = super::AgentLoopGuardPolicy {
-        max_steps: 8,
-        max_rounds: 2,
-        max_tool_calls: 12,
-        recoverable_failure_extra_rounds: 0,
-        repeat_action_limit: 1,
-        no_progress_limit: 1,
-        multi_round_enabled: true,
-        answer_verifier_retry_limit: 1,
-        fast_read: Default::default(),
-        grounded_summary: Default::default(),
-        multi_step_workspace: Default::default(),
-        ops_closed_loop: Default::default(),
-    };
+    let policy = test_policy(false);
 
     assert_eq!(
         check_repeat_action_guard(
@@ -202,4 +227,57 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
         .as_deref(),
         Some("repeat_action_limit")
     );
+}
+
+#[test]
+fn registry_idempotency_guard_records_repeat_block_attribution() {
+    let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
+    let task = task_fixture("task-registry-repeat");
+    let mut loop_state = super::LoopState::new(2);
+    let action = crate::AgentAction::CallSkill {
+        skill: "config_edit".to_string(),
+        args: serde_json::json!({
+            "action": "apply_config_change",
+            "field_path": "skills.a",
+            "value": true
+        }),
+    };
+    let fingerprint = "skill:config_edit:action:apply_config_change".to_string();
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+    let policy = test_policy(true);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            1,
+        )
+        .as_deref(),
+        Some("repeat_completed_action")
+    );
+
+    let attribution = loop_state
+        .rollout_attribution
+        .first()
+        .expect("registry attribution");
+    assert_eq!(attribution.switch_name, "registry_idempotency_guard");
+    assert_eq!(attribution.event, "registry_idempotency_guard_block");
+    assert_eq!(
+        attribution.reason_code.as_deref(),
+        Some("registry_idempotency_repeat_completed_action")
+    );
+    assert_eq!(attribution.skill.as_deref(), Some("config_edit"));
+    assert_eq!(attribution.action.as_deref(), Some("apply_config_change"));
+    assert_eq!(attribution.dedup_scope.as_deref(), Some("action"));
+    assert_eq!(
+        attribution.fingerprint.as_deref(),
+        Some(fingerprint.as_str())
+    );
+    assert_eq!(attribution.repeat_count, Some(1));
 }

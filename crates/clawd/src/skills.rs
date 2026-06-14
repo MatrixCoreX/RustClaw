@@ -1,8 +1,6 @@
 use claw_core::skill_registry::SkillKind;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
-use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 /// §E2 step1: skill-runner 子进程在 strict 模式下允许从父进程继承的 env 白名单。
@@ -111,6 +109,7 @@ mod builtin;
 mod external;
 mod memory_context;
 mod output_dirs;
+mod runner;
 
 pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command};
 // `execute_builtin_skill`（无 task 版本）只在 `builtin.rs` 内部测试用，
@@ -119,6 +118,7 @@ pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command};
 pub(crate) use external::execute_external_skill;
 pub(crate) use memory_context::inject_skill_memory_context;
 pub(crate) use output_dirs::ensure_default_output_dir_for_skill_args;
+pub(crate) use runner::{run_skill_with_runner, run_skill_with_runner_once};
 
 use crate::worker::task_runtime_channel;
 use crate::{AppState, ClaimedTask, RuntimeChannel};
@@ -349,12 +349,58 @@ pub(crate) fn parse_policy_block_error(err: &str) -> Option<PolicyBlockError> {
     })
 }
 
-fn policy_fact_value<'a>(facts: &'a [String], key: &str) -> Option<&'a str> {
-    let prefix = format!("{key}:");
-    facts
-        .iter()
-        .find_map(|fact| fact.trim().strip_prefix(&prefix).map(str::trim))
-        .filter(|value| !value.is_empty())
+fn policy_block_message_key(reason_code: &str) -> String {
+    let normalized = reason_code
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let normalized = normalized.trim_matches('_');
+    if normalized.is_empty() {
+        "clawd.msg.policy.unknown".to_string()
+    } else {
+        format!("clawd.msg.policy.{normalized}")
+    }
+}
+
+fn policy_observed_facts_value(facts: &[String]) -> Value {
+    let mut object = Map::new();
+    let mut unparsed = Vec::new();
+    for fact in facts {
+        let fact = fact.trim();
+        if fact.is_empty() {
+            continue;
+        }
+        if let Some((key, value)) = fact.split_once(':') {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() && !value.is_empty() {
+                object.insert(key.to_string(), json!(value));
+                continue;
+            }
+        }
+        unparsed.push(fact.to_string());
+    }
+    if !unparsed.is_empty() {
+        object.insert("unparsed".to_string(), json!(unparsed));
+    }
+    Value::Object(object)
+}
+
+fn policy_block_machine_payload(block: &PolicyBlockError) -> String {
+    json!({
+        "message_key": policy_block_message_key(&block.reason_code),
+        "reason_code": block.reason_code,
+        "observed_facts": policy_observed_facts_value(&block.observed_facts),
+        "policy_boundary_count": block.policy_boundary.len(),
+    })
+    .to_string()
 }
 
 fn parse_crypto_account_access_error(err: &str) -> Option<(String, String)> {
@@ -388,6 +434,33 @@ fn parse_crypto_account_access_error(err: &str) -> Option<(String, String)> {
     ))
 }
 
+fn crypto_account_access_error_from_structured_extra(
+    structured: &StructuredSkillError,
+) -> Option<(String, String)> {
+    let extra_kind = structured_extra_string(structured, "error_kind");
+    let message_key = structured_extra_string(structured, "message_key");
+    let structured_kind = structured.error_kind.trim();
+    let is_account_access = structured_kind == "account_access_failed"
+        || structured_kind == "crypto_account_access_failed"
+        || extra_kind.as_deref() == Some("account_access_failed")
+        || extra_kind.as_deref() == Some("crypto_account_access_failed")
+        || message_key.as_deref() == Some("crypto.err.account_access_failed");
+    if !is_account_access {
+        return None;
+    }
+
+    let legacy = parse_crypto_account_access_error(&structured.error_text);
+    let exchange = structured_extra_string(structured, "exchange")
+        .or_else(|| legacy.as_ref().map(|(exchange, _)| exchange.clone()))
+        .unwrap_or_default();
+    let detail = structured_extra_string(structured, "detail")
+        .or_else(|| legacy.as_ref().map(|(_, detail)| detail.clone()))
+        .unwrap_or_else(|| structured.error_text.trim().to_string())
+        .trim()
+        .to_string();
+    Some((exchange, detail))
+}
+
 fn structured_crypto_account_access_error(
     skill_name: &str,
     structured: &StructuredSkillError,
@@ -400,86 +473,95 @@ fn structured_crypto_account_access_error(
     if !effective_skill.eq_ignore_ascii_case("crypto") {
         return None;
     }
+    if let Some(error) = crypto_account_access_error_from_structured_extra(structured) {
+        return Some(error);
+    }
     parse_crypto_account_access_error(&structured.error_text)
 }
 
+fn crypto_account_access_error_observation(exchange: &str, detail: &str) -> String {
+    let mut parts = vec![
+        "message_key=crypto.err.account_access_failed".to_string(),
+        "error_kind=account_access_failed".to_string(),
+    ];
+    let exchange = exchange.trim();
+    if !exchange.is_empty() {
+        parts.push(format!("exchange={exchange}"));
+    }
+    let detail = detail.trim();
+    if !detail.is_empty() {
+        parts.push(format!("detail={detail}"));
+    }
+    parts.join(" ")
+}
+
+fn is_crypto_recoverable_i18n_message_key(message_key: &str) -> bool {
+    matches!(
+        message_key.trim(),
+        "crypto.err.binance_not_bound"
+            | "crypto.err.binance_credentials_incomplete"
+            | "crypto.err.okx_not_bound"
+            | "crypto.err.okx_credentials_incomplete"
+    )
+}
+
+fn crypto_recoverable_i18n_error_from_structured(
+    skill_name: &str,
+    structured: &StructuredSkillError,
+) -> Option<(String, String, String, String)> {
+    let effective_skill = if structured.skill.trim().is_empty() {
+        skill_name
+    } else {
+        structured.skill.as_str()
+    };
+    if !effective_skill.eq_ignore_ascii_case("crypto") {
+        return None;
+    }
+    let message_key = structured_extra_string(structured, "message_key")?;
+    if !is_crypto_recoverable_i18n_message_key(&message_key) {
+        return None;
+    }
+    let error_kind = structured_extra_string(structured, "error_kind")
+        .unwrap_or_else(|| structured.error_kind.trim().to_string());
+    let exchange = structured_extra_string(structured, "exchange").unwrap_or_default();
+    let action = structured_extra_string(structured, "action").unwrap_or_default();
+    Some((message_key, error_kind, exchange, action))
+}
+
+pub(crate) fn crypto_recoverable_i18n_error_key(skill_name: &str, err: &str) -> Option<String> {
+    let structured = parse_structured_skill_error(err)?;
+    crypto_recoverable_i18n_error_from_structured(skill_name, &structured)
+        .map(|(message_key, _, _, _)| message_key)
+}
+
+fn crypto_recoverable_i18n_error_observation(
+    message_key: &str,
+    error_kind: &str,
+    exchange: &str,
+    action: &str,
+) -> String {
+    let mut parts = vec![
+        format!("message_key={}", message_key.trim()),
+        format!("error_kind={}", error_kind.trim()),
+    ];
+    let exchange = exchange.trim();
+    if !exchange.is_empty() {
+        parts.push(format!("exchange={exchange}"));
+    }
+    let action = action.trim();
+    if !action.is_empty() {
+        parts.push(format!("action={action}"));
+    }
+    parts.join(" ")
+}
+
 pub(crate) fn policy_block_default_text(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
+    _state: &AppState,
+    _task: &ClaimedTask,
+    _user_text: &str,
     block: &PolicyBlockError,
 ) -> String {
-    let prefer_english =
-        crate::language_policy::task_response_language_hint(state, task, user_text) == "en";
-    let fact = |key: &str| policy_fact_value(&block.observed_facts, key).unwrap_or("");
-    match block.reason_code.as_str() {
-        "path_parent_traversal" => {
-            if prefer_english {
-                "That path contains `..`, so I will not access it. Please provide a path inside the workspace.".to_string()
-            } else {
-                "这个路径包含 `..`，我不会访问它。请提供 workspace 内的明确路径。".to_string()
-            }
-        }
-        "path_outside_workspace" => {
-            let path = fact("denied_path");
-            if prefer_english {
-                if path.is_empty() {
-                    "The requested path is outside the allowed workspace. Please provide a path inside the workspace or use an admin-authorized run.".to_string()
-                } else {
-                    format!("The requested path `{path}` is outside the allowed workspace. Please provide a workspace path or use an admin-authorized run.")
-                }
-            } else if path.is_empty() {
-                "请求路径在允许的 workspace 外。请提供 workspace 内路径，或使用管理员授权运行。"
-                    .to_string()
-            } else {
-                format!("请求路径 `{path}` 在允许的 workspace 外。请提供 workspace 内路径，或使用管理员授权运行。")
-            }
-        }
-        "sudo_not_allowed" => {
-            if prefer_english {
-                "This task is not allowed to use sudo. Run clawd with an admin-authorized key and sudo-enabled policy if you need elevated access.".to_string()
-            } else {
-                "当前任务不允许使用 sudo。如果需要提权访问，请使用管理员 key 并开启 sudo 权限后运行。".to_string()
-            }
-        }
-        "config_requires_web_admin" => config_requires_web_admin_message(state, task),
-        "skill_policy_denied" => {
-            let skill = fact("skill");
-            if prefer_english {
-                if skill.is_empty() {
-                    "This capability is blocked by the current tools policy. Enable it in policy before retrying.".to_string()
-                } else {
-                    format!("The `{skill}` capability is blocked by the current tools policy. Enable it in policy before retrying.")
-                }
-            } else if skill.is_empty() {
-                "当前工具策略阻止了这个能力。请在策略里开启后再试。".to_string()
-            } else {
-                format!("当前工具策略阻止了 `{skill}` 能力。请在策略里开启后再试。")
-            }
-        }
-        "skill_disabled" | "agent_skill_disabled" => {
-            let skill = fact("skill");
-            if prefer_english {
-                if skill.is_empty() {
-                    "The required skill is not enabled for this run. Enable it in config and retry."
-                        .to_string()
-                } else {
-                    format!("The `{skill}` skill is not enabled for this run. Enable it in config and retry.")
-                }
-            } else if skill.is_empty() {
-                "这次运行需要的技能没有启用。请先在配置中开启后再试。".to_string()
-            } else {
-                format!("这次运行需要的 `{skill}` 技能没有启用。请先在配置中开启后再试。")
-            }
-        }
-        _ => {
-            if prefer_english {
-                "This request is blocked by the current runtime policy. Adjust the policy or provide a safer target, then retry.".to_string()
-            } else {
-                "当前运行策略阻止了这个请求。请调整策略或提供更安全的目标后再试。".to_string()
-            }
-        }
-    }
+    policy_block_machine_payload(block)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -500,6 +582,9 @@ pub(crate) struct SkillRunOutcome {
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     if let Some(structured) = parse_structured_skill_error(err) {
         if structured_crypto_account_access_error(skill_name, &structured).is_some() {
+            return true;
+        }
+        if crypto_recoverable_i18n_error_from_structured(skill_name, &structured).is_some() {
             return true;
         }
         let effective_skill = if structured.skill.trim().is_empty() {
@@ -590,10 +675,17 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
         if let Some((exchange, detail)) =
             structured_crypto_account_access_error(skill_name, &structured)
         {
-            if exchange.is_empty() {
-                return format!("crypto account access failed: {detail}");
-            }
-            return format!("crypto account access failed on {exchange}: {detail}");
+            return crypto_account_access_error_observation(&exchange, &detail);
+        }
+        if let Some((message_key, error_kind, exchange, action)) =
+            crypto_recoverable_i18n_error_from_structured(skill_name, &structured)
+        {
+            return crypto_recoverable_i18n_error_observation(
+                &message_key,
+                &error_kind,
+                &exchange,
+                &action,
+            );
         }
         if structured.error_kind.starts_with("contract_") {
             return "planned tool step was not allowed for this request".to_string();
@@ -648,7 +740,7 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
         return structured.error_text;
     }
     if let Some(policy_block) = parse_policy_block_error(err) {
-        return format!("blocked by runtime policy: {}", policy_block.reason_code);
+        return policy_block_machine_payload(&policy_block);
     }
     if skill_name.eq_ignore_ascii_case("read_file") {
         if let Some(path) = err.strip_prefix(READ_FILE_NOT_FOUND_PREFIX) {
@@ -661,10 +753,7 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
     }
     if skill_name.eq_ignore_ascii_case("crypto") {
         if let Some((exchange, detail)) = parse_crypto_account_access_error(err) {
-            if exchange.is_empty() {
-                return format!("crypto account access failed: {detail}");
-            }
-            return format!("crypto account access failed on {exchange}: {detail}");
+            return crypto_account_access_error_observation(&exchange, &detail);
         }
     }
     err.trim().to_string()
@@ -770,40 +859,6 @@ fn task_request_locale_tag(state: &AppState, task: &ClaimedTask) -> String {
                 "en-US".to_string()
             } else {
                 "zh-CN".to_string()
-            }
-        }
-    }
-}
-
-fn config_requires_web_admin_message(state: &AppState, task: &ClaimedTask) -> String {
-    const KEY: &str = "clawd.msg.config_requires_web_admin";
-    const DEFAULT_ZH: &str = "这是高风险配置，请登录 Web 管理端修改。";
-    const DEFAULT_EN: &str =
-        "This is a high-risk configuration. Please sign in to the Web admin console to modify it.";
-
-    match extract_task_request_text(&task.payload_json)
-        .as_deref()
-        .map(request_reply_language)
-        .unwrap_or(RequestReplyLanguage::ConfigDefault)
-    {
-        RequestReplyLanguage::ZhCn => {
-            crate::app_helpers::bilingual_t_with_default(state, KEY, DEFAULT_ZH, DEFAULT_EN, false)
-        }
-        RequestReplyLanguage::En => {
-            crate::app_helpers::bilingual_t_with_default(state, KEY, DEFAULT_ZH, DEFAULT_EN, true)
-        }
-        RequestReplyLanguage::ConfigDefault => {
-            if state
-                .policy
-                .schedule
-                .locale
-                .trim()
-                .to_ascii_lowercase()
-                .starts_with("en")
-            {
-                crate::i18n_t_with_default(state, KEY, DEFAULT_EN)
-            } else {
-                crate::i18n_t_with_default(state, KEY, DEFAULT_ZH)
             }
         }
     }
@@ -1229,7 +1284,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
         return Err(structured_skill_error_string(&skill_name, &value));
     }
 
-    if let Some((provider, model, model_kind)) = extract_skill_provider_model(&value) {
+    if let Some((provider, model, model_kind)) = runner::extract_skill_provider_model(&value) {
         tracing::info!(
             "{} skill_model_selected task_id={} skill={} provider={} model={} model_kind={}",
             crate::highlight_tag("skill_llm"),
@@ -1293,522 +1348,3 @@ pub(crate) async fn run_skill_with_runner_outcome(
 #[cfg(test)]
 #[path = "skills_tests.rs"]
 mod tests;
-fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String)> {
-    let extra = value.get("extra")?.as_object()?;
-    let provider = extra
-        .get("provider")
-        .or_else(|| extra.get("vendor"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())?;
-    let model = extra
-        .get("model")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())?;
-    let model_kind = extra
-        .get("model_kind")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("unknown");
-    Some((
-        provider.to_string(),
-        model.to_string(),
-        model_kind.to_string(),
-    ))
-}
-
-fn local_clawd_base_url_from_workspace(workspace_root: &Path) -> String {
-    let config_path = workspace_root.join("configs/config.toml");
-    let parsed = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|raw| raw.parse::<toml::Value>().ok());
-    let server = parsed
-        .as_ref()
-        .and_then(|value| value.get("server"))
-        .and_then(|value| value.as_table());
-    if let Some(base_url) = server
-        .and_then(|table| table.get("clawd_base_url"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return base_url.trim_end_matches('/').to_string();
-    }
-    let listen = server
-        .and_then(|table| table.get("listen"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("127.0.0.1:8787");
-    let loopback_listen = if listen.starts_with("0.0.0.0:") {
-        listen.replacen("0.0.0.0", "127.0.0.1", 1)
-    } else {
-        listen.to_string()
-    };
-    format!("http://{}", loopback_listen.trim_end_matches('/'))
-}
-
-pub(crate) async fn run_skill_with_runner(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_name: &str,
-    args: Value,
-) -> Result<String, String> {
-    run_skill_with_runner_outcome(state, task, skill_name, args)
-        .await
-        .map(|r| r.text)
-}
-
-async fn read_skill_runner_stderr_line(stderr: &mut Option<tokio::process::ChildStderr>) -> String {
-    let Some(stderr) = stderr.take() else {
-        return String::new();
-    };
-    let mut err_reader = BufReader::new(stderr);
-    let mut err_line = String::new();
-    let _ = tokio::time::timeout(
-        Duration::from_millis(200),
-        err_reader.read_line(&mut err_line),
-    )
-    .await;
-    err_line
-}
-
-pub(crate) async fn run_skill_with_runner_once(
-    state: &AppState,
-    task: &ClaimedTask,
-    canonical_skill_name: &str,
-    runner_name: &str,
-    args: &serde_json::Value,
-    source: &str,
-    skill_timeout_secs: u64,
-) -> Result<serde_json::Value, String> {
-    let credential_context = if canonical_skill_name == "crypto" {
-        exchange_credential_context_for_task(state, task)
-    } else {
-        serde_json::json!({})
-    };
-    let user_key_for_skill = task
-        .user_key
-        .clone()
-        .map(Value::String)
-        .unwrap_or(Value::Null);
-    let skill_context = build_runner_skill_context(state, task, source, credential_context);
-    let req_line = serde_json::json!({
-        "request_id": task.task_id,
-        "user_id": task.user_id,
-        "chat_id": task.chat_id,
-        "user_key": user_key_for_skill,
-        "external_user_id": task.external_user_id,
-        "external_chat_id": crate::task_external_chat_id(task),
-        "skill_name": runner_name,
-        "args": args,
-        "context": skill_context
-    })
-    .to_string();
-
-    if !state.skill_rt.skill_runner_path.exists() {
-        return Err(format!(
-            "skill-runner binary not found: path={} (workspace_root={})",
-            state.skill_rt.skill_runner_path.display(),
-            state.skill_rt.workspace_root.display()
-        ));
-    }
-
-    // §E1.b: 按 manifest capabilities 注入 secrets env。fail-loud：声明了
-    // 但 broker 找不到 ⇒ 直接拒绝 spawn，绝不让 skill 拿空字符串去打 vendor。
-    // 同一份 manifest capabilities 也用于 LLM 权限边界：只有声明 `llm`
-    // 的 skill 才会拿到内部文本 LLM token / OPENAI_* 兼容环境。
-    let caps: Vec<claw_core::skill_registry::Capability> = state
-        .get_skills_registry()
-        .as_ref()
-        .map(|reg| reg.capabilities(canonical_skill_name).to_vec())
-        .unwrap_or_default();
-    let skill_uses_llm = caps
-        .iter()
-        .any(|cap| matches!(cap, claw_core::skill_registry::Capability::Llm));
-    let secret_envs = {
-        let broker = claw_core::secrets::global_or_default();
-        match claw_core::secrets::provision_secret_envs(broker.as_ref(), &caps) {
-            Ok(pairs) => {
-                if !pairs.is_empty() {
-                    let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
-                    tracing::info!(
-                        "skill_dispatch skill={} provisioned_secrets={:?} broker={}",
-                        canonical_skill_name,
-                        names,
-                        broker.label()
-                    );
-                }
-                pairs
-            }
-            Err(claw_core::secrets::ProvisionError::MissingSecrets { missing }) => {
-                let env_names: Vec<String> =
-                    missing.iter().map(|n| n.to_ascii_uppercase()).collect();
-                tracing::error!(
-                    "skill_dispatch skill={} missing_secrets={:?} broker={} — refuse to spawn",
-                    canonical_skill_name,
-                    env_names,
-                    broker.label()
-                );
-                return Err(format!(
-                    "skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
-                    broker.label(),
-                    env_names.join(", ")
-                ));
-            }
-            Err(claw_core::secrets::ProvisionError::Lookup { name, source }) => {
-                tracing::error!(
-                    "skill_dispatch skill={} secret_lookup_failed name={} err={} broker={}",
-                    canonical_skill_name,
-                    name,
-                    source,
-                    broker.label()
-                );
-                return Err(format!(
-                    "skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}",
-                    broker.label()
-                ));
-            }
-        }
-    };
-
-    let secret_token_ttl = Duration::from_secs(300);
-    let selected_openai_model = if skill_uses_llm {
-        Some(crate::llm_gateway::selected_openai_model(state, Some(task)))
-    } else {
-        None
-    };
-    let internal_llm_token = if skill_uses_llm {
-        let internal_llm_context = json!({
-            "task_id": task.task_id.clone(),
-            "user_id": task.user_id,
-            "chat_id": task.chat_id,
-            "user_key": task.user_key.clone(),
-            "channel": task.channel.clone(),
-            "external_user_id": task.external_user_id.clone(),
-            "external_chat_id": task.external_chat_id.clone(),
-            "kind": task.kind.clone(),
-            "payload_json": task.payload_json.clone(),
-            "skill_name": canonical_skill_name,
-        });
-        match claw_core::secrets::issue_secret_token_value(
-            &claw_core::secrets::SecretValue::new(internal_llm_context.to_string()),
-            secret_token_ttl,
-        ) {
-            Ok(token) => Some(token),
-            Err(err) => {
-                return Err(format!(
-                    "skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
-                ));
-            }
-        }
-    } else {
-        None
-    };
-    let tokenized_secret_envs =
-        match claw_core::secrets::issue_secret_env_tokens(&secret_envs, secret_token_ttl) {
-            Ok(pairs) => pairs,
-            Err(err) => {
-                return Err(format!(
-                "skill `{canonical_skill_name}` failed to issue short-lived secret tokens: {err}"
-            ));
-            }
-        };
-    let openai_api_key_token = if skill_uses_llm {
-        let selected_openai_api_key =
-            crate::llm_gateway::selected_openai_api_key(state, Some(task));
-        if selected_openai_api_key.trim().is_empty() {
-            None
-        } else {
-            match claw_core::secrets::issue_secret_token_value(
-                &claw_core::secrets::SecretValue::new(selected_openai_api_key),
-                secret_token_ttl,
-            ) {
-                Ok(token) => Some(token),
-                Err(err) => {
-                    return Err(format!(
-                        "skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
-                    ));
-                }
-            }
-        }
-    } else {
-        None
-    };
-    let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
-    // §E2 step1: 严格模式下先 env_clear + 白名单，让后续 `.env(...)` / secrets 注入
-    // 成为子进程 env 的唯一来源。默认 OFF，行为与历史一致。
-    if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
-        tracing::info!(
-            "skill_dispatch skill={} env_strict=on preserved={:?} stripped_parent_env={}",
-            canonical_skill_name,
-            report.preserved,
-            report.stripped_count
-        );
-    }
-    cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
-        .env(
-            "RUSTCLAW_SECRET_TOKEN_DIR",
-            claw_core::secrets::secret_token_store_dir()
-                .display()
-                .to_string(),
-        )
-        .env(
-            "WORKSPACE_ROOT",
-            state.skill_rt.workspace_root.display().to_string(),
-        )
-        .env(
-            "RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH",
-            state.skill_rt.locator_scan_max_depth.to_string(),
-        )
-        .env(
-            "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
-            state.skill_rt.locator_scan_max_files.to_string(),
-        );
-    if let Some(token) = &internal_llm_token {
-        cmd.env(
-            "RUSTCLAW_INTERNAL_LLM_URL",
-            format!(
-                "{}/v1/internal/llm/text",
-                local_clawd_base_url_from_workspace(&state.skill_rt.workspace_root)
-            ),
-        )
-        .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token)
-        .env(
-            "OPENAI_BASE_URL",
-            crate::llm_gateway::selected_openai_base_url(state, Some(task)),
-        );
-    }
-    if let Some(model) = &selected_openai_model {
-        cmd.env("OPENAI_MODEL", model);
-    }
-    if let Some(token) = &openai_api_key_token {
-        cmd.env("OPENAI_API_KEY", token);
-    }
-    // §E1.b: secrets 在最后注入，确保覆盖任何上面无意命中的同名硬编码键
-    // （目前已经覆盖 OPENAI_API_KEY：这里与 manifest secrets.* 一起统一变成
-    // 短期 token，而不是把明文 secret 直接塞进 child env）。
-    for (env_name, token) in &tokenized_secret_envs {
-        cmd.env(env_name, token);
-    }
-    cmd.current_dir(&state.skill_rt.workspace_root);
-    let mut child = cmd
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "spawn skill-runner failed: path={} err={}",
-                state.skill_rt.skill_runner_path.display(),
-                err
-            )
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(format!("{req_line}\n").as_bytes())
-            .await
-            .map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|err| format!("flush skill-runner stdin failed: {err}"))?;
-    }
-
-    let mut out_line = String::new();
-    let mut stderr = child.stderr.take();
-
-    if let Some(stdout) = child.stdout.take() {
-        let mut reader = BufReader::new(stdout);
-        let read_out = tokio::time::timeout(
-            Duration::from_secs(skill_timeout_secs.max(1)),
-            reader.read_line(&mut out_line),
-        )
-        .await;
-
-        match read_out {
-            Ok(Ok(_)) => {}
-            Ok(Err(err)) => return Err(format!("read skill-runner stdout failed: {err}")),
-            Err(_) => {
-                let _ = child.kill().await;
-                return Err("skill-runner timeout".to_string());
-            }
-        }
-    }
-
-    let wait_result = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
-    let mut err_line = String::new();
-
-    match wait_result {
-        Ok(Ok(_)) => {
-            err_line = read_skill_runner_stderr_line(&mut stderr).await;
-        }
-        Ok(Err(err)) => {
-            err_line = read_skill_runner_stderr_line(&mut stderr).await;
-            if out_line.trim().is_empty() {
-                let detail = err_line.trim();
-                if detail.is_empty() {
-                    return Err(format!("wait skill-runner failed: {err}"));
-                }
-                return Err(format!("wait skill-runner failed: {err}; stderr: {detail}"));
-            }
-        }
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
-            if out_line.trim().is_empty() {
-                err_line = read_skill_runner_stderr_line(&mut stderr).await;
-                let detail = err_line.trim();
-                if detail.is_empty() {
-                    return Err("skill-runner exit wait timeout".to_string());
-                }
-                return Err(format!("skill-runner exit wait timeout: {detail}"));
-            }
-        }
-    }
-
-    if out_line.trim().is_empty() {
-        let detail = err_line.trim();
-        if detail.is_empty() {
-            return Err("empty skill-runner output".to_string());
-        }
-        return Err(format!("empty skill-runner output: {detail}"));
-    }
-
-    serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
-}
-
-pub(crate) fn build_runner_skill_context(
-    state: &AppState,
-    task: &ClaimedTask,
-    source: &str,
-    credential_context: Value,
-) -> Value {
-    let mut ctx = serde_json::Map::new();
-    ctx.insert("source".to_string(), Value::String(source.to_string()));
-    ctx.insert("kind".to_string(), Value::String("run_skill".to_string()));
-    let auth_role = current_task_auth_role(state, task).unwrap_or_else(|| "unknown".to_string());
-    let allow_path_outside_workspace = task_allows_path_outside_workspace(state, Some(task));
-    let allow_sudo = task_allows_sudo(state, Some(task));
-    ctx.insert("auth_role".to_string(), Value::String(auth_role));
-    ctx.insert(
-        "allow_path_outside_workspace".to_string(),
-        Value::Bool(allow_path_outside_workspace),
-    );
-    ctx.insert("allow_sudo".to_string(), Value::Bool(allow_sudo));
-    ctx.insert(
-        "permissions".to_string(),
-        serde_json::json!({
-            "allow_path_outside_workspace": allow_path_outside_workspace,
-            "allow_sudo": allow_sudo,
-        }),
-    );
-    ctx.insert(
-        "user_key".to_string(),
-        task.user_key
-            .clone()
-            .map(Value::String)
-            .unwrap_or(Value::Null),
-    );
-    ctx.insert("exchange_credentials".to_string(), credential_context);
-    let locale_tag = task_request_locale_tag(state, task);
-    ctx.insert("locale".to_string(), Value::String(locale_tag.clone()));
-    ctx.insert("language".to_string(), Value::String(locale_tag));
-    ctx.insert(
-        "workspace_root".to_string(),
-        Value::String(state.skill_rt.workspace_root.display().to_string()),
-    );
-    ctx.insert(
-        "database_sqlite_path".to_string(),
-        Value::String(state.worker.database_sqlite_path.display().to_string()),
-    );
-    ctx.insert(
-        "database_busy_timeout_ms".to_string(),
-        Value::from(state.worker.database_busy_timeout_ms),
-    );
-
-    let recent_images = crate::collect_recent_image_candidates(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        200,
-    );
-    ctx.insert(
-        "recent_image_paths".to_string(),
-        Value::Array(
-            recent_images
-                .into_iter()
-                .map(Value::String)
-                .collect::<Vec<_>>(),
-        ),
-    );
-
-    if let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) {
-        if let Some(p) = payload.as_object() {
-            for key in [
-                "schedule_job_id",
-                "invocation_source",
-                "scheduled",
-                "schedule_triggered",
-            ] {
-                if let Some(v) = p.get(key) {
-                    ctx.insert(key.to_string(), v.clone());
-                }
-            }
-        }
-    }
-    Value::Object(ctx)
-}
-
-pub(crate) fn exchange_credential_context_for_task(
-    state: &AppState,
-    task: &ClaimedTask,
-) -> serde_json::Value {
-    let Some(user_key) = task
-        .user_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return serde_json::json!({});
-    };
-    let Ok(db) = state.core.db.get() else {
-        return serde_json::json!({});
-    };
-    let mut stmt = match db.prepare(
-        "SELECT exchange, api_key, api_secret, passphrase
-         FROM exchange_api_credentials
-         WHERE user_key = ?1 AND enabled = 1",
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return serde_json::json!({}),
-    };
-    let rows = match stmt.query_map(rusqlite::params![user_key], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return serde_json::json!({}),
-    };
-    let mut exchanges = serde_json::Map::new();
-    for row in rows.flatten() {
-        let (exchange, api_key, api_secret, passphrase) = row;
-        exchanges.insert(
-            exchange,
-            serde_json::json!({
-                "api_key": api_key,
-                "api_secret": api_secret,
-                "passphrase": passphrase,
-            }),
-        );
-    }
-    Value::Object(exchanges)
-}

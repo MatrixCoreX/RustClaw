@@ -23,6 +23,8 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
         "normalizer"
     } else if s.contains("direct_answer_gate") {
         "direct_answer_gate"
+    } else if s.contains("contract_repair") {
+        "contract_repair"
     } else if s.contains("intent_router") {
         "router_legacy"
     } else if s.contains("plan_repair") {
@@ -40,6 +42,10 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
         "direct_classifier"
     } else if s.contains("observed_answer_fallback") || s.contains("observed_") {
         "observed"
+    } else if s.contains("user_response_composer") {
+        "user_response_composer"
+    } else if s.contains("user_response_contract_validator") {
+        "user_response_validator"
     } else if s.contains("clarify_question") {
         "clarify"
     } else if s.contains("intent_meta_summary") || s.contains("meta_summary") {
@@ -519,6 +525,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。
     let prompt_label = classify_prompt_source(prompt_source);
     state.note_task_llm_call_with_label(&task.task_id, prompt_label);
+    state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
     let call_started_at = std::time::Instant::now();
 
     let mut last_error = "unknown llm error".to_string();
@@ -576,6 +583,14 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
 
         match crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints).await {
             Ok(output) => {
+                state.note_task_provider_attempts_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    output.attempts,
+                    output.retryable_error_count,
+                    output.last_retry_error_kind,
+                    None,
+                );
                 let (mut cleaned_text, mut sanitized) =
                     crate::maybe_sanitize_llm_text_output(vendor, &output.text);
                 if cleaned_text.trim().is_empty() {
@@ -669,6 +684,14 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
             }
             Err(err) => {
                 let error_kind = err.observability_kind();
+                state.note_task_provider_attempts_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    err.attempts,
+                    err.retryable_error_count,
+                    None,
+                    Some(error_kind),
+                );
                 if err.should_trip_breaker() {
                     provider.breaker.note_failure();
                 } else if err.should_reset_breaker() {

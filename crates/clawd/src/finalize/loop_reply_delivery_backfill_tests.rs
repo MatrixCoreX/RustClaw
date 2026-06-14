@@ -1,0 +1,577 @@
+use super::*;
+
+#[test]
+fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
+    let task = claimed_task("task-contractual-last-respond");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
+    loop_state.last_publishable_synthesis_output =
+        Some("命令执行已完成，但综合答案时出错。".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_hint.clear();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["/home/guagua/rustclaw".to_string()]
+    );
+}
+
+#[test]
+fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
+    let task = claimed_task("task-contractual-multiline-raw-command");
+    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some(observed.trim().to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", observed));
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec![observed.trim().to_string()]
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
+    let state = test_state();
+    let task = claimed_task("task-single-line-observed-respond");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some("/home/guagua/rustclaw".to_string());
+    loop_state.last_publishable_synthesis_output =
+        Some("执行成功了，但合成最终答案的环节遇到问题。".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "synthesize_answer",
+        "synthesis failed",
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "执行命令 pwd，直接回复执行结果，不要解释",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert!(!reply.should_fail_task);
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some("/home/guagua/rustclaw")
+    );
+    assert!(reply.messages[0].contains("**执行过程**"));
+    assert!(reply.messages[0].contains("run_cmd"));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_keeps_exact_multiline_raw_command_observed_respond() {
+    let state = test_state();
+    let task = claimed_task("task-multiline-raw-command-observed-respond");
+    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some(observed.trim().to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", observed));
+    let mut route = free_route_result();
+    route.resolved_intent = "raw command output".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "pwd whoami hostname 三个结果每个一行 不要总结",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should keep exact raw command output");
+
+    assert_eq!(reply.text, observed.trim());
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.messages, vec![observed.trim().to_string()]);
+    assert!(!reply.is_llm_reply);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_uses_publishable_synthesis_output() {
+    let state = test_state();
+    let task = claimed_task("task-synth-finalize");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "run_cmd".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("rustclaw.service".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("有，路径：/tmp/rustclaw.service".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.last_publishable_synthesis_output =
+        Some("有，路径：/tmp/rustclaw.service".to_string());
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(scalar_route_result()),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "检查 rustclaw.service 是否存在并给出路径",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, "有，路径：/tmp/rustclaw.service");
+    assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
+    assert!(!reply.should_fail_task);
+    assert!(!reply.is_llm_reply);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
+    let state = test_state();
+    let task = claimed_task("task-synth-over-raw-listing");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let raw_listing = "Untitled\nauth-key.sh\ncheck_no_nl_hardmatch.py\nnl_tests\n";
+    let synthesis = "该 scripts 目录主要包含用于测试、回归、代码检查和运行时验证的脚本。";
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push(raw_listing.to_string());
+    loop_state.last_user_visible_respond = Some(raw_listing.to_string());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "run_cmd".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(raw_listing.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(synthesis.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-raw-read-delivery-synthesis");
+    let raw_read = r#"{"action":"read_range","mode":"head","excerpt":"1|alpha\n2|beta\n3|gamma","path":"/tmp/app.log"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "fs_basic", raw_read));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "검색 결과 없음",
+    ));
+    loop_state.delivery_messages.push(raw_read.to_string());
+    loop_state.last_user_visible_respond = Some(raw_read.to_string());
+    loop_state.last_publishable_synthesis_output = Some("검색 결과 없음".to_string());
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "app.log 에서 impossible_keyword_987 을 찾아보고 결과를 짧게 말해.",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should use synthesis");
+
+    assert_eq!(reply.text, "검색 결과 없음");
+    assert_eq!(reply.messages, vec!["검색 결과 없음".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-strict-raw-tail-keeps-observed");
+    let observed = "98|first observed line\n99|second observed line";
+    let raw_read = serde_json::json!({
+        "extra": {
+            "action": "read_range",
+            "mode": "tail",
+            "requested_n": 2,
+            "path": "/tmp/app.log",
+            "resolved_path": "/tmp/app.log",
+            "excerpt": observed
+        },
+        "text": serde_json::json!({
+            "action": "read_range",
+            "mode": "tail",
+            "excerpt": observed
+        })
+        .to_string()
+    })
+    .to_string();
+    let synthesis = "planned fallback text";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "fs_basic", &raw_read));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    loop_state.delivery_messages.push(observed.to_string());
+    loop_state.last_user_visible_respond = Some(observed.to_string());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "show the last two lines exactly",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve strict raw read output");
+
+    let normalized_observed = "first observed line\nsecond observed line";
+    assert_eq!(reply.text, normalized_observed);
+    assert_eq!(reply.messages, vec![normalized_observed.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
+    let state = test_state();
+    let task = claimed_task("task-path-fact-after-repair");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":4,"facts":[{"exists":false,"path":"agent_guard.toml"},{"exists":false,"path":"audio.toml"},{"exists":false,"path":"browser_web_wait_map.json"},{"exists":false,"path":"channel_commands.toml"}],"include_missing":true}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
+    ));
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent = "查看 configs 目录下最后一个条目的路径和类型信息".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/repo/configs/channels".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "看最后一个的基本信息，只回答路径和类型",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, "/tmp/repo/configs/channels | 目录");
+    assert!(!reply.text.contains("没能整理成可靠结论"));
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some("/tmp/repo/configs/channels | 目录")
+    );
+    assert!(!reply.should_fail_task);
+    assert!(!reply.is_llm_reply);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
+    let state = test_state();
+    let task = claimed_task("task-synth-over-raw");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .output_vars
+        .insert("last_skill_name".to_string(), "git_basic".to_string());
+    let raw_git = "exit=0\nabc123 fix deployment docs\n";
+    loop_state.last_user_visible_respond = Some(raw_git.to_string());
+    loop_state.last_publishable_synthesis_output =
+        Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "git_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(raw_git.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "帮我写一段 RustClaw 部署说明",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, "RustClaw 的部署可按项目文档和安装脚本完成。");
+    assert!(reply.messages[0].contains("**执行过程**"));
+    assert!(reply.messages[0].contains("git_basic"));
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some("RustClaw 的部署可按项目文档和安装脚本完成。")
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
+    let state = test_state();
+    let task = claimed_task("task-synth-after-repair");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "list_dir".to_string(),
+        status: StepExecutionStatus::Error,
+        output: None,
+        error: Some("file operation failed: target path was not found".to_string()),
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "read_file".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("# RustClaw\n\nRustClaw is a local Rust agent runtime.".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let article = "RustClaw 是一个本地优先的 Rust 智能体运行时，围绕 clawd、技能调度和多渠道入口组织，可用于通过聊天或浏览器完成项目管理与自动化任务。".to_string();
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_3".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(article.clone()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.delivery_messages.push(
+        "**执行过程**\n1. 调用技能 `list_dir`\n   错误：\n```text\nfile operation failed: target path was not found\n```"
+            .to_string(),
+    );
+    loop_state.delivery_messages.push(article.clone());
+    loop_state.last_user_visible_respond = Some(article.clone());
+    loop_state.last_publishable_synthesis_output = Some(article.clone());
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "帮我写一篇关于 RustClaw 的长文",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, article);
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some(article.as_str())
+    );
+    assert!(
+        !reply.text.contains("第 1 步"),
+        "article synthesis must not be replaced by step status: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-synth-placeholder");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .delivery_messages
+        .push("{{synthesized}}".to_string());
+    loop_state.last_user_visible_respond = Some("{{synthesized}}".to_string());
+    loop_state.last_publishable_synthesis_output =
+        Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "read_file".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("# RustClaw\n\nUse install-rustclaw-cmd.sh".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "帮我写一段 RustClaw 部署说明",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(
+        reply.text,
+        "RustClaw 可以按 README 中的安装脚本路径完成部署。"
+    );
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some("RustClaw 可以按 README 中的安装脚本路径完成部署。")
+    );
+    assert!(!reply.text.contains("{{"));
+}

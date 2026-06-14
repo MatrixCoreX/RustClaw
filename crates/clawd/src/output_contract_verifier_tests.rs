@@ -19,6 +19,8 @@ fn pass_for_default_contract() {
 #[test]
 fn reject_for_empty_candidate() {
     let v = verify_output_contract(&contract_existence("rustclaw.service"), "  ", "?");
+    assert_eq!(v.owner_layer(), "output_contract_verifier");
+    assert_eq!(v.reason_code(), Some("candidate_empty"));
     assert!(matches!(v, OutputContractVerdict::Reject { .. }));
 }
 
@@ -83,7 +85,12 @@ fn reshape_scalar_path_only_extracts_path_structurally() {
     let candidate = "路径是 /etc/passwd。";
     let v = verify_output_contract(&contract, candidate, "?");
     match v {
-        OutputContractVerdict::Reshape { reshaped, .. } => {
+        OutputContractVerdict::Reshape {
+            reason_code,
+            reshaped,
+            ..
+        } => {
+            assert_eq!(reason_code, "scalar_path_only_extracted_first_path_token");
             assert_eq!(reshaped, "/etc/passwd");
         }
         other => panic!("expected Reshape extracting path, got: {other:?}"),
@@ -131,6 +138,10 @@ fn directory_names_rejects_requested_extension_file_list() {
         "Find directories containing .sh files",
     );
 
+    assert_eq!(
+        v.reason_code(),
+        Some("directory_names_requested_extension_file_entries")
+    );
     assert!(matches!(v, OutputContractVerdict::Reject { .. }));
 }
 
@@ -175,7 +186,14 @@ fn reshape_scalar_count_extracts_sole_int_from_multiline_candidate() {
     let candidate = "目录检查完成。\n一共是 5 个。";
     let v = verify_output_contract(&contract, candidate, "?");
     match v {
-        OutputContractVerdict::Reshape { reshaped, .. } => assert_eq!(reshaped, "5"),
+        OutputContractVerdict::Reshape {
+            reason_code,
+            reshaped,
+            ..
+        } => {
+            assert_eq!(reason_code, "scalar_count_extracted_unique_integer");
+            assert_eq!(reshaped, "5");
+        }
         other => panic!("expected Reshape extracting int, got: {other:?}"),
     }
 }
@@ -238,6 +256,10 @@ fn reject_scalar_count_when_no_integer_at_all() {
         ..IntentOutputContract::default()
     };
     let v = verify_output_contract(&contract, "数不清", "?");
+    assert_eq!(
+        v.reason_code(),
+        Some("scalar_count_missing_integer_literal")
+    );
     assert!(matches!(v, OutputContractVerdict::Reject { .. }));
 }
 

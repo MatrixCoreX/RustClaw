@@ -1,6 +1,8 @@
 use super::{
-    mixed_language_prefers_cjk_response, preferred_response_language_hint, request_language_hint,
-    task_language_source_text, task_user_request_for_prompt, text_language_conflicts_with_hint,
+    first_clear_request_language_hint, mixed_language_prefers_cjk_response,
+    preferred_response_language_hint, request_language_hint, task_language_source_text,
+    task_language_source_text_with_active_clarify, task_user_request_for_prompt,
+    text_is_language_neutral_artifact_only, text_language_conflicts_with_hint,
 };
 
 #[test]
@@ -41,7 +43,35 @@ fn request_language_hint_prefers_current_turn_text_shape() {
         request_language_hint("résume le fichier README"),
         "und-Latn"
     );
+    assert_eq!(
+        request_language_hint("/home/guagua/rustclaw/configs/config.toml"),
+        "config_default"
+    );
+    assert_eq!(
+        request_language_hint("configs/app_config.toml"),
+        "config_default"
+    );
     assert_eq!(request_language_hint("12345"), "config_default");
+}
+
+#[test]
+fn language_neutral_artifacts_do_not_force_english() {
+    assert!(text_is_language_neutral_artifact_only(
+        "/home/guagua/rustclaw/configs/config.toml"
+    ));
+    assert!(text_is_language_neutral_artifact_only(
+        "configs/app_config.toml"
+    ));
+    assert!(text_is_language_neutral_artifact_only("README.md"));
+    assert!(!text_is_language_neutral_artifact_only("读取 README.md"));
+    assert_eq!(
+        first_clear_request_language_hint([
+            "/home/guagua/rustclaw/configs/app_config.toml",
+            "把那个文件发给我，不要贴内容",
+        ])
+        .as_deref(),
+        Some("zh-CN")
+    );
 }
 
 #[test]
@@ -178,6 +208,52 @@ fn task_language_source_prefers_original_payload_over_resolved_semantic_rewrite(
     assert_eq!(
         task_language_source_text(&task, resolved).as_ref(),
         "读取 UI/package.json 里的 name，最后只用一行输出：一样或不一样"
+    );
+}
+
+#[test]
+fn task_language_source_uses_active_clarify_source_for_locator_only_reply() {
+    let task = crate::ClaimedTask {
+        task_id: "task-language-active-clarify".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"telegramd"}).to_string(),
+    };
+    let source_request = "看看那个服务现在是不是在运行";
+    let resolved = "Check if the telegramd service is currently running";
+    assert_eq!(
+        task_language_source_text_with_active_clarify(&task, resolved, Some(source_request))
+            .as_ref(),
+        source_request
+    );
+}
+
+#[test]
+fn task_language_source_keeps_current_sentence_language_over_active_clarify_source() {
+    let task = crate::ClaimedTask {
+        task_id: "task-language-active-clarify-current-sentence".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"please continue with the task"}).to_string(),
+    };
+    assert_eq!(
+        task_language_source_text_with_active_clarify(
+            &task,
+            "please continue with the task",
+            Some("看看那个服务现在是不是在运行"),
+        )
+        .as_ref(),
+        "please continue with the task"
     );
 }
 

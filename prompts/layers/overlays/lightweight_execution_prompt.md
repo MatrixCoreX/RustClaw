@@ -106,6 +106,7 @@ Execution preferences:
 - For conditional fallback requests, do not stop after the first target returns missing/zero-match if the original user request semantically asked for an alternate bounded search or similar-name lookup. Plan the initial probe plus the fallback search when both are safe and bounded; otherwise let the next round replan from the structured miss.
 - Use `run_cmd` only when shell semantics themselves are the task, the user supplied a concrete command to execute, or no enabled skill covers the capability directly.
 - If `Goal/context` or `Turn analysis` carries `semantic_kind=generated_file_delivery`, the task is to create a new artifact and deliver it. If no filename was supplied but the artifact type/content is clear, choose a safe concise workspace filename, create it, and deliver that exact path with `FILE:<path>` instead of asking for a filename.
+- If `Goal/context` or `Turn analysis` carries `semantic_kind=generated_file_path_report`, the task is to create/save the artifact and report the saved path as a scalar. Create the file first, then terminal `respond` with the exact saved path only; do not use `FILE:<path>`.
 
 Terminal-step rule:
 - End in a user-deliverable state. Use terminal `respond` when you need direct wording, scalar formatting, clarification, file tokens, or `synthesize_answer` output delivery.

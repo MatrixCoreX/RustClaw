@@ -1198,6 +1198,28 @@ fn normalize_agent_action_shape_rewrites_call_tool_run_cmd_aliases() {
 }
 
 #[test]
+fn normalize_agent_action_shape_preserves_call_tool_fs_basic_write_text() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let normalized = super::parse_agent_action_json_with_repair(
+        r#"{"type":"call_tool","tool":"fs_basic","args":{"action":"write_text","path":"/tmp/path_note.txt","content":"hello"}}"#,
+        &state,
+    )
+    .expect("call_tool fs_basic should normalize");
+    assert_eq!(
+        normalized,
+        json!({
+            "type": "call_tool",
+            "tool": "fs_basic",
+            "args": {
+                "action": "write_text",
+                "path": "/tmp/path_note.txt",
+                "content": "hello"
+            }
+        })
+    );
+}
+
+#[test]
 fn normalize_agent_action_shape_rewrites_system_basic_list_dir_to_base_skill() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let normalized = super::parse_agent_action_json_with_repair(

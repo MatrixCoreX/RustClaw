@@ -7,7 +7,7 @@
 - `log_analyze` scans logs for notable errors/events and summarizes key findings.
 - It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
 - It can narrow results with keyword filters.
-- Even without explicit `keywords`, it returns structured severity evidence (`level_counts`, `recent_notable_lines`) so warning/error lines remain observable.
+- Even without explicit `keywords`, it returns structured severity evidence (`level_counts`, `recent_notable_lines`) and recovery evidence (`recovery_counts`, `recent_recovery_lines`) so warning/error and retry/recovery lines remain observable.
 
 ## Actions
 - No action field is required for baseline analysis.
@@ -28,6 +28,8 @@
 - `recent_matches`: recent keyword-matching lines.
 - `level_counts`: counts by detected log level (`warn`, `error`, `fatal`, `panic`, etc.).
 - `recent_notable_lines`: recent `warn` or higher severity lines, independent of keyword filters.
+- `recovery_counts`: counts for operational recovery tokens such as `retry`, `recover`, `recovered`, `succeeded`, and `success`.
+- `recent_recovery_lines`: recent lines containing retry/recovery tokens, independent of severity level.
 
 ## Error Contract
 - Invalid/missing log path when path is provided.

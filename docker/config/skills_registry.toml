@@ -13,10 +13,20 @@ aliases = ["shell", "exec"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = true
 supported_os = ["linux", "macos"]
 required_bins = ["bash"]
 optional_bins = ["sudo"]
 platform_notes = ["Executes through bash on Linux/macOS; sudo use is gated by task policy."]
+planner_capabilities = [
+  { name = "system.run_command", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "read_file"
@@ -30,13 +40,14 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/read_file.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
-runtime_skill = "system_basic"
-runtime_action = "inventory_dir"
-runtime_default_args = { names_only = true }
-runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions"]
-runtime_rewrite_semantic_kinds = ["file_names", "directory_names"]
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "write_file"
@@ -50,8 +61,15 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/write_file.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" }, append = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "list_dir"
@@ -65,13 +83,21 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/list_dir.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+requires_confirmation = false
+side_effect = false
+retryable = true
 capabilities = ["fs.read"]
+preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
 runtime_skill = "system_basic"
 runtime_action = "inventory_dir"
 runtime_default_args = { names_only = true }
 runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions"]
 runtime_rewrite_semantic_kinds = ["file_names", "directory_names"]
+input_schema = { type = "object", properties = { path = { type = "string" }, names_only = { type = "boolean" }, limit = { type = "integer" }, max_entries = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "make_dir"
@@ -85,8 +111,15 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/make_dir.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "remove_file"
@@ -100,8 +133,15 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/remove_file.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "fs_basic"
@@ -134,6 +174,21 @@ confirmation_exempt_when = [
   { action = "grep_text" },
   { action = "compare_paths" },
 ]
+planner_capabilities = [
+  { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.list_entries", action = "list_dir", effect = "observe", required = ["path"], optional = ["names_only", "max_entries", "include_hidden", "files_only", "dirs_only", "sort_by"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.count_entries", action = "count_entries", effect = "observe", required = ["path"], optional = ["include_hidden", "files_only", "dirs_only"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"], optional = ["start_line", "end_line", "max_bytes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.find_entries", action = "find_entries", effect = "observe", optional = ["root", "pattern", "ext", "target_kind", "max_results"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.grep_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "max_results"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.compare_paths", action = "compare_paths", effect = "observe", required = ["left_path|paths", "right_path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "filesystem.append_text", action = "append_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["stat_paths", "list_dir", "count_entries", "read_text_range", "find_entries", "grep_text", "compare_paths", "write_text", "append_text", "make_dir", "remove_path"] }, path = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, root = { type = "string" }, pattern = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, ext = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, query = { type = "string" }, content = { type = "string" }, target_kind = { type = "string" }, include_hidden = { type = "boolean" }, files_only = { type = "boolean" }, dirs_only = { type = "boolean" }, names_only = { type = "boolean" }, sort_by = { type = "string" }, max_entries = { type = "integer" }, max_results = { type = "integer" }, mode = { type = "string" }, n = { type = "integer" }, start_line = { type = "integer" }, end_line = { type = "integer" }, left_path = { type = "string" }, right_path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "config_basic"
@@ -147,7 +202,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/config_basic.md"
 output_kind = "text"
 description = "Planner-facing structured config read/validation contract for TOML, JSON, and YAML. Writes are intentionally not exposed in v1."
-semantic_tags = ["structured_config", "toml", "json", "yaml", "field_read", "key_listing", "structured_keys", "config_validation", "config_guard"]
+semantic_tags = ["structured_config", "toml", "json", "yaml", "field_read", "key_listing", "structured_keys", "config_validation", "config_risk_assessment", "config_guard"]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
@@ -157,11 +212,11 @@ preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
 platform_notes = ["Virtual planner tool; runtime read actions delegate to system_basic and RustClaw config guard."]
 planner_capabilities = [
-  { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", preferred = true },
-  { name = "config.read_fields", action = "read_fields", effect = "observe", required = ["path", "field_paths"], risk_level = "low", preferred = true },
-  { name = "config.list_keys", action = "list_keys", effect = "observe", required = ["path"], optional = ["max_keys"], risk_level = "low", preferred = true },
-  { name = "config.validate", action = "validate", effect = "validate", required = ["path"], optional = ["validation_profile"], risk_level = "low", preferred = true },
-  { name = "config.guard_rustclaw_config", action = "guard_rustclaw_config", effect = "validate", required = ["path"], risk_level = "low", preferred = true },
+  { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.read_fields", action = "read_fields", effect = "observe", required = ["path", "field_paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.list_keys", action = "list_keys", effect = "observe", required = ["path"], optional = ["max_keys"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.validate", action = "validate", effect = "validate", required = ["path"], optional = ["validation_profile"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.guard_rustclaw_config", action = "guard_rustclaw_config", effect = "validate", required = ["path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields", "list_keys", "validate", "guard_rustclaw_config"] }, path = { type = "string" }, field_path = { type = "string" }, field_paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, format = { type = "string" }, validation_profile = { type = "string", enum = ["syntax_only", "rustclaw_semantic_guard"] }, max_keys = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
@@ -178,7 +233,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/config_edit.md"
 output_kind = "text"
 description = "Planner-facing structured config mutation tool. Use for plan/apply/validate/guard/read-back workflows when changing RustClaw config fields."
-semantic_tags = ["structured_config", "config_mutation", "toml", "json", "field_write", "field_read_back", "config_validation", "config_guard", "restart_recommendation"]
+semantic_tags = ["structured_config", "config_mutation", "toml", "json", "field_write", "field_read_back", "config_validation", "config_risk_assessment", "config_guard", "restart_recommendation"]
 risk_level = "high"
 auto_invocable = true
 requires_confirmation = true
@@ -196,15 +251,17 @@ confirmation_exempt_when = [
   { action = "restart_if_requested", restart = false },
 ]
 planner_capabilities = [
-  { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true },
-  { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
-  { name = "config.write_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
-  { name = "config.set_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
-  { name = "config.validate_after_change", action = "validate_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true },
-  { name = "config.guard_after_change", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true },
-  { name = "config.read_back", action = "read_back", effect = "observe", required = ["field_path"], optional = ["path", "format"], risk_level = "low", preferred = true },
-  { name = "config.restart_if_requested", action = "restart_if_requested", effect = "external", optional = ["restart", "reason"], risk_level = "high", preferred = true },
+  { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "config.write_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "config.set_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "config.validate_after_change", action = "validate_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.guard_after_change", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.read_back", action = "read_back", effect = "observe", required = ["field_path"], optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.restart_if_requested", action = "restart_if_requested", effect = "external", optional = ["restart", "reason"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["plan_config_change", "apply_config_change", "validate_config", "guard_config", "read_back", "restart_if_requested"] }, path = { type = "string" }, field_path = { type = "string" }, value = {}, operation = { type = "string", enum = ["set"] }, format = { type = "string", enum = ["toml", "json"] }, restart = { type = "boolean" }, reason = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "schedule"
@@ -216,6 +273,13 @@ aliases = ["schedule_compile", "timer_compile"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/schedule.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "x"
@@ -227,6 +291,18 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/x.md"
 output_kind = "text"
+description = "Draft or publish social posts through X/Twitter-like channel tooling. Preview/dry-run requests should call this skill with dry_run=true instead of answering as ordinary chat text."
+semantic_tags = ["publishing", "social_post", "draft_preview", "dry_run", "external_channel"]
+risk_level = "high"
+auto_invocable = true
+side_effect = true
+retryable = true
+planner_capabilities = [
+  { name = "x.draft_preview", action = "preview", effect = "observe", required = ["text"], optional = ["dry_run", "send"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "x.publish", action = "publish", effect = "external", required = ["text", "send"], optional = ["dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", required = ["text"], properties = { action = { type = "string", enum = ["post", "draft", "preview", "publish"] }, text = { type = "string" }, dry_run = { type = "boolean" }, send = { type = "boolean" }, confirm_send = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "system_basic"
@@ -235,20 +311,26 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 primary_fallback_role = "fallback"
-aliases = ["system"]
-timeout_seconds = 30
+aliases = ["system", "system_query"]
+timeout_seconds = 45
 prompt_file = "prompts/skills/system_basic.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["hostname", "sysctl"]
 platform_notes = ["Linux uses /proc for detailed runtime probes; macOS uses sysctl where available."]
 planner_capabilities = [
-  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true },
-  { name = "system.inventory_dir", action = "inventory_dir", effect = "observe", optional = ["path", "files_only", "dirs_only", "include_hidden", "names_only", "sort_by", "ext_filter", "max_entries"], risk_level = "low", preferred = true },
-  { name = "system.tree_summary", action = "tree_summary", effect = "observe", optional = ["path", "include_hidden", "max_depth", "max_children_per_dir", "max_nodes"], risk_level = "low", preferred = true },
-  { name = "system.read_range", action = "read_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line"], risk_level = "low", preferred = true },
+  { name = "system.info", action = "info", effect = "observe", risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "system.inventory_dir", action = "inventory_dir", effect = "observe", optional = ["path", "files_only", "dirs_only", "include_hidden", "names_only", "sort_by", "ext_filter", "max_entries"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "system.tree_summary", action = "tree_summary", effect = "observe", optional = ["path", "include_hidden", "max_depth", "max_children_per_dir", "max_nodes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "system.read_range", action = "read_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string" }, query = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array" }, field_path = { type = "string" }, field_paths = { type = "array" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "http_basic"
@@ -264,9 +346,11 @@ capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses Rust HTTP client; no external command dependency."]
 planner_capabilities = [
-  { name = "http.get", action = "get", effect = "observe", required = ["url"], optional = ["headers", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "low", preferred = true },
-  { name = "http.post_json", action = "post_json", effect = "external", required = ["url"], optional = ["headers", "body", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "medium" },
+  { name = "http.get", action = "get", effect = "observe", required = ["url"], optional = ["headers", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "http.post_json", action = "post_json", effect = "external", required = ["url"], optional = ["headers", "body", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
+input_schema = { type = "object", properties = { action = { type = "string" }, url = { type = "string" }, method = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "git_basic"
@@ -280,6 +364,22 @@ prompt_file = "prompts/skills/git_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 required_bins = ["git"]
+planner_capabilities = [
+  { name = "git_basic", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.status", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.branch", action = "branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.remote", action = "remote", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.log", action = "log", effect = "observe", optional = ["path", "repo", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.diff", action = "diff", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.diff_cached", action = "diff_cached", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.rev_parse", action = "rev_parse", effect = "observe", optional = ["path", "repo", "ref"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "git.show", action = "show", effect = "observe", optional = ["path", "repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args" },
+  { name = "git.show_file_at_rev", action = "show_file_at_rev", effect = "observe", required = ["path"], optional = ["repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, repo = { type = "string" }, ref = { type = "string" }, args = { type = "array", items = { type = "string" } } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "install_module"
@@ -302,6 +402,10 @@ kind = "runner"
 planner_kind = "tool"
 group = "ops"
 aliases = ["process", "process_manager"]
+description = "Inspect local processes and listening ports through structured process actions instead of ad-hoc shell commands."
+semantic_tags = ["service_status", "runtime_health"]
+preferred_over_run_cmd = true
+validation_actions = ["ps", "port_list"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/process_basic.md"
 output_kind = "text"
@@ -309,6 +413,15 @@ supported_os = ["linux", "macos"]
 required_bins = ["ps", "kill"]
 optional_bins = ["ss", "lsof", "netstat"]
 platform_notes = ["port_list chooses Linux ss before lsof/netstat; macOS uses lsof before netstat."]
+planner_capabilities = [
+  { name = "process_basic", action = "ps", effect = "observe", optional = ["action", "limit", "filter", "query", "name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "process.ps", action = "ps", effect = "observe", optional = ["limit", "filter", "query", "name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "process.port_list", action = "port_list", effect = "observe", optional = ["filter", "query", "port"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "process.kill", action = "kill", effect = "mutate", required = ["pid"], optional = ["signal"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "process.tail_log", action = "tail_log", effect = "observe", required = ["path"], optional = ["n"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, process = { type = "string" }, query = { type = "string" }, port = { type = "integer" }, pid = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "package_manager"
@@ -327,10 +440,12 @@ platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package m
 semantic_tags = ["package_manager_detection"]
 preferred_over_run_cmd = true
 planner_capabilities = [
-  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true },
-  { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
-  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
+  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "uninstall"] }, package = { type = "string" }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "archive_basic"
@@ -339,16 +454,24 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["archive", "archive_tool"]
-description = "List, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
-semantic_tags = ["archive_list", "archive_pack", "archive_unpack"]
+description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
+semantic_tags = ["archive_list", "archive_read", "archive_pack", "archive_unpack"]
 preferred_over_run_cmd = true
-validation_actions = ["list"]
+validation_actions = ["list", "read"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/archive_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["tar", "zip", "unzip"]
 platform_notes = ["Archive command dependency is action/format dependent."]
+planner_capabilities = [
+  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "archive.read", action = "read", effect = "observe", required = ["archive", "member"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "archive.pack", action = "pack", effect = "mutate", required = ["source", "archive"], optional = ["format"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "db_basic"
@@ -366,6 +489,8 @@ prompt_file = "prompts/skills/db_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["SQLite access is implemented in-process; no sqlite3 CLI dependency."]
+input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "docker_basic"
@@ -374,16 +499,28 @@ kind = "runner"
 planner_kind = "tool"
 group = "ops"
 aliases = ["docker", "docker_ops"]
-description = "Inspect Docker containers/images and perform targeted container lifecycle actions through structured Docker actions."
-semantic_tags = ["docker_ps", "docker_images", "docker_logs", "docker_container_lifecycle"]
+description = "Inspect Docker containers/images/version and perform targeted container lifecycle actions through structured Docker actions."
+semantic_tags = ["docker_ps", "docker_images", "docker_version", "docker_logs", "docker_container_lifecycle"]
 preferred_over_run_cmd = true
-validation_actions = ["ps", "images", "inspect"]
+validation_actions = ["ps", "images", "version", "inspect"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/docker_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["docker"]
 platform_notes = ["Read-only Docker inspection returns available=false when Docker CLI or daemon is unavailable."]
+planner_capabilities = [
+  { name = "docker.list_containers", action = "ps", effect = "observe", optional = ["limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "docker.list_images", action = "images", effect = "observe", optional = ["limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "docker.version", action = "version", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "docker.inspect_container", action = "inspect", effect = "observe", required = ["container"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "docker.read_logs", action = "logs", effect = "observe", required = ["container"], optional = ["tail"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "docker.restart_container", action = "restart", effect = "mutate", required = ["container"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "docker.start_container", action = "start", effect = "mutate", required = ["container"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "docker.stop_container", action = "stop", effect = "mutate", required = ["container"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" }, tail = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "fs_search"
@@ -408,9 +545,21 @@ kind = "runner"
 planner_kind = "skill"
 group = "news/web"
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
+description = "Fetch configured RSS/Atom category feeds or explicit feed URLs and return normalized latest news items."
+semantic_tags = ["rss_news_fetch", "latest_news", "feed_fetch", "external_news"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
 timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
 output_kind = "text"
+planner_capabilities = [
+  { name = "rss.latest_news", action = "latest", effect = "observe", optional = ["category", "limit", "timeout_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["latest", "fetch"] }, category = { type = "string" }, url = { type = "string" }, feed_url = { type = "string" }, feed_urls = { type = "array", items = { type = "string" } }, limit = { type = "integer" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "image_vision"
@@ -422,16 +571,31 @@ aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
 output_kind = "image"
+description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
+semantic_tags = ["image_understanding", "image_description", "image_extract", "image_compare", "screenshot_summary"]
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
 # 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
-# 当前默认 default_vendor=minimax（见 configs/image.toml [image_vision]），
-# 启用别的 vendor 段时同步追加 secrets.image_vision_<vendor>_api_key。
+# 当前默认 default_vendor=minimax（见 configs/image.toml [image_vision]），默认复用
+# 主 LLM provider 注入的 MINIMAX_API_KEY；启用独立 vendor 段时再同步追加
+# secrets.image_vision_<vendor>_api_key。
 capabilities = [
     "llm",
     "net",
-    "secrets.image_vision_minimax_api_key",
 ]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+planner_capabilities = [
+  { name = "image_vision.describe", action = "describe", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "image_vision.analyze", action = "analyze", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "image_vision.extract", action = "extract", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "schema"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "image_vision.compare", action = "compare", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "image_vision.screenshot_summary", action = "screenshot_summary", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["describe", "analyze", "extract", "compare", "screenshot_summary"] }, images = { type = "array", items = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] } }, image = { type = "string" }, instruction = { type = "string" }, query = { type = "string" }, text = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, detail_level = { type = "string" }, schema = { type = "object" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "image_generate"
@@ -464,6 +628,8 @@ capabilities = [
 # §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "image_edit"
@@ -476,17 +642,18 @@ timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
 output_kind = "image"
 # §P4.1 / §P4.4 E1.d：image_edit 调远端 vendor 编辑图，落盘到 workspace。
-# 命名遵守 <用途>_<vendor>_api_key 规范（不能与 image_generation / image_vision
-# / chat 串货）。当前默认 default_vendor=minimax（见 configs/image.toml
-# [image_edit]），启用别的 vendor 段时同步追加 secrets.image_edit_<vendor>_api_key。
+# 默认 default_vendor=minimax（见 configs/image.toml [image_edit]）。运行时优先使用
+# IMAGE_EDIT_<VENDOR>_API_KEY；未配置专用 key 时，技能可复用同厂商全局 key
+# （如 MINIMAX_API_KEY），避免默认能力被空专用 secret 门禁挡住。
 capabilities = [
     "llm",
     "net",
     "fs.write",
-    "secrets.image_edit_minimax_api_key",
 ]
 # §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
 side_effect = true
+input_schema = { type = "object", required = ["instruction"], properties = { action = { type = "string", enum = ["edit", "outpaint", "restyle", "add_remove"] }, instruction = { type = "string" }, image = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] }, images = { type = "array", items = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] } }, mask = { anyOf = [ { type = "string" }, { type = "object" } ] }, size = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "audio_transcribe"
@@ -509,6 +676,10 @@ aliases = []
 timeout_seconds = 90
 prompt_file = "prompts/skills/audio_synthesize.md"
 output_kind = "text"
+capabilities = ["llm", "net", "fs.write"]
+side_effect = true
+input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "health_check"
@@ -521,9 +692,19 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
+planner_capabilities = [
+  { name = "health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "system.health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "log_analyze"
@@ -537,6 +718,8 @@ prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, max_lines = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "service_control"
@@ -555,6 +738,17 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log", "sudo", "ps"]
 platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
+planner_capabilities = [
+  { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "service.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "service.verify", action = "verify", effect = "validate", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "service.logs", action = "logs", effect = "observe", required = ["target"], optional = ["service", "manager_type", "lines"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "service.start", action = "start", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "service.stop", action = "stop", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "service.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, lines = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "task_control"
@@ -569,6 +763,12 @@ output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses authenticated local clawd HTTP APIs; no external command dependency."]
+semantic_tags = ["task_status", "task_control", "runtime_tasks"]
+planner_capabilities = [
+  { name = "task_control.list", action = "list", effect = "observe", optional = ["status", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "task_control.cancel_all", action = "cancel_all", effect = "mutate", optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "task_control.cancel_one", action = "cancel_one", effect = "mutate", required = ["index"], optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args" },
+]
 
 [[skills]]
 name = "config_guard"
@@ -583,6 +783,8 @@ prompt_file = "prompts/skills/config_guard.md"
 output_kind = "text"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, profile = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "crypto"
@@ -594,6 +796,19 @@ aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
 output_kind = "text"
+description = "Query crypto market quotes, prices, book tickers, candles, indicators, on-chain facts, and private exchange order/account workflows."
+semantic_tags = ["market_quote", "market_quote_scalar", "crypto_quote", "crypto_price", "asset_quote"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "crypto.quote", action = "quote", effect = "observe", required = ["symbol"], optional = ["exchange", "locale", "lang", "timeout_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "crypto.multi_quote", action = "multi_quote", effect = "observe", required = ["symbols|symbol"], optional = ["exchange", "locale", "lang", "timeout_seconds"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "crypto.positions", action = "positions", effect = "observe", optional = ["exchange", "locale", "lang", "timeout_seconds"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["quote", "price", "multi_quote", "get_price", "get_multi_price", "get_book_ticker", "book_ticker", "candles", "indicator", "price_alert_check", "onchain", "trade_preview", "trade_submit", "order_status", "cancel_order", "cancel_all_orders", "open_orders", "trade_history", "positions"] }, symbol = { type = "string" }, symbols = { type = "array", items = { type = "string" } }, exchange = { type = "string" }, locale = { type = "string" }, lang = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "stock"
@@ -605,6 +820,17 @@ aliases = ["a_stock", "stock_quote", "股票"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
+description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
+semantic_tags = ["market_quote", "market_quote_scalar", "stock_quote", "a_share_quote", "asset_quote"]
+capabilities = ["net", "llm"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "stock.quote", action = "quote", effect = "observe", required = ["symbol|code|name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["quote", "query"] }, symbol = { type = "string" }, code = { type = "string" }, name = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "weather"
@@ -616,6 +842,17 @@ aliases = ["天气", "weather_query", "查天气"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
 output_kind = "text"
+description = "Query current weather or daily forecasts for a concrete city/place or coordinates through Open-Meteo."
+semantic_tags = ["weather_query", "current_weather", "weather_forecast", "external_weather"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "weather.current", action = "query", effect = "observe", required = ["city|location|place|q|latitude+longitude"], optional = ["days", "forecast_days", "locale", "lang"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["query"] }, city = { type = "string" }, location = { type = "string" }, place = { type = "string" }, q = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" }, days = { type = "integer" }, forecast_days = { type = "integer" }, locale = { type = "string" }, lang = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "map_merchant"
@@ -648,6 +885,7 @@ kind = "runner"
 planner_kind = "tool"
 group = "filesystem"
 aliases = ["parse_doc", "document_parse", "doc_reader"]
+description = "Parse supported local documents and expose text, sections, tables, and metadata for summaries or key-point extraction."
 timeout_seconds = 20
 prompt_file = "prompts/skills/doc_parse.md"
 output_kind = "text"
@@ -655,6 +893,8 @@ capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 optional_bins = ["pdftotext", "pdfinfo"]
 platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses poppler tools when available."]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_bytes = { type = "integer" }, section = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "transform"
@@ -663,11 +903,14 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["transform_data", "data_transform", "table_transform"]
+description = "Transform structured records from JSON arrays/objects or CSV: sort, filter, rename, project, group, aggregate, deduplicate, and render JSON, markdown tables, or CSV."
 timeout_seconds = 20
 prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["Pure structured-data transform; no filesystem or command dependency."]
+input_schema = { type = "object", properties = { action = { type = "string" }, input = {}, records = { type = "array" }, csv = { type = "string" }, operation = { type = "string" }, fields = { type = "array", items = { type = "string" } } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "invest_copy"
@@ -680,6 +923,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/invest_copy.md"
 output_kind = "text"
 risk_level = "medium"
+capabilities = ["llm"]
 auto_invocable = false
 retryable = true
 
@@ -693,9 +937,20 @@ aliases = ["search_extract", "web_search", "web_extract"]
 timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
 output_kind = "text"
+description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
+semantic_tags = ["web_search_summary", "search_results", "external_web_search", "url_discovery"]
 capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
 supported_os = ["linux", "macos"]
 platform_notes = ["Search backend requires network and backend/API configuration."]
+planner_capabilities = [
+  { name = "web.search_results", action = "search_extract", effect = "observe", required = ["query"], optional = ["top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "web.search", action = "search", effect = "observe", required = ["query"], optional = ["top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, top_k = { type = "integer" }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string" }, include_snippet = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "kb"
@@ -707,6 +962,17 @@ aliases = ["knowledge_base", "kb_ingest", "kb_search"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
 output_kind = "text"
+semantic_tags = ["knowledge_base", "document_ingest", "retrieval_index"]
+capabilities = ["fs.read", "fs.write"]
+risk_level = "medium"
+auto_invocable = true
+side_effect = true
+planner_capabilities = [
+  { name = "kb.ingest", action = "ingest", effect = "mutate", required = ["namespace", "paths|path"], optional = ["chunk_size", "chunk_overlap", "overwrite", "file_types", "max_file_size"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args" },
+  { name = "kb.search", action = "search", effect = "observe", required = ["namespace", "query"], optional = ["top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "kb.list_namespaces", action = "list_namespaces", effect = "observe", optional = [], risk_level = "low", idempotent = true, dedup_scope = "action" },
+  { name = "kb.stats", action = "stats", effect = "observe", required = ["namespace"], optional = [], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
 
 [[skills]]
 name = "browser_web"
@@ -718,13 +984,23 @@ aliases = ["browser_fetch", "page_extract", "browser_search"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
+description = "Open and extract explicit web pages through a headless browser, including page title, readable text, content excerpts, citations, and capture artifacts."
+semantic_tags = ["web_page_summary", "web_content_extract", "browser_page_extract", "url_content_summary"]
 capabilities = ["net", "fs.write"]
+risk_level = "low"
+auto_invocable = true
 side_effect = true
 supported_os = ["linux", "macos"]
 required_bins = ["node"]
 optional_bins = ["chromium", "google-chrome", "playwright"]
 platform_notes = ["Uses Node.js helper and headless Chromium; Linux sandbox probing is skipped on macOS."]
-
+planner_capabilities = [
+  { name = "browser.open_extract", action = "open_extract", effect = "observe", required = ["url|urls"], optional = ["max_pages", "wait_until", "save_screenshot", "content_mode", "max_text_chars", "min_content_chars"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "browser.search_page", action = "search_page", effect = "observe", required = ["query"], optional = ["max_results"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "browser.search_extract", action = "search_extract", effect = "observe", required = ["query"], optional = ["max_results", "max_pages", "content_mode", "max_text_chars"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["open_extract", "search_page", "search_extract"] }, url = { type = "string" }, urls = { type = "array", items = { type = "string" } }, query = { type = "string" }, max_pages = { type = "integer" }, max_results = { type = "integer" }, wait_until = { type = "string" }, save_screenshot = { type = "boolean" }, screenshot_dir = { type = "string" }, content_mode = { type = "string" }, max_text_chars = { type = "integer" }, min_content_chars = { type = "integer" }, fail_fast = { type = "boolean" }, wait_map_path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 [[skills]]
 name = "photo_organize"
 enabled = true
@@ -752,9 +1028,9 @@ confirmation_exempt_when = [
   { action = "organize", organize_mode = "plan" },
 ]
 planner_capabilities = [
-  { name = "photo.preview_organization", action = "preview", effect = "observe", optional = ["source_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "low", preferred = true },
-  { name = "photo.prepare_source_candidates", action = "prepare", effect = "observe", risk_level = "low", preferred = true },
-  { name = "photo.apply_organization", action = "organize", effect = "mutate", required = ["source_dir"], optional = ["mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "high" },
+  { name = "photo.preview_organization", action = "preview", effect = "observe", optional = ["source_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "photo.prepare_source_candidates", action = "prepare", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "photo.apply_organization", action = "organize", effect = "mutate", required = ["source_dir"], optional = ["mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
 
 [[skills]]

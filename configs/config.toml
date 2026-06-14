@@ -81,7 +81,7 @@ user_rpm = 20
 # 除非某个 skill 的专用配置文件明确提供并启用独立覆盖项，否则不要为每个文本 skill 单独指定模型。
 # Text skills use this global selection by default; per-skill text model overrides should be explicit and opt-in.
 # 默认模型名 / Default selected model.
-selected_model = "MiniMax-M2.7"
+selected_model = "MiniMax-M3"
 # 默认厂商标识 / Default selected vendor.
 selected_vendor = "minimax"
 
@@ -194,20 +194,23 @@ timeout_seconds = 60
 api_key = ""
 base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 2
-model = "MiniMax-M2.7"
+model = "MiniMax-M3"
 # Optional prompt-budget capacity override for compatible providers whose
-# public model name does not expose a reliable context window. Local probe on
-# 2026-05-19 accepted 252k input chars (~89k reported prompt tokens); 120k keeps
-# RustClaw's byte budget high enough for full routing prompts while staying
-# below the observed character envelope.
-context_window_tokens = 120000
+# public model name does not expose a reliable context window. MiniMax official
+# docs list MiniMax-M3 with a 1,000,000-token context window; keep this aligned
+# with the active text model so routing prompts can use the larger window.
+context_window_tokens = 1000000
 models = [
+    "MiniMax-M3",
     "MiniMax-M2.7",
     "MiniMax-M2.5",
     "MiniMax-M2.5-thinking",
     "MiniMax-M2.5-coder",
 ]
-timeout_seconds = 60
+# MiniMax text routing/model calls can be slow under load; keep the per-request
+# window aligned with worker.llm_total_timeout_seconds instead of cutting off
+# normal responses at 60s.
+timeout_seconds = 180
 
 # 用途/Purpose: Xiaomi MiMo 提供商连接与模型池（OpenAI-compatible，兼容 Anthropic 协议）.
 # 建议修改/Recommended change: 默认为 OpenAI-compatible；如切换 Anthropic-compatible，

@@ -1,9 +1,11 @@
 use super::{
-    apply_execution_context_to_prompts, build_active_task_context, build_request_surface_hints,
-    build_session_alias_context, classify_route_context_budget, needs_text_anchor_probe_for_route,
-    observed_facts_provide_immediate_anchor, request_can_fill_active_clarify_target,
+    active_task_context_only_memory_context, apply_execution_context_to_prompts,
+    build_active_task_context, build_request_surface_hints, build_session_alias_context,
+    chat_memory_context_hint, classify_route_context_budget, current_request_only_memory_context,
+    needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
+    planner_memory_context_hint, request_can_fill_active_clarify_target,
     request_qualifies_for_anchor_only_route_context, route_needs_recent_execution_history,
-    session_snapshot_provides_execution_state_anchor,
+    session_snapshot_has_primary_task_context, session_snapshot_provides_execution_state_anchor,
     should_prefer_light_execution_memory_from_session, should_suppress_execution_anchor_context,
     uses_light_execution_context_budget, ExecutionContextView, PlannerContextView,
     RouteContextBudgetTier, TaskContextBundle, TaskContextRawSources,
@@ -43,6 +45,22 @@ fn active_task_context_includes_primary_prompt_and_output() {
     assert!(context.contains("last_primary_task_output:"));
     assert!(context.contains("Python 3.10 installed"));
     assert!(context.contains("not a filesystem locator"));
+}
+
+#[test]
+fn primary_task_output_counts_as_active_task_context_for_memory_hint() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_output: Some("Draft checklist".to_string()),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!session_snapshot_provides_execution_state_anchor(&snapshot));
+    assert!(session_snapshot_has_primary_task_context(&snapshot));
 }
 
 #[test]
@@ -645,6 +663,7 @@ fn recent_observed_judgments_keep_recent_execution_history() {
         crate::OutputSemanticKind::ContentPresenceCheck,
         crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::RecentArtifactsJudgment,
+        crate::OutputSemanticKind::FileBasename,
     ] {
         let mut route = base_route_result();
         route.output_contract.semantic_kind = semantic_kind;
@@ -700,6 +719,76 @@ fn base_route_result() -> crate::RouteResult {
         agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
     }
+}
+
+#[test]
+fn standalone_direct_answer_without_turn_analysis_disables_stable_facts_memory() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
+
+    assert!(current_request_only_memory_context(&route, None, false));
+    assert_eq!(
+        chat_memory_context_hint(&route, None, false),
+        crate::memory::use_policy::ChatMemoryContextHint::CurrentRequestOnly
+    );
+    assert_eq!(
+        planner_memory_context_hint(&route, None, false),
+        crate::memory::use_policy::PlannerMemoryContextHint::StableFactsDisabled
+    );
+}
+
+#[test]
+fn explicit_preference_or_memory_turn_keeps_default_memory_policy() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(!current_request_only_memory_context(
+        &route,
+        Some(&analysis),
+        false
+    ));
+    assert_eq!(
+        chat_memory_context_hint(&route, Some(&analysis), false),
+        crate::memory::use_policy::ChatMemoryContextHint::Default
+    );
+    assert_eq!(
+        planner_memory_context_hint(&route, Some(&analysis), false),
+        crate::memory::use_policy::PlannerMemoryContextHint::Default
+    );
+}
+
+#[test]
+fn active_task_scope_update_uses_active_task_context_only_for_chat_memory() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskScopeUpdate),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(active_task_context_only_memory_context(
+        &route,
+        Some(&analysis),
+        true
+    ));
+    assert_eq!(
+        chat_memory_context_hint(&route, Some(&analysis), true),
+        crate::memory::use_policy::ChatMemoryContextHint::ActiveTaskContextOnly
+    );
+    assert_eq!(
+        planner_memory_context_hint(&route, Some(&analysis), true),
+        crate::memory::use_policy::PlannerMemoryContextHint::Default
+    );
 }
 
 #[test]

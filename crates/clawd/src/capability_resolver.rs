@@ -3,6 +3,55 @@ use serde_json::Value;
 use crate::{AgentAction, AppState};
 use claw_core::skill_registry::{PlannerCapabilityKind, SkillRiskLevel};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CapabilityResolutionRecord {
+    pub(crate) owner_layer: &'static str,
+    pub(crate) reason_code: &'static str,
+    pub(crate) outcome: &'static str,
+    pub(crate) source: &'static str,
+    pub(crate) capability_ref: String,
+    pub(crate) resolved_ref: Option<String>,
+    pub(crate) planner_kind: Option<&'static str>,
+}
+
+impl CapabilityResolutionRecord {
+    fn resolved(
+        reason_code: &'static str,
+        source: &'static str,
+        capability_ref: impl Into<String>,
+        resolved: &AgentAction,
+        planner_kind: PlannerCapabilityKind,
+    ) -> Self {
+        Self {
+            owner_layer: "capability_resolver",
+            reason_code,
+            outcome: "resolved",
+            source,
+            capability_ref: capability_ref.into(),
+            resolved_ref: resolved_action_ref(resolved),
+            planner_kind: Some(planner_kind.as_token()),
+        }
+    }
+
+    fn unresolved(capability_ref: impl Into<String>) -> Self {
+        Self {
+            owner_layer: "capability_resolver",
+            reason_code: "capability_resolver_unresolved",
+            outcome: "unresolved",
+            source: "none",
+            capability_ref: capability_ref.into(),
+            resolved_ref: None,
+            planner_kind: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedCapabilityAction {
+    action: AgentAction,
+    record: CapabilityResolutionRecord,
+}
+
 pub(crate) fn resolve_agent_actions_for_state(
     state: &AppState,
     actions: Vec<AgentAction>,
@@ -30,9 +79,22 @@ pub(crate) fn resolve_capability_action_for_state(
     capability: &str,
     args: Value,
 ) -> Option<AgentAction> {
+    resolve_capability_action_with_record_for_state(state, capability, args).0
+}
+
+pub(crate) fn resolve_capability_action_with_record_for_state(
+    state: &AppState,
+    capability: &str,
+    args: Value,
+) -> (Option<AgentAction>, CapabilityResolutionRecord) {
     let normalized = normalize_capability_name(capability);
-    resolve_registry_capability_action(state, &normalized, args.clone())
-        .or_else(|| resolve_static_capability_action_for_state(state, &normalized, args))
+    if let Some(resolved) = resolve_registry_capability_action(state, &normalized, args.clone()) {
+        return (Some(resolved.action), resolved.record);
+    }
+    if let Some(resolved) = resolve_static_capability_action_for_state(state, &normalized, args) {
+        return (Some(resolved.action), resolved.record);
+    }
+    (None, CapabilityResolutionRecord::unresolved(normalized))
 }
 
 #[derive(Debug)]
@@ -48,7 +110,7 @@ fn resolve_static_capability_action_for_state(
     state: &AppState,
     normalized: &str,
     args: Value,
-) -> Option<AgentAction> {
+) -> Option<ResolvedCapabilityAction> {
     let Some((skill, action)) = (match normalized {
         "fs_basic" => Some(("fs_basic", None)),
         "filesystem.list_entries" | "filesystem.list_dir" | "fs_basic.list_dir" => {
@@ -133,22 +195,29 @@ fn resolve_static_capability_action_for_state(
         Some(action) => with_action(args, action),
         None => args,
     };
-    Some(action_for_skill(
-        state
-            .get_skills_registry()
-            .as_ref()
-            .and_then(|registry| registry.planner_kind(skill))
-            .unwrap_or(PlannerCapabilityKind::Skill),
-        skill.to_string(),
-        args,
-    ))
+    let planner_kind = state
+        .get_skills_registry()
+        .as_ref()
+        .and_then(|registry| registry.planner_kind(skill))
+        .unwrap_or(PlannerCapabilityKind::Skill);
+    let action = action_for_skill(planner_kind, skill.to_string(), args);
+    Some(ResolvedCapabilityAction {
+        record: CapabilityResolutionRecord::resolved(
+            "capability_resolver_static_mapping_resolved",
+            "static",
+            normalized.to_string(),
+            &action,
+            planner_kind,
+        ),
+        action,
+    })
 }
 
 fn resolve_registry_capability_action(
     state: &AppState,
     normalized_capability: &str,
     args: Value,
-) -> Option<AgentAction> {
+) -> Option<ResolvedCapabilityAction> {
     let registry = state.get_skills_registry()?;
     let mut candidates = Vec::new();
     for skill in registry.enabled_names() {
@@ -181,10 +250,20 @@ fn resolve_registry_capability_action(
         });
     }
     candidates.sort_by_key(resolver_candidate_rank);
-    candidates
-        .into_iter()
-        .next()
-        .map(|candidate| resolve_candidate_action(candidate, args))
+    candidates.into_iter().next().map(|candidate| {
+        let planner_kind = candidate.planner_kind;
+        let action = resolve_candidate_action(candidate, args);
+        ResolvedCapabilityAction {
+            record: CapabilityResolutionRecord::resolved(
+                "capability_resolver_registry_mapping_resolved",
+                "registry",
+                normalized_capability.to_string(),
+                &action,
+                planner_kind,
+            ),
+            action,
+        }
+    })
 }
 
 fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentAction {
@@ -217,6 +296,17 @@ fn action_for_skill(
         PlannerCapabilityKind::Skill | PlannerCapabilityKind::Workflow => {
             AgentAction::CallSkill { skill, args }
         }
+    }
+}
+
+fn resolved_action_ref(action: &AgentAction) -> Option<String> {
+    match action {
+        AgentAction::CallTool { tool, .. } => Some(format!("tool:{tool}")),
+        AgentAction::CallSkill { skill, .. } => Some(format!("skill:{skill}")),
+        AgentAction::CallCapability { capability, .. } => Some(format!("capability:{capability}")),
+        AgentAction::SynthesizeAnswer { .. } => Some("synthesize_answer".to_string()),
+        AgentAction::Respond { .. } => Some("respond".to_string()),
+        AgentAction::Think { .. } => Some("think".to_string()),
     }
 }
 

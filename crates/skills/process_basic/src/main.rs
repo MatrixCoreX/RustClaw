@@ -80,11 +80,9 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .unwrap_or(30)
                 .min(200);
             let filter = string_arg(obj, &["filter", "query", "name"]);
-            run_ps_snapshot(limit as usize, filter.as_deref()).map(|text| {
-                (
-                    text.clone(),
-                    json!({"action":"ps","exit_code":0,"limit":limit,"filter":filter,"platform":std::env::consts::OS,"output":text}),
-                )
+            run_ps_snapshot(limit as usize, filter.as_deref()).map(|(text, match_count)| {
+                let extra = ps_extra(limit, filter, &text, match_count);
+                (text, extra)
             })
         }
         "port_list" => {
@@ -169,7 +167,23 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
     }
 }
 
-fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<String, String> {
+fn ps_extra(limit: u64, filter: Option<String>, text: &str, match_count: usize) -> Value {
+    let running = match_count > 0;
+    json!({
+        "action": "ps",
+        "exit_code": 0,
+        "limit": limit,
+        "filter": filter,
+        "platform": std::env::consts::OS,
+        "output": text,
+        "match_count": match_count,
+        "process_count": match_count,
+        "running": running,
+        "status": if running { "running" } else { "not_running" },
+    })
+}
+
+fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<(String, usize), String> {
     let output = Command::new("ps")
         .args(["-Ao", "pid=,ppid=,pcpu=,pmem=,comm="])
         .output()
@@ -196,9 +210,10 @@ fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<String, String>
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.pid.cmp(&b.pid))
     });
+    let match_count = rows.len();
 
     let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
-    for row in rows.into_iter().take(limit) {
+    for row in rows.iter().take(limit) {
         lines.push(format!(
             "{} {} {:.1} {:.1} {}",
             row.pid, row.ppid, row.cpu, row.mem, row.comm
@@ -209,10 +224,13 @@ fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<String, String>
             lines.push(format!("no matching processes for filter: {filter}"));
         }
     }
-    Ok(format!(
-        "exit={}\n{}",
-        output.status.code().unwrap_or(0),
-        lines.join("\n")
+    Ok((
+        format!(
+            "exit={}\n{}",
+            output.status.code().unwrap_or(0),
+            lines.join("\n")
+        ),
+        match_count,
     ))
 }
 

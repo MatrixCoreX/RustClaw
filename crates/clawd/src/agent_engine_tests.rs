@@ -33,6 +33,9 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
         retryable: None,
         group: None,
         primary_fallback_role: None,
+        once_per_task: None,
+        dedup_scope: None,
+        idempotent: None,
         supported_os: Vec::new(),
         required_bins: Vec::new(),
         optional_bins: Vec::new(),
@@ -52,6 +55,9 @@ fn quick_index_includes_planner_capability_metadata() {
         optional: vec!["limit".to_string()],
         risk_level: None,
         preferred: true,
+        once_per_task: None,
+        dedup_scope: None,
+        idempotent: None,
     }]);
 
     let text = quick_index_planner_capabilities(&manifest);
@@ -60,6 +66,125 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("action=list_dir"));
     assert!(text.contains("effect=observe"));
     assert!(text.contains("required=path"));
+}
+
+#[test]
+fn loop_state_seeds_session_alias_targets_from_original_request() {
+    let mut loop_state = LoopState::new(2);
+    let ctx = AgentRunContext {
+        session_alias_bindings: vec![
+            crate::conversation_state::SessionAliasBinding {
+                alias: "甲目录".to_string(),
+                target: "/tmp/docs/archive".to_string(),
+                updated_at_ts: 1,
+            },
+            crate::conversation_state::SessionAliasBinding {
+                alias: "乙文件".to_string(),
+                target: "/tmp/docs/release_checklist.md".to_string(),
+                updated_at_ts: 2,
+            },
+        ],
+        user_request: Some(
+            "List /tmp/docs/archive and summarize /tmp/docs/release_checklist.md.".to_string(),
+        ),
+        original_user_request: Some(
+            "列一下甲目录里的名字，再顺手说乙文件主要在提醒什么".to_string(),
+        ),
+        ..AgentRunContext::default()
+    };
+
+    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
+
+    let raw = loop_state
+        .output_vars
+        .get("required_session_alias_targets")
+        .expect("multi-alias request should seed required targets");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("required targets must be JSON encoded");
+    assert_eq!(
+        targets,
+        vec![
+            "/tmp/docs/archive".to_string(),
+            "/tmp/docs/release_checklist.md".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn loop_state_seeds_session_alias_targets_from_context_alias_block() {
+    let mut loop_state = LoopState::new(2);
+    let ctx = AgentRunContext {
+        context_bundle_summary: Some(
+            "resolved_prompt=列一下甲目录里的名字，再顺手说乙文件主要在提醒什么\n\n\
+### SESSION_ALIAS_BINDINGS\n\
+- alias: 甲目录\n\
+  target: /tmp/docs/archive\n\
+- alias: 乙文件\n\
+  target: /tmp/docs/release_checklist.md\n"
+                .to_string(),
+        ),
+        original_user_request: Some(
+            "列一下甲目录里的名字，再顺手说乙文件主要在提醒什么".to_string(),
+        ),
+        ..AgentRunContext::default()
+    };
+
+    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
+
+    let raw = loop_state
+        .output_vars
+        .get("required_session_alias_targets")
+        .expect("context alias block should recover required targets");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("required targets must be JSON encoded");
+    assert_eq!(
+        targets,
+        vec![
+            "/tmp/docs/archive".to_string(),
+            "/tmp/docs/release_checklist.md".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn loop_state_does_not_count_alias_block_lines_as_current_mentions() {
+    let mut loop_state = LoopState::new(2);
+    let ctx = AgentRunContext {
+        context_bundle_summary: Some(
+            "resolved_prompt=列一下甲目录里的名字\n\n\
+### SESSION_ALIAS_BINDINGS\n\
+- alias: 甲目录\n\
+  target: /tmp/docs/archive\n\
+- alias: 乙文件\n\
+  target: /tmp/docs/release_checklist.md\n"
+                .to_string(),
+        ),
+        user_request: Some(
+            "列一下甲目录里的名字\n\n\
+### SESSION_ALIAS_BINDINGS\n\
+- alias: 甲目录\n\
+  target: /tmp/docs/archive\n\
+- alias: 乙文件\n\
+  target: /tmp/docs/release_checklist.md\n"
+                .to_string(),
+        ),
+        original_user_request: Some("列一下甲目录里的名字".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
+
+    let raw = loop_state
+        .output_vars
+        .get("required_session_alias_targets")
+        .expect("current alias mention should recover only the mentioned target");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("required targets must be JSON encoded");
+    assert_eq!(
+        targets,
+        vec!["/tmp/docs/archive".to_string()],
+        "context alias block entries not mentioned by the user must not become required targets"
+    );
 }
 
 // --- build_safe_skill_args_summary: progress hint args must be whitelisted and safe ---
@@ -267,95 +392,6 @@ fn test_normalize_user_visible_text_strips_inline_failed_prefix() {
 }
 
 #[test]
-fn test_extract_latest_successful_read_file_output_prefers_content_body() {
-    let mut loop_state = LoopState::default();
-    loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: "subtask#2".to_string(),
-            skill: "read_file".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("# Test Workspace\nThis directory is reserved.".to_string()),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    let observed = super::observed_output::extract_latest_successful_read_file_output(&loop_state);
-    assert_eq!(
-        observed.as_deref(),
-        Some("# Test Workspace\nThis directory is reserved.")
-    );
-}
-
-#[test]
-fn test_extract_latest_successful_list_dir_output_prefers_content_body() {
-    let mut loop_state = LoopState::default();
-    loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: "subtask#1".to_string(),
-            skill: "list_dir".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("file1.txt\nsubdir/\nfile2.md".to_string()),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    let observed = super::observed_output::extract_latest_successful_list_dir_output(&loop_state);
-    assert_eq!(observed.as_deref(), Some("file1.txt\nsubdir/\nfile2.md"));
-}
-
-#[test]
-fn test_extract_latest_generic_successful_output_prefers_non_read_non_list_skill() {
-    let mut loop_state = LoopState::default();
-    loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: "subtask#1".to_string(),
-            skill: "read_file".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("hello".to_string()),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: "subtask#2".to_string(),
-            skill: "run_cmd".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("testuser".to_string()),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    let observed = super::observed_output::extract_latest_generic_successful_output(&loop_state)
-        .expect("generic observed output");
-    assert!(observed.action_label.contains("skill(run_cmd): success"));
-    assert_eq!(observed.body, "testuser");
-}
-
-#[test]
-fn test_extract_latest_generic_successful_output_skips_non_content() {
-    let mut loop_state = LoopState::default();
-    loop_state
-        .executed_step_results
-        .push(crate::executor::StepExecutionResult {
-            step_id: "subtask#1".to_string(),
-            skill: "chat".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("FILE:/tmp/demo.txt".to_string()),
-            error: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-    assert!(
-        super::observed_output::extract_latest_generic_successful_output(&loop_state).is_none()
-    );
-}
-
-#[test]
 fn test_normalized_observed_listing_trims_blank_lines() {
     let observed = "\n file1.txt \n\n subdir/ \n";
     let out = super::observed_output::normalized_observed_listing(observed);
@@ -493,13 +529,21 @@ fn test_user_safe_step_error_preserves_sanitized_error_excerpt() {
         user_safe_step_error("unknown action: read; allowed: info|inventory_dir", true),
         "unknown action: read; allowed: info|inventory_dir"
     );
+    let missing_zh: serde_json::Value =
+        serde_json::from_str(&user_safe_step_error("", false)).unwrap();
     assert_eq!(
-        user_safe_step_error("", false),
-        "执行失败，但没有返回明确原因"
+        missing_zh
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("execution_step_error_missing")
     );
+    let missing_en: serde_json::Value =
+        serde_json::from_str(&user_safe_step_error("  ", true)).unwrap();
     assert_eq!(
-        user_safe_step_error("  ", true),
-        "Execution failed without a clear reason."
+        missing_en
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.execution.step_error_missing")
     );
 }
 

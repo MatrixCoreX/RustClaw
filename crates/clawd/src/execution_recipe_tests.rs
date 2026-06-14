@@ -137,6 +137,29 @@ planner_capabilities = [
 }
 
 #[test]
+fn classify_skill_action_effect_uses_registry_read_only_fallback_before_skill_name_branch() {
+    let state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "custom_readonly"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+side_effect = false
+"#,
+        &["custom_readonly"],
+    );
+    let effect = classify_skill_action_effect(
+        &state,
+        "custom_readonly",
+        &json!({"action": "inspect_status"}),
+    );
+    assert!(effect.observes);
+    assert!(!effect.mutates);
+    assert!(!effect.validates);
+}
+
+#[test]
 fn classify_run_cmd_restart_as_mutation() {
     let state = test_state();
     let effect = classify_skill_action_effect(

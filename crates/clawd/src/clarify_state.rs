@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{AppState, ClaimedTask};
 
 const CLARIFY_STATE_TTL_SECS: u64 = 30 * 60;
+const CLARIFY_STATE_RESOLVED_INTENT_MARKER: &str = "[RESOLVED_INTENT]";
+const STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX: &str = "structured_field_selector=";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -185,6 +187,7 @@ fn derive_clarify_state_for_ask_outcome(
     let candidate_targets =
         derive_clarify_candidate_targets(fuzzy_locator_suggestions, prior_session_snapshot);
     let now_ts = crate::now_ts_u64();
+    let semantic_kind = clarify_state_semantic_kind(route_result);
     Some(ClarifyState {
         missing_slot: ClarifyMissingSlot::Locator,
         pending_question,
@@ -206,22 +209,117 @@ fn derive_clarify_state_for_ask_outcome(
                 .as_str()
                 .to_string()
         }),
-        semantic_kind: (!matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-        ))
-        .then(|| {
-            route_result
-                .output_contract
-                .semantic_kind
-                .as_str()
-                .to_string()
-        }),
-        source_request: prompt.trim().to_string(),
+        semantic_kind,
+        source_request: clarify_state_source_request(prompt, route_result),
         source_task_id: task_id.to_string(),
         updated_at_ts: now_ts,
         expires_at_ts: now_ts + CLARIFY_STATE_TTL_SECS,
     })
+}
+
+fn clarify_state_source_request(prompt: &str, route_result: &crate::RouteResult) -> String {
+    let source = prompt.trim();
+    let resolved = route_result.resolved_intent.trim();
+    let request = if resolved.is_empty() || resolved == source {
+        source.to_string()
+    } else {
+        format!("{source}\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\n{resolved}")
+    };
+    append_structured_field_selector_token(
+        request,
+        route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+    )
+}
+
+fn append_structured_field_selector_token(mut text: String, selector: Option<&str>) -> String {
+    let Some(selector) = selector.and_then(normalize_structured_field_selector_token) else {
+        return text;
+    };
+    let token = format!("{STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX}{selector}");
+    if text.split_whitespace().any(|part| part == token) {
+        return text;
+    }
+    if !text.ends_with(char::is_whitespace) && !text.is_empty() {
+        text.push(' ');
+    }
+    text.push_str(&token);
+    text
+}
+
+pub(crate) fn structured_field_selector_token_from_text(text: &str) -> Option<String> {
+    text.split_whitespace().find_map(|part| {
+        part.strip_prefix(STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX)
+            .and_then(normalize_structured_field_selector_token)
+    })
+}
+
+pub(crate) fn normalize_structured_field_selector_token(raw: &str) -> Option<String> {
+    let selector = raw.trim();
+    if selector.is_empty()
+        || selector.chars().count() > 256
+        || selector.chars().any(char::is_control)
+        || selector.chars().any(char::is_whitespace)
+        || selector.contains('\\')
+        || selector.contains("://")
+        || selector.starts_with('{')
+        || selector.starts_with('[')
+        || selector.ends_with('}')
+        || selector.ends_with(']')
+    {
+        return None;
+    }
+    if selector.starts_with('/') {
+        return selector
+            .split('/')
+            .skip(1)
+            .all(|segment| !segment.trim().is_empty())
+            .then(|| selector.to_string());
+    }
+    selector
+        .chars()
+        .all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '_' | '-' | '$' | '@' | '.' | '/' | '*' | '[' | ']')
+        })
+        .then(|| selector.to_string())
+}
+
+fn clarify_state_semantic_kind(route_result: &crate::RouteResult) -> Option<String> {
+    if !matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    ) {
+        return Some(
+            route_result
+                .output_contract
+                .semantic_kind
+                .as_str()
+                .to_string(),
+        );
+    }
+    let non_content_locator_probe = !route_result.wants_file_delivery
+        && !route_result.output_contract.delivery_required
+        && !route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+        && matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        );
+    if non_content_locator_probe {
+        return Some(
+            crate::OutputSemanticKind::ExistenceWithPath
+                .as_str()
+                .to_string(),
+        );
+    }
+    None
 }
 
 fn derive_clarify_candidate_targets(

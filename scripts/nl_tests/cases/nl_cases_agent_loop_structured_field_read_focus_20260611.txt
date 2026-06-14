@@ -1,0 +1,89 @@
+# Focused persistent cases for agent-loop structured_field_read canary.
+# Format: suite|name|tags|prompt|expect=<substring>
+# These are test prompts only. Do not mirror them into runtime phrase matching.
+
+act|sfr_json_pkg_name_zh_001|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_name_zh_002|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|去 scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只给值。|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_name_en_003|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Read the name field from scripts/nl_tests/fixtures/device_local/package.json and output only the value.|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_name_ja_004|act,structured_field_read,scalar,file,json,ja,expect_exact_scalar,client_like|scripts/nl_tests/fixtures/device_local/package.json の name フィールドの値だけ出力してください。|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_name_ko_005|act,structured_field_read,scalar,file,json,ko,expect_exact_scalar,client_like|scripts/nl_tests/fixtures/device_local/package.json 의 name 필드 값만 출력해 주세요.|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_version_zh_006|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 的 version，只输出值。|expect=1.0.0
+act|sfr_json_pkg_version_en_007|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|From scripts/nl_tests/fixtures/device_local/package.json, return only the version value.|expect=1.0.0
+act|sfr_json_pkg_private_zh_008|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|看一下 scripts/nl_tests/fixtures/device_local/package.json 里的 private 字段，只输出原始值。|expect=true
+act|sfr_json_pkg_private_en_009|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Read scripts/nl_tests/fixtures/device_local/package.json and output only the private field value.|expect=true
+act|sfr_json_pkg_description_zh_010|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 的 description 字段，只输出这个字段值。|expect=Local fixture package for RustClaw NL regression tests
+act|sfr_json_pkg_description_en_011|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Extract only the description field from scripts/nl_tests/fixtures/device_local/package.json.|expect=Local fixture package for RustClaw NL regression tests
+act|sfr_json_pkg_scripts_build_zh_012|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 scripts.build，只输出值。|expect=echo build
+act|sfr_json_pkg_scripts_dev_zh_013|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 scripts.dev，只输出值。|expect=echo dev
+act|sfr_json_pkg_scripts_lint_zh_014|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 scripts.lint，只输出值。|expect=echo lint
+act|sfr_json_pkg_scripts_build_en_015|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Output only scripts.build from scripts/nl_tests/fixtures/device_local/package.json.|expect=echo build
+act|sfr_json_pkg_scripts_dev_en_016|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Output only scripts.dev from scripts/nl_tests/fixtures/device_local/package.json.|expect=echo dev
+act|sfr_json_pkg_scripts_lint_en_017|act,structured_field_read,scalar,file,json,en,expect_exact_scalar,client_like|Output only scripts.lint from scripts/nl_tests/fixtures/device_local/package.json.|expect=echo lint
+act|sfr_json_pkg_name_abs_018|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/package.json 里找 name，只输出值。|expect=rustclaw-nl-fixture
+act|sfr_json_pkg_version_abs_019|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/package.json 里找 version，只输出值。|expect=1.0.0
+act|sfr_json_pkg_description_abs_020|act,structured_field_read,scalar,file,json,zh,expect_exact_scalar,client_like|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/package.json 里找 description，只输出值。|expect=Local fixture package for RustClaw NL regression tests
+
+act|sfr_toml_app_name_zh_021|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 app.name，只输出值。|expect=RustClaw NL Fixture
+act|sfr_toml_app_name_en_022|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Read app.name from scripts/nl_tests/fixtures/device_local/configs/app_config.toml and output only the value.|expect=RustClaw NL Fixture
+act|sfr_toml_app_name_ja_023|act,structured_field_read,scalar,file,toml,config,ja,expect_exact_scalar,client_like|scripts/nl_tests/fixtures/device_local/configs/app_config.toml の app.name の値だけ出力してください。|expect=RustClaw NL Fixture
+act|sfr_toml_app_name_ko_024|act,structured_field_read,scalar,file,toml,config,ko,expect_exact_scalar,client_like|scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 app.name 값만 출력해 주세요.|expect=RustClaw NL Fixture
+act|sfr_toml_app_mode_zh_025|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 app.mode，只输出值。|expect=test
+act|sfr_toml_app_mode_en_026|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Return only app.mode from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=test
+act|sfr_toml_app_port_zh_027|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 app.port，只输出数字。|expect=8787
+act|sfr_toml_app_port_en_028|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Read app.port in scripts/nl_tests/fixtures/device_local/configs/app_config.toml and output only the number.|expect=8787
+act|sfr_toml_upload_zh_029|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 features.enable_upload，只输出原始值。|expect=true
+act|sfr_toml_upload_en_030|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Output only features.enable_upload from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=true
+act|sfr_toml_dynamic_guard_zh_031|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 features.enable_dynamic_guard，只输出值。|expect=true
+act|sfr_toml_dynamic_guard_en_032|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Return only features.enable_dynamic_guard from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=true
+act|sfr_toml_locale_zh_033|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 features.default_locale，只输出值。|expect=zh-CN
+act|sfr_toml_locale_en_034|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Read features.default_locale from scripts/nl_tests/fixtures/device_local/configs/app_config.toml and output only the value.|expect=zh-CN
+act|sfr_toml_docs_dir_zh_035|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 paths.docs_dir，只输出值。|expect=docs
+act|sfr_toml_logs_dir_zh_036|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 paths.logs_dir，只输出值。|expect=logs
+act|sfr_toml_db_path_zh_037|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 的 paths.db_path，只输出值。|expect=data/test_contract.sqlite
+act|sfr_toml_docs_dir_en_038|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Output only paths.docs_dir from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=docs
+act|sfr_toml_logs_dir_en_039|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Output only paths.logs_dir from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=logs
+act|sfr_toml_db_path_en_040|act,structured_field_read,scalar,file,toml,config,en,expect_exact_scalar,client_like|Output only paths.db_path from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.|expect=data/test_contract.sqlite
+act|sfr_toml_app_name_abs_041|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只输出值。|expect=RustClaw NL Fixture
+act|sfr_toml_locale_abs_042|act,structured_field_read,scalar,file,toml,config,zh,expect_exact_scalar,client_like|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 features.default_locale，只输出值。|expect=zh-CN
+
+act|sfr_ui_pkg_name_zh_043|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 的 name 字段，只输出值。|expect=react-example
+act|sfr_ui_pkg_name_en_044|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Read UI/package.json and output only the name field value.|expect=react-example
+act|sfr_ui_pkg_version_zh_045|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 的 version 字段，只输出值。|expect=0.0.0
+act|sfr_ui_pkg_version_en_046|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|From UI/package.json, output only the version value.|expect=0.0.0
+act|sfr_ui_pkg_private_zh_047|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 的 private 字段，只输出原始值。|expect=true
+act|sfr_ui_pkg_type_zh_048|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 的 type 字段，只输出值。|expect=module
+act|sfr_ui_pkg_type_en_049|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Read the type field from UI/package.json and output only the value.|expect=module
+act|sfr_ui_scripts_dev_zh_050|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 scripts.dev，只输出值。|expect=node ./node_modules/vite/bin/vite.js --port=3000 --host=0.0.0.0
+act|sfr_ui_scripts_build_zh_051|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 scripts.build，只输出值。|expect=node ./node_modules/vite/bin/vite.js build
+act|sfr_ui_scripts_preview_zh_052|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 scripts.preview，只输出值。|expect=node ./node_modules/vite/bin/vite.js preview
+act|sfr_ui_scripts_clean_zh_053|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 scripts.clean，只输出值。|expect=rm -rf dist
+act|sfr_ui_scripts_lint_zh_054|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 scripts.lint，只输出值。|expect=node ./node_modules/typescript/bin/tsc --noEmit
+act|sfr_ui_react_dep_zh_055|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 dependencies.react，只输出值。|expect=^19.0.0
+act|sfr_ui_lucide_dep_zh_056|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 dependencies.lucide-react，只输出值。|expect=^0.546.0
+act|sfr_ui_vite_dep_zh_057|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 dependencies.vite，只输出值。|expect=^6.2.0
+act|sfr_ui_typescript_devdep_zh_058|act,structured_field_read,scalar,file,json,ui,zh,expect_exact_scalar,client_like|读取 UI/package.json 里的 devDependencies.typescript，只输出值。|expect=~5.8.2
+act|sfr_ui_scripts_dev_en_059|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Output only scripts.dev from UI/package.json.|expect=node ./node_modules/vite/bin/vite.js --port=3000 --host=0.0.0.0
+act|sfr_ui_scripts_lint_en_060|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Output only scripts.lint from UI/package.json.|expect=node ./node_modules/typescript/bin/tsc --noEmit
+act|sfr_ui_react_dep_en_061|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Read dependencies.react from UI/package.json and output only the value.|expect=^19.0.0
+act|sfr_ui_typescript_devdep_en_062|act,structured_field_read,scalar,file,json,ui,en,expect_exact_scalar,client_like|Return only devDependencies.typescript from UI/package.json.|expect=~5.8.2
+
+act|sfr_cargo_clawd_name_zh_063|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/clawd/Cargo.toml 的 package.name，只输出值。|expect=clawd
+act|sfr_cargo_clawd_name_en_064|act,structured_field_read,scalar,file,toml,cargo,en,expect_exact_scalar,client_like|Read package.name from crates/clawd/Cargo.toml and output only the value.|expect=clawd
+act|sfr_cargo_clawd_version_zh_065|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/clawd/Cargo.toml 的 package.version，只输出值。|expect={"workspace":true}
+act|sfr_cargo_clawd_edition_zh_066|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/clawd/Cargo.toml 的 package.edition，只输出值。|expect={"workspace":true}
+act|sfr_cargo_core_name_zh_067|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/claw-core/Cargo.toml 的 package.name，只输出值。|expect=claw-core
+act|sfr_cargo_cli_name_zh_068|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/clawcli/Cargo.toml 的 package.name，只输出值。|expect=clawcli
+act|sfr_cargo_runner_name_zh_069|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/skill-runner/Cargo.toml 的 package.name，只输出值。|expect=skill-runner
+act|sfr_cargo_telegram_name_zh_070|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/telegramd/Cargo.toml 的 package.name，只输出值。|expect=telegramd
+act|sfr_cargo_wechat_name_zh_071|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 crates/wechatd/Cargo.toml 的 package.name，只输出值。|expect=wechatd
+act|sfr_cargo_lark_desc_en_072|act,structured_field_read,scalar,file,toml,cargo,en,expect_exact_scalar,client_like|Read package.description from crates/larkd/Cargo.toml and output only the value.|expect=Lark (international) app bot channel daemon: event callback, media inbox, submit to clawd, deliver result. Separate from feishud (Feishu China).
+act|sfr_cargo_feishu_desc_en_073|act,structured_field_read,scalar,file,toml,cargo,en,expect_exact_scalar,client_like|Read package.description from crates/feishud/Cargo.toml and output only the value.|expect=Feishu (Lark) app bot channel daemon: event callback, media inbox, submit to clawd, deliver result.
+act|sfr_root_workspace_resolver_zh_074|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.resolver，只输出值。|expect=2
+act|sfr_root_workspace_version_zh_075|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.package.version，只输出值。|expect=0.1.7
+act|sfr_root_workspace_edition_zh_076|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.package.edition，只输出值。|expect=2021
+act|sfr_root_workspace_license_zh_077|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.package.license，只输出值。|expect=MIT
+act|sfr_root_workspace_authors_zh_078|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.package.authors，只输出值。|expect=["RustClaw"]
+act|sfr_root_workspace_repo_zh_079|act,structured_field_read,empty_field_value,file,toml,cargo,zh,client_like|读取 ./Cargo.toml 的 workspace.package.repository，只输出值。
+act|sfr_root_dep_anyhow_zh_080|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.dependencies.anyhow，只输出值。|expect=1
+act|sfr_root_dep_regex_zh_081|act,structured_field_read,scalar,file,toml,cargo,zh,expect_exact_scalar,client_like|读取 ./Cargo.toml 的 workspace.dependencies.regex，只输出值。|expect=1
+act|sfr_root_dep_toml_en_082|act,structured_field_read,scalar,file,toml,cargo,en,expect_exact_scalar,client_like|Read workspace.dependencies.toml from ./Cargo.toml and output only the value.|expect=0.8

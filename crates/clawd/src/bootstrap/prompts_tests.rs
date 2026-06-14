@@ -1,5 +1,6 @@
 use super::*;
-use crate::PolicyConfig;
+use crate::{load_schedule_runtime, PolicyConfig};
+use claw_core::config::ScheduleConfig;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -116,6 +117,45 @@ fn reload_runtime_prompts_swaps_persona_and_schedule() {
         .intent_prompt_template_string()
         .contains("TEMPLATE_V2"));
     assert_eq!(policy.schedule.intent_rules_template_string(), "RULES_V2");
+}
+
+#[test]
+fn load_schedule_runtime_merges_locale_i18n_files() {
+    let root = temp_workspace("merged_i18n");
+    write_file(
+        &root,
+        "prompts/schedule_intent_prompt.md",
+        "<!-- Version: test.1 -->\nTEMPLATE __REQUEST__",
+    );
+    write_file(&root, "prompts/schedule_intent_rules.md", "RULES");
+    write_file(
+        &root,
+        "configs/i18n/schedule.zh-CN.toml",
+        "[dict]\n\"schedule.desc.daily\" = \"SCHEDULE_DAILY_ZH\"\n",
+    );
+    write_file(
+        &root,
+        "configs/i18n/crypto.zh-CN.toml",
+        "[dict]\ncrypto.err.account_access_failed = \"CRYPTO_ACCOUNT_ACCESS_ZH\"\n",
+    );
+
+    let cfg = ScheduleConfig {
+        intent_prompt_path: "prompts/schedule_intent_prompt.md".to_string(),
+        intent_rules_path: "prompts/schedule_intent_rules.md".to_string(),
+        locale: "zh-CN".to_string(),
+        i18n_dir: "configs/i18n".to_string(),
+        ..ScheduleConfig::default()
+    };
+    let runtime = load_schedule_runtime(&root, &cfg, None).expect("schedule runtime");
+
+    assert_eq!(
+        runtime.i18n_dict.get("schedule.desc.daily"),
+        Some(&"SCHEDULE_DAILY_ZH".to_string())
+    );
+    assert_eq!(
+        runtime.i18n_dict.get("crypto.err.account_access_failed"),
+        Some(&"CRYPTO_ACCOUNT_ACCESS_ZH".to_string())
+    );
 }
 
 #[test]

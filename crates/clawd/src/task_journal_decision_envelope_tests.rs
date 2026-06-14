@@ -1,0 +1,122 @@
+use serde_json::{json, Value};
+
+use super::{TaskJournal, TaskJournalRoundTrace};
+
+fn route_for_round_envelope() -> crate::RouteResult {
+    crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        },
+    }
+}
+
+#[test]
+fn trace_json_includes_round_decision_envelope() {
+    let route = route_for_round_envelope();
+    let plan = crate::PlanResult {
+        goal: "read a field".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "fs.read_text_range".to_string(),
+            args: json!({"path": "README.md"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let mut journal = TaskJournal::for_task("task-round-envelope", "ask", "prompt");
+    journal.record_route_result(&route);
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 2,
+        goal: "read a field".to_string(),
+        plan_result: Some(plan),
+        ..Default::default()
+    });
+
+    let trace = journal.to_trace_json();
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/schema_version")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/source")
+            .and_then(Value::as_str),
+        Some("planner_round_action")
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/semantic_authority")
+            .and_then(Value::as_str),
+        Some("planner_loop_runtime")
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/decision")
+            .and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/capability_ref")
+            .and_then(Value::as_str),
+        Some("fs.read_text_range")
+    );
+}
+
+#[test]
+fn agent_loop_decision_envelope_schema_accepts_round_runtime_source() {
+    const SCHEMA_RAW: &str =
+        include_str!("../../../prompts/schemas/agent_loop_decision_envelope.schema.json");
+    let schema: Value =
+        serde_json::from_str(SCHEMA_RAW).expect("agent_loop_decision_envelope schema json");
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("schema properties");
+    let sources = properties
+        .get("source")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("source enum");
+    assert!(sources
+        .iter()
+        .any(|value| value.as_str() == Some("planner_first_action_shadow")));
+    assert!(sources
+        .iter()
+        .any(|value| value.as_str() == Some("planner_round_action")));
+    let semantic_authorities = properties
+        .get("semantic_authority")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("semantic authority enum");
+    assert!(semantic_authorities
+        .iter()
+        .any(|value| value.as_str() == Some("planner_loop_shadow")));
+    assert!(semantic_authorities
+        .iter()
+        .any(|value| value.as_str() == Some("planner_loop_runtime")));
+}

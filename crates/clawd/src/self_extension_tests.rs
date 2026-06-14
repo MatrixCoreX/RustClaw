@@ -34,7 +34,19 @@ fn localized_plan_reply_mentions_disabled_package_install() {
         "packages": [{"ecosystem":"python","modules":["tomli"]}]
     });
     let reply = localized_plan_reply(None, ReplyLanguage::En, &plan, false, false);
-    assert!(reply.contains("automatic package install is currently disabled"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_temporary_plan_pending")
+    );
+    assert_eq!(
+        payload
+            .pointer("/package_install_blocked")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -60,6 +72,9 @@ fn self_extension_gating_requires_enabled_runtime_and_non_none_mode() {
                 mode: crate::SelfExtensionMode::TemporaryFix,
                 trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
                 execute_now: true,
+                scalar_count_filter: Default::default(),
+                list_selector: Default::default(),
+                structured_field_selector: None,
             },
             ..Default::default()
         },
@@ -91,6 +106,9 @@ fn capability_gap_trigger_requires_auto_flag() {
                 mode: crate::SelfExtensionMode::TemporaryFix,
                 trigger: crate::SelfExtensionTrigger::CapabilityGap,
                 execute_now: false,
+                scalar_count_filter: Default::default(),
+                list_selector: Default::default(),
+                structured_field_selector: None,
             },
             ..Default::default()
         },
@@ -130,8 +148,25 @@ fn localized_permanent_plan_reply_mentions_skill_name() {
         "rationale": "Reusable document workflow."
     });
     let reply = localized_permanent_plan_reply(None, ReplyLanguage::En, &plan, false);
-    assert!(reply.contains("pdf_compare"));
-    assert!(reply.contains("reusable capability"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_permanent_plan_pending")
+    );
+    assert_eq!(
+        payload
+            .pointer("/skill_path")
+            .and_then(serde_json::Value::as_str),
+        Some("external_skills/pdf_compare")
+    );
+    assert_eq!(
+        payload
+            .pointer("/capability_summary")
+            .and_then(serde_json::Value::as_str),
+        Some("Compare PDFs and summarize differences.")
+    );
 }
 
 #[test]
@@ -142,8 +177,25 @@ fn localized_permanent_materialization_failure_mentions_scaffold() {
         "pdf_compare",
         "write failed",
     );
-    assert!(reply.contains("external_skills/pdf_compare"));
-    assert!(reply.contains("write failed"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.self_extension.materialization_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/skill_path")
+            .and_then(serde_json::Value::as_str),
+        Some("external_skills/pdf_compare")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("write failed")
+    );
 }
 
 #[test]
@@ -154,15 +206,43 @@ fn localized_permanent_validation_failure_mentions_validation_steps() {
         "pdf_compare",
         "cargo check failed",
     );
-    assert!(reply.contains("external_skills/pdf_compare"));
-    assert!(reply.contains("cargo check failed"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_validation_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/skill_path")
+            .and_then(serde_json::Value::as_str),
+        Some("external_skills/pdf_compare")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("cargo check failed")
+    );
 }
 
 #[test]
 fn localized_permanent_runtime_enabled_reply_mentions_reload_completion() {
     let reply = localized_permanent_runtime_enabled_reply(None, ReplyLanguage::En, "pdf_compare");
-    assert!(reply.contains("external_skills/pdf_compare"));
-    assert!(reply.contains("visible to the runtime"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/skill_path")
+            .and_then(serde_json::Value::as_str),
+        Some("external_skills/pdf_compare")
+    );
+    assert_eq!(
+        payload
+            .pointer("/runtime_visible")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -173,8 +253,19 @@ fn localized_permanent_registration_failure_mentions_runtime_block() {
         "pdf_compare",
         "registry write failed",
     );
-    assert!(reply.contains("external_skills/pdf_compare"));
-    assert!(reply.contains("registry write failed"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_registration_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("registry write failed")
+    );
 }
 
 #[test]
@@ -185,16 +276,38 @@ fn localized_permanent_enable_failure_mentions_release_build() {
         "pdf_compare",
         "release build failed",
     );
-    assert!(reply.contains("release build failed"));
-    assert!(reply.contains("runtime use"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_enable_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("release build failed")
+    );
 }
 
 #[test]
 fn localized_permanent_reload_failure_mentions_manual_reload() {
     let reply =
         localized_permanent_reload_failure(None, ReplyLanguage::En, "pdf_compare", "reload failed");
-    assert!(reply.contains("reload failed"));
-    assert!(reply.contains("restart clawd"));
+    let payload: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_reload_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("reload failed")
+    );
 }
 
 #[test]
@@ -236,7 +349,25 @@ fn temporary_fix_without_execute_returns_plan_reply_and_single_plan_call() {
     ))
     .expect("temporary plan should succeed");
 
-    assert_eq!(reply.text.contains("did not execute it yet"), true);
+    let payload: serde_json::Value = serde_json::from_str(&reply.text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_temporary_plan_pending")
+    );
+    assert_eq!(
+        payload
+            .pointer("/will_execute")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .pointer("/summary")
+            .and_then(serde_json::Value::as_str),
+        Some("Write a parser script.")
+    );
     assert_eq!(seen_actions.borrow().as_slice(), ["temporary_fix_plan"]);
 }
 
@@ -272,8 +403,25 @@ fn temporary_fix_missing_plan_uses_failure_contract_fallback() {
     ))
     .expect("temporary missing-plan failure should be user-visible");
 
-    assert!(reply.text.contains("controlled self-extension path"));
-    assert!(reply.text.contains("missing temporary fix plan"));
+    let payload: serde_json::Value = serde_json::from_str(&reply.text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_temporary_plan_missing")
+    );
+    assert_eq!(
+        payload
+            .pointer("/phase")
+            .and_then(serde_json::Value::as_str),
+        Some("temporary_fix_plan")
+    );
+    assert_eq!(
+        payload
+            .pointer("/detail")
+            .and_then(serde_json::Value::as_str),
+        Some("missing temporary fix plan")
+    );
     assert_eq!(seen_actions.borrow().as_slice(), ["temporary_fix_plan"]);
 }
 
@@ -392,8 +540,25 @@ fn permanent_extension_runtime_enable_runs_full_chain_and_reloads() {
     ))
     .expect("permanent extension should succeed");
 
-    assert!(reply.text.contains("external_skills/demo_ext"));
-    assert!(reply.text.contains("visible to the runtime"));
+    let payload: serde_json::Value = serde_json::from_str(&reply.text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("self_extension_permanent_enabled")
+    );
+    assert_eq!(
+        payload
+            .pointer("/skill_path")
+            .and_then(serde_json::Value::as_str),
+        Some("external_skills/demo_ext")
+    );
+    assert_eq!(
+        payload
+            .pointer("/runtime_visible")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     assert_eq!(
         seen_actions.borrow().as_slice(),
         [

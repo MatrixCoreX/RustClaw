@@ -1,0 +1,996 @@
+// Execution contract repair tests for intent_router.
+
+use crate::FirstLayerDecision;
+
+use super::{
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind,
+};
+
+#[test]
+fn explicit_command_execution_repair_prevents_executionless_downgrade() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["请执行".to_string()],
+        standalone_commands: vec![],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/home/guagua/rustclaw".to_string(),
+        semantic_kind: OutputSemanticKind::ScalarPathOnly,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+    let downgrade = super::downgrade_executionless_route_to_direct_answer(
+        &mut decision,
+        &mut finalize_style,
+        false,
+        &contract,
+        false,
+        crate::ScheduleKind::None,
+        None,
+    );
+
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+    assert_eq!(downgrade, None);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_command_summary_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run whoami and pwd commands, then create one signature line from those results.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_requires_command_output_summary_execution")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_upgrades_raw_one_sentence_to_command_summary_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run pwd first, then create one reply line from the observed result.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_requires_command_output_summary_execution")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_upgrades_raw_strict_with_synthesis_marker() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["执行".to_string()],
+        standalone_commands: vec![],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "执行 pwd，然后基于结果输出一行文本。",
+        "command_result_synthesis",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_requires_command_output_summary_execution")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_failed_step_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["执行".to_string()],
+        standalone_commands: vec![],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExecutionFailedStep
+    );
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_generated_file_delivery_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+        locator_hint: "worker_line_explicit.txt".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run pwd first, save one short line to worker_line_explicit.txt, then tell me the saved path.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_preserves_generated_file_delivery_execution")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFileDelivery
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, "worker_line_explicit.txt");
+    assert!(contract.requires_content_evidence);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_generated_file_path_report_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
+        locator_hint: "worker_line_explicit.txt".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run pwd first, save one short line to worker_line_explicit.txt, then return the saved path.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_preserves_generated_file_path_report_execution")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, "worker_line_explicit.txt");
+    assert!(contract.requires_content_evidence);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+}
+
+#[test]
+fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["execute".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "execute ls -la: explain what this command means, do not run it",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_ignores_quoted_replacement_payload() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string(), "execute ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Continue, but change the remaining step so it says `echo AFTER_PATCHED_STEP` instead.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+}
+
+#[test]
+fn explicit_command_execution_repair_clears_spurious_clarify() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["请执行".to_string(), "执行".to_string()],
+        standalone_commands: vec![],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = true;
+    let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "请执行 pwd，只输出命令结果",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn embedded_standalone_command_execution_repair_clears_spurious_clarify() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["执行".to_string()],
+        standalone_commands: vec!["pwd".to_string()],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = true;
+    let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "运行 pwd -P，只返回物理工作目录路径",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn command_payload_contract_repair_clears_spurious_locatorless_clarify() {
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = true;
+    let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_raw_output_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_command_summary_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_command_output_summary_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_strict_command_summary_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_command_output_summary_execution")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_failed_step_contract() {
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = true;
+    let mut clarify_question = "Need a path target.".to_string();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/tmp/rustclaw-anchor-test".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_raw_output_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExecutionFailedStep
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn file_delivery_contract_repair_preserves_named_file_delivery_request() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        locator_kind: OutputLocatorKind::Filename,
+        locator_hint: "definitely_missing_named_file_rustclaw_24687.md".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_file_delivery_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("file_delivery_request_preserves_delivery_contract")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
+    assert_eq!(
+        contract.locator_hint,
+        "definitely_missing_named_file_rustclaw_24687.md"
+    );
+}
+
+#[test]
+fn file_delivery_contract_repair_keeps_content_summary_delivery_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: true,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/tmp/config.toml".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_file_delivery_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ContentExcerptWithSummary
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+}
+
+#[test]
+fn file_delivery_contract_repair_preserves_archive_pack_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ArchivePack,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "scripts/skill_calls | document/skill_calls_smoke.zip".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_file_delivery_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+    assert_eq!(
+        contract.locator_hint,
+        "scripts/skill_calls | document/skill_calls_smoke.zip"
+    );
+}
+
+#[test]
+fn declared_publishing_preview_contract_restores_after_generic_drift() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/workspace/rustclaw".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::restore_declared_publishing_preview_contract(
+        OutputSemanticKind::PublishingPreview,
+        None,
+        super::ScheduleKind::None,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut wants_file_delivery,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("declared_publishing_preview_contract_preserved")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert!(!wants_file_delivery);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::PublishingPreview
+    );
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+}
+
+#[test]
+fn declared_publishing_preview_restore_respects_active_text_followup_repair() {
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::restore_declared_publishing_preview_contract(
+        OutputSemanticKind::PublishingPreview,
+        Some("active_text_followup_route_repair"),
+        super::ScheduleKind::None,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut wants_file_delivery,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(!contract.requires_content_evidence);
+}
+
+#[test]
+fn raw_output_explicit_locator_repair_restores_path_for_non_command_read() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: Vec::new(),
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec!["pwd".to_string()],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_raw_output_explicit_locator_repair(
+        &mut contract,
+        "读 /etc/shadow 第一行，告诉我里面是什么",
+        &runtime,
+    );
+
+    assert_eq!(repair, Some("raw_output_explicit_locator_contract_repair"));
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "/etc/shadow");
+}
+
+#[test]
+fn raw_output_explicit_locator_repair_skips_literal_command_requests() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: Vec::new(),
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec!["pwd".to_string()],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_raw_output_explicit_locator_repair(
+        &mut contract,
+        "run cat /etc/shadow",
+        &runtime,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn plain_execute_is_not_downgraded_when_contract_is_sparse() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::downgrade_executionless_route_to_direct_answer(
+        &mut decision,
+        &mut finalize_style,
+        false,
+        &contract,
+        false,
+        crate::ScheduleKind::None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+}
+
+#[test]
+fn execution_signal_act_route_stays_executable() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::FileNames,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::downgrade_executionless_route_to_direct_answer(
+        &mut decision,
+        &mut finalize_style,
+        false,
+        &contract,
+        false,
+        crate::ScheduleKind::None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+}

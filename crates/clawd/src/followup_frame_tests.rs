@@ -325,6 +325,89 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
 }
 
 #[test]
+fn config_read_field_extra_path_persists_followup_bound_target() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-config-field".to_string(),
+        user_id: 3,
+        chat_id: 4,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let expected_path =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml";
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                serde_json::json!({
+                    "request_id": "req-config-field",
+                    "status": "ok",
+                    "text": "RustClaw NL Fixture",
+                    "error_text": null,
+                    "extra": {
+                        "action": "read_field",
+                        "path": "scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+                        "resolved_path": expected_path,
+                        "field_path": "app.name",
+                        "value": "RustClaw NL Fixture"
+                    }
+                })
+                .to_string(),
+            ),
+            ..Default::default()
+        });
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "read structured field".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: "fallback.toml".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "read structured field",
+        &route_result,
+        "RustClaw NL Fixture",
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::Read);
+    assert_eq!(frame.bound_target.as_deref(), Some(expected_path));
+}
+
+#[test]
 fn compact_listing_answer_persists_ordered_entries_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
@@ -642,6 +725,123 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
     assert_eq!(
         super::ordered_entry_target_at(&frame, 1).as_deref(),
         Some("/home/guagua/rustclaw/logs/clawd.log")
+    );
+}
+
+#[test]
+fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-fs-basic-wrapped-list".to_string(),
+        user_id: 33,
+        chat_id: 34,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let listing_payload = serde_json::json!({
+        "action": "inventory_dir",
+        "counts": {"dirs": 0, "files": 5, "hidden": 0, "total": 5},
+        "entries": [],
+        "files_only": true,
+        "names": [
+            "act_plan.log",
+            "clawd-dev.log",
+            "clawd.codex.nltest.log",
+            "clawd.log",
+            "clawd.nl-focus.log"
+        ],
+        "names_by_kind": {
+            "dirs": [],
+            "files": [
+                "act_plan.log",
+                "clawd-dev.log",
+                "clawd.codex.nltest.log",
+                "clawd.log",
+                "clawd.nl-focus.log"
+            ],
+            "other": []
+        },
+        "names_only": true,
+        "path": "/home/guagua/rustclaw/logs",
+        "resolved_path": "/home/guagua/rustclaw/logs",
+        "sort_by": "name"
+    });
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                serde_json::json!({
+                    "extra": listing_payload,
+                    "text": listing_payload.to_string()
+                })
+                .to_string(),
+            ),
+            ..Default::default()
+        });
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "List first 5 filenames in logs directory".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            locator_hint: "/home/guagua/rustclaw/logs".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "List first 5 filenames in logs directory",
+        &route_result,
+        "",
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::List);
+    assert_eq!(
+        frame.bound_target.as_deref(),
+        Some("/home/guagua/rustclaw/logs")
+    );
+    assert_eq!(
+        frame.ordered_entries,
+        vec![
+            "act_plan.log",
+            "clawd-dev.log",
+            "clawd.codex.nltest.log",
+            "clawd.log",
+            "clawd.nl-focus.log"
+        ]
+    );
+    assert_eq!(
+        super::ordered_entry_target_at(&frame, 1).as_deref(),
+        Some("/home/guagua/rustclaw/logs/clawd-dev.log")
     );
 }
 

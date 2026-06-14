@@ -108,18 +108,35 @@ impl UserResponseContract {
         {
             observed_facts.push(format!("candidate_context: {context}"));
         }
+        let mut missing_slots = Vec::new();
+        if let Some(clarify_case) = clarify_case_from_candidate_context(candidate_context) {
+            missing_slots.push(clarify_case);
+        }
+        missing_slots.push(source.as_metric_label().to_string());
+        let resolved_user_intent =
+            field_value_from_candidate_context(candidate_context, "resolved_user_intent")
+                .unwrap_or_default();
+        let mut policy_boundary = vec![
+            "Do not expose internal route reasons, schema names, prompt names, or raw provider errors."
+                .to_string(),
+            "Ask one concise, situation-specific clarification or recovery question.".to_string(),
+        ];
+        if missing_slots_have_specific_target_slot(&missing_slots)
+            && !resolved_user_intent.trim().is_empty()
+        {
+            policy_boundary.push(
+                "The requested operation is already understood from resolved_user_intent; ask only for the missing target/path/scope/locator and do not ask what action to perform."
+                    .to_string(),
+            );
+        }
         Self {
             kind: UserResponseKind::Clarify,
             reason_code: source.as_metric_label().to_string(),
-            missing_slots: vec![source.as_metric_label().to_string()],
+            missing_slots,
             observed_facts,
-            policy_boundary: vec![
-                "Do not expose internal route reasons, schema names, prompt names, or raw provider errors."
-                    .to_string(),
-                "Ask one concise, situation-specific clarification or recovery question.".to_string(),
-            ],
+            policy_boundary,
             original_user_request: original_user_request.trim().to_string(),
-            resolved_user_intent: String::new(),
+            resolved_user_intent,
             response_shape: "one_short_clarification".to_string(),
             language_hint: language_hint.trim().to_string(),
         }
@@ -130,10 +147,15 @@ impl UserResponseContract {
         resolved_user_intent: &str,
         response_shape: &str,
         semantic_kind: &str,
+        verifier_reason_code: &str,
         verifier_reason: &str,
         language_hint: &str,
     ) -> Self {
         let mut observed_facts = Vec::new();
+        let reason_code = verifier_reason_code.trim();
+        if !reason_code.is_empty() {
+            observed_facts.push(format!("verifier_reason_code: {reason_code}"));
+        }
         let reason = verifier_reason.trim();
         if !reason.is_empty() {
             observed_facts.push(format!("verifier_reason: {reason}"));
@@ -261,31 +283,97 @@ impl UserResponseContract {
     }
 }
 
-pub(crate) fn missing_file_delivery_response_text_for_language(
-    state: &AppState,
-    language_hint: &str,
-    locator_hint: Option<&str>,
-) -> String {
-    let prefer_english = fallback_prefers_english_for_language_hint(state, language_hint);
-    if let Some(locator) = locator_hint
+fn clarify_case_from_candidate_context(candidate_context: Option<&str>) -> Option<String> {
+    let value = field_value_from_candidate_context(candidate_context, "clarify_case")?;
+    (!value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+    .then_some(value)
+}
+
+fn missing_slots_have_specific_target_slot(slots: &[String]) -> bool {
+    slots.iter().any(|slot| {
+        matches!(
+            slot.as_str(),
+            "missing_search_locator"
+                | "missing_delivery_locator"
+                | "missing_read_target"
+                | "missing_file_locator"
+                | "missing_directory_locator"
+                | "missing_count_target"
+                | "missing_service_target"
+                | "missing_target"
+        )
+    })
+}
+
+fn field_value_from_candidate_context(
+    candidate_context: Option<&str>,
+    field: &str,
+) -> Option<String> {
+    let context = candidate_context?.trim();
+    let prefix = format!("{field}:");
+    for line in context.lines() {
+        let Some(value) = line.trim().strip_prefix(&prefix) else {
+            continue;
+        };
+        let value = value.trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+pub(crate) fn missing_file_delivery_default_payload(locator_hint: Option<&str>) -> String {
+    let locator = locator_hint
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return crate::app_helpers::bilingual_t_with_default_vars(
+        .filter(|value| !value.is_empty());
+    let message_key = if locator.is_some() {
+        "clawd.msg.delivery.file_not_found_path_next_step"
+    } else {
+        "clawd.msg.delivery.file_not_found_next_step"
+    };
+    let mut payload = json!({
+        "message_key": message_key,
+        "reason_code": "missing_file_delivery_not_found",
+        "delivery_required": true,
+        "file_found": false
+    });
+    if let Some(locator) = locator {
+        payload["missing_path"] = json!(locator);
+    }
+    payload.to_string()
+}
+
+pub(crate) fn missing_file_delivery_default_text(
+    state: &AppState,
+    locator_hint: Option<&str>,
+    language_hint: &str,
+) -> String {
+    let locator = locator_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let prefer_english = fallback_prefers_english_for_language_hint(state, language_hint);
+    if let Some(locator) = locator {
+        return crate::bilingual_t_with_default_vars(
             state,
             "clawd.msg.delivery.file_not_found_path_next_step",
-            "未找到文件：{path}，所以无法发送。请确认完整路径或上传该文件。",
-            "File not found: {path}, so I cannot send it. Please confirm the full path or upload the file.",
+            "未找到 `{missing_path}`，所以无法发送文件。请确认路径或文件名后再发一次。",
+            "I couldn't find `{missing_path}`, so I can't send the file. Please confirm the path or filename and send it again.",
             prefer_english,
-            &[("path", locator)],
+            &[("missing_path", locator)],
         );
     }
-    crate::app_helpers::bilingual_t_with_default(
+    crate::bilingual_t_with_default_vars(
         state,
         "clawd.msg.delivery.file_not_found_next_step",
-        "未找到该文件。请确认完整路径或上传该文件。",
-        "File not found. Please confirm the full path or upload the file.",
+        "未找到要发送的文件。请确认路径或文件名后再发一次。",
+        "I couldn't find the file to send. Please confirm the path or filename and send it again.",
         prefer_english,
+        &[],
     )
 }
 
@@ -297,8 +385,39 @@ pub(crate) async fn compose_missing_file_delivery_response(
     locator_hint: Option<&str>,
     language_hint: &str,
 ) -> String {
-    let _ = (task, original_user_request, resolved_user_intent);
-    missing_file_delivery_response_text_for_language(state, language_hint, locator_hint)
+    let locator = locator_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut observed_facts = vec![
+        "delivery_required: true".to_string(),
+        "file_found: false".to_string(),
+    ];
+    if let Some(locator) = locator {
+        observed_facts.push(format!("missing_path: {locator}"));
+    }
+    let contract = UserResponseContract::tool_failure(
+        "missing_file_delivery_not_found",
+        original_user_request,
+        resolved_user_intent,
+        observed_facts,
+        vec![
+            "Do not claim the file was sent.".to_string(),
+            "Mention the missing path when it is present in observed_facts.".to_string(),
+            "Give one concise recovery next step without exposing internal tool traces."
+                .to_string(),
+        ],
+        "brief_failure_with_next_step",
+        language_hint,
+    );
+    let default_text = missing_file_delivery_default_text(state, locator, language_hint);
+    compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        ClarifyFallbackSource::ExecutionFailedPartial,
+        &default_text,
+    )
+    .await
 }
 
 pub(crate) async fn compose_user_response_from_contract(
@@ -334,6 +453,9 @@ async fn compose_user_response_from_contract_impl(
     fallback_source: ClarifyFallbackSource,
     default_text: Option<&str>,
 ) -> String {
+    if let Some(text) = structured_clarify_default_text(state, contract) {
+        return text;
+    }
     let default_text = default_text
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -463,6 +585,51 @@ async fn compose_user_response_from_contract_impl(
             )
         }
     }
+}
+
+fn structured_clarify_default_text(
+    state: &AppState,
+    contract: &UserResponseContract,
+) -> Option<String> {
+    if !matches!(contract.kind, UserResponseKind::Clarify) {
+        return None;
+    }
+    let key = if contract
+        .missing_slots
+        .iter()
+        .any(|slot| slot == "missing_read_target")
+    {
+        "clawd.msg.clarify_missing_read_target"
+    } else if contract
+        .missing_slots
+        .iter()
+        .any(|slot| slot == "missing_search_locator")
+    {
+        "clawd.msg.clarify_missing_search_locator"
+    } else if contract.missing_slots.iter().any(|slot| {
+        matches!(
+            slot.as_str(),
+            "missing_file_locator" | "missing_delivery_locator"
+        )
+    }) {
+        "clawd.msg.clarify_missing_file_locator"
+    } else {
+        return None;
+    };
+    let default_payload = json!({
+        "message_key": key,
+        "reason_code": &contract.reason_code,
+        "missing_slots": &contract.missing_slots,
+    })
+    .to_string();
+    Some(crate::bilingual_t_with_default_vars(
+        state,
+        key,
+        &default_payload,
+        &default_payload,
+        fallback_prefers_english_for_language_hint(state, &contract.language_hint),
+        &[],
+    ))
 }
 
 fn user_response_contract_local_shape_satisfied(
@@ -685,56 +852,16 @@ impl ClarifyFallbackSource {
         }
     }
 
-    /// 默认英文文案（i18n 字典缺该 key 时兜底）。
-    pub(crate) fn default_en(self) -> &'static str {
-        match self {
-            Self::LlmUnavailable => {
-                "I could not reach the model service for this turn. Please retry, or switch to another available model."
-            }
-            Self::EmptyResponse => {
-                "The model returned an empty answer this time. Please describe the goal more concretely and I'll try again."
-            }
-            Self::IntentUnresolved => {
-                "I couldn't determine the requested action. Please add the target, context, and action you want."
-            }
-            Self::PlannerFailed => {
-                "I couldn't break the request into executable steps. Please restate the goal, target, and constraints more concretely."
-            }
-            Self::ExecutionFailedPartial => {
-                "I hit a problem partway through. Already done: {context_hint}. Want me to try a different path?"
-            }
-            Self::SynthesisEmpty => {
-                "I couldn't produce a reliable final answer from the available evidence. Please add the missing target or ask me to retry the synthesis."
-            }
-            Self::VerifyRejected => {
-                "The model's answer didn't match the expected shape ({context_hint}). Could you tell me the exact form you want?"
-            }
-            Self::PolicyBlock => {
-                "This request is blocked by the current runtime policy. Adjust the policy or provide a safer target, then retry."
-            }
-        }
-    }
-
-    /// 默认中文文案（当前请求明确是中文、但运行时 i18n 字典不是中文时使用）。
-    pub(crate) fn default_zh(self) -> &'static str {
-        match self {
-            Self::LlmUnavailable => "这次没有连上模型服务。请重试，或切换到其它可用模型继续。",
-            Self::EmptyResponse => "模型这次没给出回答。请把目标说得更具体一点，我立刻再试。",
-            Self::IntentUnresolved => {
-                "我没看出这条消息要做什么。请补充目标、上下文或你希望我采取的动作。"
-            }
-            Self::PlannerFailed => "我没能把请求拆成可执行步骤。请补充目标、操作边界和关键约束。",
-            Self::ExecutionFailedPartial => {
-                "执行到一半遇到问题。已经完成的部分：{context_hint}。要不要换条路继续？"
-            }
-            Self::SynthesisEmpty => {
-                "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标，或让我重新整理一次。"
-            }
-            Self::VerifyRejected => {
-                "模型给的答案不符合预期格式（{context_hint}）。能告诉我你最想要的形式吗？"
-            }
-            Self::PolicyBlock => "当前运行策略阻止了这个请求。请调整策略或提供更安全的目标后再试。",
-        }
+    /// Machine fallback used only when the i18n resource is unavailable.
+    ///
+    /// Runtime must not carry user-visible prose templates; localized wording lives in
+    /// `configs/i18n/*.toml`.
+    pub(crate) fn machine_default_payload(self) -> String {
+        json!({
+            "message_key": self.i18n_key(),
+            "reason_code": self.as_metric_label(),
+        })
+        .to_string()
     }
 
     /// 全部已知 source 列表（用于集合化比对端）。
@@ -754,10 +881,14 @@ impl ClarifyFallbackSource {
 
 /// 旧的"超级 fallback" i18n key，保留用于历史 DB 兼容比对（写入端不再使用）。
 pub(crate) const LEGACY_SUPER_FALLBACK_KEY: &str = "clawd.msg.clarify_question_fallback";
-pub(crate) const LEGACY_SUPER_FALLBACK_DEFAULT_EN: &str =
-    "I need to clarify: what task is this message about? Please provide the target or context.";
-pub(crate) const LEGACY_SUPER_FALLBACK_DEFAULT_ZH: &str =
-    "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文。";
+
+pub(crate) fn legacy_super_fallback_machine_payload() -> String {
+    json!({
+        "message_key": LEGACY_SUPER_FALLBACK_KEY,
+        "reason_code": "legacy_super_fallback",
+    })
+    .to_string()
+}
 
 /// 渲染 fallback 文案 + 上报 trace（统一入口）。
 ///
@@ -770,11 +901,12 @@ pub(crate) fn clarify_fallback_text_with_language_hint(
     language_hint: &str,
 ) -> String {
     let hint = context_hint.unwrap_or("").trim();
+    let default_payload = source.machine_default_payload();
     crate::bilingual_t_with_default_vars(
         state,
         source.i18n_key(),
-        source.default_zh(),
-        source.default_en(),
+        &default_payload,
+        &default_payload,
         fallback_prefers_english_for_language_hint(state, language_hint),
         &[("context_hint", hint)],
     )
@@ -832,23 +964,19 @@ pub(crate) fn all_clarify_fallback_texts(state: &AppState) -> Vec<String> {
 pub(crate) fn all_clarify_fallback_texts_from_dict(dict: &HashMap<String, String>) -> Vec<String> {
     let mut out = Vec::new();
     for src in ClarifyFallbackSource::all() {
+        let default_payload = src.machine_default_payload();
         push_fallback_text_variants(
             &mut out,
-            &lookup_or_default(dict, src.i18n_key(), src.default_en()),
+            &lookup_or_default(dict, src.i18n_key(), &default_payload),
         );
-        push_fallback_text_variants(&mut out, src.default_en());
-        push_fallback_text_variants(&mut out, src.default_zh());
+        push_fallback_text_variants(&mut out, &default_payload);
     }
+    let legacy_default = legacy_super_fallback_machine_payload();
     push_fallback_text_variants(
         &mut out,
-        &lookup_or_default(
-            dict,
-            LEGACY_SUPER_FALLBACK_KEY,
-            LEGACY_SUPER_FALLBACK_DEFAULT_EN,
-        ),
+        &lookup_or_default(dict, LEGACY_SUPER_FALLBACK_KEY, &legacy_default),
     );
-    push_fallback_text_variants(&mut out, LEGACY_SUPER_FALLBACK_DEFAULT_EN);
-    push_fallback_text_variants(&mut out, LEGACY_SUPER_FALLBACK_DEFAULT_ZH);
+    push_fallback_text_variants(&mut out, &legacy_default);
     out.sort();
     out.dedup();
     out

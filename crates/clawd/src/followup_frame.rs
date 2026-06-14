@@ -650,6 +650,32 @@ fn parse_journal_step_output(output: &str) -> Option<Value> {
     serde_json::from_str::<Value>(output.trim()).ok()
 }
 
+fn nonempty_string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn bound_target_from_journal_output_value(value: &Value) -> Option<String> {
+    for source in [Some(value), value.get("extra")].into_iter().flatten() {
+        if let Some(path) = nonempty_string_field(source, "resolved_path")
+            .or_else(|| nonempty_string_field(source, "path"))
+        {
+            return Some(path);
+        }
+    }
+    let text_value = value
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| text.starts_with('{') || text.starts_with('['))
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())?;
+    bound_target_from_journal_output_value(&text_value)
+}
+
 fn is_listing_json(value: &Value) -> bool {
     value
         .get("action")
@@ -721,7 +747,7 @@ fn entry_name_from_tree_child(value: &Value) -> Option<String> {
         .or_else(|| Some(path_text.to_string()))
 }
 
-fn ordered_entries_from_listing_json(value: &Value) -> Vec<String> {
+fn ordered_entries_from_listing_json_shallow(value: &Value) -> Vec<String> {
     if !is_listing_json(value) {
         return Vec::new();
     }
@@ -775,6 +801,36 @@ fn ordered_entries_from_listing_json(value: &Value) -> Vec<String> {
     Vec::new()
 }
 
+fn ordered_entries_from_listing_json_value(value: &Value, depth: usize) -> Vec<String> {
+    if depth > 4 {
+        return Vec::new();
+    }
+    let entries = ordered_entries_from_listing_json_shallow(value);
+    if entries.len() >= 2 {
+        return entries;
+    }
+    if let Some(extra) = value.get("extra") {
+        let entries = ordered_entries_from_listing_json_value(extra, depth + 1);
+        if entries.len() >= 2 {
+            return entries;
+        }
+    }
+    let Some(text_value) = value
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| text.starts_with('{') || text.starts_with('['))
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return Vec::new();
+    };
+    ordered_entries_from_listing_json_value(&text_value, depth + 1)
+}
+
+fn ordered_entries_from_listing_json(value: &Value) -> Vec<String> {
+    ordered_entries_from_listing_json_value(value, 0)
+}
+
 fn listing_json_has_entries(value: &Value) -> bool {
     ordered_entries_from_listing_json(value).len() >= 2
 }
@@ -792,14 +848,8 @@ pub(crate) fn derive_bound_target_from_journal(
         let Some(value) = parse_journal_step_output(output) else {
             continue;
         };
-        if let Some(path) = value
-            .get("resolved_path")
-            .or_else(|| value.get("path"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-        {
-            return Some(path.to_string());
+        if let Some(path) = bound_target_from_journal_output_value(&value) {
+            return Some(path);
         }
     }
     None
