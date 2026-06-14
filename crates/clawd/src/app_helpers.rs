@@ -98,8 +98,75 @@ pub(crate) fn bilingual_t_with_default(
     if configured_matches_requested {
         i18n_t_with_default(state, key, default_text)
     } else {
-        default_text.to_string()
+        let requested_locale = if prefer_english { "en-US" } else { "zh-CN" };
+        i18n_t_for_locale_with_default(state, requested_locale, key, default_text)
     }
+}
+
+pub(crate) fn localized_t_with_default(
+    state: &AppState,
+    key: &str,
+    default_text: &str,
+    locale_hint: &str,
+) -> String {
+    let locale = match locale_hint.trim().to_ascii_lowercase() {
+        hint if hint.starts_with("en") => Some("en-US"),
+        hint if hint.starts_with("zh") => Some("zh-CN"),
+        hint if hint.starts_with("ja") => Some("ja"),
+        hint if hint.starts_with("ko") => Some("ko"),
+        _ => None,
+    };
+    if let Some(locale) = locale {
+        let text = i18n_t_for_locale_with_default(state, locale, key, default_text);
+        if text != default_text {
+            return text;
+        }
+    }
+    i18n_t_with_default(state, key, default_text)
+}
+
+fn i18n_t_for_locale_with_default(
+    state: &AppState,
+    locale: &str,
+    key: &str,
+    default_text: &str,
+) -> String {
+    let i18n_dir = state.policy.schedule.i18n_dir.trim();
+    let i18n_dir = if i18n_dir.is_empty() {
+        std::path::PathBuf::from("configs/i18n")
+    } else {
+        std::path::PathBuf::from(i18n_dir)
+    };
+    let i18n_dir = if i18n_dir.is_absolute() {
+        i18n_dir
+    } else {
+        state.skill_rt.workspace_root.join(i18n_dir)
+    };
+    let suffix = format!(".{locale}.toml");
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&i18n_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if file_name.ends_with(&suffix) {
+                paths.push(path);
+            }
+        }
+    }
+    if paths.is_empty() {
+        paths.push(i18n_dir.join(format!("schedule.{locale}.toml")));
+    }
+    paths.sort();
+    for path in paths {
+        let path = path.to_string_lossy();
+        let text = claw_core::channel_i18n::text_from_path(path.as_ref(), key, default_text);
+        if text != default_text {
+            return text;
+        }
+    }
+    default_text.to_string()
 }
 
 pub(crate) fn bilingual_t_with_default_vars(

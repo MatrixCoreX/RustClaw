@@ -1,0 +1,63 @@
+# Focused persistent cases for agent-loop exact_path_list canary.
+# Format: suite|name|tags|prompt|expect=<substring>
+# These are test prompts only. Do not mirror them into runtime phrase matching.
+
+act|epl_docs_file_names_zh_001|act,exact_path_list,file_names,listing,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/docs 目录下的文件名，只输出文件名列表。|expect=release_checklist.md
+act|epl_docs_file_names_zh_002|act,exact_path_list,file_names,listing,zh,client_like|只看 scripts/nl_tests/fixtures/device_local/docs，给我里面的文件名，不要读内容。|expect=service_notes.md
+act|epl_docs_file_names_en_003|act,exact_path_list,file_names,listing,en,client_like|List only the file names under scripts/nl_tests/fixtures/device_local/docs.|expect=release_checklist.md
+act|epl_docs_file_names_en_004|act,exact_path_list,file_names,listing,en,client_like|Output the files in scripts/nl_tests/fixtures/device_local/docs by name only.|expect=service_notes.md
+act|epl_docs_file_names_ja_005|act,exact_path_list,file_names,listing,ja,client_like|scripts/nl_tests/fixtures/device_local/docs のファイル名だけを一覧にしてください。|expect=release_checklist.md
+act|epl_docs_file_names_ko_006|act,exact_path_list,file_names,listing,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 안의 파일 이름만 나열해 주세요.|expect=service_notes.md
+
+act|epl_device_dirs_zh_007|act,exact_path_list,directory_names,listing,zh,client_like|列出 scripts/nl_tests/fixtures/device_local 下面的直接子目录名，只输出目录名。|expect=configs
+act|epl_device_dirs_zh_008|act,exact_path_list,directory_names,listing,zh,client_like|只要 scripts/nl_tests/fixtures/device_local 的一级文件夹名字。|expect=docs
+act|epl_device_dirs_en_009|act,exact_path_list,directory_names,listing,en,client_like|List only the direct directory names under scripts/nl_tests/fixtures/device_local.|expect=logs
+act|epl_device_dirs_en_010|act,exact_path_list,directory_names,listing,en,client_like|Output the first-level folders inside scripts/nl_tests/fixtures/device_local.|expect=tmp
+act|epl_device_dirs_ja_011|act,exact_path_list,directory_names,listing,ja,client_like|scripts/nl_tests/fixtures/device_local 直下のディレクトリ名だけを出してください。|expect=data
+act|epl_device_dirs_ko_012|act,exact_path_list,directory_names,listing,ko,client_like|scripts/nl_tests/fixtures/device_local 바로 아래 폴더 이름만 출력해 주세요.|expect=configs
+
+act|epl_locator_paths_zh_013|act,exact_path_list,file_paths,listing,zh,client_like|在 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 里找包含 abcd 的文件，只输出路径列表。|expect=abcd_report.md
+act|epl_locator_paths_zh_014|act,exact_path_list,file_paths,listing,zh,client_like|找出 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 下名字里带 abcd 的文件路径。|expect=my_abcd.txt
+act|epl_locator_paths_en_015|act,exact_path_list,file_paths,listing,en,client_like|Find files containing abcd under scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 and output only paths.|expect=x_abcd_log.txt
+act|epl_locator_paths_en_016|act,exact_path_list,file_paths,listing,en,client_like|Output paths for files whose names contain abcd in scripts/nl_tests/fixtures/locator_smart/fuzzy_top3.|expect=zz_abcd_backup.log
+act|epl_locator_paths_ja_017|act,exact_path_list,file_paths,listing,ja,client_like|scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 で abcd を含むファイルのパスだけを出してください。|expect=abcd_report.md
+act|epl_locator_paths_ko_018|act,exact_path_list,file_paths,listing,ko,client_like|scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 에서 abcd 가 들어간 파일 경로만 출력해 주세요.|expect=my_abcd.txt
+
+act|epl_device_groups_zh_019|act,exact_path_list,directory_entry_groups,listing,zh,client_like|把 scripts/nl_tests/fixtures/device_local 的直接子项按文件和目录简单分组列出来。|expect=README.md
+act|epl_device_groups_zh_020|act,exact_path_list,directory_entry_groups,listing,zh,client_like|列出 scripts/nl_tests/fixtures/device_local 顶层内容，区分文件和文件夹。|expect=package.json
+act|epl_device_groups_en_021|act,exact_path_list,directory_entry_groups,listing,en,client_like|Group the direct entries under scripts/nl_tests/fixtures/device_local into files and directories.|expect=configs
+act|epl_device_groups_en_022|act,exact_path_list,directory_entry_groups,listing,en,client_like|Show the top-level contents of scripts/nl_tests/fixtures/device_local grouped by file versus folder.|expect=docs
+act|epl_device_groups_ja_023|act,exact_path_list,directory_entry_groups,listing,ja,client_like|scripts/nl_tests/fixtures/device_local 直下の項目をファイルとフォルダに分けて出してください。|expect=README.md
+act|epl_device_groups_ko_024|act,exact_path_list,directory_entry_groups,listing,ko,client_like|scripts/nl_tests/fixtures/device_local 의 최상위 항목을 파일과 폴더로 나눠 보여 주세요.|expect=package.json
+
+act|epl_workspace_hidden_zh_025|act,exact_path_list,hidden_entries_check,listing,zh,client_like|当前仓库顶层有没有点开头的隐藏项？如果有，只列隐藏项名字。|expect=.git
+act|epl_workspace_hidden_zh_026|act,exact_path_list,hidden_entries_check,listing,zh,client_like|列出当前工作区根目录的隐藏条目名字，只看点开头的。|expect=.gitignore
+act|epl_workspace_hidden_en_027|act,exact_path_list,hidden_entries_check,listing,en,client_like|List hidden dot-prefixed entries at the workspace root.|expect=.git
+act|epl_workspace_hidden_en_028|act,exact_path_list,hidden_entries_check,listing,en,client_like|Show only dot-prefixed top-level entries in the current workspace.|expect=.gitignore
+act|epl_workspace_hidden_ja_029|act,exact_path_list,hidden_entries_check,listing,ja,client_like|現在のワークスペース直下にあるドットで始まる隠し項目名だけを出してください。|expect=.git
+act|epl_workspace_hidden_ko_030|act,exact_path_list,hidden_entries_check,listing,ko,client_like|현재 워크스페이스 루트의 점으로 시작하는 숨김 항목 이름만 출력해 주세요.|expect=.gitignore
+
+act|epl_docs_archive_paths_zh_031|act,exact_path_list,file_paths,listing,zh,client_like|找出 scripts/nl_tests/fixtures/device_local/docs/archive 里的文件路径，只输出路径。|expect=README.txt
+act|epl_docs_archive_paths_en_032|act,exact_path_list,file_paths,listing,en,client_like|List only file paths under scripts/nl_tests/fixtures/device_local/docs/archive.|expect=README.txt
+act|epl_docs_archive_names_zh_033|act,exact_path_list,file_names,listing,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/docs/archive 目录里的文件名，只输出名字。|expect=README.txt
+act|epl_docs_archive_names_en_034|act,exact_path_list,file_names,listing,en,client_like|Output only file names inside scripts/nl_tests/fixtures/device_local/docs/archive.|expect=README.txt
+
+act|epl_tmp_dir_names_zh_035|act,exact_path_list,directory_names,listing,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/tmp 下的直接子目录名。|expect=bundle_src
+act|epl_tmp_dir_names_en_036|act,exact_path_list,directory_names,listing,en,client_like|List direct directory names under scripts/nl_tests/fixtures/device_local/tmp.|expect=_unpacked_notes
+act|epl_tmp_groups_zh_037|act,exact_path_list,directory_entry_groups,listing,zh,client_like|把 scripts/nl_tests/fixtures/device_local/tmp 顶层内容按文件和目录分组列出来。|expect=test_bundle.zip
+act|epl_tmp_groups_en_038|act,exact_path_list,directory_entry_groups,listing,en,client_like|Group top-level entries under scripts/nl_tests/fixtures/device_local/tmp by file and directory.|expect=bundle_src
+
+act|epl_prompts_schema_paths_zh_039|act,exact_path_list,file_paths,listing,zh,client_like|找出 prompts/schemas 目录下的 json 文件路径，只输出路径列表。|expect=intent_normalizer.schema.json
+act|epl_prompts_schema_paths_en_040|act,exact_path_list,file_paths,listing,en,client_like|Find JSON file paths under prompts/schemas and output only paths.|expect=contract_repair_judge.schema.json
+act|epl_prompts_schema_names_zh_041|act,exact_path_list,file_names,listing,zh,client_like|列出 prompts/schemas 里的 json 文件名，只输出文件名。|expect=agent_loop_decision_envelope.schema.json
+act|epl_prompts_schema_names_en_042|act,exact_path_list,file_names,listing,en,client_like|List only JSON file names in prompts/schemas.|expect=intent_normalizer.schema.json
+
+act|epl_crates_dir_names_zh_043|act,exact_path_list,directory_names,listing,zh,client_like|列出 crates 目录下的一级目录名，只输出目录名。|expect=clawd
+act|epl_crates_dir_names_en_044|act,exact_path_list,directory_names,listing,en,client_like|List direct directory names under crates only.|expect=skill-runner
+act|epl_skills_dir_names_zh_045|act,exact_path_list,directory_names,listing,zh,client_like|列出 crates/skills 下的一级技能目录名，只输出目录名。|expect=system_basic
+act|epl_skills_dir_names_en_046|act,exact_path_list,directory_names,listing,en,client_like|List direct skill folder names under crates/skills.|expect=git_basic
+
+act|epl_root_toml_paths_zh_047|act,exact_path_list,file_paths,listing,zh,client_like|找出当前仓库顶层的 toml 文件路径，只输出路径。|expect=Cargo.toml
+act|epl_root_toml_paths_en_048|act,exact_path_list,file_paths,listing,en,client_like|Find top-level toml file paths in the current repo and output only paths.|expect=Cargo.toml
+act|epl_root_names_zh_049|act,exact_path_list,directory_entry_groups,listing,zh,client_like|把当前仓库顶层内容按文件和目录分组列出来。|expect=AGENTS.md
+act|epl_root_names_en_050|act,exact_path_list,directory_entry_groups,listing,en,client_like|Group the current repo top-level entries into files and directories.|expect=Cargo.toml

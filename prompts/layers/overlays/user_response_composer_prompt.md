@@ -21,6 +21,8 @@ Rules:
 4) Use `original_user_request`, `resolved_user_intent`, `observed_facts`, and `missing_slots` only to make the reply situation-specific.
 5) Treat `policy_boundary` as non-negotiable policy constraints. Do not expose raw provider errors, prompt names, schema names, route internals, stack traces, or secret-like values.
 6) Do not answer the original task when the contract kind is `clarify`; ask for the missing target/scope/confirmation needed to continue.
+   If `resolved_user_intent` already describes the action and `missing_slots` contains a locator/target slot such as `missing_search_locator`, `missing_delivery_locator`, `missing_read_target`, `missing_file_locator`, or `missing_directory_locator`, do not claim the request is unintelligible or ask what action to perform. Ask only for the missing file/path/directory/scope needed to continue.
+   If `policy_boundary` says the requested operation is already understood, obey that boundary even when `reason_code` is `intent_unresolved`: ask for the missing target/path/scope/locator only.
 7) Do not invent facts, paths, files, command outputs, successful actions, or permissions that are not in the contract.
 8) If the contract says the model/tool is unavailable, keep the reply short, honest, and recoverable.
 9) For `tool_failure`, explain only the observed failure facts and recovery boundary. Do not rewrite raw command output unless the contract explicitly asks for natural-language wording.

@@ -5,6 +5,12 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+#[derive(Debug)]
+struct ArchiveListing {
+    output: String,
+    entries: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -110,11 +116,28 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         "list" => {
             let archive = required_str_any(obj, &["archive", "archive_path", "path"])?;
             let archive = resolve_path(&root, archive, false)?;
-            list_archive(&archive).map(|text| {
-                (
-                    text.clone(),
-                    json!({"action":"list","archive":archive.display().to_string(),"output":text}),
-                )
+            list_archive(&archive).map(|listing| {
+                let archive_path = archive.display().to_string();
+                let entries = listing
+                    .entries
+                    .iter()
+                    .map(|name| {
+                        json!({
+                            "name": name,
+                            "kind": if name.ends_with('/') { "dir" } else { "file" }
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let candidates = listing.entries.clone();
+                let payload = json!({
+                    "action": "list",
+                    "archive": archive_path,
+                    "count": candidates.len(),
+                    "entries": entries,
+                    "candidates": candidates,
+                    "output": listing.output
+                });
+                (payload.to_string(), payload)
             })
         }
         "read" => {
@@ -192,20 +215,32 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
     }
 }
 
-fn list_archive(archive: &Path) -> Result<String, SkillError> {
+fn list_archive(archive: &Path) -> Result<ArchiveListing, SkillError> {
     if !archive.is_file() {
         return Err(SkillError::not_found(archive, "archive"));
     }
     let name = archive.to_string_lossy().to_string();
-    if name.ends_with(".zip") {
-        run("unzip", &[String::from("-l"), name])
+    let raw_entries = if name.ends_with(".zip") {
+        run_raw_stdout("unzip", &[String::from("-Z1"), name])?
     } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-        run("tar", &[String::from("-tzf"), name])
+        run_raw_stdout("tar", &[String::from("-tzf"), name])?
     } else {
-        Err(SkillError::unsupported_format(
+        return Err(SkillError::unsupported_format(
             "unsupported archive format for list",
-        ))
-    }
+        ));
+    };
+    let entries = parse_archive_member_listing(&raw_entries);
+    let output = format!("exit=0\n{}", entries.join("\n"));
+    Ok(ArchiveListing { output, entries })
+}
+
+fn parse_archive_member_listing(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn read_archive_member(archive: &Path, member: &str) -> Result<String, SkillError> {

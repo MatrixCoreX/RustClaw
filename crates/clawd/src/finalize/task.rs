@@ -4,6 +4,22 @@ use tracing::{error, info, warn};
 
 use crate::{repo, AppState};
 
+#[path = "task_resume.rs"]
+mod task_resume;
+
+use task_resume::{
+    direct_chat_answer_verifier_retry_applicable, resume_context_execution_summary_messages,
+    resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
+    resume_failure_is_structured_service_status_result,
+    resume_failure_is_unbound_path_lookup_clarify_result, retry_direct_chat_answer_after_verifier,
+    text_looks_like_missing_file_target,
+};
+
+#[cfg(test)]
+use task_resume::{
+    resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
+};
+
 fn ask_result_payload(
     answer_text: &str,
     answer_messages: &[String],
@@ -53,6 +69,24 @@ fn answer_verifier_forces_task_failure(
             .answer_verifier_summary
             .as_ref()
             .is_some_and(|summary| summary.high_confidence_retry_gap())
+}
+
+fn answer_verifier_should_force_task_failure(
+    enforce_required: bool,
+    semantic_clarify: bool,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    enforce_required && answer_verifier_forces_task_failure(semantic_clarify, journal)
+}
+
+fn record_answer_verifier_required_evidence_rollout_attribution(
+    journal: &mut crate::task_journal::TaskJournal,
+) {
+    let rollout_attribution =
+        crate::task_journal::TaskJournalRolloutAttribution::answer_verifier_required_evidence_block(
+            journal.answer_verifier_summary.as_ref(),
+        );
+    journal.record_rollout_attribution(rollout_attribution);
 }
 
 fn answer_verifier_requests_filtered_entry(journal: &crate::task_journal::TaskJournal) -> bool {
@@ -183,6 +217,113 @@ fn deterministic_filtered_log_entry_recovery(
     })
 }
 
+fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
+    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && route_result.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+}
+
+fn raw_tail_read_finalizer_has_qualified_evidence(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal.finalizer_summary.as_ref().is_some_and(|summary| {
+        summary.contract_ok
+            && matches!(
+                summary.disposition,
+                Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+            )
+            && summary.used_evidence_ids_count > 0
+    })
+}
+
+fn raw_tail_read_answer_from_value(value: &Value, prefer_english: bool) -> Option<String> {
+    if let Some(answer) = raw_tail_read_answer_from_flat_value(value, prefer_english) {
+        return Some(answer);
+    }
+    value
+        .get("extra")
+        .and_then(|extra| raw_tail_read_answer_from_value(extra, prefer_english))
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .and_then(|inner| raw_tail_read_answer_from_value(&inner, prefer_english))
+        })
+}
+
+fn raw_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> Option<String> {
+    if !matches!(
+        value.get("action").and_then(Value::as_str),
+        Some("read_range" | "read_text_range")
+    ) || value.get("mode").and_then(Value::as_str) != Some("tail")
+    {
+        return None;
+    }
+    let requested_n = value
+        .get("requested_n")
+        .or_else(|| value.get("n"))
+        .or_else(|| value.get("count"))
+        .and_then(Value::as_u64)?;
+    if requested_n == 0 || requested_n > 50 {
+        return None;
+    }
+    value
+        .get("excerpt")
+        .and_then(Value::as_str)
+        .filter(|excerpt| !excerpt.trim().is_empty())?;
+    let mut candidate = value.clone();
+    let obj = candidate.as_object_mut()?;
+    obj.insert(
+        "action".to_string(),
+        Value::String("read_range".to_string()),
+    );
+    if !obj.contains_key("requested_n") {
+        obj.insert("requested_n".to_string(), json!(requested_n));
+    }
+    crate::agent_engine::observed_output::tail_read_range_direct_answer_candidate(
+        &candidate.to_string(),
+        prefer_english,
+    )
+}
+
+fn raw_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
+    serde_json::from_str::<Value>(output.trim())
+        .ok()
+        .and_then(|value| raw_tail_read_answer_from_value(&value, prefer_english))
+        .map(|answer| answer.trim().to_string())
+        .filter(|answer| !answer.is_empty())
+}
+
+fn deterministic_raw_tail_read_failure_recovery(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    user_request: &str,
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    if !raw_tail_read_route_allows_failure_recovery(route_result)
+        || !raw_tail_read_finalizer_has_qualified_evidence(journal)
+    {
+        return None;
+    }
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let prefer_english =
+        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
+    journal.step_results.iter().rev().find_map(|step| {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
+        {
+            return None;
+        }
+        step.output_excerpt
+            .as_deref()
+            .and_then(|output| raw_tail_read_answer_from_step_output(output, prefer_english))
+    })
+}
+
 fn mark_answer_verifier_recovered_by_deterministic_filtered_entry(
     journal: &mut crate::task_journal::TaskJournal,
 ) {
@@ -265,6 +406,15 @@ fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bool {
             .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
 }
 
+fn journal_has_non_control_step(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().any(|step| {
+        !matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think" | "answer_verifier"
+        )
+    })
+}
+
 fn route_has_file_delivery_contract(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
@@ -272,6 +422,27 @@ fn route_has_file_delivery_contract(route_result: &crate::RouteResult) -> bool {
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
+}
+
+fn delivery_path_gap_should_finalize_as_clarify(
+    route_result: &crate::RouteResult,
+    answer_text: &str,
+    answer_messages: &[String],
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    route_has_file_delivery_contract(route_result)
+        && !has_any_delivery_file_token(answer_text, answer_messages)
+        && !journal_has_non_control_step(journal)
+        && journal
+            .answer_verifier_summary
+            .as_ref()
+            .is_some_and(|summary| {
+                !summary.pass
+                    && summary
+                        .missing_evidence_fields
+                        .iter()
+                        .any(|field| field.trim() == "path")
+            })
 }
 
 fn should_use_missing_file_delivery_reply(
@@ -284,370 +455,6 @@ fn should_use_missing_file_delivery_reply(
         && journal_has_missing_file_search_evidence(answer.task_journal.as_ref())
 }
 
-fn resume_context_body(value: &Value) -> &Value {
-    value.get("resume_context").unwrap_or(value)
-}
-
-fn text_looks_like_missing_file_target(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.starts_with("__RC_READ_FILE_NOT_FOUND__:")
-        || crate::skills::parse_structured_skill_error(trimmed)
-            .is_some_and(|structured| structured.error_kind == "not_found")
-}
-
-fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
-    resume_context_body(resume_ctx)
-        .get("remaining_actions")
-        .and_then(|value| value.as_array())
-        .is_some_and(|actions| !actions.is_empty())
-}
-
-fn resume_context_failed_step_texts<'a>(resume_ctx: &'a Value) -> Vec<&'a str> {
-    let body = resume_context_body(resume_ctx);
-    let mut texts = Vec::new();
-    if let Some(error) = body
-        .get("failed_step")
-        .and_then(|step| step.get("error"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        texts.push(error);
-    }
-    if let Some(messages) = body
-        .get("completed_messages")
-        .and_then(|value| value.as_array())
-    {
-        texts.extend(
-            messages
-                .iter()
-                .filter_map(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty()),
-        );
-    }
-    texts
-}
-
-fn resume_context_failed_step_action(resume_ctx: &Value) -> Option<&str> {
-    resume_context_body(resume_ctx)
-        .get("failed_step")
-        .and_then(|step| step.get("action"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn resume_context_failed_step_skill(resume_ctx: &Value) -> Option<String> {
-    if let Some(error) = resume_context_failed_structured_skill_error(resume_ctx) {
-        return Some(error.skill);
-    }
-    let action = resume_context_failed_step_action(resume_ctx)?;
-    action
-        .strip_prefix("skill(")
-        .and_then(|value| value.strip_suffix(')'))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn resume_context_completed_message_json(message: &str) -> Option<Value> {
-    let trimmed = message.trim();
-    let json_start = trimmed.find('{')?;
-    serde_json::from_str::<Value>(&trimmed[json_start..]).ok()
-}
-
-fn resume_context_completed_structured_values(resume_ctx: &Value) -> Vec<Value> {
-    resume_context_body(resume_ctx)
-        .get("completed_messages")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str())
-        .filter_map(resume_context_completed_message_json)
-        .collect()
-}
-
-fn resume_context_path_batch_facts_are_missing_only(resume_ctx: &Value) -> bool {
-    let mut saw_path_batch = false;
-    let mut saw_missing = false;
-    let mut saw_existing = false;
-    for value in resume_context_completed_structured_values(resume_ctx) {
-        if value.get("action").and_then(|value| value.as_str()) != Some("path_batch_facts") {
-            continue;
-        }
-        saw_path_batch = true;
-        if let Some(facts) = value.get("facts").and_then(|value| value.as_array()) {
-            for fact in facts {
-                match fact.get("exists").and_then(|value| value.as_bool()) {
-                    Some(true) => saw_existing = true,
-                    Some(false) => {
-                        if fact
-                            .get("path")
-                            .and_then(|value| value.as_str())
-                            .is_some_and(|path| !path.trim().is_empty())
-                        {
-                            saw_missing = true;
-                        }
-                    }
-                    None => {}
-                }
-            }
-        }
-    }
-    saw_path_batch && saw_missing && !saw_existing
-}
-
-fn text_is_directory_lookup_failure(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.starts_with("read_dir failed")
-        || crate::skills::parse_structured_skill_error(trimmed)
-            .is_some_and(|structured| structured.error_text.trim().starts_with("read_dir failed"))
-}
-
-fn resume_context_has_directory_lookup_failure(resume_ctx: &Value) -> bool {
-    let body = resume_context_body(resume_ctx);
-    if body
-        .get("failed_step")
-        .and_then(|step| step.get("error"))
-        .and_then(|value| value.as_str())
-        .is_some_and(text_is_directory_lookup_failure)
-    {
-        return true;
-    }
-    body.get("failed_step")
-        .and_then(|step| step.get("structured_error"))
-        .and_then(|error| error.get("error_text"))
-        .and_then(|value| value.as_str())
-        .is_some_and(text_is_directory_lookup_failure)
-}
-
-fn resume_failure_is_unbound_path_lookup_clarify_result(
-    route_result: &crate::RouteResult,
-    resume_ctx: &Value,
-) -> bool {
-    route_result.output_contract.requires_content_evidence
-        && !route_has_file_delivery_contract(route_result)
-        && !resume_context_has_remaining_actions(resume_ctx)
-        && !matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
-        && matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ScalarPathOnly
-                | crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::ExistenceWithPathSummary
-                | crate::OutputSemanticKind::FilePaths
-        )
-        && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")
-        && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
-            || resume_context_has_directory_lookup_failure(resume_ctx))
-}
-
-fn resume_failure_is_missing_file_delivery_result(
-    route_result: &crate::RouteResult,
-    user_error: &str,
-    resume_ctx: &Value,
-) -> bool {
-    route_has_file_delivery_contract(route_result)
-        && !resume_context_has_remaining_actions(resume_ctx)
-        && (text_looks_like_missing_file_target(user_error)
-            || resume_context_failed_step_texts(resume_ctx)
-                .iter()
-                .any(|text| text_looks_like_missing_file_target(text)))
-}
-
-fn resume_context_failed_structured_skill_error(
-    resume_ctx: &Value,
-) -> Option<crate::skills::StructuredSkillError> {
-    resume_context_body(resume_ctx)
-        .get("failed_step")
-        .and_then(|step| {
-            step.get("structured_error")
-                .and_then(resume_context_structured_skill_error_from_value)
-                .or_else(|| {
-                    step.get("error")
-                        .and_then(|value| value.as_str())
-                        .and_then(crate::skills::parse_structured_skill_error)
-                })
-        })
-}
-
-fn resume_context_string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn resume_context_structured_skill_error_from_value(
-    value: &Value,
-) -> Option<crate::skills::StructuredSkillError> {
-    Some(crate::skills::StructuredSkillError {
-        skill: resume_context_string_field(value, "skill")?,
-        error_kind: resume_context_string_field(value, "error_kind")?,
-        error_text: resume_context_string_field(value, "error_text")?,
-        platform: resume_context_string_field(value, "platform"),
-        manager_type: resume_context_string_field(value, "manager_type"),
-        service_name: resume_context_string_field(value, "service_name"),
-        extra: value.get("extra").cloned().filter(|value| !value.is_null()),
-    })
-}
-
-fn structured_service_status_error_is_answerable(
-    error: &crate::skills::StructuredSkillError,
-) -> bool {
-    error.skill == "service_control"
-        && matches!(
-            error.error_kind.as_str(),
-            "not_found" | "service_inactive" | "service_failed" | "service_control_failed"
-        )
-}
-
-fn resume_failure_is_structured_service_status_result(
-    route_result: &crate::RouteResult,
-    resume_ctx: &Value,
-) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
-        && !resume_context_has_remaining_actions(resume_ctx)
-        && resume_context_failed_structured_skill_error(resume_ctx)
-            .as_ref()
-            .is_some_and(structured_service_status_error_is_answerable)
-}
-
-fn resume_context_extra_string<'a>(
-    error: &'a crate::skills::StructuredSkillError,
-    key: &str,
-) -> Option<&'a str> {
-    error
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get(key))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn resume_context_extra_i64(error: &crate::skills::StructuredSkillError, key: &str) -> Option<i64> {
-    error
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get(key))
-        .and_then(|value| value.as_i64())
-}
-
-fn compact_resume_error_text(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn resume_failure_execution_failed_step_answer(
-    route_result: &crate::RouteResult,
-    resume_ctx: &Value,
-    prefer_english: bool,
-) -> Option<String> {
-    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ExecutionFailedStep
-    {
-        return None;
-    }
-    let body = resume_context_body(resume_ctx);
-    let failed_step = body.get("failed_step")?;
-    let action = failed_step
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("step");
-    let raw_error = failed_step
-        .get("error")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let structured = resume_context_failed_structured_skill_error(resume_ctx);
-    let command = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_string(error, "command"));
-    let exit_code = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_i64(error, "exit_code"));
-    let detail = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_string(error, "stderr"))
-        .or_else(|| structured.as_ref().map(|error| error.error_text.trim()))
-        .or(raw_error)
-        .map(compact_resume_error_text)
-        .filter(|value| !value.is_empty())?;
-
-    if prefer_english {
-        let subject = command
-            .map(|command| format!("Command `{command}`"))
-            .unwrap_or_else(|| format!("Step `{action}`"));
-        if let Some(exit_code) = exit_code {
-            Some(format!(
-                "{subject} failed with exit code {exit_code}: {detail}"
-            ))
-        } else {
-            Some(format!("{subject} failed: {detail}"))
-        }
-    } else {
-        let subject = command
-            .map(|command| format!("命令 `{command}`"))
-            .unwrap_or_else(|| format!("步骤 `{action}`"));
-        if let Some(exit_code) = exit_code {
-            Some(format!("{subject}执行失败，退出码为 {exit_code}：{detail}"))
-        } else {
-            Some(format!("{subject}执行失败：{detail}"))
-        }
-    }
-}
-
-fn resume_context_user_visible_step_error(error: &str) -> String {
-    crate::skills::parse_structured_skill_error(error)
-        .map(|structured| crate::skills::normalize_skill_error_for_user(&structured.skill, error))
-        .unwrap_or_else(|| error.to_string())
-}
-
-fn resume_context_execution_summary_messages(
-    resume_ctx: &Value,
-    prefer_english: bool,
-) -> Vec<String> {
-    let body = resume_context_body(resume_ctx);
-    let Some(failed_step) = body.get("failed_step") else {
-        return Vec::new();
-    };
-    let action = failed_step
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("step");
-    let error = failed_step
-        .get("error")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Execution failed.");
-    let error = resume_context_user_visible_step_error(error);
-    let prefix = if prefer_english {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
-    } else {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
-    };
-    let label = if prefer_english { "Error" } else { "错误" };
-    let line = if prefer_english {
-        format!("1. Called `{action}`")
-    } else {
-        format!("1. 调用 `{action}`")
-    };
-    vec![format!(
-        "{prefix}\n{line}\n   {label}：\n```text\n{}\n```",
-        crate::truncate_for_agent_trace(&error).replace("```", "'''")
-    )]
-}
-
 async fn missing_file_delivery_reply_text(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -658,7 +465,11 @@ async fn missing_file_delivery_reply_text(
     if !should_use_missing_file_delivery_reply(route_result, answer) {
         return None;
     }
-    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
+    let language_hint = crate::language_policy::first_clear_request_language_hint([
+        prompt,
+        route_result.resolved_intent.as_str(),
+    ])
+    .unwrap_or_else(|| crate::language_policy::task_response_language_hint(state, task, prompt));
     Some(
         crate::fallback::compose_missing_file_delivery_response(
             state,
@@ -887,12 +698,6 @@ async fn compose_ask_failure_user_message(
 ) -> String {
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-    let fallback_text = if prefer_english {
-        "The task could not be completed, and no reliable user-facing result was produced. Please adjust the request or retry later."
-    } else {
-        "这次任务没有完成，也没有形成可靠的可交付结果。请调整请求或稍后重试。"
-    };
     let mut observed_facts = Vec::new();
     let err = err_text.trim();
     if !err.is_empty() {
@@ -901,6 +706,7 @@ async fn compose_ask_failure_user_message(
             crate::truncate_for_agent_trace(err)
         ));
     }
+    let fallback_text = ask_runtime_failure_machine_payload(err);
     let contract = crate::fallback::UserResponseContract::tool_failure(
         "ask_runtime_failure",
         user_request,
@@ -919,9 +725,114 @@ async fn compose_ask_failure_user_message(
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        fallback_text,
+        &fallback_text,
     )
     .await
+}
+
+async fn compose_answer_verifier_failure_user_message(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    user_request: &str,
+    err_text: &str,
+) -> String {
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let mut observed_facts = Vec::new();
+    let err = err_text.trim();
+    if !err.is_empty() {
+        observed_facts.push(format!(
+            "verifier_block: {}",
+            crate::truncate_for_agent_trace(err)
+        ));
+    }
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        "answer_verifier_required_evidence_block",
+        user_request,
+        user_request,
+        observed_facts,
+        vec![
+            "Do not expose raw verifier JSON, schema names, prompt names, or internal planner action names.".to_string(),
+            "Do not claim the task succeeded or that any unobserved action was completed.".to_string(),
+            "Give one concise recovery path the user can act on.".to_string(),
+        ],
+        "brief_failure_with_next_step",
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+    )
+    .await
+}
+
+#[cfg(test)]
+fn answer_verifier_failure_machine_line(err: &str) -> String {
+    let mut parts = vec![
+        "message_key=answer_verifier_required_evidence_block".to_string(),
+        "reason_code=answer_verifier_required_evidence_block".to_string(),
+    ];
+    if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(err.trim()) {
+        if let Some(fields) = obj
+            .get("missing_evidence_fields")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty())
+        {
+            parts.push(format!("missing_evidence_fields={}", fields.join(",")));
+        }
+    }
+    parts.join(" ")
+}
+
+fn answer_text_is_machine_json_payload(answer_text: &str) -> bool {
+    let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(answer_text.trim()) else {
+        return false;
+    };
+    [
+        "message_key",
+        "reason_code",
+        "error_code",
+        "missing_evidence_fields",
+        "answer_incomplete_reason",
+    ]
+    .iter()
+    .any(|key| obj.contains_key(*key))
+}
+
+fn answer_text_is_answer_verifier_machine_line(answer_text: &str) -> bool {
+    let text = answer_text.trim();
+    !text.is_empty()
+        && (text.contains("message_key=answer_verifier_required_evidence_block")
+            || text.contains("reason_code=answer_verifier_required_evidence_block"))
+}
+
+fn answer_verifier_failure_needs_user_message(answer_text: &str, err_text: &str) -> bool {
+    answer_text_is_machine_json_payload(answer_text)
+        || answer_text_is_machine_json_payload(err_text)
+        || answer_text_is_answer_verifier_machine_line(answer_text)
+        || answer_text_is_answer_verifier_machine_line(err_text)
+}
+
+fn ask_runtime_failure_machine_payload(err: &str) -> String {
+    let err = err.trim();
+    let mut payload = serde_json::json!({
+        "message_key": "clawd.msg.ask_runtime_failure",
+        "reason_code": "ask_runtime_failure",
+    });
+    if !err.is_empty() {
+        payload["error_summary"] = serde_json::json!(crate::truncate_for_agent_trace(err));
+    }
+    payload.to_string()
 }
 
 pub(crate) async fn finalize_ask_direct_success(
@@ -1130,7 +1041,7 @@ pub(crate) async fn finalize_ask_result(
                 }
             }
             let route_result = &effective_route_result;
-            let semantic_clarify = route_result.ask_mode.is_clarify_only()
+            let mut semantic_clarify = route_result.ask_mode.is_clarify_only()
                 || answer
                     .task_journal
                     .as_ref()
@@ -1154,15 +1065,7 @@ pub(crate) async fn finalize_ask_result(
                         .collect(),
                 )
             } else if let Some(reply_text) = missing_file_delivery_reply {
-                let mut messages = answer
-                    .messages
-                    .into_iter()
-                    .map(|message| message.trim().to_string())
-                    .filter(|message| !message.is_empty())
-                    .filter(|message| crate::finalize::is_execution_summary_message(message))
-                    .collect::<Vec<_>>();
-                messages.push(reply_text.clone());
-                (reply_text, messages)
+                (reply_text.clone(), vec![reply_text])
             } else {
                 let original_messages = answer.messages;
                 let execution_summaries = original_messages
@@ -1201,6 +1104,29 @@ pub(crate) async fn finalize_ask_result(
                 (answer_text, answer_messages)
             };
             journal.record_final_answer(&answer_text);
+            if failure_reply {
+                if let Some(recovered_answer) = deterministic_raw_tail_read_failure_recovery(
+                    state,
+                    task,
+                    prompt,
+                    route_result,
+                    &journal,
+                ) {
+                    failure_reply = false;
+                    semantic_clarify = false;
+                    answer_text = recovered_answer;
+                    answer_messages
+                        .retain(|message| crate::finalize::is_execution_summary_message(message));
+                    answer_messages.push(answer_text.clone());
+                    journal.answer_verifier_summary = None;
+                    journal.record_final_answer(&answer_text);
+                    info!(
+                        "finalize_raw_tail_read_failure_recovered task_id={} answer={}",
+                        task.task_id,
+                        crate::truncate_for_log(&answer_text)
+                    );
+                }
+            }
             if !failure_reply && !semantic_clarify && journal.answer_verifier_summary.is_none() {
                 if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
                     state,
@@ -1212,7 +1138,46 @@ pub(crate) async fn finalize_ask_result(
                 )
                 .await
                 {
+                    let direct_chat_retry = direct_chat_answer_verifier_retry_applicable(
+                        route_result,
+                        &journal,
+                        &answer_verifier,
+                    );
+                    let retry_verifier_input = answer_verifier.clone();
                     journal.record_answer_verifier_summary(answer_verifier);
+                    if direct_chat_retry {
+                        if let Some(retried_answer) = retry_direct_chat_answer_after_verifier(
+                            state,
+                            task,
+                            prompt,
+                            &journal,
+                            &answer_text,
+                            &retry_verifier_input,
+                        )
+                        .await
+                        {
+                            answer_text = retried_answer;
+                            answer_messages.retain(|message| {
+                                crate::finalize::is_execution_summary_message(message)
+                            });
+                            answer_messages.push(answer_text.clone());
+                            journal.record_final_answer(&answer_text);
+                            journal.answer_verifier_summary = None;
+                            if let Some(retry_verifier) =
+                                crate::answer_verifier::verify_answer_observe_only(
+                                    state,
+                                    task,
+                                    prompt,
+                                    route_result,
+                                    &journal,
+                                    &answer_text,
+                                )
+                                .await
+                            {
+                                journal.record_answer_verifier_summary(retry_verifier);
+                            }
+                        }
+                    }
                 }
             }
             if let Some(recovered_answer) = deterministic_filtered_log_entry_recovery(&journal) {
@@ -1223,6 +1188,15 @@ pub(crate) async fn finalize_ask_result(
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_filtered_entry(&mut journal);
+            }
+            if delivery_path_gap_should_finalize_as_clarify(
+                route_result,
+                &answer_text,
+                &answer_messages,
+                &journal,
+            ) {
+                semantic_clarify = true;
+                journal.answer_verifier_summary = None;
             }
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
@@ -1248,28 +1222,66 @@ pub(crate) async fn finalize_ask_result(
                 } else {
                     journal
                         .record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+                    let (visible_failure_text, visible_failure_messages) =
+                        if answer_verifier_failure_needs_user_message(&answer_text, &err_text) {
+                            let visible = compose_answer_verifier_failure_user_message(
+                                state, task, prompt, &err_text,
+                            )
+                            .await;
+                            (visible.clone(), vec![visible])
+                        } else {
+                            (answer_text.clone(), answer_messages.clone())
+                        };
+                    journal.record_final_answer(&visible_failure_text);
                     finalize_ask_failure(
                         state,
                         task,
                         payload,
-                        &answer_text,
-                        &answer_messages,
+                        &visible_failure_text,
+                        &visible_failure_messages,
                         &err_text,
                         &mut journal,
                     )
                     .await?;
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
                 }
-            } else if answer_verifier_forces_task_failure(semantic_clarify, &journal) {
-                let err_text = "answer_verifier_failed";
+            } else if answer_verifier_should_force_task_failure(
+                crate::agent_engine::answer_verifier_enforce_required_enabled(state),
+                semantic_clarify,
+                &journal,
+            ) {
+                record_answer_verifier_required_evidence_rollout_attribution(&mut journal);
+                let err_text = journal
+                    .answer_verifier_summary
+                    .as_ref()
+                    .map(|summary| summary.required_evidence_failure_payload_text())
+                    .unwrap_or_else(|| {
+                        json!({
+                            "schema_version": 1,
+                            "message_key": "answer_verifier_required_evidence_block",
+                            "reason_code": "answer_verifier_required_evidence_block",
+                        })
+                        .to_string()
+                    });
                 journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+                let (visible_failure_text, visible_failure_messages) =
+                    if answer_verifier_failure_needs_user_message(&answer_text, &err_text) {
+                        let visible = compose_answer_verifier_failure_user_message(
+                            state, task, prompt, &err_text,
+                        )
+                        .await;
+                        (visible.clone(), vec![visible])
+                    } else {
+                        (answer_text.clone(), answer_messages.clone())
+                    };
+                journal.record_final_answer(&visible_failure_text);
                 finalize_ask_failure(
                     state,
                     task,
                     payload,
-                    &answer_text,
-                    &answer_messages,
-                    err_text,
+                    &visible_failure_text,
+                    &visible_failure_messages,
+                    &err_text,
                     &mut journal,
                 )
                 .await?;

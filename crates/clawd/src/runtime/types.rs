@@ -179,6 +179,7 @@ pub(crate) struct ScheduleRuntime {
     /// §3.5d: 同上。
     pub(crate) intent_rules_template: Arc<RwLock<String>>,
     pub(crate) locale: String,
+    pub(crate) i18n_dir: String,
     pub(crate) i18n_dict: HashMap<String, String>,
 }
 

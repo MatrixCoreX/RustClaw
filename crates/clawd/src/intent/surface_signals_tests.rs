@@ -40,6 +40,20 @@ fn detects_explicit_path_locator() {
 }
 
 #[test]
+fn detects_multiple_english_filename_targets() {
+    let signals = analyze_prompt_surface(
+        "read the opening section of README.md, then read the opening section of AGENTS.md, and say in one short English sentence which one is for end users versus contributors",
+    );
+
+    assert_eq!(
+        signals.filename_candidates_excluding_field_selectors(),
+        vec!["README.md".to_string(), "AGENTS.md".to_string()]
+    );
+    assert!(signals.dotted_field_selector.is_none());
+    assert!(signals.field_selector_mentions.is_empty());
+}
+
+#[test]
 fn detects_locator_only_reply_shape() {
     let signals = analyze_prompt_surface("logs/model_io.log");
     assert_eq!(

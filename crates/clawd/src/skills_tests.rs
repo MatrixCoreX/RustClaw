@@ -1,11 +1,12 @@
 use super::{
-    collect_whitelisted_env_pairs, extract_task_request_text, is_crypto_account_access_error,
-    is_missing_target_skill_error, is_recoverable_skill_error, normalize_skill_error_for_user,
-    parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
-    policy_block_error, request_reply_language, skill_runner_env_strict_enabled,
-    structured_skill_error_from_parts, task_allows_path_outside_workspace, task_allows_sudo,
-    task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
-    READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
+    collect_whitelisted_env_pairs, crypto_recoverable_i18n_error_key, extract_task_request_text,
+    is_crypto_account_access_error, is_missing_target_skill_error, is_recoverable_skill_error,
+    normalize_skill_error_for_user, parse_policy_block_error, parse_structured_skill_error,
+    policy_block_default_text, policy_block_error, request_reply_language,
+    skill_runner_env_strict_enabled, structured_skill_error_from_parts,
+    task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
+    RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
+    SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
 };
 use crate::{
     runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -80,6 +81,7 @@ fn test_state(locale: &str) -> AppState {
                 intent_prompt_source: String::new(),
                 intent_rules_template: Arc::new(RwLock::new(String::new())),
                 locale: locale.to_string(),
+                i18n_dir: "configs/i18n".to_string(),
                 i18n_dict: HashMap::new(),
             },
             ..crate::PolicyConfig::test_default()
@@ -650,7 +652,9 @@ fn crypto_account_access_errors_are_recoverable() {
     assert!(is_crypto_account_access_error("crypto", &err));
     assert!(is_recoverable_skill_error("CRYPTO", &err));
     let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("crypto account access failed on binance"));
+    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
+    assert!(normalized.contains("error_kind=account_access_failed"));
+    assert!(normalized.contains("exchange=binance"));
     assert!(normalized.contains("Invalid API-key"));
 }
 
@@ -676,9 +680,69 @@ fn wrapped_crypto_account_access_errors_are_recoverable() {
     assert!(is_recoverable_skill_error("crypto", &err));
     assert!(is_crypto_account_access_error("crypto", &err));
     let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("crypto account access failed on binance"));
+    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
+    assert!(normalized.contains("error_kind=account_access_failed"));
+    assert!(normalized.contains("exchange=binance"));
     assert!(normalized.contains("Invalid API-key"));
     assert!(!normalized.contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
+}
+
+#[test]
+fn structured_crypto_account_access_extra_is_recoverable_without_sentinel() {
+    let err = format!(
+        "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+        json!({
+            "skill": "crypto",
+            "error_kind": "account_access_failed",
+            "error_text": "private exchange account access failed",
+            "extra": {
+                "error_kind": "account_access_failed",
+                "message_key": "crypto.err.account_access_failed",
+                "exchange": "binance",
+                "detail": "binance api error code=-2015: Invalid API-key"
+            }
+        })
+    );
+
+    assert!(is_recoverable_skill_error("crypto", &err));
+    assert!(is_crypto_account_access_error("crypto", &err));
+    let normalized = normalize_skill_error_for_user("crypto", &err);
+    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
+    assert!(normalized.contains("error_kind=account_access_failed"));
+    assert!(normalized.contains("exchange=binance"));
+    assert!(normalized.contains("Invalid API-key"));
+    assert!(!normalized.contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
+}
+
+#[test]
+fn structured_crypto_credential_errors_are_recoverable_i18n() {
+    let err = format!(
+        "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+        json!({
+            "skill": "crypto",
+            "error_kind": "credential_not_bound",
+            "error_text": "credential binding unavailable",
+            "extra": {
+                "error_kind": "credential_not_bound",
+                "message_key": "crypto.err.okx_not_bound",
+                "exchange": "okx",
+                "action": "cancel_all_orders",
+                "recoverable": true,
+                "status_code": "credential_not_bound"
+            }
+        })
+    );
+
+    assert!(is_recoverable_skill_error("crypto", &err));
+    assert_eq!(
+        crypto_recoverable_i18n_error_key("crypto", &err).as_deref(),
+        Some("crypto.err.okx_not_bound")
+    );
+    let normalized = normalize_skill_error_for_user("crypto", &err);
+    assert!(normalized.contains("message_key=crypto.err.okx_not_bound"));
+    assert!(normalized.contains("error_kind=credential_not_bound"));
+    assert!(normalized.contains("exchange=okx"));
+    assert!(normalized.contains("action=cancel_all_orders"));
 }
 
 #[test]
@@ -739,14 +803,24 @@ fn policy_block_error_roundtrips_structured_payload() {
         parsed.policy_boundary,
         vec!["Do not access the denied path."]
     );
+    let normalized: serde_json::Value =
+        serde_json::from_str(&normalize_skill_error_for_user("read_file", &encoded)).unwrap();
     assert_eq!(
-        normalize_skill_error_for_user("read_file", &encoded),
-        "blocked by runtime policy: path_outside_workspace"
+        normalized
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.policy.path_outside_workspace")
+    );
+    assert_eq!(
+        normalized
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("path_outside_workspace")
     );
 }
 
 #[test]
-fn policy_block_default_text_uses_request_language() {
+fn policy_block_default_text_returns_machine_payload() {
     let state = test_state("zh-CN");
     let task = test_task(json!({
         "text": "读取 /etc/shadow 第一行"
@@ -758,19 +832,25 @@ fn policy_block_default_text_uses_request_language() {
     );
     let parsed = parse_policy_block_error(&encoded).expect("policy block payload");
     let text = policy_block_default_text(&state, &task, "读取 /etc/shadow 第一行", &parsed);
-    assert!(text.contains("/etc/shadow"));
-    assert!(text.contains("workspace"));
-
-    let english_task = test_task(json!({
-        "text": "Read the first line of /etc/shadow"
-    }));
-    let english = policy_block_default_text(
-        &state,
-        &english_task,
-        "Read the first line of /etc/shadow",
-        &parsed,
+    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.policy.path_outside_workspace")
     );
-    assert!(english.contains("outside the allowed workspace"));
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("path_outside_workspace")
+    );
+    assert_eq!(
+        payload
+            .pointer("/observed_facts/denied_path")
+            .and_then(serde_json::Value::as_str),
+        Some("/etc/shadow")
+    );
 }
 
 // §E2 step1 ===============================================================

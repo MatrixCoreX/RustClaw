@@ -1,4 +1,9 @@
 use super::build_attempt_ledger_compact;
+use serde_json::Value;
+
+fn ledger_value(ledger: &str) -> Value {
+    serde_json::from_str(ledger).expect("attempt ledger should be valid JSON")
+}
 
 #[test]
 fn attempt_ledger_renders_failed_step_with_retry_hint() {
@@ -56,6 +61,41 @@ fn attempt_ledger_records_verifier_retry_instruction() {
     assert!(ledger.contains("\"tool_or_skill\": \"answer_verifier\""));
     assert!(ledger.contains("\"retry_instruction\""));
     assert!(ledger.contains("Read README.md and Cargo.toml"));
+    let value = ledger_value(&ledger);
+    assert_eq!(
+        value
+            .pointer("/0/action_ref")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/missing_evidence/0")
+            .and_then(serde_json::Value::as_str),
+        Some("content_excerpt")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/verifier_reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_incomplete")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/retry_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    let args_fingerprint = value
+        .pointer("/0/args_fingerprint")
+        .and_then(serde_json::Value::as_str)
+        .expect("args fingerprint");
+    assert_eq!(args_fingerprint.len(), 16);
+    assert!(args_fingerprint.chars().all(|ch| ch.is_ascii_hexdigit()));
+    assert!(value
+        .pointer("/0/forbidden_repeat_signature")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value.starts_with("answer_verifier:")));
 }
 
 #[test]
@@ -139,6 +179,72 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
     assert!(ledger.contains("\"decision\": \"rejected_not_allowed\""));
     assert!(ledger.contains("\"preferred_actions\""));
     assert!(ledger.contains("fs_basic.list_dir"));
+    let value = ledger_value(&ledger);
+    assert_eq!(
+        value
+            .pointer("/0/error_code")
+            .and_then(serde_json::Value::as_str),
+        Some("contract_action_rejected")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/missing_evidence/0")
+            .and_then(serde_json::Value::as_str),
+        Some("candidates")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/retry_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let err = crate::skills::structured_skill_error_from_parts(
+        "run_cmd",
+        "command_failed",
+        "command failed",
+        None,
+        Some(serde_json::json!({
+            "error_code": "exit_status",
+            "exit_code": 127,
+            "missing_evidence_fields": ["command_output"]
+        })),
+    );
+    super::record_attempt(
+        &mut loop_state,
+        "run_cmd",
+        "command=missing-bin",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let ledger = build_attempt_ledger_compact(&loop_state);
+    let value = ledger_value(&ledger);
+
+    assert_eq!(
+        value
+            .pointer("/0/error_code")
+            .and_then(serde_json::Value::as_str),
+        Some("exit_status")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(127)
+    );
+    assert_eq!(
+        value
+            .pointer("/0/missing_evidence/0")
+            .and_then(serde_json::Value::as_str),
+        Some("command_output")
+    );
 }
 
 #[test]

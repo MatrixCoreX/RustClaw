@@ -85,6 +85,64 @@ fn filename_like_tokens_split_adjacent_cjk_punctuation() {
 }
 
 #[test]
+fn workspace_child_locator_resolves_directory_scope_with_child_filename_token() {
+    let root = TempDirGuard::new("dir_scope_child_filename");
+    let logs = root.path.join("logs");
+    fs::create_dir_all(&logs).expect("logs dir");
+    fs::write(logs.join("clawd.run.log"), "line\n").expect("log file");
+
+    let resolved = super::try_resolve_workspace_child_locator_from_text(
+        &root.path,
+        &root.path,
+        "logs clawd.run.log",
+    )
+    .expect("resolved logs directory");
+
+    assert_eq!(
+        resolved,
+        logs.canonicalize()
+            .expect("canonical logs")
+            .display()
+            .to_string()
+    );
+}
+
+#[test]
+fn workspace_child_locator_does_not_resolve_bare_hidden_vcs_control_path() {
+    let root = TempDirGuard::new("hidden_vcs_control_path");
+    fs::create_dir_all(root.path.join(".git")).expect("git dir");
+
+    let out = super::try_resolve_workspace_child_locator_from_text(
+        &root.path,
+        &root.path,
+        "inspect .git",
+    );
+
+    assert!(out.is_none(), "unexpected hidden VCS locator: {out:?}");
+}
+
+#[test]
+fn explicit_relative_hidden_vcs_control_path_still_resolves() {
+    let root = TempDirGuard::new("explicit_hidden_vcs_control_path");
+    let git_dir = root.path.join(".git");
+    fs::create_dir_all(&git_dir).expect("git dir");
+
+    let out =
+        super::resolve_explicit_locator_path_from_text(&root.path, &root.path, "inspect ./.git");
+
+    assert_eq!(
+        out.as_deref(),
+        Some(
+            git_dir
+                .canonicalize()
+                .expect("canonical git dir")
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
+}
+
+#[test]
 fn implicit_locator_does_not_anchor_on_keyword_inside_missing_filename() {
     let workspace = TempDirGuard::new("missing_filename_keyword");
     fs::write(workspace.path.join("rustclaw"), "binary placeholder").expect("write rustclaw");
@@ -356,6 +414,146 @@ fn relative_explicit_locator_prefers_recent_context_ancestor_over_workspace_root
 }
 
 #[test]
+fn auto_locator_does_not_pick_one_target_from_multiple_explicit_paths() {
+    let workspace = TempDirGuard::new("multiple_explicit_paths");
+    fs::create_dir_all(workspace.path.join("UI")).expect("create ui");
+    fs::create_dir_all(workspace.path.join("crates/clawd")).expect("create clawd");
+    fs::write(workspace.path.join("UI/package.json"), "{}").expect("write package");
+    fs::write(
+        workspace.path.join("crates/clawd/Cargo.toml"),
+        "[package]\nname=\"clawd\"\n",
+    )
+    .expect("write cargo");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    let request =
+        "read UI/package.json name and crates/clawd/Cargo.toml package.name, then compare";
+
+    assert!(super::has_multiple_explicit_local_path_locators(request));
+    assert!(super::has_multiple_distinct_explicit_local_path_locators(
+        &state, request, None
+    ));
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        request,
+        request,
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    assert!(
+        out.is_none(),
+        "multi-target request must not auto-bind one path: {out:?}"
+    );
+}
+
+#[test]
+fn auto_locator_does_not_pick_one_target_from_mixed_path_and_bare_filename_targets() {
+    let workspace = TempDirGuard::new("mixed_path_and_bare_filename_targets");
+    fs::create_dir_all(workspace.path.join("UI")).expect("create ui");
+    fs::write(
+        workspace.path.join("Cargo.toml"),
+        "[package]\nname=\"root\"\n",
+    )
+    .expect("write cargo");
+    fs::write(workspace.path.join("README.md"), "# Root Readme\n").expect("write readme");
+    fs::write(
+        workspace.path.join("UI/package.json"),
+        "{\"name\":\"ui\"}\n",
+    )
+    .expect("write package");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    let request =
+        "先读 Cargo.toml 里的 package.name，再读 UI/package.json 里的 name，再看 README.md 开头";
+
+    assert!(super::has_multiple_distinct_explicit_local_path_locators(
+        &state, request, None
+    ));
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        request,
+        request,
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    assert!(
+        out.is_none(),
+        "mixed multi-target request must not auto-bind one path: {out:?}"
+    );
+}
+
+#[test]
+fn auto_locator_does_not_pick_child_from_bare_directory_and_nested_path_targets() {
+    let workspace = TempDirGuard::new("bare_directory_and_nested_path_targets");
+    fs::create_dir_all(workspace.path.join("crates/skills")).expect("create skills");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    let request = "count entries directly under crates, then count entries under crates/skills";
+
+    assert!(super::has_multiple_distinct_explicit_local_path_locators(
+        &state, request, None
+    ));
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        request,
+        request,
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    assert!(
+        out.is_none(),
+        "bare parent + nested path request must not auto-bind one path: {out:?}"
+    );
+}
+
+#[test]
+fn auto_locator_ignores_unresolved_slash_semantic_token_when_one_path_resolves() {
+    let workspace = TempDirGuard::new("single_resolved_path_with_slash_semantic");
+    let docs = workspace
+        .path
+        .join("scripts/nl_tests/fixtures/device_local/docs");
+    fs::create_dir_all(&docs).expect("create docs");
+    let target = docs.join("service_notes.md");
+    fs::write(&target, "# Service Notes\n").expect("write service notes");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    let prompt = "Read the title of ALPHA_DOC. Output only the title.";
+    let resolved = "Read the title/heading from ALPHA_DOC (scripts/nl_tests/fixtures/device_local/docs/service_notes.md) and output only the title value";
+    let combined = format!("{prompt}\n{resolved}");
+
+    assert!(super::has_multiple_explicit_local_path_locators(&combined));
+    assert!(!super::has_multiple_distinct_explicit_local_path_locators(
+        &state, &combined, None
+    ));
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        prompt,
+        resolved,
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    match out {
+        Some(super::LocatorAutoResolution::Direct(path)) => {
+            assert_eq!(
+                PathBuf::from(path)
+                    .canonicalize()
+                    .expect("canonical resolved target"),
+                target.canonicalize().expect("canonical target")
+            );
+        }
+        other => panic!("expected unique resolved path, got {other:?}"),
+    }
+}
+
+#[test]
 fn relative_explicit_file_token_scans_exact_suffix_before_parent_directory_fallback() {
     let workspace = TempDirGuard::new("relative_suffix_workspace");
     let context_root = workspace.path.join("fixtures").join("device");
@@ -467,6 +665,38 @@ fn implicit_locator_prefers_unique_direct_child_match_over_nested_stem_matches()
             );
         }
         other => panic!("expected direct root README match, got {other:?}"),
+    }
+}
+
+#[test]
+fn bare_readme_prefers_root_readme_md_over_localized_readme_variants() {
+    let root = TempDirGuard::new("prefer_root_readme_md");
+    fs::write(root.path.join("README.md"), "# root\n").expect("write root README");
+    fs::write(root.path.join("README.zh-CN.md"), "# zh\n").expect("write zh README");
+    fs::write(root.path.join("README_cn.md"), "# cn\n").expect("write cn README");
+    fs::create_dir_all(root.path.join("UI")).expect("create UI");
+    fs::write(root.path.join("UI/README.md"), "# ui\n").expect("write UI README");
+    let out = super::try_resolve_workspace_child_locator_from_text(
+        &root.path,
+        &root.path,
+        "读一下 README 然后用恰好三句话总结",
+    );
+    match out {
+        Some(path) => {
+            assert!(
+                path.ends_with("/README.md"),
+                "unexpected direct path: {path}"
+            );
+            assert!(
+                !path.contains("/README.zh-CN.md") && !path.contains("/README_cn.md"),
+                "localized README unexpectedly won: {path}"
+            );
+            assert!(
+                !path.contains("/UI/README.md"),
+                "nested README unexpectedly won: {path}"
+            );
+        }
+        other => panic!("expected direct root README.md match, got {other:?}"),
     }
 }
 

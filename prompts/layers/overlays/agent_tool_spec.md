@@ -10,7 +10,8 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 - `IMAGE_URL:<http(s)-url>` for remote image delivery
 - `VIDEO_URL:<http(s)-url>` / `FILE_URL:<http(s)-url>` / `MEDIA_URL:<http(s)-url>` for remote media delivery
 - Do not paste large file contents when explicit file delivery is requested.
-- For text artifacts that the user wants as a file/document, prefer creating a real file first via a matching filesystem planner capability such as `filesystem.write_text` / `filesystem.write_file`; use direct `write_file` or `run_cmd` only when the current contract does not expose a matching planner capability, then deliver that path with `FILE:<path>`.
+- For text artifacts that the user wants as a delivered file/document, prefer creating a real file first via a matching filesystem planner capability such as `filesystem.write_text` / `filesystem.write_file`; use direct `write_file` or `run_cmd` only when the current contract does not expose a matching planner capability, then deliver that path with `FILE:<path>`.
+- If the output contract carries `semantic_kind=generated_file_path_report`, create/save the file first, then end with a plain path-only `respond` using the exact saved path. Do not emit `FILE:<path>` for this contract.
 - If you output `FILE:<path>`, treat it as mandatory document delivery. Do not replace it with pasted content, summaries, or inline previews.
 - If a final `respond` carries delivery tokens (`FILE:<path>`, `IMAGE_FILE:<path>`, or equivalent media tokens), that `respond` must contain only standalone token lines. Do not prepend labels or append confirmation/explanation text in the same `respond`.
 - Do not hardcode a default document name/path. If the user does not provide a path, create the file first and then use the exact saved path from tool output in `FILE:<path>`.

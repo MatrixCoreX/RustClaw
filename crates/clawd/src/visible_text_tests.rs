@@ -26,6 +26,17 @@ fn sanitizes_json_escaped_ansi_and_sensitive_fields() {
 }
 
 #[test]
+fn keeps_i18n_message_key_machine_fields() {
+    let raw = "message_key=crypto.err.account_access_failed api_key=secret-token";
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert!(sanitized.contains("message_key=crypto.err.account_access_failed"));
+    assert!(sanitized.contains("api_key=[REDACTED]"));
+    assert!(!sanitized.contains("secret-token"));
+}
+
+#[test]
 fn sanitizes_structured_skill_error_payloads() {
     let raw = r#"已尝试访问文件，但执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"unknown","error_text":"archive is required","text":null}。"#;
 

@@ -4,6 +4,29 @@ use regex::Regex;
 
 const REDACTED: &str = "[REDACTED]";
 
+pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
+    const MARKERS: &[&str] = &[
+        "\n### ACTIVE_EXECUTION_ANCHOR",
+        "\n### ACTIVE_TASK",
+        "\n### ALIASES",
+        "\n### ANCHOR",
+        "\n### AUTH",
+        "\n### CAPABILITIES",
+        "\n### HINTS",
+        "\n### MEMORY",
+        "\n### RECENT",
+        "\n### RECENT_EXECUTION_CONTEXT",
+        "\n### RECENT_TURNS_FULL",
+        "\n### SESSION_ALIAS_BINDINGS",
+    ];
+    let stop = MARKERS
+        .iter()
+        .filter_map(|marker| text.find(marker))
+        .min()
+        .unwrap_or(text.len());
+    &text[..stop]
+}
+
 pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = strip_ansi_sequences(text);
     let stripped = compact_internal_json_log_lines(&stripped);
@@ -219,6 +242,9 @@ fn sensitive_key_name(key: &str) -> bool {
         .to_ascii_lowercase()
         .replace('-', "_");
     if normalized.is_empty() {
+        return false;
+    }
+    if matches!(normalized.as_str(), "message_key" | "i18n_message_key") {
         return false;
     }
     normalized == "key"

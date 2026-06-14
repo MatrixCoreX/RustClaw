@@ -1,0 +1,5 @@
+locale = "ko"
+
+[dict]
+"clawd.msg.memory.alias_remembered" = "기억했습니다"
+"clawd.msg.memory.alias_updated" = "업데이트했습니다"

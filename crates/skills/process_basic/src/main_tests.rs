@@ -27,6 +27,29 @@ fn command_output_filter_keeps_exit_and_matching_rows() {
 }
 
 #[test]
+fn ps_extra_includes_structured_running_status() {
+    let extra = ps_extra(
+        20,
+        Some("telegramd".to_string()),
+        "exit=0\nPID PPID %CPU %MEM COMM\n",
+        0,
+    );
+
+    assert_eq!(extra.get("action").and_then(Value::as_str), Some("ps"));
+    assert_eq!(
+        extra.get("filter").and_then(Value::as_str),
+        Some("telegramd")
+    );
+    assert_eq!(extra.get("match_count").and_then(Value::as_u64), Some(0));
+    assert_eq!(extra.get("process_count").and_then(Value::as_u64), Some(0));
+    assert_eq!(extra.get("running").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        extra.get("status").and_then(Value::as_str),
+        Some("not_running")
+    );
+}
+
+#[test]
 fn ss_listener_parser_extracts_scope_port_and_process() {
     let line = "LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:((\"clawd\",pid=4097222,fd=31))";
 

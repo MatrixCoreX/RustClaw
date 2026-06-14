@@ -212,7 +212,15 @@ pub(crate) fn classify_planner_artifact(text: &str) -> Option<PlannerArtifactKin
     if trimmed.is_empty() {
         return None;
     }
-    if trimmed.starts_with("[TOOL_CALL]") || trimmed.contains("[/TOOL_CALL]") {
+    if trimmed.starts_with("[TOOL_CALL]")
+        || trimmed.contains("[/TOOL_CALL]")
+        || trimmed.contains("<minimax:tool_call")
+        || trimmed.contains("</minimax:tool_call>")
+        || trimmed.contains("<invoke ")
+        || trimmed.contains("</invoke>")
+        || trimmed.contains("<parameter ")
+        || trimmed.contains("</parameter>")
+    {
         return Some(PlannerArtifactKind::ToolCallTag);
     }
     if trimmed.contains("{tool =>") && trimmed.contains("args =>") {
@@ -303,7 +311,7 @@ pub(crate) fn build_final_delivery_with_priority(
     let mut delivery_deduped: Vec<String> = Vec::new();
     for m in delivery_messages {
         let t = normalize_user_visible_text(m).trim();
-        if t.is_empty() {
+        if t.is_empty() || looks_like_planner_artifact(t) {
             continue;
         }
         if let Some(pos) = delivery_deduped.iter().position(|x| x.trim() == t) {
@@ -313,7 +321,7 @@ pub(crate) fn build_final_delivery_with_priority(
     }
     let used_last_respond = if let Some(last_respond) = last_user_visible_respond {
         let trimmed = normalize_user_visible_text(last_respond).trim();
-        if !trimmed.is_empty() {
+        if !trimmed.is_empty() && !looks_like_planner_artifact(trimmed) {
             delivery_deduped.retain(|x| x.trim() != trimmed);
             delivery_deduped.push(trimmed.to_string());
             true

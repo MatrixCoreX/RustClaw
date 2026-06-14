@@ -293,6 +293,9 @@ fn registry_manifest_exposes_planner_metadata() {
 	semantic_tags = ["sqlite_query", "SQLite_Query", "sqlite_table_listing", ""]
 	preferred_over_run_cmd = true
 	validation_actions = ["sqlite_query", "SQLITE_QUERY"]
+	once_per_task = true
+	dedup_scope = "action"
+	idempotent = false
 	runtime_skill = "system_basic"
 	runtime_action = "Inventory-Dir"
 	runtime_default_args = { names_only = true }
@@ -303,7 +306,7 @@ fn registry_manifest_exposes_planner_metadata() {
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
 	planner_capabilities = [
-	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low" },
+	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true },
 	  { name = "database::list-tables", action = "duplicate-ignored" }
 	]
 	matrix_admission = { eligible = true, declared_actions = ["List-Tables"], evidence_sources = ["structured-json"], required_extra_fields = ["extra.tables", "extra.count", "extra.tables"], extractor_kind = "Structured-Json", admission_version = "external-v1" }
@@ -323,6 +326,9 @@ fn registry_manifest_exposes_planner_metadata() {
             "sqlite_table_listing".to_string()
         ]
     );
+    assert!(reg.has_semantic_tag("db_basic", "sqlite_query"));
+    assert!(reg.has_semantic_tag("DB_BASIC", "SQLite_Query"));
+    assert!(!reg.has_semantic_tag("db_basic", "missing_tag"));
     assert!(manifest.preferred_over_run_cmd);
     assert_eq!(manifest.planner_kind, PlannerCapabilityKind::Tool);
     assert_eq!(
@@ -366,6 +372,12 @@ fn registry_manifest_exposes_planner_metadata() {
     assert_eq!(capability.optional, vec!["limit".to_string()]);
     assert_eq!(capability.risk_level, Some(SkillRiskLevel::Low));
     assert!(capability.preferred);
+    assert_eq!(capability.once_per_task, Some(false));
+    assert_eq!(capability.dedup_scope, Some(RegistryDedupScope::Args));
+    assert_eq!(capability.idempotent, Some(true));
+    assert_eq!(manifest.once_per_task, Some(true));
+    assert_eq!(manifest.dedup_scope, Some(RegistryDedupScope::Action));
+    assert_eq!(manifest.idempotent, Some(false));
     let entry = reg.get("db_basic").unwrap();
     assert_eq!(entry.semantic_tags, manifest.semantic_tags);
     assert_eq!(entry.validation_actions, manifest.validation_actions);
@@ -391,6 +403,93 @@ fn registry_manifest_exposes_planner_metadata() {
     assert_eq!(admission.admission_version.as_deref(), Some("external-v1"));
     assert!(reg.matrix_admission_eligible("db_basic", Some("list-tables")));
     assert!(!reg.matrix_admission_eligible("db_basic", Some("query")));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_defaults() {
+    let toml = r#"
+	[[skills]]
+	name = "config_edit"
+	enabled = true
+	kind = "runner"
+	risk_level = "high"
+	requires_confirmation = true
+	side_effect = true
+	once_per_task = true
+	dedup_scope = "action"
+	idempotent = false
+	planner_capabilities = [
+	  { name = "config.plan", action = "plan", effect = "observe" },
+	  { name = "config.apply", action = "apply", effect = "mutate" },
+	  { name = "config.preview", action = "preview", effect = "mutate", once_per_task = false, dedup_scope = "args", idempotent = true }
+	]
+
+	[[skills]]
+	name = "legacy_status"
+	enabled = true
+	kind = "runner"
+	side_effect = false
+
+	[[skills]]
+	name = "legacy_mutate"
+	enabled = true
+	kind = "runner"
+	risk_level = "high"
+	requires_confirmation = true
+	side_effect = true
+	"#;
+    let path = std::env::temp_dir().join("test_registry_action_governance.toml");
+    std::fs::write(&path, toml).unwrap();
+    let reg = SkillsRegistry::load_from_path(&path).unwrap();
+
+    assert!(!reg.resolved_once_per_task("config_edit", Some("plan")));
+    assert_eq!(
+        reg.resolved_dedup_scope("config_edit", Some("plan")),
+        RegistryDedupScope::Args
+    );
+    assert!(reg.resolved_idempotent("config_edit", Some("plan")));
+
+    assert!(reg.resolved_once_per_task("config_edit", Some("apply")));
+    assert_eq!(
+        reg.resolved_dedup_scope("config_edit", Some("apply")),
+        RegistryDedupScope::Action
+    );
+    assert!(!reg.resolved_idempotent("config_edit", Some("apply")));
+
+    assert!(!reg.resolved_once_per_task("config_edit", Some("preview")));
+    assert_eq!(
+        reg.resolved_dedup_scope("config_edit", Some("preview")),
+        RegistryDedupScope::Args
+    );
+    assert!(reg.resolved_idempotent("config_edit", Some("preview")));
+
+    assert!(reg.resolved_once_per_task("config_edit", Some("unknown_action")));
+    assert_eq!(
+        reg.resolved_dedup_scope("config_edit", Some("unknown_action")),
+        RegistryDedupScope::Action
+    );
+    assert!(!reg.resolved_idempotent("config_edit", Some("unknown_action")));
+
+    assert!(!reg.resolved_once_per_task("legacy_status", None));
+    assert_eq!(
+        reg.resolved_dedup_scope("legacy_status", None),
+        RegistryDedupScope::Args
+    );
+    assert!(reg.resolved_idempotent("legacy_status", None));
+
+    assert!(reg.resolved_once_per_task("legacy_mutate", None));
+    assert_eq!(
+        reg.resolved_dedup_scope("legacy_mutate", None),
+        RegistryDedupScope::Action
+    );
+    assert!(!reg.resolved_idempotent("legacy_mutate", None));
+    assert!(!reg.resolved_once_per_task("missing", None));
+    assert_eq!(
+        reg.resolved_dedup_scope("missing", None),
+        RegistryDedupScope::Args
+    );
+    assert!(!reg.resolved_idempotent("missing", None));
     let _ = std::fs::remove_file(path);
 }
 

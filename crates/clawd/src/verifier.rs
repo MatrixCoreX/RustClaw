@@ -5,6 +5,16 @@ use claw_core::skill_registry::{PrimaryFallbackRole, SkillRiskLevel};
 
 use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
 
+#[path = "verifier_structured_fields.rs"]
+mod structured_fields;
+#[path = "verifier_templates.rs"]
+mod templates;
+
+use templates::{
+    step_can_produce_output_for_template_scope, value_contains_unresolved_template,
+    TemplatePlaceholderScope,
+};
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerifyMode {
@@ -96,6 +106,32 @@ impl VerifyIssueKind {
             | Self::ContractMissing
             | Self::ContractPolicyViolation
             | Self::ContractPreferredActionAvailable => FailureAttribution::ContractGap,
+        }
+    }
+
+    pub(crate) fn reason_code(self) -> &'static str {
+        match self {
+            Self::SkillNotVisible => "verify_skill_not_visible",
+            Self::CapabilityUnavailable => "verify_capability_unavailable",
+            Self::MissingRequiredArg => "verify_missing_required_arg",
+            Self::DefaultCreationTargetApplied => "verify_default_creation_target_applied",
+            Self::UnresolvedTemplateArg => "verify_unresolved_template_arg",
+            Self::InvalidDependsOn => "verify_invalid_depends_on",
+            Self::ConfirmationRequired => "verify_confirmation_required",
+            Self::RiskBudgetExceeded => "verify_risk_budget_exceeded",
+            Self::PrimaryFallbackConflict => "verify_primary_fallback_conflict",
+            Self::RouteClarifyRequired => "verify_route_clarify_required",
+            Self::RecipeInspectBeforeMutateRequired => {
+                "verify_recipe_inspect_before_mutate_required"
+            }
+            Self::RecipeValidationAfterMutateRequired => {
+                "verify_recipe_validation_after_mutate_required"
+            }
+            Self::RecipeTargetScopeRequired => "verify_recipe_target_scope_required",
+            Self::ContractActionRejected => "verify_contract_action_rejected",
+            Self::ContractMissing => "verify_contract_missing",
+            Self::ContractPolicyViolation => "verify_contract_policy_violation",
+            Self::ContractPreferredActionAvailable => "verify_contract_preferred_action_available",
         }
     }
 }
@@ -345,6 +381,137 @@ fn apply_default_creation_targets(
     for step in &mut plan_result.steps {
         let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
         apply_default_creation_target_to_step(state, task, step, &normalized_skill, issues);
+    }
+}
+
+fn route_requires_generated_file_path_write(route: Option<&crate::RouteResult>) -> bool {
+    route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::GeneratedFilePathReport
+            && route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+            && !route.output_contract.delivery_required
+    })
+}
+
+fn plan_step_action_key(state: &AppState, step: &PlanStep) -> Option<String> {
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return None;
+    }
+    let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+    crate::contract_matrix::ActionRef::from_skill_args(&normalized_skill, &step.args)
+        .map(|action| action.as_key())
+}
+
+fn plan_has_generated_file_path_write_step(state: &AppState, plan_result: &PlanResult) -> bool {
+    plan_result.steps.iter().any(|step| {
+        plan_step_action_key(state, step).is_some_and(|action_key| {
+            crate::contract_matrix::action_matches_policy_tokens(
+                &action_key,
+                &["fs_basic.write_text".to_string()],
+            )
+        })
+    })
+}
+
+fn generated_file_path_report_target_path(
+    state: &AppState,
+    route: &crate::RouteResult,
+) -> Option<String> {
+    let hint = route.output_contract.locator_hint.trim();
+    if hint.is_empty() {
+        return None;
+    }
+    anchor_creation_path_to_workspace(state, hint)
+}
+
+fn unique_plan_step_id(plan_result: &PlanResult, base: &str) -> String {
+    let existing = plan_result
+        .steps
+        .iter()
+        .map(|step| step.step_id.as_str())
+        .collect::<HashSet<_>>();
+    if !existing.contains(base) {
+        return base.to_string();
+    }
+    for idx in 2.. {
+        let candidate = format!("{base}_{idx}");
+        if !existing.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded unique step id search")
+}
+
+fn step_can_feed_generated_file_path_write(step: &PlanStep) -> bool {
+    matches!(step.action_type.as_str(), "call_skill" | "call_tool")
+}
+
+fn generated_file_path_report_insert_index(plan_result: &PlanResult) -> Option<(usize, String)> {
+    let insert_idx = plan_result
+        .steps
+        .iter()
+        .position(|step| matches!(step.action_type.as_str(), "respond" | "synthesize_answer"))
+        .unwrap_or(plan_result.steps.len());
+    let dependency = plan_result
+        .steps
+        .iter()
+        .take(insert_idx)
+        .rev()
+        .find(|step| step_can_feed_generated_file_path_write(step))
+        .map(|step| step.step_id.clone())?;
+    Some((insert_idx, dependency))
+}
+
+fn apply_generated_file_path_report_write_repair(
+    state: &AppState,
+    route: Option<&crate::RouteResult>,
+    plan_result: &mut PlanResult,
+) {
+    if !route_requires_generated_file_path_write(route)
+        || plan_has_generated_file_path_write_step(state, plan_result)
+    {
+        return;
+    }
+    let Some(route) = route else {
+        return;
+    };
+    let Some(target_path) = generated_file_path_report_target_path(state, route) else {
+        return;
+    };
+    let Some((insert_idx, dependency)) = generated_file_path_report_insert_index(plan_result)
+    else {
+        return;
+    };
+    let step_id = unique_plan_step_id(plan_result, "contract_write_generated_file_path");
+    let write_step = PlanStep {
+        step_id: step_id.clone(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "write_text",
+            "path": target_path,
+            "content": "{{last_output}}",
+        }),
+        depends_on: vec![dependency],
+        why: "contract generated_file_path_report requires writing the observed content to the requested file before reporting its path".to_string(),
+    };
+    plan_result.steps.insert(insert_idx, write_step);
+    if !plan_result
+        .steps
+        .iter()
+        .skip(insert_idx + 1)
+        .any(|step| matches!(step.action_type.as_str(), "respond" | "synthesize_answer"))
+    {
+        let synthesize_id =
+            unique_plan_step_id(plan_result, "contract_synthesize_generated_file_path");
+        plan_result.steps.push(PlanStep {
+            step_id: synthesize_id,
+            action_type: "synthesize_answer".to_string(),
+            skill: "synthesize_answer".to_string(),
+            args: serde_json::json!({ "evidence_refs": ["last_output"] }),
+            depends_on: vec![step_id],
+            why: "contract generated_file_path_report requires a final single path answer"
+                .to_string(),
+        });
     }
 }
 
@@ -666,100 +833,6 @@ fn verify_step_args(
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct TemplatePlaceholderScope {
-    exact_refs: HashSet<String>,
-    indexable_refs: HashSet<String>,
-}
-
-impl TemplatePlaceholderScope {
-    fn register_step_output(&mut self, step: &PlanStep, step_number: usize) {
-        self.exact_refs.insert("last_output".to_string());
-        self.exact_refs.insert(format!("s{step_number}.output"));
-        self.exact_refs
-            .insert(format!("{}.last_output", step.step_id.trim()));
-        self.indexable_refs.insert("last_output".to_string());
-        self.indexable_refs.insert(format!("s{step_number}"));
-        self.indexable_refs.insert(step.step_id.trim().to_string());
-    }
-
-    fn allows(&self, raw_ref: &str) -> bool {
-        let reference = raw_ref.trim();
-        if reference.is_empty() {
-            return false;
-        }
-        if self.exact_refs.contains(reference) {
-            return true;
-        }
-        placeholder_indexable_base(reference).is_some_and(|base| self.indexable_refs.contains(base))
-    }
-}
-
-fn placeholder_indexable_base(reference: &str) -> Option<&str> {
-    let dot = reference.find('.');
-    let bracket = reference.find('[');
-    let split_at = match (dot, bracket) {
-        (Some(a), Some(b)) => a.min(b),
-        (Some(a), None) | (None, Some(a)) => a,
-        (None, None) => return None,
-    };
-    let base = reference[..split_at].trim();
-    (!base.is_empty()).then_some(base)
-}
-
-fn extract_template_refs(text: &str) -> Option<Vec<String>> {
-    let mut refs = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("{{") {
-        let after_start = &rest[start + 2..];
-        let Some(end) = after_start.find("}}") else {
-            return None;
-        };
-        let reference = after_start[..end].trim();
-        if reference.is_empty() {
-            return None;
-        }
-        refs.push(reference.to_string());
-        rest = &after_start[end + 2..];
-    }
-    Some(refs)
-}
-
-fn value_contains_unresolved_template(
-    value: &serde_json::Value,
-    template_scope: &TemplatePlaceholderScope,
-) -> bool {
-    match value {
-        serde_json::Value::String(text) => {
-            let text = text.trim();
-            if !(text.contains("{{") || text.contains("}}")) {
-                return false;
-            }
-            let Some(refs) = extract_template_refs(text) else {
-                return true;
-            };
-            refs.is_empty()
-                || refs
-                    .iter()
-                    .any(|reference| !template_scope.allows(reference))
-        }
-        serde_json::Value::Array(items) => items
-            .iter()
-            .any(|item| value_contains_unresolved_template(item, template_scope)),
-        serde_json::Value::Object(map) => map
-            .values()
-            .any(|item| value_contains_unresolved_template(item, template_scope)),
-        _ => false,
-    }
-}
-
-fn step_can_produce_output_for_template_scope(step: &PlanStep) -> bool {
-    matches!(
-        step.action_type.as_str(),
-        "call_skill" | "call_tool" | "synthesize_answer"
-    )
-}
-
 fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
     matches!(
         kind,
@@ -1064,19 +1137,14 @@ fn first_shadow_blocked_reason(issues: &[VerifyIssue]) -> Option<String> {
         .map(|issue| issue.detail.clone())
 }
 
-fn request_prefers_english(request_text: Option<&str>) -> bool {
-    request_text
-        .map(crate::language_policy::request_language_hint)
-        .is_some_and(|hint| hint == "en")
-}
-
-fn unresolved_template_response_step(request_text: Option<&str>) -> PlanStep {
-    let content = if request_prefers_english(request_text) {
-        "I need the concrete input before I can continue. Please provide the JSON array, file path, or previous result to use.".to_string()
-    } else {
-        "我还缺少要处理的具体内容。请直接提供 JSON 数组、文件路径或上一条结果后，我再继续处理。"
-            .to_string()
-    };
+fn unresolved_template_response_step(_request_text: Option<&str>) -> PlanStep {
+    let content = serde_json::json!({
+        "message_key": "clawd.msg.verify.unresolved_template_arg",
+        "reason_code": "verify_unresolved_template_arg",
+        "missing_slots": ["concrete_input"],
+        "accepted_input_kinds": ["json_array", "file_path", "previous_result"],
+    })
+    .to_string();
     PlanStep {
         step_id: "verify_unresolved_template_response".to_string(),
         action_type: "respond".to_string(),
@@ -1087,12 +1155,13 @@ fn unresolved_template_response_step(request_text: Option<&str>) -> PlanStep {
     }
 }
 
-fn unresolved_capability_response_step(request_text: Option<&str>, capability: &str) -> PlanStep {
-    let content = if request_prefers_english(request_text) {
-        format!("I cannot execute this yet because the runtime capability is not available: `{capability}`.")
-    } else {
-        format!("暂时无法执行：运行时能力未解析或不可用：`{capability}`。")
-    };
+fn unresolved_capability_response_step(_request_text: Option<&str>, capability: &str) -> PlanStep {
+    let content = serde_json::json!({
+        "message_key": "clawd.msg.verify.capability_unavailable",
+        "reason_code": "verify_capability_unavailable",
+        "capability": capability,
+    })
+    .to_string();
     PlanStep {
         step_id: "verify_unresolved_capability_response".to_string(),
         action_type: "respond".to_string(),
@@ -1112,6 +1181,18 @@ pub(crate) fn verify_plan(
     let mut effective_plan_result = input.plan_result.clone();
     let mut issues = Vec::new();
     apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
+    apply_generated_file_path_report_write_repair(
+        state,
+        input.route_result,
+        &mut effective_plan_result,
+    );
+    structured_fields::apply_structured_field_selector_repair(
+        state,
+        input.route_result,
+        input.request_text,
+        &mut effective_plan_result,
+        &mut issues,
+    );
 
     let route_requires_clarify_before_tools = input
         .route_result
@@ -1189,7 +1270,9 @@ pub(crate) fn verify_plan(
                 &normalized_skill,
                 &step.args,
             ) {
-                if !policy.is_allowed() {
+                if !policy.is_allowed()
+                    && !crate::agent_engine::action_has_user_named_output_path_marker(&step.args)
+                {
                     issues.push(VerifyIssue {
                         step_id: step.step_id.clone(),
                         kind: VerifyIssueKind::ContractActionRejected,

@@ -1,12 +1,20 @@
 use super::{
-    answer_verifier_retry_summary, evaluate_round_outcome, initial_execution_recipe_spec,
-    mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
+    answer_verifier_retry_summary, boundary_context_snapshot_json, evaluate_round_outcome,
+    initial_execution_recipe_spec, mark_reply_failed_after_answer_verifier_exhausted,
+    maybe_record_agent_decides_shadow_attribution,
+    maybe_record_agent_decides_shadow_first_action_attribution, parse_log_analyze_finding,
     should_stop_for_observed_finalize, suppress_answer_verifier_retry_if_structurally_satisfied,
+    suppress_answer_verifier_retry_if_user_locator_disambiguation,
+    try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
+    try_recover_document_heading_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
-    try_recover_log_analyze_answer_verifier_gap, try_recover_structured_count_answer_verifier_gap,
+    try_recover_http_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,
+    try_recover_rss_news_answer_verifier_gap, try_recover_structured_count_answer_verifier_gap,
+    try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
+use crate::agent_engine::support::SemanticRouteAuthority;
 use crate::{
     agent_engine::{AgentRunContext, LoopState},
     execution_recipe::{
@@ -60,6 +68,10 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         started_at: 0,
         finished_at: 0,
     }
+}
+
+fn sample_rss_news_output() -> &'static str {
+    r#"{"extra":{"action":"latest","category":"general","field_value":{"items":3,"sources_failed":0,"sources_ok":2,"titles":["What a hair loss breakthrough could mean for women like me","Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say","New NHS drug offers ovarian cancer patients more time and better quality of life"]},"item_count":3,"items":[{"date":"Wed, 03 Jun 2026 23:42:35 GMT","layer":"feed","source":"https://feeds.bbci.co.uk/news/rss.xml","source_host":"feeds.bbci.co.uk","title":"What a hair loss breakthrough could mean for women like me","topic":"other"},{"date":"Wed, 03 Jun 2026 23:40:01 +0000","layer":"feed","source":"https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml","source_host":"rss.nytimes.com","title":"Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say","topic":"macro_market"},{"date":"Wed, 03 Jun 2026 23:34:59 GMT","layer":"feed","source":"https://feeds.bbci.co.uk/news/rss.xml","source_host":"feeds.bbci.co.uk","title":"New NHS drug offers ovarian cancer patients more time and better quality of life","topic":"other"}],"mode":"category","schema_version":1,"source_count":2,"sources_failed":0,"sources_ok":2},"text":"sources_ok=2 sources_failed=0 items=3"}"#
 }
 
 fn test_task() -> ClaimedTask {
@@ -123,6 +135,39 @@ fn answer_verifier_retry_summary_respects_explicit_retry_flag() {
     let reply = AskReply::non_llm("single candidate".to_string()).with_task_journal(journal);
 
     assert!(answer_verifier_retry_summary(&reply, None).is_some());
+}
+
+#[test]
+fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() {
+    let mut route = route_result(OutputResponseShape::FileToken);
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_name","count":3,"results":["docs/a.md","docs/b.md","docs/c.md"],"root":""},"text":"{}"}"#,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["path".to_string()],
+        answer_incomplete_reason: "single file path not selected".to_string(),
+        should_retry: true,
+        retry_instruction: "wait for user locator selection".to_string(),
+        confidence: 0.88,
+    });
+    let mut reply = AskReply::non_llm("multiple candidates".to_string()).with_task_journal(journal);
+
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(
+        suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, Some(&route))
+    );
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
 }
 
 #[test]
@@ -650,6 +695,106 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
 }
 
 #[test]
+fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
+    journal.record_route_result(&route);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["source".to_string()],
+        answer_incomplete_reason: "candidate answer source did not match observed field"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "use observed source_host fields".to_string(),
+        confidence: 0.88,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "rss_fetch",
+            sample_rss_news_output(),
+        ));
+    let mut reply =
+        AskReply::non_llm("BBC; New York Times; incorrect synthesized source labels".to_string())
+            .with_task_journal(journal);
+
+    assert!(try_recover_rss_news_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+    assert!(reply.text.contains(
+        "title=New NHS drug offers ovarian cancer patients more time and better quality of life | source_host=feeds.bbci.co.uk"
+    ));
+    assert_eq!(
+        reply.text.matches("source_host=feeds.bbci.co.uk").count(),
+        2
+    );
+    assert!(reply.text.contains("source_host=rss.nytimes.com"));
+    assert!(!reply.text.contains("纽约时报"));
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
+fn rss_news_passed_verifier_preserves_observed_source_hosts() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
+    journal.record_route_result(&route);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.85,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "rss_fetch",
+            sample_rss_news_output(),
+        ));
+    let mut reply = AskReply::non_llm(
+        "BBC; New York Times; synthesized source labels without source_host tokens".to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(try_preserve_rss_source_hosts_from_structured_evidence(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+    assert!(reply.text.contains("source_host=feeds.bbci.co.uk"));
+    assert!(reply.text.contains("source_host=rss.nytimes.com"));
+    assert!(reply
+        .text
+        .contains("title=Louisiana ICE Facility Mistreated Immigrants, Federal Investigators Say | source_host=rss.nytimes.com"));
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
 fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
@@ -867,6 +1012,198 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
 }
 
 #[test]
+fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "package.json".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-scalar-recovery", "ask", "field value");
+    journal.record_route_result(&route);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate is an object".to_string(),
+        should_retry: true,
+        retry_instruction: "Return only the scalar value \"rustclaw\".".to_string(),
+        confidence: 0.95,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "/repo/package.json",
+                    "excerpt": "1|{\n2|  \"name\": \"rustclaw\",\n3|  \"private\": true,"
+                },
+                "text": "{\"action\":\"read_range\",\"path\":\"/repo/package.json\",\"excerpt\":\"1|{\\n2|  \\\"name\\\": \\\"rustclaw\\\",\\n3|  \\\"private\\\": true,\"}"
+            })
+            .to_string(),
+        ));
+    let mut reply =
+        AskReply::non_llm("{\n\"name\": \"rustclaw\",\n\"private\": true\n}".to_string())
+            .with_task_journal(journal);
+
+    assert!(
+        try_recover_structured_scalar_output_format_answer_verifier_gap(Some(&route), &mut reply)
+    );
+    assert_eq!(reply.text, "rustclaw");
+    assert_eq!(reply.messages, vec!["rustclaw"]);
+    assert!(!reply.should_fail_task);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
+fn document_heading_verifier_gap_recovers_heading_scalar_from_read_range_evidence() {
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
+    route.output_contract.locator_hint = "docs/service_notes.md".to_string();
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "read the document heading");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_answer("# Service Notes\n\nFull body");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "answer included more than the scalar value".to_string(),
+        should_retry: true,
+        retry_instruction: "return only the scalar value".to_string(),
+        confidence: 0.95,
+    });
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "docs/service_notes.md",
+                    "resolved_path": "/repo/docs/service_notes.md",
+                    "excerpt": "1|# Service Notes\n2|\n3|Body"
+                },
+                "text": "{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|Body\"}"
+            })
+            .to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut reply = AskReply::non_llm("# Service Notes\n\nFull body".to_string())
+        .with_messages(vec!["# Service Notes\n\nFull body".to_string()])
+        .with_task_journal(journal);
+
+    assert!(try_recover_document_heading_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert_eq!(reply.text, "Service Notes");
+    assert_eq!(reply.messages, vec!["Service Notes".to_string()]);
+    assert!(!reply.should_fail_task);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(
+        journal
+            .rollout_attribution
+            .last()
+            .and_then(|item| item.reason_code.as_deref()),
+        Some("document_heading_recovered_from_observed_markdown_heading")
+    );
+}
+
+#[test]
+fn alias_prebound_scalar_output_format_gap_recovers_markdown_heading() {
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_hint = "docs/release_checklist.md".to_string();
+    route.route_reason =
+        "session_alias_locator_prebound_from_current_request; machine_alias_binding".to_string();
+
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-1",
+        "ask",
+        "alias-bound scalar document heading",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_answer("# Release Checklist\n\n1. Verify configuration loads correctly.");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "answer included the whole content instead of one scalar"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "return only the scalar value".to_string(),
+        confidence: 0.97,
+    });
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "docs/release_checklist.md",
+                    "resolved_path": "/repo/docs/release_checklist.md",
+                    "excerpt": "1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly."
+                },
+                "text": "{\"action\":\"read_range\",\"excerpt\":\"1|# Release Checklist\\n2|\\n3|1. Verify configuration loads correctly.\"}"
+            })
+            .to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut reply = AskReply::non_llm(
+        "# Release Checklist\n\n1. Verify configuration loads correctly.".to_string(),
+    )
+    .with_messages(vec![
+        "# Release Checklist\n\n1. Verify configuration loads correctly.".to_string(),
+    ])
+    .with_task_journal(journal);
+
+    assert!(try_recover_document_heading_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert_eq!(reply.text, "Release Checklist");
+    assert_eq!(reply.messages, vec!["Release Checklist".to_string()]);
+    assert!(!reply.should_fail_task);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(
+        journal
+            .rollout_attribution
+            .last()
+            .and_then(|item| item.reason_code.as_deref()),
+        Some("document_heading_recovered_from_observed_markdown_heading")
+    );
+}
+
+#[test]
 fn answer_verifier_exhaustion_marks_reply_failure() {
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
@@ -892,13 +1229,116 @@ fn answer_verifier_exhaustion_marks_reply_failure() {
     assert!(reply.should_fail_task);
     assert_eq!(reply.messages.len(), 2);
     assert!(reply.messages[0].starts_with("**Execution**"));
-    assert!(reply.text.contains("Verification issue"));
+    let payload: serde_json::Value =
+        serde_json::from_str(&reply.text).expect("structured verifier failure payload");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        payload
+            .get("reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        payload
+            .pointer("/missing_evidence_fields/0")
+            .and_then(serde_json::Value::as_str),
+        Some("output_format")
+    );
     let journal = reply.task_journal.as_ref().expect("journal");
     assert_eq!(
         journal.final_status,
         Some(crate::task_journal::TaskJournalFinalStatus::Failure)
     );
     assert_eq!(journal.final_answer.as_deref(), Some(reply.text.as_str()));
+    assert_eq!(
+        journal.final_failure_attribution.as_deref(),
+        Some("contract_gap")
+    );
+}
+
+#[test]
+fn http_health_verifier_gap_recovers_with_structured_status_line() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::WebPageSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Url;
+    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+
+    let body = json!({
+        "ok": true,
+        "data": {
+            "version": "0.1.7",
+            "uptime_seconds": 1227,
+            "memory_rss_bytes": 764149760,
+            "running_length": 1,
+            "channel_gateway_healthy": false,
+            "telegram_bot_healthy": true,
+            "gateway_instance_statuses": [
+                {"kind": "telegram", "name": "primary", "healthy": false, "status": "stale"},
+                {"kind": "feishu", "name": "primary", "healthy": true, "status": "running"}
+            ]
+        },
+        "error": null
+    });
+    let output = json!({
+        "extra": {
+            "action": "get",
+            "url": "http://127.0.0.1:8787/v1/health",
+            "status_code": 200,
+            "success_status": true,
+            "body_preview": body.to_string()
+        },
+        "text": format!("status=200\n{}", body)
+    })
+    .to_string();
+
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "http_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(output),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "unsupported generated health summary".to_string(),
+        should_retry: true,
+        retry_instruction: "use only observed health fields".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply =
+        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
+
+    assert!(try_recover_http_health_answer_verifier_gap(
+        Some(&route),
+        &mut reply,
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert!(reply.text.contains("http_reachability=reachable"));
+    assert!(reply.text.contains("status_code=200"));
+    assert!(reply.text.contains("ok=true"));
+    assert!(reply.text.contains("version=0.1.7"));
+    assert!(reply.text.contains("channel_gateway_healthy=false"));
+    assert!(reply.text.contains("telegram:primary:stale:false"));
+    assert!(!reply.text.contains("memory"));
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
 }
 
 fn test_policy() -> AgentLoopGuardPolicy {
@@ -911,6 +1351,12 @@ fn test_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
+        answer_verifier_enforce_required: false,
+        semantic_route_authority: SemanticRouteAuthority::Legacy,
+        agent_decides_semantic_route: false,
+        agent_decides_migration_class: "none".to_string(),
+        registry_idempotency_guard: false,
+        structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
         multi_step_workspace: Default::default(),
@@ -919,635 +1365,603 @@ fn test_policy() -> AgentLoopGuardPolicy {
 }
 
 #[test]
-fn observed_scalar_output_can_stop_loop_without_second_round() {
+fn agent_decides_shadow_switch_records_route_snapshot_only() {
+    let mut policy = test_policy();
+    policy.agent_decides_semantic_route = true;
+    let route = route_result(OutputResponseShape::Free);
+    let task = test_task();
     let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
-    ));
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"extract_field"}),
-    }];
-    assert!(should_stop_for_observed_finalize(
+    maybe_record_agent_decides_shadow_attribution(
+        &policy,
+        &task,
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
-            ..Default::default()
+            session_alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
+                alias: "doc".to_string(),
+                target: "README.md".to_string(),
+                updated_at_ts: 1,
+            }],
+            auto_locator_path: Some("README.md".to_string()),
+            has_authoritative_deictic_anchor: true,
+            memory_context_for_execution: Some("memory_context_present".to_string()),
+            cross_turn_recent_execution_context: Some("recent_execution_present".to_string()),
+            ..AgentRunContext::default()
         }),
-        &loop_state,
-        &actions,
-    ));
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+        &mut loop_state,
+    );
+    assert_eq!(loop_state.rollout_attribution.len(), 1);
+    let attribution = &loop_state.rollout_attribution[0];
+    assert_eq!(attribution.switch_name, "agent_decides_semantic_route");
+    assert_eq!(
+        attribution.reason_code.as_deref(),
+        Some("agent_decides_shadow_not_evaluated")
+    );
+    assert_eq!(
+        attribution.old_first_layer_decision.as_deref(),
+        Some("planner_execute")
+    );
+    assert_eq!(loop_state.total_steps_executed, 0);
+    assert_eq!(loop_state.tool_calls_total, 0);
+    let boundary = attribution
+        .boundary_context
+        .as_ref()
+        .expect("boundary context should be recorded");
+    assert_eq!(
+        boundary
+            .pointer("/owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("boundary_layer")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/activation_state")
+            .and_then(serde_json::Value::as_str),
+        Some("shadow")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/ordinary_semantic_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_loop_shadow")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/normalizer_role")
+            .and_then(serde_json::Value::as_str),
+        Some("initial_hint")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/post_route_role")
+            .and_then(serde_json::Value::as_str),
+        Some("boundary_machine_gate")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/direct_answer_gate_role")
+            .and_then(serde_json::Value::as_str),
+        Some("fallback_safety_check")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/runtime_default_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("legacy_pre_agent_until_activation_gates_pass")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/confirmation/owned_by")
+            .and_then(serde_json::Value::as_str),
+        Some("plan_verifier")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/active_bindings/session_alias_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/active_bindings/auto_locator_present")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/intent_normalizer/authority_target")
+            .and_then(serde_json::Value::as_str),
+        Some("initial_hint_shadow")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/intent_normalizer/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("semantic_initial_hint")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/intent_normalizer/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/intent_normalizer/semantic_migration_target")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_loop_decision_envelope")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/intent_normalizer/current_decision")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/authority_target")
+            .and_then(serde_json::Value::as_str),
+        Some("boundary_machine_gate")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("boundary_machine_check")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/authority_target")
+            .and_then(serde_json::Value::as_str),
+        Some("fallback_safety_check")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("fallback_safety_check")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/semantic_migration_target")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
+            .and_then(serde_json::Value::as_str),
+        Some("not_observed_in_planner_shadow")
+    );
 }
 
 #[test]
-fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
+fn agent_decides_shadow_records_first_action_delta_without_execution() {
+    let mut policy = test_policy();
+    policy.agent_decides_semantic_route = true;
+    let route = route_result(OutputResponseShape::Free);
+    let task = test_task();
     let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "config_basic",
-        r#"{"action":"extract_field","exists":true,"field_path":"run_cmd.planner_kind","value_text":"tool","value":"tool","value_type":"string"}"#,
-    ));
-    let actions = vec![AgentAction::CallTool {
-        tool: "config_basic".to_string(),
-        args: json!({"action":"read_field","path":"configs/skills_registry.toml","field_path":"run_cmd.planner_kind"}),
+    loop_state.round_no = 1;
+    let actions = vec![AgentAction::CallCapability {
+        capability: "fs.read_text_range".to_string(),
+        args: json!({"path": "README.md"}),
     }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Strict)),
-            ..Default::default()
-        }),
-        &loop_state,
+    maybe_record_agent_decides_shadow_first_action_attribution(
+        &policy,
+        &task,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
         &actions,
-    ));
+        &mut loop_state,
+    );
+    assert_eq!(loop_state.rollout_attribution.len(), 1);
+    let attribution = &loop_state.rollout_attribution[0];
+    assert_eq!(attribution.event, "agent_decides_shadow_first_action");
+    assert_eq!(
+        attribution.agent_decision.as_deref(),
+        Some("call_capability")
+    );
+    assert_eq!(attribution.decision_delta.as_deref(), Some("same_gate"));
+    assert_eq!(
+        attribution.capability_delta.as_deref(),
+        Some("agent_capability_ref")
+    );
+    assert_eq!(loop_state.total_steps_executed, 0);
+    assert_eq!(loop_state.tool_calls_total, 0);
+    assert_eq!(
+        attribution
+            .boundary_context
+            .as_ref()
+            .and_then(|value| value.pointer("/budget/profile"))
+            .and_then(serde_json::Value::as_str),
+        Some("fast_read")
+    );
+    assert_eq!(
+        attribution
+            .boundary_context
+            .as_ref()
+            .and_then(|value| value.pointer("/budget/agent_decides_migration_class"))
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
 }
 
 #[test]
-fn observation_only_freeform_round_can_stop_for_observed_fallback() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "list_dir",
-        "README.md\ndocs/\ncrates/\n",
-    ));
-    let actions = vec![AgentAction::CallSkill {
-        skill: "list_dir".to_string(),
-        args: json!({"path":"."}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Free)),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn service_status_port_observation_without_direct_candidate_does_not_stop() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "process_basic",
-        "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    let actions = vec![AgentAction::CallSkill {
-        skill: "process_basic".to_string(),
-        args: json!({"action":"port_list"}),
-    }];
-
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_search",
-        r#"{"action":"find_name","count":2,"results":["README.md","USAGE.md"]}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Write a short setup note grounded in the current workspace docs".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    let actions = vec![AgentAction::CallSkill {
-        skill: "fs_search".to_string(),
-        args: json!({"action":"find_name","pattern":"README"}),
-    }];
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|## Setup"}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Write a short setup note grounded in the current workspace docs".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"read_range","path":"README.md","mode":"head","n":120}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn hidden_entries_scalar_output_can_stop_before_synthesis_followup() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "list_dir",
-        ".git\nREADME.md\n.env\nsrc\n",
-    ));
+fn boundary_context_marks_structured_field_read_migration_eligibility() {
+    let mut policy = test_policy();
+    policy.agent_decides_migration_class = "structured_field_read".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.resolved_intent = "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
-    route.output_contract.locator_hint = ".".to_string();
-    let actions = vec![
-        AgentAction::CallSkill {
-            skill: "list_dir".to_string(),
-            args: json!({"path":"."}),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        },
-    ];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/package.json".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+
+    assert_eq!(
+        boundary
+            .pointer("/budget/eligible_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_field_read")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/selected_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_field_read")
+    );
 }
 
 #[test]
-fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::planner_execute_plain();
-    route.resolved_intent = "List file names from a known directory.".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
-    route.output_contract.locator_hint = "document".to_string();
-    let actions = vec![
-        AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args: json!({"action":"list_dir","path":"/tmp/document","files_only":true,"names_only":true}),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        },
-    ];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn existence_with_path_free_output_can_stop_before_second_round() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 1;
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":1190},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "rustclaw.service".to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn missing_path_batch_facts_existence_contract_stops_before_second_round() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 1;
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Read plan/missing.md; if it is absent, search plan for related markdown files".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "plan/missing.md".to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 1;
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Read plan/missing.md; if it is absent, search plan for related markdown files".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "plan/missing.md".to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
-    }];
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn structured_keys_free_output_can_stop_before_second_round() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "llm_contract:generic_explicit_path_structured_keys".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/package.json".to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"structured_keys","path":"/tmp/package.json","field_path":"scripts"}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn extract_fields_free_output_can_stop_before_second_round() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "system_basic",
-        r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
-    ));
-    let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "llm_contract:generic_explicit_path_extract_fields".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/config.toml".to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({"action":"extract_fields","path":"/tmp/config.toml","field_paths":["database.sqlite_path","tools.allow_sudo"]}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn health_check_scalar_summary_continues_to_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.has_tool_or_skill_output = true;
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "health_check",
-        r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#,
-    ));
+fn boundary_context_marks_agent_loop_canary_authority_for_selected_class() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
+    policy.agent_decides_semantic_route = true;
+    policy.agent_decides_migration_class = "structured_field_read".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.resolved_intent =
-        "执行基础健康检查，仅提取并返回操作系统相关的关键字段，排除 RustClaw 自身的状态摘要"
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/activation_state")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_loop_canary")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/ordinary_semantic_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_loop_selected_class")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/runtime_default_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_loop_for_selected_migration_class")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/agent_loop_authority_enabled")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/chosen_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_loop_canary")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/rollback_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/selected_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_field_read")
+    );
+}
+
+#[test]
+fn agent_loop_canary_uses_agent_decision_for_selected_class() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
+    policy.agent_decides_semantic_route = true;
+    policy.agent_decides_migration_class = "structured_field_read".to_string();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.risk_ceiling = RiskCeiling::Low;
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    assert_eq!(
+        crate::agent_engine::agent_loop_authority_selected_migration_class_for_policy(
+            &policy, &route
+        ),
+        Some("structured_field_read")
+    );
+}
+
+#[test]
+fn agent_loop_canary_falls_back_to_legacy_for_unselected_class() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
+    policy.agent_decides_semantic_route = true;
+    policy.agent_decides_migration_class = "exact_path_list".to_string();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.risk_ceiling = RiskCeiling::Low;
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    assert_eq!(
+        crate::agent_engine::agent_loop_authority_selected_migration_class_for_policy(
+            &policy, &route
+        ),
+        None
+    );
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/chosen_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("legacy_pre_agent")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/rollback_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("migration_class_not_selected")
+    );
+}
+
+fn selected_migration_class_for(route: RouteResult, selected: &str) -> Option<String> {
+    let mut policy = test_policy();
+    policy.agent_decides_migration_class = selected.to_string();
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+    boundary
+        .pointer("/budget/selected_migration_class")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+#[test]
+fn boundary_context_classifies_all_low_risk_migration_tokens() {
+    let mut structured = route_result(OutputResponseShape::Scalar);
+    structured.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    structured.output_contract.locator_hint = "README.md".to_string();
+    assert_eq!(
+        selected_migration_class_for(structured, "structured_field_read").as_deref(),
+        Some("structured_field_read")
+    );
+
+    let mut exact_paths = route_result(OutputResponseShape::Strict);
+    exact_paths.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    exact_paths.output_contract.locator_hint = "docs".to_string();
+    assert_eq!(
+        selected_migration_class_for(exact_paths, "exact_path_list").as_deref(),
+        Some("exact_path_list")
+    );
+
+    let mut summary = route_result(OutputResponseShape::Free);
+    summary.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    summary.output_contract.locator_hint = "README.md".to_string();
+    assert_eq!(
+        selected_migration_class_for(summary, "bound_path_summary").as_deref(),
+        Some("bound_path_summary")
+    );
+
+    let mut recent = route_result(OutputResponseShape::OneSentence);
+    recent.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    recent.output_contract.locator_kind = OutputLocatorKind::None;
+    assert_eq!(
+        selected_migration_class_for(recent, "recent_artifacts_judgment").as_deref(),
+        Some("recent_artifacts_judgment")
+    );
+
+    let mut count = route_result(OutputResponseShape::Scalar);
+    count.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    count.output_contract.locator_hint = "docs".to_string();
+    assert_eq!(
+        selected_migration_class_for(count, "scalar_count").as_deref(),
+        Some("scalar_count")
+    );
+}
+
+#[test]
+fn boundary_context_keeps_migration_class_unselected_by_default() {
+    let policy = test_policy();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/package.json".to_string();
+    route.output_contract.requires_content_evidence = true;
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+
+    assert_eq!(
+        boundary
+            .pointer("/budget/eligible_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_field_read")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/selected_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+}
+
+#[test]
+fn boundary_context_classifies_pre_agent_gate_machine_summary() {
+    let policy = test_policy();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.route_reason =
+        "clarify_reason_code:missing_read_target; direct_answer_gate_unbound_deictic_clarify"
             .to_string();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "health_check".to_string(),
-        args: json!({}),
-    }];
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
+    route.output_contract.requires_content_evidence = true;
 
-#[test]
-fn recipe_waiting_for_validation_does_not_stop_on_observed_output() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        validation_required: true,
-        saw_mutation: true,
-        ..Default::default()
-    };
-    loop_state.has_tool_or_skill_output = true;
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "configuration updated\n"));
-    let actions = vec![AgentAction::CallSkill {
-        skill: "run_cmd".to_string(),
-        args: json!({"command":"cat ./config.json"}),
-    }];
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Free)),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn recipe_inspect_stage_does_not_stop_on_observed_output() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Inspect,
-        inspect_first: true,
-        validation_required: true,
-        ..Default::default()
-    };
-    loop_state.has_tool_or_skill_output = true;
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "list_dir", "index.html\n"));
-    let actions = vec![AgentAction::CallSkill {
-        skill: "list_dir".to_string(),
-        args: json!({"path":"document/nl_ops_http_demo"}),
-    }];
-    assert!(!should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn recipe_done_does_not_scan_user_text_for_success_marker() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Done,
-        inspect_first: true,
-        validation_required: true,
-        saw_inspect: true,
-        saw_mutation: true,
-        saw_validation: true,
-        ..Default::default()
-    };
-    loop_state.has_tool_or_skill_output = true;
-    loop_state
-        .executed_step_results
-        .push(ok_step("step_1", "run_cmd", "ops-demo-ok\n"));
-    let actions = vec![AgentAction::CallSkill {
-        skill: "run_cmd".to_string(),
-        args: json!({"command":"curl -s http://127.0.0.1:52752/ | grep -o ops-demo-ok"}),
-    }];
-    assert!(should_stop_for_observed_finalize(
-        Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
-            user_request: Some(
-                "验证通过时请明确输出 VALIDATION_PASSED，然后直接结束。".to_string()
-            ),
-            ..Default::default()
-        }),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn recoverable_recipe_failure_continues_next_round_and_keeps_repair_count() {
-    let task = test_task();
-    let policy = test_policy();
-    let mut loop_state = LoopState::new(4);
-    loop_state.round_no = 1;
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Repair,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 3,
-        repair_count: 1,
-        saw_inspect: true,
-        saw_mutation: true,
-        saw_validation: false,
-        ..Default::default()
-    };
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("repair sing-box".to_string()),
-        no_progress: false,
-    };
-    assert!(!evaluate_round_outcome(
-        &task,
-        &mut loop_state,
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
         &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.execution_recipe.repair_count, 1);
+        Some(&AgentRunContext {
+            fuzzy_locator_suggestions: vec!["README.md".to_string()],
+            ..AgentRunContext::default()
+        }),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+
     assert_eq!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Repair
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/boundary_class")
+            .and_then(serde_json::Value::as_str),
+        Some("locator_fuzzy_candidates")
     );
-    assert_eq!(loop_state.consecutive_no_progress, 0);
-}
-
-#[test]
-fn recoverable_failure_at_round_cap_extends_loop_once() {
-    let task = test_task();
-    let mut policy = test_policy();
-    policy.max_rounds = 2;
-    policy.recoverable_failure_extra_rounds = 1;
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 2;
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("try alternate locator".to_string()),
-        no_progress: false,
-    };
-
-    assert!(!evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.max_rounds, 3);
-    assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
-}
-
-#[test]
-fn recoverable_failure_extra_round_exhaustion_stops() {
-    let task = test_task();
-    let mut policy = test_policy();
-    policy.max_rounds = 2;
-    policy.recoverable_failure_extra_rounds = 1;
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 2;
-    loop_state.recoverable_failure_extra_rounds_used = 1;
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: Some("try alternate locator".to_string()),
-        no_progress: false,
-    };
-
-    assert!(evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.max_rounds, 2);
-    assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
-}
-
-#[test]
-fn exhausted_recipe_budget_stops_next_round() {
-    let task = test_task();
-    let policy = test_policy();
-    let mut loop_state = LoopState::new(4);
-    loop_state.round_no = 2;
-    loop_state.execution_recipe = ExecutionRecipeRuntimeState {
-        kind: ExecutionRecipeKind::OpsClosedLoop,
-        phase: crate::execution_recipe::ExecutionRecipePhase::Repair,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 2,
-        repair_count: 3,
-        saw_inspect: true,
-        saw_mutation: true,
-        saw_validation: false,
-        ..Default::default()
-    };
-    let outcome = RoundOutcome {
-        executed_actions: 1,
-        had_error: false,
-        stop_signal: Some("recipe_repair_budget_exhausted".to_string()),
-        next_goal_hint: None,
-        no_progress: false,
-    };
-    assert!(evaluate_round_outcome(
-        &task,
-        &mut loop_state,
-        &policy,
-        &outcome
-    ));
-    assert_eq!(loop_state.execution_recipe.repair_count, 3);
     assert_eq!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Repair
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("boundary_machine_check")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/semantic_migration_target")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/post_route_policy/fuzzy_locator_suggestion_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/observed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/observation_class")
+            .and_then(serde_json::Value::as_str),
+        Some("legacy_gate_observed")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
+            .and_then(serde_json::Value::as_str),
+        Some("locator_binding_fallback")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
     );
 }
 
 #[test]
-fn explicit_execution_recipe_hint_takes_priority_over_local_detection() {
-    let spec = initial_execution_recipe_spec(
-        "configure sing-box and verify the proxy works",
-        "configure sing-box and verify the proxy works",
-        Some(&AgentRunContext {
-            execution_recipe_hint: Some(ExecutionRecipeSpec {
-                kind: ExecutionRecipeKind::OpsClosedLoop,
-                profile: ExecutionRecipeProfile::CodeChange,
-                target_scope: ExecutionRecipeTargetScope::Greenfield,
-                inspect_first: true,
-                validation_required: true,
-                max_repairs: 2,
-            }),
-            route_result: Some(route_result(OutputResponseShape::Free)),
-            user_request: Some("configure sing-box and verify the proxy works".to_string()),
-            ..Default::default()
-        }),
+fn boundary_context_marks_direct_answer_execution_promotion_as_planner_migration_debt() {
+    let policy = test_policy();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.route_reason = "direct_answer_gate_contract_execute".to_string();
+    route.output_contract.requires_content_evidence = true;
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
     );
-    assert_eq!(spec.profile, ExecutionRecipeProfile::CodeChange);
-    assert_eq!(spec.target_scope, ExecutionRecipeTargetScope::Greenfield);
+
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
+            .and_then(serde_json::Value::as_str),
+        Some("semantic_execution_promotion")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("semantic_policy_candidate")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/semantic_migration_target")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_loop_decision_envelope")
+    );
 }
+
+#[path = "loop_control_tests/observed_finalize.rs"]
+mod observed_finalize;

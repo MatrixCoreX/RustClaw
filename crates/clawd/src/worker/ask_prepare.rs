@@ -6,6 +6,26 @@ use tracing::info;
 
 use crate::{schedule_service, AppState};
 
+#[path = "ask_prepare_field_contract.rs"]
+mod field_contract;
+#[path = "ask_prepare_file_delivery.rs"]
+mod file_delivery;
+#[path = "ask_prepare_ordered_entry.rs"]
+mod ordered_entry;
+use field_contract::{
+    repair_scalar_field_value_contract_for_locator_reply,
+    repair_structured_field_target_from_prompt,
+};
+pub(super) use file_delivery::repair_structural_file_delivery_resolution;
+use file_delivery::{
+    append_active_delivery_content_target_token, bind_content_read_to_active_delivery_target,
+    clear_file_delivery_contract_for_filename_only, route_reason_has_structural_marker,
+    route_requests_file_delivery,
+};
+use ordered_entry::{
+    bind_ordered_entry_reference_from_active_frame, has_ordered_entry_state_patch,
+};
+
 pub(super) struct PreparedAskExecutionContext {
     pub(super) context_bundle: crate::task_context_builder::TaskContextBundle,
     pub(super) chat_prompt_context: String,
@@ -22,9 +42,6 @@ pub(super) struct PreparedAskRouting {
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) resolved_prompt: String,
     pub(super) agent_mode: bool,
-    /// Final runtime ask mode after first-layer routing and resume overrides.
-    /// All dispatch branches should use `ask_mode` predicates.
-    pub(super) ask_mode: crate::AskMode,
 }
 
 pub(super) struct PreparedAskInput {
@@ -93,7 +110,7 @@ fn merged_prompt_from_task_turn_analysis(
             prior_output.as_deref(),
             current,
             structured_patch.as_deref(),
-            "Keep the same task, but treat the new instruction as a correction that overrides conflicting earlier details.",
+            "Keep the same task, but treat the new instruction as a correction that overrides conflicting earlier details. Return the corrected deliverable itself, not a description of what should change.",
         )),
         (
             crate::intent_router::TurnType::TaskScopeUpdate,
@@ -120,24 +137,31 @@ fn merged_prompt_from_task_turn_analysis(
 
 fn task_turn_merge_prior_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> (Option<&str>, Option<&str>) {
+    _latest_assistant_output: Option<&str>,
+) -> (Option<String>, Option<String>) {
     if let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() {
         let prompt = non_empty_str(&clarify_state.source_request);
         let output = non_empty_str(&clarify_state.pending_question);
         if prompt.is_some() || output.is_some() {
-            return (prompt, output);
+            return (
+                prompt.map(ToString::to_string),
+                output.map(ToString::to_string),
+            );
         }
     }
-    (
-        session_snapshot
-            .conversation_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_prompt.as_deref()),
-        session_snapshot
-            .conversation_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_output.as_deref()),
-    )
+    let prompt = session_snapshot
+        .conversation_state
+        .as_ref()
+        .and_then(|state| state.last_primary_task_prompt.as_deref())
+        .and_then(non_empty_str)
+        .map(ToString::to_string);
+    let primary_output = session_snapshot
+        .conversation_state
+        .as_ref()
+        .and_then(|state| state.last_primary_task_output.as_deref())
+        .and_then(non_empty_str);
+    let output = primary_output.map(ToString::to_string);
+    (prompt, output)
 }
 
 fn non_empty_str(value: &str) -> Option<&str> {
@@ -222,7 +246,7 @@ fn merged_reuse_active_prompt(
     let recent_output_block = prior_output
         .map(|output| format!("\n\nMost recent generated output:\n{output}"))
         .unwrap_or_default();
-    let continuity_rules = "\n\nContinuity rules:\n- Preserve all active prior subject, scope, audience, tone, key facts, and safety constraints unless the new instruction explicitly overrides them.\n- Continuity does not preserve reply language when the current turn has a clear language. The current user instruction's language hint remains authoritative; translate or rewrite the prior deliverable into that language while preserving facts, scope, and format.\n- Treat the latest output-shape constraints as highest priority: exact bullet/table row counts, word/character limits, and output-only/body-only requests must be followed.\n- For table requests, row counts mean data rows only, excluding the header and separator. A two-row table must contain exactly two data rows.\n- When the latest instruction specifies a table, bullet count, final sentence, body-only, or another exact output shape, emit only that requested shape; do not append explanatory notes or summaries outside it.\n- For a latest length limit, compress the deliverable body comfortably below the stated limit instead of preserving all prior coverage. Runtime-visible process/execution framing is separate from the deliverable body and must not be used as an excuse to exceed the requested body length.\n- A format/count-only change must not broaden a narrowed scope. If an exact count needs more items than the recent output has, split, combine, or elaborate within the current scope instead of adding unrelated categories.\n- If the most recent generated output is a clarification question, visibly incomplete, starts mid-document, or relies on a continued marker, do not preserve its question shape, broken numbering, continuation marker, or fragment boundary. Rebuild a coherent compact deliverable for the current task scope and latest instruction, while preserving valid facts and constraints.\n- Style or quality feedback means rewrite the deliverable itself. Do not answer with meta-commentary like \"it already meets that\" unless the user explicitly asks for evaluation.\n- Do not invent unobserved project setup, channel setup, integration commands, package names, dependency lines, version numbers, paths, or configuration values. If such details are not provided or observed, keep them neutral/generic or say to follow the repo's documented setup path.\n- For a project-specific setup/deployment/channel-integration note with no observed setup evidence, do not include command blocks, backticked command invocations, package names, fake CLI steps, settings-file claims, or assigned installer roles. If recent output already contains unsupported setup commands or setup artifacts, remove or replace them with neutral documented-path wording instead of preserving them.\n- When rewriting setup/deployment/channel-setup/onboarding text for a simpler audience, do not introduce alternate OS scripts, download methods, websites, ports, Bot platforms, API-key locations, installer roles, or launch commands unless they already appear in recent output or authoritative context. Do not present shell scripts (.sh) as GUI-only actions unless that GUI flow was explicitly observed. Simplify by replacing commands with neutral documented-step wording, not by inventing easier-looking steps.\n- When shortening, reformatting, or asking for the final sentence/body, synthesize a complete standalone answer from the current task and recent output. Do not return only a heading, label, dangling fragment, or trailing sentence if that would drop required facts.\n- If the recent output is a clarification question and the new instruction only adds constraints without answering the missing slot, do not repeat the same clarification indefinitely. For low-risk writing or chat-only drafting tasks, produce a best-effort draft using a neutral, reasonable assumption. For file, code, command, system, credential, delivery, or other concrete-action tasks, keep clarifying instead of guessing.";
+    let continuity_rules = "\n\nContinuity rules:\n- Preserve all active prior subject, scope, audience, tone, key facts, and safety constraints unless the new instruction explicitly overrides them.\n- Continuity does not preserve reply language when the current turn has a clear language. The current user instruction's language hint remains authoritative; translate or rewrite the prior deliverable into that language while preserving facts, scope, and format.\n- Treat the latest output-shape constraints as highest priority: exact bullet/table row counts, exact line counts, word/character limits, and output-only/body-only requests must be followed.\n- Exact line counts mean physical non-empty newline-separated lines. If the latest rewrite keeps the same items but removes list markers or asks for plain body lines, remove the markers while preserving one prior item per line; do not merge those items into one paragraph. Plain body line output uses no bullet or numbered prefixes unless the current instruction asks for list markers.\n- For table requests, row counts mean data rows only, excluding the header and separator. A two-row table must contain exactly two data rows.\n- When the latest instruction specifies a table, bullet count, exact line count, final sentence, body-only, or another exact output shape, emit only that requested shape; do not append explanatory notes or summaries outside it.\n- For a latest length limit, compress the deliverable body comfortably below the stated limit instead of preserving all prior coverage. Runtime-visible process/execution framing is separate from the deliverable body and must not be used as an excuse to exceed the requested body length.\n- A format/count-only change must not broaden a narrowed scope. If an exact count needs more items than the recent output has, split, combine, or elaborate within the current scope instead of adding unrelated categories.\n- If the most recent generated output is a clarification question, visibly incomplete, starts mid-document, or relies on a continued marker, do not preserve its question shape, broken numbering, continuation marker, or fragment boundary. Rebuild a coherent compact deliverable for the current task scope and latest instruction, while preserving valid facts and constraints.\n- Style or quality feedback means rewrite the deliverable itself. Do not answer with meta-commentary like \"it already meets that\" unless the user explicitly asks for evaluation.\n- Do not invent unobserved project setup, channel setup, integration commands, package names, dependency lines, version numbers, paths, configuration values, setup/configuration methods, project-doc references, official-doc references, or support/contact recommendations. If such details are not provided or observed, keep them neutral/generic and preserve the evidence boundary; do not direct the user to project docs unless the recent output or authoritative context already observed setup-relevant content from those docs.\n- Preserve evidence-source labels. Do not rewrite an observed README excerpt into official docs, docs, documentation, or a generic project-documentation source unless that source label was already present in the most recent generated output or authoritative context.\n- Preserve channel surfaces as surfaces. Do not rewrite browser UI into a browser chat window or supported channel names into claims about apps the reader probably uses unless that usage scenario was already present.\n- For a project-specific setup/deployment/channel-integration note with no observed setup evidence, do not include command blocks, backticked command invocations, package names, fake CLI steps, settings-file claims, assigned installer roles, support/contact recommendations, or unobserved documentation references. If recent output already contains unsupported setup commands or setup artifacts, remove them or replace them with neutral evidence-boundary wording instead of preserving them.\n- When rewriting setup/deployment/channel-setup/onboarding text for a simpler audience, do not introduce alternate OS scripts, download methods, websites, ports, Bot platforms, API-key locations, installer roles, support contacts, or launch commands unless they already appear in recent output or authoritative context. Do not present shell scripts (.sh) as GUI-only actions unless that GUI flow was explicitly observed. Simplify by replacing commands with neutral evidence-boundary wording, not by inventing easier-looking steps.\n- When shortening, reformatting, or asking for the final sentence/body, synthesize a complete standalone answer from the current task and recent output. Do not return only a heading, label, dangling fragment, or trailing sentence if that would drop required facts.\n- If the recent output is a clarification question and the new instruction only adds constraints without answering the missing slot, do not repeat the same clarification indefinitely. For low-risk writing or chat-only drafting tasks, produce a best-effort draft using a neutral, reasonable assumption. For file, code, command, system, credential, delivery, or other concrete-action tasks, keep clarifying instead of guessing.";
     match structured_patch {
         Some(patch) => format!(
             "Current task:\n{prior}{recent_output_block}{continuity_rules}\n\nStructured task updates:\n{patch}\n\n{merge_instruction}\nNew user instruction:\n{current}"
@@ -314,6 +338,7 @@ pub(super) async fn prepare_ask_execution_context(
     payload: &Value,
     route_result: &crate::RouteResult,
     resolved_prompt: &str,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> anyhow::Result<PreparedAskExecutionContext> {
     let chat_memory_budget_chars =
         crate::dynamic_chat_memory_budget_chars(state, task, resolved_prompt);
@@ -323,6 +348,7 @@ pub(super) async fn prepare_ask_execution_context(
         route_result,
         resolved_prompt,
         chat_memory_budget_chars,
+        turn_analysis,
     );
     let execution_view = context_bundle
         .execution_view
@@ -533,6 +559,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "hidden_entries_check" => Some(crate::OutputSemanticKind::HiddenEntriesCheck),
         "execution_failed_step" => Some(crate::OutputSemanticKind::ExecutionFailedStep),
         "generated_file_delivery" => Some(crate::OutputSemanticKind::GeneratedFileDelivery),
+        "generated_file_path_report" => Some(crate::OutputSemanticKind::GeneratedFilePathReport),
         "filesystem_mutation_result" => Some(crate::OutputSemanticKind::FilesystemMutationResult),
         "recent_scalar_equality_check" => {
             Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
@@ -582,340 +609,6 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
     }
 }
 
-fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
-    route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
-        || matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
-}
-
-fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
-    !route_result.output_contract.locator_hint.trim().is_empty()
-        || matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Url
-        )
-}
-
-fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) -> bool {
-    route_requests_file_delivery(route_result)
-        && route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::GeneratedFileDelivery
-        && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
-        && route_result.output_contract.response_shape == crate::OutputResponseShape::FileToken
-}
-
-fn normalize_output_shape_text(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect::<String>()
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-fn json_value_requests_filename_only_output(value: &Value) -> bool {
-    match value {
-        Value::String(text) => matches!(
-            normalize_output_shape_text(text).as_str(),
-            "filename"
-                | "file_name"
-                | "basename"
-                | "filename_only"
-                | "file_name_only"
-                | "basename_only"
-        ),
-        Value::Array(items) => items.iter().any(json_value_requests_filename_only_output),
-        Value::Object(map) => map.iter().any(|(key, value)| {
-            matches!(
-                normalize_output_shape_text(key).as_str(),
-                "output_format" | "output_shape" | "format" | "answer_format" | "delivery_format"
-            ) && json_value_requests_filename_only_output(value)
-        }),
-        _ => false,
-    }
-}
-
-fn turn_analysis_requests_filename_only_output(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> bool {
-    turn_analysis
-        .and_then(|analysis| analysis.state_patch.as_ref())
-        .is_some_and(json_value_requests_filename_only_output)
-}
-
-fn clear_file_delivery_contract_for_filename_only(
-    route_result: &mut crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) {
-    if !turn_analysis_requests_filename_only_output(turn_analysis) {
-        return;
-    }
-    route_result.wants_file_delivery = false;
-    route_result.output_contract.delivery_required = false;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    if matches!(
-        route_result.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) {
-        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    }
-    route_result
-        .route_reason
-        .push_str("; filename_only_output_clears_file_delivery_contract");
-}
-
-fn json_usize(value: &Value) -> Option<usize> {
-    value
-        .as_u64()
-        .and_then(|raw| usize::try_from(raw).ok())
-        .or_else(|| value.as_i64().and_then(|raw| usize::try_from(raw).ok()))
-}
-
-fn json_i64(value: &Value) -> Option<i64> {
-    value
-        .as_i64()
-        .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
-}
-
-fn ordered_entry_index_from_state_patch(
-    state_patch: Option<&Value>,
-    frame: &crate::followup_frame::FollowupFrame,
-) -> Option<usize> {
-    let len = frame.ordered_entries.len();
-    if len == 0 {
-        return None;
-    }
-    let reference = state_patch?
-        .get("ordered_entry_ref")
-        .or_else(|| state_patch?.get("ordered_entry_reference"))?;
-    let reference = reference.as_object()?;
-    if let Some(index_value) = reference.get("index") {
-        let index = json_usize(index_value)?;
-        let index_base = reference
-            .get("index_base")
-            .and_then(json_usize)
-            .unwrap_or(1);
-        let zero_based_index = index.checked_sub(index_base)?;
-        return (zero_based_index < len).then_some(zero_based_index);
-    }
-
-    let offset = reference
-        .get("relative_offset")
-        .or_else(|| reference.get("offset_from_selected"))
-        .and_then(json_i64)?;
-    let selected = i64::try_from(frame.selected_entry_index?).ok()?;
-    let target = selected.checked_add(offset)?;
-    usize::try_from(target).ok().filter(|index| *index < len)
-}
-
-fn ordered_entry_state_patch(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> Option<&Value> {
-    turn_analysis.and_then(|analysis| analysis.state_patch.as_ref())
-}
-
-fn has_ordered_entry_state_patch(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> bool {
-    ordered_entry_state_patch(turn_analysis).is_some_and(|state_patch| {
-        state_patch.get("ordered_entry_ref").is_some()
-            || state_patch.get("ordered_entry_reference").is_some()
-    })
-}
-
-fn ordered_entry_reference_from_active_frame_index(
-    route_result: &mut crate::RouteResult,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-    index: usize,
-) -> bool {
-    let Some(frame) = session_snapshot.active_followup_frame.as_ref() else {
-        return false;
-    };
-    let Some(target) = crate::followup_frame::ordered_entry_target_at(frame, index) else {
-        return false;
-    };
-    if target.trim().is_empty() {
-        return false;
-    }
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = target.clone();
-    if route_result.route_reason.trim().is_empty() {
-        route_result.route_reason = "ordered_entry_reference_bound_from_active_frame".to_string();
-    } else if !route_result
-        .route_reason
-        .contains("ordered_entry_reference_bound_from_active_frame")
-    {
-        route_result
-            .route_reason
-            .push_str("; ordered_entry_reference_bound_from_active_frame");
-    }
-    if route_result.resolved_intent.trim().is_empty() {
-        route_result.resolved_intent = format!("Use ordered entry {}: {target}", index + 1);
-    } else if !route_result.resolved_intent.contains(&target) {
-        route_result
-            .resolved_intent
-            .push_str(&format!("\nordered_entry_target: {target}"));
-    }
-    true
-}
-
-fn bind_ordered_entry_reference_from_active_frame(
-    route_result: &mut crate::RouteResult,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> bool {
-    let supported_ordered_entry_contract = route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || (route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
-            && route_result.output_contract.semantic_kind
-                == crate::OutputSemanticKind::ScalarPathOnly);
-    if route_result.needs_clarify
-        || !route_result.is_execute_gate()
-        || !supported_ordered_entry_contract
-        || !has_ordered_entry_state_patch(turn_analysis)
-    {
-        return false;
-    }
-    let Some(frame) = session_snapshot.active_followup_frame.as_ref() else {
-        return false;
-    };
-    let Some(index) =
-        ordered_entry_index_from_state_patch(ordered_entry_state_patch(turn_analysis), frame)
-    else {
-        return false;
-    };
-    ordered_entry_reference_from_active_frame_index(route_result, session_snapshot, index)
-}
-
-fn active_read_bound_target(
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> Option<String> {
-    session_snapshot
-        .active_observed_facts
-        .as_ref()
-        .and_then(|facts| facts.bound_target.as_deref())
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-        .map(ToString::to_string)
-        .or_else(|| {
-            session_snapshot
-                .active_followup_frame
-                .as_ref()
-                .filter(|frame| {
-                    matches!(frame.op_kind, crate::followup_frame::FollowupOpKind::Read)
-                })
-                .and_then(|frame| frame.bound_target.as_deref())
-                .map(str::trim)
-                .filter(|target| !target.is_empty())
-                .map(ToString::to_string)
-        })
-}
-
-fn bind_structural_file_delivery_to_recent_read_target(
-    route_result: &mut crate::RouteResult,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> bool {
-    if !route_requests_file_delivery(route_result)
-        || route_result.needs_clarify
-        || file_delivery_has_concrete_locator(route_result)
-    {
-        return false;
-    }
-    let Some(bound_target) = active_read_bound_target(session_snapshot) else {
-        return false;
-    };
-    route_result.needs_clarify = false;
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
-    if route_result.resolved_intent.trim().is_empty() {
-        route_result.resolved_intent = format!("file_delivery_target: {bound_target}");
-    } else if !route_result.resolved_intent.contains(&bound_target) {
-        route_result
-            .resolved_intent
-            .push_str(&format!("\nfile_delivery_target: {bound_target}"));
-    }
-    route_result.clarify_question.clear();
-    route_result.wants_file_delivery = true;
-    route_result.output_contract.delivery_required = true;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route_result.output_contract.requires_content_evidence = false;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route_result.output_contract.locator_hint = bound_target;
-    route_result
-        .route_reason
-        .push_str("; structural_file_delivery_bound_to_recent_read_target");
-    true
-}
-
-fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
-    route_result.needs_clarify = true;
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
-    route_result.clarify_question = "请提供要发送的文件路径或文件名。".to_string();
-    route_result.wants_file_delivery = false;
-    route_result.output_contract.delivery_required = false;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route_result.output_contract.requires_content_evidence = false;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route_result.output_contract.locator_hint.clear();
-    route_result
-        .route_reason
-        .push_str("; unresolved_file_delivery_requires_clarify");
-}
-
-fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
-    route_result.needs_clarify = false;
-    if route_result.is_clarify_gate() {
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
-    }
-    route_result.clarify_question.clear();
-    route_result.wants_file_delivery = true;
-    route_result.output_contract.delivery_required = true;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route_result.output_contract.requires_content_evidence = true;
-    if matches!(
-        route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    ) {
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    }
-    route_result
-        .route_reason
-        .push_str("; generated_file_delivery_allows_runtime_target");
-}
-
-fn repair_structural_file_delivery_resolution(
-    route_result: &mut crate::RouteResult,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) {
-    if !route_requests_file_delivery(route_result) {
-        return;
-    }
-    if generated_file_delivery_can_choose_target(route_result) {
-        allow_generated_file_delivery_without_locator(route_result);
-        return;
-    }
-    if file_delivery_has_concrete_locator(route_result) {
-        return;
-    }
-    if bind_structural_file_delivery_to_recent_read_target(route_result, session_snapshot) {
-        return;
-    }
-    force_unresolved_file_delivery_clarify(route_result);
-}
-
 fn preserve_active_clarify_output_contract_for_locator_reply(
     route_result: &mut crate::RouteResult,
     clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
@@ -926,9 +619,6 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     else {
         return;
     };
-    if active_clarify_locator_reply_is_structured_payload(&hit.current_user_text) {
-        return;
-    }
     let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() else {
         return;
     };
@@ -937,12 +627,15 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     }
     let prior_shape = parse_clarify_state_response_shape(clarify_state.output_shape.as_deref());
     let prior_semantic = parse_clarify_state_semantic_kind(clarify_state.semantic_kind.as_deref());
+    let prior_selector = crate::clarify_state::structured_field_selector_token_from_text(
+        &clarify_state.source_request,
+    );
     let prior_requested_file_delivery = clarify_state.delivery_required
         || matches!(prior_shape, Some(crate::OutputResponseShape::FileToken));
     if prior_requested_file_delivery {
         return;
     }
-    if prior_shape.is_none() && prior_semantic.is_none() {
+    if prior_shape.is_none() && prior_semantic.is_none() && prior_selector.is_none() {
         return;
     }
 
@@ -967,6 +660,8 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
         prior_shape.filter(|shape| !matches!(shape, crate::OutputResponseShape::FileToken))
     {
         route_result.output_contract.response_shape = shape;
+    } else if prior_selector.is_some() {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     } else if current_requested_file_delivery {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
     }
@@ -981,9 +676,70 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
             .route_reason
             .push_str("; drop_untrusted_locator_reply_semantic_kind");
     }
+    if let Some(selector) = prior_selector {
+        if route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .is_none()
+        {
+            route_result
+                .output_contract
+                .self_extension
+                .structured_field_selector = Some(selector);
+            route_result
+                .route_reason
+                .push_str("; preserve_active_clarify_structured_field_selector");
+        }
+    }
     route_result
         .route_reason
         .push_str("; preserve_active_clarify_output_contract");
+}
+
+fn promote_active_clarify_structured_payload_reply_to_execute(
+    route_result: &mut crate::RouteResult,
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) {
+    let crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(hit) =
+        clarify_followup_resolution
+    else {
+        return;
+    };
+    let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() else {
+        return;
+    };
+    if hit.prior_user_text.trim() != clarify_state.source_request.trim() {
+        return;
+    }
+    if !active_clarify_locator_reply_is_structured_payload(&hit.current_user_text) {
+        return;
+    }
+    let prior_shape = parse_clarify_state_response_shape(clarify_state.output_shape.as_deref());
+    let prior_semantic = parse_clarify_state_semantic_kind(clarify_state.semantic_kind.as_deref());
+    if clarify_state.delivery_required
+        || matches!(prior_shape, Some(crate::OutputResponseShape::FileToken))
+        || (prior_shape.is_none() && prior_semantic.is_none())
+    {
+        return;
+    }
+
+    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route_result.needs_clarify = false;
+    route_result.clarify_question.clear();
+    route_result.resolved_intent = hit.resolved_intent.clone();
+    route_result.wants_file_delivery = false;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route_result.output_contract.requires_content_evidence = false;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result
+        .route_reason
+        .push_str("; active_clarify_structured_payload_execute");
 }
 
 fn active_clarify_locator_reply_is_structured_payload(text: &str) -> bool {
@@ -1162,48 +918,6 @@ fn path_basename_looks_like_file(path: &str) -> bool {
         && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
-fn route_reason_has_structural_marker(route_result: &crate::RouteResult, marker: &str) -> bool {
-    route_result
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .any(|part| {
-            part == marker
-                || part
-                    .rsplit_once(':')
-                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
-        })
-}
-
-fn repair_scalar_field_value_contract_for_locator_reply(route_result: &mut crate::RouteResult) {
-    if route_result.needs_clarify
-        || route_result.output_contract.delivery_required
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::StructuredKeys
-        || !route_result.output_contract.requires_content_evidence
-        || !matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        )
-    {
-        return;
-    }
-    let marker_matches_field_value_request = [
-        "contract_valid_minor_repair_fields_only",
-        "single_path_field_extraction_semantic_kind_none_is_valid",
-        "structured_field_selector_requires_scalar_value",
-        "structured_keys_scalar_response_requires_field_value",
-    ]
-    .iter()
-    .any(|marker| route_reason_has_structural_marker(route_result, marker));
-    if !marker_matches_field_value_request {
-        return;
-    }
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route_result
-        .route_reason
-        .push_str("; scalar_field_value_contract_repair");
-}
-
 fn active_clarify_existing_workspace_locator_reply(
     workspace_root: &Path,
     default_search_dir: &Path,
@@ -1214,7 +928,7 @@ fn active_clarify_existing_workspace_locator_reply(
     if clarify_state.missing_slot != crate::clarify_state::ClarifyMissingSlot::Locator {
         return None;
     }
-    if !active_clarify_state_has_structural_binding_contract(clarify_state) {
+    if !active_clarify_state_allows_locator_reply_resolution(clarify_state) {
         return None;
     }
     let locator = prompt.trim();
@@ -1248,6 +962,16 @@ fn active_clarify_state_has_structural_binding_contract(
     clarify_state.delivery_required
         || clarify_state.output_shape.is_some()
         || clarify_state.semantic_kind.is_some()
+        || crate::clarify_state::structured_field_selector_token_from_text(
+            &clarify_state.source_request,
+        )
+        .is_some()
+}
+
+fn active_clarify_state_allows_locator_reply_resolution(
+    clarify_state: &crate::clarify_state::ClarifyState,
+) -> bool {
+    active_clarify_state_has_structural_binding_contract(clarify_state)
         || !clarify_state.candidate_targets.is_empty()
         || (!clarify_state.source_request.trim().is_empty()
             && !clarify_state.pending_question.trim().is_empty())
@@ -1332,6 +1056,126 @@ fn workspace_relative_display_path(workspace_root: &Path, path: &Path) -> Option
         .filter(|value| !value.trim().is_empty())
 }
 
+fn active_clarify_locator_exists_for_fast_path(
+    workspace_root: &Path,
+    default_search_dir: &Path,
+    locator: &str,
+) -> bool {
+    let candidate = Path::new(locator.trim());
+    if candidate.is_absolute() {
+        return candidate.exists();
+    }
+    default_search_dir.join(candidate).exists() || workspace_root.join(candidate).exists()
+}
+
+fn repair_scalar_field_value_contract_for_active_clarify_fast_path(
+    route_result: &mut crate::RouteResult,
+) {
+    if route_result.needs_clarify
+        || route_result.output_contract.delivery_required
+        || !route_result.output_contract.requires_content_evidence
+        || !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Scalar
+                | crate::OutputResponseShape::Strict
+        )
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::StructuredKeys
+        )
+    {
+        return;
+    }
+    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result
+        .route_reason
+        .push_str("; active_clarify_fast_path_scalar_field_value_contract_repair");
+}
+
+fn active_clarify_locator_reply_fast_path_route(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+) -> Option<crate::RouteResult> {
+    let crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(hit) =
+        clarify_followup_resolution
+    else {
+        return None;
+    };
+    let clarify_state = session_snapshot.active_clarify_state.as_ref()?;
+    if hit.prior_user_text.trim() != clarify_state.source_request.trim() {
+        return None;
+    }
+    if !active_clarify_state_has_structural_binding_contract(clarify_state) {
+        return None;
+    }
+    let locator = hit.current_user_text.trim();
+    if locator.is_empty()
+        || active_clarify_locator_reply_is_structured_payload(locator)
+        || !active_clarify_locator_exists_for_fast_path(
+            &state.skill_rt.workspace_root,
+            &state.skill_rt.default_locator_search_dir,
+            locator,
+        )
+    {
+        return None;
+    }
+    let mut route_result = crate::RouteResult {
+        ask_mode: crate::AskMode::from_first_layer_decision_with_finalize(
+            crate::FirstLayerDecision::PlannerExecute,
+            crate::ActFinalizeStyle::Plain,
+        ),
+        resolved_intent: hit.resolved_intent.clone(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "active_clarify_locator_reply_fast_path".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: state.planner_available_skills_for_task(task),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    };
+    preserve_locator_reply_runtime_intent(&mut route_result, clarify_followup_resolution);
+    preserve_active_clarify_output_contract_for_locator_reply(
+        &mut route_result,
+        clarify_followup_resolution,
+        session_snapshot,
+    );
+    promote_active_clarify_structured_payload_reply_to_execute(
+        &mut route_result,
+        clarify_followup_resolution,
+        session_snapshot,
+    );
+    promote_active_clarify_locator_reply_to_execute(
+        &mut route_result,
+        clarify_followup_resolution,
+        session_snapshot,
+    );
+    if !route_result.output_contract.delivery_required
+        && !route_result.output_contract.locator_hint.trim().is_empty()
+        && (!matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+        ) || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        ))
+    {
+        route_result.output_contract.requires_content_evidence = true;
+    }
+    repair_scalar_field_value_contract_for_active_clarify_fast_path(&mut route_result);
+    repair_structural_file_delivery_resolution(&mut route_result, session_snapshot);
+    Some(route_result)
+}
+
 pub(super) async fn prepare_ask_routing(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1393,6 +1237,29 @@ pub(super) async fn prepare_ask_routing(
                 &routed_prompt_surface,
             );
     }
+    if let Some(mut route_result) = active_clarify_locator_reply_fast_path_route(
+        state,
+        task,
+        &session_snapshot,
+        &clarify_followup_resolution,
+    ) {
+        crate::intent::safety_class::apply_route_risk_ceiling(&mut route_result, None);
+        let resolved_prompt = route_result.resolved_intent.clone();
+        info!(
+            "{} worker_once: ask active_clarify_locator_fast_path task_id={} reason={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            route_result.route_reason
+        );
+        return PreparedAskRouting {
+            route_result,
+            execution_recipe_hint: None,
+            turn_analysis: None,
+            clarify_fallback_source: None,
+            resolved_prompt,
+            agent_mode,
+        };
+    }
     let normalizer_prompt = match &clarify_followup_resolution {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::NormalizerRewrite {
             rewritten_prompt,
@@ -1441,6 +1308,22 @@ pub(super) async fn prepare_ask_routing(
         &schedule_rules,
     )
     .await;
+    info!(
+        "first_layer_gate_record task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={}",
+        task.task_id,
+        normalizer_out.first_layer_gate_record.owner_layer,
+        normalizer_out.first_layer_gate_record.reason_code,
+        normalizer_out.first_layer_gate_record.outcome,
+        normalizer_out
+            .first_layer_gate_record
+            .source_decision
+            .map(|decision| decision.as_str())
+            .unwrap_or("none"),
+        normalizer_out.first_layer_gate_record.final_decision.as_str(),
+        normalizer_out.first_layer_gate_record.needs_clarify,
+        normalizer_out.first_layer_gate_record.output_contract_ref,
+        normalizer_out.first_layer_gate_record.repair_codes.join(","),
+    );
     // Phase 0.4: 若 normalizer 已给出 schedule_intent，缓存起来，后续
     // `schedule.compile` 技能可以直接复用，避免对同一段文本再跑一次
     // `schedule_intent_prompt` LLM 调用。
@@ -1458,17 +1341,35 @@ pub(super) async fn prepare_ask_routing(
         &clarify_followup_resolution,
         &session_snapshot,
     );
+    promote_active_clarify_structured_payload_reply_to_execute(
+        &mut route_result,
+        &clarify_followup_resolution,
+        &session_snapshot,
+    );
     promote_active_clarify_locator_reply_to_execute(
         &mut route_result,
         &clarify_followup_resolution,
         &session_snapshot,
     );
-    repair_scalar_field_value_contract_for_locator_reply(&mut route_result);
+    repair_structured_field_target_from_prompt(
+        &mut route_result,
+        &normalizer_prompt,
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
+    );
+    repair_scalar_field_value_contract_for_locator_reply(&mut route_result, &normalizer_prompt);
     clear_file_delivery_contract_for_filename_only(&mut route_result, turn_analysis.as_ref());
     bind_ordered_entry_reference_from_active_frame(
         &mut route_result,
         &session_snapshot,
         turn_analysis.as_ref(),
+        Some(prompt),
+    );
+    bind_content_read_to_active_delivery_target(
+        &mut route_result,
+        &session_snapshot,
+        turn_analysis.as_ref(),
+        prompt,
     );
     repair_structural_file_delivery_resolution(&mut route_result, &session_snapshot);
     let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
@@ -1492,11 +1393,17 @@ pub(super) async fn prepare_ask_routing(
     );
     let mut runtime_prompt = resume_runtime.runtime_prompt;
     if should_apply_task_turn_merge(&clarify_followup_resolution) {
+        let latest_assistant_output = crate::memory::latest_terminal_assistant_reply_for_chat(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+        );
         let (merge_prior_prompt, merge_prior_output) =
-            task_turn_merge_prior_context(&session_snapshot);
+            task_turn_merge_prior_context(&session_snapshot, latest_assistant_output.as_deref());
         if let Some(merged_prompt) = merged_prompt_from_task_turn_analysis(
-            merge_prior_prompt,
-            merge_prior_output,
+            merge_prior_prompt.as_deref(),
+            merge_prior_output.as_deref(),
             prompt,
             turn_analysis.as_ref(),
         ) {
@@ -1509,8 +1416,9 @@ pub(super) async fn prepare_ask_routing(
                 .as_ref()
                 .and_then(|analysis| analysis.target_task_policy),
             crate::truncate_for_log(&merged_prompt)
-        );
+            );
             runtime_prompt = merged_prompt;
+            append_active_delivery_content_target_token(&mut runtime_prompt, &route_result);
             route_result.resolved_intent = runtime_prompt.clone();
         }
     }
@@ -1575,15 +1483,7 @@ pub(super) async fn prepare_ask_routing(
         resume_runtime.should_discuss_context,
         resume_runtime.should_apply_context,
     );
-    // When resume flags do not override the route, RouteResult should already
-    // carry the normalized ask_mode. Route labels are derived only for logs.
-    if !resume_runtime.should_discuss_context && !resume_runtime.should_apply_context {
-        debug_assert_eq!(
-            ask_mode,
-            route_result.ask_mode,
-            "prepared ask_mode should come from normalized RouteResult when no resume flag dominates"
-        );
-    }
+    route_result.ask_mode = ask_mode;
     PreparedAskRouting {
         route_result,
         execution_recipe_hint,
@@ -1591,10 +1491,13 @@ pub(super) async fn prepare_ask_routing(
         clarify_fallback_source,
         resolved_prompt,
         agent_mode,
-        ask_mode,
     }
 }
 
 #[cfg(test)]
 #[path = "ask_prepare_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ask_prepare_structured_field_tests.rs"]
+mod structured_field_tests;

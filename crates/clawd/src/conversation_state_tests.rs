@@ -272,6 +272,233 @@ fn standalone_task_request_without_prior_can_start_primary_task() {
 }
 
 #[test]
+fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let resolved = "Write one deployment note mentioning Python 3.10\nanswer_candidate: **Deployment Note**\n\nUse Python 3.10 before deploying.";
+
+    let prompt = next_last_primary_task_prompt(
+        None,
+        &route_result,
+        Some(&turn_analysis),
+        "Write one deployment note that mentions Python 3.10",
+        resolved,
+    );
+    let output = next_last_primary_task_output(
+        None,
+        &route_result,
+        Some(&turn_analysis),
+        resolved,
+        "**Deployment Note**\n\nUse Python 3.10 before deploying.",
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some("Write one deployment note that mentions Python 3.10")
+    );
+    assert_eq!(
+        output.as_deref(),
+        Some("**Deployment Note**\n\nUse Python 3.10 before deploying.")
+    );
+}
+
+#[test]
+fn unannotated_direct_chat_substantial_text_starts_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let answer = "# Deployment Note\n\n- Use Python 3.10 for deployment.\n- Confirm runtime variables before release.\n- Keep rollback steps available.";
+
+    let prompt = super::unannotated_chat_primary_prompt_for_output(
+        None,
+        &route_result,
+        None,
+        "Write one deployment note that mentions Python 3.10",
+        "Write one deployment note that mentions Python 3.10",
+        answer,
+        &[],
+    );
+    let output = next_last_primary_task_output(
+        None,
+        &route_result,
+        None,
+        "Write one deployment note that mentions Python 3.10",
+        answer,
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some("Write one deployment note that mentions Python 3.10")
+    );
+    assert_eq!(output.as_deref(), Some(answer));
+}
+
+#[test]
+fn unannotated_short_chat_does_not_start_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let answer = "RC-CONT-CN-0428-A";
+
+    let prompt = super::unannotated_chat_primary_prompt_for_output(
+        None,
+        &route_result,
+        None,
+        "What was the saved code?",
+        "What was the saved code?",
+        answer,
+        &[],
+    );
+    let output = next_last_primary_task_output(
+        None,
+        &route_result,
+        None,
+        "What was the saved code?",
+        answer,
+        &[],
+    );
+
+    assert!(prompt.is_none());
+    assert!(output.is_none());
+}
+
+#[test]
+fn unannotated_compact_sentence_chat_starts_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let answer = "部署前请确保已安装 Python 3.10 或更高版本。";
+
+    let prompt = super::unannotated_chat_primary_prompt_for_output(
+        None,
+        &route_result,
+        None,
+        "帮我写一句部署说明，要求提到 Python 3.10",
+        "帮我写一句部署说明，要求提到 Python 3.10",
+        answer,
+        &[],
+    );
+    let output = next_last_primary_task_output(
+        None,
+        &route_result,
+        None,
+        "帮我写一句部署说明，要求提到 Python 3.10",
+        answer,
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some("帮我写一句部署说明，要求提到 Python 3.10")
+    );
+    assert_eq!(output.as_deref(), Some(answer));
+}
+
+#[test]
+fn unannotated_compact_question_chat_does_not_start_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let answer = "请问是哪方面的方案？比如功能设计、项目计划、技术选型，还是其他？";
+
+    let prompt = super::unannotated_chat_primary_prompt_for_output(
+        None,
+        &route_result,
+        None,
+        "帮我写个方案",
+        "帮我写个方案",
+        answer,
+        &[],
+    );
+    let output =
+        next_last_primary_task_output(None, &route_result, None, "帮我写个方案", answer, &[]);
+
+    assert!(prompt.is_none());
+    assert!(output.is_none());
+}
+
+#[test]
+fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a release note".to_string()),
+        last_primary_task_output: Some("Existing release note.".to_string()),
+        ..ConversationState::default()
+    };
+    let resolved = "Answer a separate freeform request\nanswer_candidate: Separate answer.";
+
+    let prompt = next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        "Answer a separate freeform request",
+        resolved,
+    );
+    let output = next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        resolved,
+        "Separate answer.",
+        &[],
+    );
+
+    assert_eq!(prompt.as_deref(), Some("Write a release note"));
+    assert_eq!(output.as_deref(), Some("Existing release note."));
+}
+
+#[test]
+fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "primary_task_update": "replace",
+            "active_task_boundary": "new_deliverable"
+        })),
+        attachment_processing_required: false,
+    };
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a release note".to_string()),
+        last_primary_task_output: Some("Existing release note.".to_string()),
+        ..ConversationState::default()
+    };
+    let resolved =
+        "Write one deployment note mentioning Python 3.10\nanswer_candidate: New deployment note.";
+
+    let prompt = next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        "Write one deployment note that mentions Python 3.10",
+        resolved,
+    );
+    let output = next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        resolved,
+        "New deployment note.",
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some("Write one deployment note that mentions Python 3.10")
+    );
+    assert_eq!(output.as_deref(), Some("New deployment note."));
+}
+
+#[test]
 fn active_task_non_success_preserves_prior_primary_output() {
     let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -789,6 +1016,70 @@ fn replace_active_conversation_state_with_pointers_persists_ids() {
 }
 
 #[test]
+fn alias_only_state_patch_clears_stale_active_pointers() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = ClaimedTask {
+        task_id: "task-alias-update".to_string(),
+        user_id: 11,
+        chat_id: 12,
+        user_key: Some("user-key".to_string()),
+        channel: "telegram".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    super::replace_active_conversation_state_with_pointers(
+        &state,
+        &task,
+        None,
+        ActiveSessionPointers {
+            active_followup_task_id: Some("old-followup".to_string()),
+            active_clarify_task_id: Some("old-clarify".to_string()),
+            active_observed_facts_task_id: Some("old-observed".to_string()),
+        },
+    );
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "alias_bindings": [{
+                "alias": "ALPHA_DOC",
+                "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            }]
+        })),
+        attachment_processing_required: false,
+    };
+
+    super::update_active_session_from_ask_outcome(
+        &state,
+        &task,
+        None,
+        "Correction: ALPHA_DOC now refers to scripts/nl_tests/fixtures/device_local/docs/release_checklist.md.",
+        &route,
+        Some(&turn_analysis),
+        "Update ALPHA_DOC alias to point to scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+        "alias updated via i18n",
+        &[],
+        false,
+        &[],
+        &empty_journal_for_test(),
+        None,
+    );
+
+    let loaded = super::load_active_conversation_state(&state, &task).expect("state");
+    assert!(loaded.active_followup_task_id.is_none());
+    assert!(loaded.active_clarify_task_id.is_none());
+    assert!(loaded.active_observed_facts_task_id.is_none());
+    assert!(loaded.alias_bindings.iter().any(|binding| {
+        binding.alias == "ALPHA_DOC"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    }));
+}
+
+#[test]
 fn merge_alias_bindings_prefers_structured_state_patch() {
     let prior = ConversationState {
         alias_bindings: vec![SessionAliasBinding {
@@ -821,6 +1112,38 @@ fn merge_alias_bindings_prefers_structured_state_patch() {
     assert!(!merged
         .iter()
         .any(|binding| binding.target == "/tmp/regex.md"));
+}
+
+#[test]
+fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "alias_bindings": [{
+                "alias": "ALPHA_DOC",
+                "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+            }]
+        })),
+        attachment_processing_required: false,
+    };
+
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        Some(&turn_analysis),
+        "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only remembered.",
+        &route,
+        "Establish ALPHA_DOC as a temporary alias for scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+    );
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].alias, "ALPHA_DOC");
+    assert_eq!(
+        merged[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
 }
 
 #[test]
@@ -908,6 +1231,108 @@ fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag
 }
 
 #[test]
+fn preference_memory_turn_with_machine_alias_derives_exact_token() {
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        Some(&turn_analysis),
+        "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only remembered.",
+        &route,
+        "",
+    );
+
+    assert!(merged.iter().any(|binding| {
+        binding.alias == "ALPHA_DOC"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }));
+    assert!(!merged
+        .iter()
+        .any(|binding| binding.alias.contains("refers")));
+}
+
+#[test]
+fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        Some(&turn_analysis),
+        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
+        &route,
+        "",
+    );
+
+    assert!(merged.iter().any(|binding| {
+        binding.alias == "甲文件"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }));
+}
+
+#[test]
+fn chat_ack_single_locator_derives_compact_alias_without_memory_turn_classification() {
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        None,
+        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
+        &route,
+        "",
+    );
+
+    assert!(merged.iter().any(|binding| {
+        binding.alias == "甲文件"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }));
+}
+
+#[test]
+fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
+    let route = route_result_for_test(crate::AskMode::planner_execute_plain(), false);
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        None,
+        "读取 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 的标题",
+        &route,
+        "",
+    );
+
+    assert!(merged.is_empty());
+}
+
+#[test]
+fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
+    let route = route_result_for_test(crate::AskMode::clarify(), true);
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        None,
+        "先记一下，后面我说“那个文件”就是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md",
+        &route,
+        "",
+    );
+
+    assert!(merged.iter().any(|binding| {
+        binding.alias == "那个文件"
+            && binding.target
+                == "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md"
+    }));
+}
+
+#[test]
 fn current_locator_rebinds_existing_alias_without_language_phrase_table() {
     let prior = ConversationState {
         alias_bindings: vec![SessionAliasBinding {
@@ -918,13 +1343,41 @@ fn current_locator_rebinds_existing_alias_without_language_phrase_table() {
         ..ConversationState::default()
     };
 
-    let binding = super::structural_alias_rebind_from_prompt(
+    let bindings = super::structural_alias_rebinds_from_prompt(
         Some(&prior),
         "Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.",
-    )
-    .expect("existing alias should rebind to the current locator");
+    );
+    let binding = bindings
+        .first()
+        .expect("existing alias should rebind to the current locator");
 
     assert_eq!(binding.alias, "note file");
+    assert_eq!(
+        binding.target,
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    );
+}
+
+#[test]
+fn compact_alias_current_locator_rebinds_existing_alias() {
+    let prior = ConversationState {
+        alias_bindings: vec![SessionAliasBinding {
+            alias: "甲文件".to_string(),
+            target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
+            updated_at_ts: 1,
+        }],
+        ..ConversationState::default()
+    };
+
+    let bindings = super::structural_alias_rebinds_from_prompt(
+        Some(&prior),
+        "不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。",
+    );
+    let binding = bindings
+        .first()
+        .expect("existing compact alias should rebind to the current locator");
+
+    assert_eq!(binding.alias, "甲文件");
     assert_eq!(
         binding.target,
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
@@ -1051,6 +1504,40 @@ fn meta_turn_types_preserve_active_session_pointers() {
             attachment_processing_required: false,
         }
     )));
+}
+
+#[test]
+fn ordered_listing_outcome_refreshes_active_session_pointers_for_status_query() {
+    let mut journal = crate::task_journal::TaskJournal::new("list");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                serde_json::json!({
+                    "action": "inventory_dir",
+                    "resolved_path": "/tmp/logs",
+                    "names": ["act_plan.log", "clawd.log", "clawd.run.log"]
+                })
+                .to_string(),
+            ),
+            ..Default::default()
+        });
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(super::should_preserve_active_session_pointers(Some(
+        &turn_analysis
+    )));
+    assert!(super::current_outcome_has_ordered_entries(&journal, false));
+    assert!(!super::current_outcome_has_ordered_entries(&journal, true));
 }
 
 #[test]

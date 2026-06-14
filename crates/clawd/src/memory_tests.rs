@@ -179,11 +179,7 @@ fn provider_unavailable_task_is_skipped_for_last_turn_context() {
     let state = test_state();
     let db = state.core.db.get().expect("db");
     create_tasks_table(&db);
-    let provider_unavailable = crate::i18n_t_with_default(
-        &state,
-        "clawd.msg.clarify_question_fallback",
-        "I need to clarify: what task is this message about? Please provide the target or context.",
-    );
+    let provider_unavailable = crate::fallback::legacy_super_fallback_machine_payload();
     db.execute(
         "INSERT INTO tasks (user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
          VALUES (?1, ?2, ?3, 'ask', ?4, ?5, NULL, 'succeeded', '100', '100')",

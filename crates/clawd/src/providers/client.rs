@@ -65,6 +65,9 @@ pub(crate) struct LlmProviderResponse {
     pub(crate) request_payload: Value,
     pub(crate) raw_response: String,
     pub(crate) usage: Option<LlmUsageSnapshot>,
+    pub(crate) attempts: usize,
+    pub(crate) retryable_error_count: usize,
+    pub(crate) last_retry_error_kind: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,8 @@ pub(crate) struct ProviderError {
     pub(crate) request_payload: Value,
     pub(crate) raw_response: Option<String>,
     pub(crate) usage: Option<LlmUsageSnapshot>,
+    pub(crate) attempts: usize,
+    pub(crate) retryable_error_count: usize,
     breaker_impact: BreakerImpact,
 }
 
@@ -106,6 +111,8 @@ impl ProviderError {
             request_payload,
             raw_response: None,
             usage: None,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
         }
     }
@@ -122,6 +129,8 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
         }
     }
@@ -133,6 +142,8 @@ impl ProviderError {
             request_payload,
             raw_response: None,
             usage: None,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Neutral,
         }
     }
@@ -149,6 +160,8 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
         }
     }
@@ -165,6 +178,8 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
         }
     }
@@ -181,8 +196,20 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            attempts: 1,
+            retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
         }
+    }
+
+    pub(crate) fn with_retry_metadata(
+        mut self,
+        attempts: usize,
+        retryable_error_count: usize,
+    ) -> Self {
+        self.attempts = attempts.max(1);
+        self.retryable_error_count = retryable_error_count;
+        self
     }
 
     pub(crate) fn should_trip_breaker(&self) -> bool {
@@ -220,6 +247,20 @@ impl ProviderError {
             (BreakerImpact::Neutral, false, false) => "local_non_retryable",
             _ => "provider_error",
         }
+    }
+}
+
+impl LlmProviderResponse {
+    pub(crate) fn with_retry_metadata(
+        mut self,
+        attempts: usize,
+        retryable_error_count: usize,
+        last_retry_error_kind: Option<&'static str>,
+    ) -> Self {
+        self.attempts = attempts.max(1);
+        self.retryable_error_count = retryable_error_count;
+        self.last_retry_error_kind = last_retry_error_kind;
+        self
     }
 }
 
@@ -263,20 +304,30 @@ pub(crate) async fn call_provider_with_retry_with_hints(
     hints: &ChatRequestHints,
 ) -> Result<LlmProviderResponse, ProviderError> {
     let mut attempts = 0usize;
+    let mut retryable_error_count = 0usize;
+    let mut last_retry_error_kind = None;
 
     loop {
         attempts += 1;
         match call_provider(provider.clone(), prompt, hints).await {
-            Ok(output) => return Ok(output),
+            Ok(output) => {
+                return Ok(output.with_retry_metadata(
+                    attempts,
+                    retryable_error_count,
+                    last_retry_error_kind,
+                ))
+            }
             Err(err) if err.retryable => {
+                retryable_error_count += 1;
+                last_retry_error_kind = Some(err.observability_kind());
                 let retry_limit = retry_limit_for_provider_error(&err);
                 if attempts > retry_limit {
-                    return Err(err);
+                    return Err(err.with_retry_metadata(attempts, retryable_error_count));
                 }
                 let delay = retry_delay_for_provider_error(&err, attempts);
                 tokio::time::sleep(delay).await;
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.with_retry_metadata(attempts, retryable_error_count)),
         }
     }
 }

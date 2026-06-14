@@ -265,6 +265,42 @@ fn validate_knowledge_candidate_rejects_cross_turn_deictic_locator_mapping() {
 }
 
 #[test]
+fn validate_knowledge_candidate_rejects_deictic_identifier_mapping() {
+    let candidate = KnowledgeCandidateLlmOut {
+        should_persist: true,
+        kind: "project_fact".to_string(),
+        namespace: KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
+        fact: "项目别名：'那个服务' 代指 'clawd'".to_string(),
+        confidence: 0.97,
+        reason: "deictic alias mapping should not become a durable project fact".to_string(),
+        fact_key: "service_alias".to_string(),
+        fact_value: "clawd".to_string(),
+        conflict_group: "project_facts:service_alias".to_string(),
+        expires_at_ts: None,
+    };
+
+    assert!(validate_knowledge_candidate(42, &candidate).is_none());
+}
+
+#[test]
+fn validate_knowledge_candidate_rejects_plain_locator_alias_fact() {
+    let candidate = KnowledgeCandidateLlmOut {
+        should_persist: true,
+        kind: "project_fact".to_string(),
+        namespace: KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
+        fact: "那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
+        confidence: 0.97,
+        reason: "plain locator alias mapping should stay session-scoped".to_string(),
+        fact_key: "config_alias".to_string(),
+        fact_value: "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string(),
+        conflict_group: "project_facts:config_alias".to_string(),
+        expires_at_ts: None,
+    };
+
+    assert!(validate_knowledge_candidate(42, &candidate).is_none());
+}
+
+#[test]
 fn knowledge_source_ref_is_stable_across_refresh_rounds() {
     let first = knowledge_source_ref(
         "user-key",

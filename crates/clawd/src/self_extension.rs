@@ -13,71 +13,6 @@ enum ReplyLanguage {
     En,
 }
 
-fn self_extension_t(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-) -> String {
-    match language {
-        ReplyLanguage::ZhCn => state.map_or_else(
-            || default_zh.to_string(),
-            |state| {
-                crate::app_helpers::bilingual_t_with_default(
-                    state, key, default_zh, default_en, false,
-                )
-            },
-        ),
-        ReplyLanguage::En => state.map_or_else(
-            || default_en.to_string(),
-            |state| {
-                crate::app_helpers::bilingual_t_with_default(
-                    state, key, default_zh, default_en, true,
-                )
-            },
-        ),
-    }
-}
-
-fn self_extension_t_with_vars(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-    vars: &[(&str, &str)],
-) -> String {
-    match language {
-        ReplyLanguage::ZhCn => state.map_or_else(
-            || {
-                let mut text = default_zh.to_string();
-                for (name, value) in vars {
-                    text = text.replace(&format!("{{{name}}}"), value);
-                }
-                text
-            },
-            |state| {
-                crate::bilingual_t_with_default_vars(
-                    state, key, default_zh, default_en, false, vars,
-                )
-            },
-        ),
-        ReplyLanguage::En => state.map_or_else(
-            || {
-                let mut text = default_en.to_string();
-                for (name, value) in vars {
-                    text = text.replace(&format!("{{{name}}}"), value);
-                }
-                text
-            },
-            |state| {
-                crate::bilingual_t_with_default_vars(state, key, default_zh, default_en, true, vars)
-            },
-        ),
-    }
-}
-
 fn request_language(state: &AppState, request: &str) -> ReplyLanguage {
     match crate::language_policy::request_language_hint(request) {
         "zh-CN" => ReplyLanguage::ZhCn,
@@ -224,59 +159,33 @@ fn plan_summary(plan: &Value) -> String {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .unwrap_or("Temporary fix plan generated.")
+        .unwrap_or_default()
         .to_string()
 }
 
 fn localized_plan_reply(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     plan: &Value,
     will_execute: bool,
     allow_package_install: bool,
 ) -> String {
     let (files, commands, packages) = plan_counts(plan);
     let summary = plan_summary(plan);
-    let files_text = files.to_string();
-    let commands_text = commands.to_string();
-    let packages_text = packages.to_string();
-    let package_note = if packages > 0 && !allow_package_install {
-        self_extension_t(
-            state,
-            language,
-            "clawd.msg.self_extension.package_install_disabled_note",
-            " 方案包含依赖安装，但当前配置未允许自动安装。",
-            " The plan includes package installation, but automatic package install is currently disabled.",
-        )
-    } else {
-        String::new()
-    };
-    let text = if will_execute {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.temporary_plan_execute",
-            "当前没有合适的现成技能完全覆盖这个请求。我已生成临时方案并准备执行：{summary}",
-            "No existing skill cleanly covers this request. I generated a bounded temporary plan and am executing it: {summary}",
-            &[("summary", summary.as_str())],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.temporary_plan_pending",
-            "当前没有合适的现成技能完全覆盖这个请求。我已生成一份受控临时方案，暂未执行：{summary} 预计会写入 {files} 个临时文件、运行 {commands} 条命令、涉及 {packages} 组依赖。{package_note}",
-            "No existing skill cleanly covers this request. I created a bounded temporary plan but did not execute it yet: {summary} It would write {files} temporary file(s), run {commands} command(s), and involve {packages} package group(s).{package_note}",
-            &[
-                ("summary", summary.as_str()),
-                ("files", files_text.as_str()),
-                ("commands", commands_text.as_str()),
-                ("packages", packages_text.as_str()),
-                ("package_note", package_note.as_str()),
-            ],
-        )
-    };
-    text.trim().to_string()
+    let mut payload = json!({
+        "message_key": "clawd.msg.self_extension.temporary_plan",
+        "reason_code": if will_execute { "self_extension_temporary_plan_execute" } else { "self_extension_temporary_plan_pending" },
+        "will_execute": will_execute,
+        "files": files,
+        "commands": commands,
+        "packages": packages,
+        "package_install_allowed": allow_package_install,
+        "package_install_blocked": packages > 0 && !allow_package_install,
+    });
+    if !summary.is_empty() {
+        payload["summary"] = json!(summary);
+    }
+    payload.to_string()
 }
 
 fn extract_best_execution_output(value: &Value) -> Option<String> {
@@ -303,34 +212,62 @@ fn extract_best_execution_output(value: &Value) -> Option<String> {
 }
 
 fn localized_extension_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t(
-            state,
-            language,
-            "clawd.msg.self_extension.failure",
-            "我尝试走受控自扩展链，但这次没有成功。",
-            "I tried the controlled self-extension path, but it did not succeed.",
-        )
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.failure",
+        "self_extension_failure",
+        "",
+        "self_extension",
+        detail,
+    )
+}
+
+fn self_extension_message_key_from_reason(reason_code: &str) -> String {
+    let suffix = reason_code
+        .trim()
+        .strip_prefix("self_extension_")
+        .unwrap_or(reason_code.trim())
+        .replace('_', ".");
+    if suffix.is_empty() {
+        "clawd.msg.self_extension.failure".to_string()
     } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.failure_with_detail",
-            "我尝试走受控自扩展链，但这次没有成功：{detail}",
-            "I tried the controlled self-extension path, but it did not succeed: {detail}",
-            &[("detail", trimmed)],
-        )
+        format!("clawd.msg.self_extension.{suffix}")
     }
 }
 
+fn self_extension_failure_machine_payload(
+    message_key: &str,
+    reason_code: &str,
+    skill_name: &str,
+    phase: &str,
+    detail: &str,
+) -> String {
+    let mut payload = json!({
+        "message_key": message_key,
+        "reason_code": reason_code,
+    });
+    let skill_name = skill_name.trim();
+    if !skill_name.is_empty() {
+        payload["skill_name"] = json!(skill_name);
+        payload["skill_path"] = json!(format!("external_skills/{skill_name}"));
+    }
+    let phase = phase.trim();
+    if !phase.is_empty() {
+        payload["phase"] = json!(phase);
+    }
+    let detail = detail.trim();
+    if !detail.is_empty() {
+        payload["detail"] = json!(detail);
+    }
+    payload.to_string()
+}
+
 fn localized_permanent_plan_reply(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     plan: &Value,
     materialized: bool,
 ) -> String {
@@ -352,197 +289,114 @@ fn localized_permanent_plan_reply(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .trim();
-    let actions_text = actions.to_string();
-    match (language, materialized) {
-        (_, false) => {
-            let mut text = self_extension_t_with_vars(
-                state,
-                language,
-                "clawd.msg.self_extension.permanent_plan_pending",
-                "这个请求更适合做成可复用能力。我已生成外部技能脚手架方案，但当前未自动落地：建议技能名 `{skill_name}`，摘要是“{capability_summary}”，包含 {actions} 个动作。",
-                "This request looks better as a reusable capability. I generated an external-skill scaffold plan but did not materialize it yet: suggested skill name `{skill_name}`, summary \"{capability_summary}\", with {actions} action(s).",
-                &[
-                    ("skill_name", skill_name),
-                    ("capability_summary", capability_summary),
-                    ("actions", actions_text.as_str()),
-                ],
-            );
-            if !rationale.is_empty() {
-                text.push_str(&self_extension_t_with_vars(
-                    state,
-                    language,
-                    "clawd.msg.self_extension.permanent_plan_rationale_suffix",
-                    " 原因：{rationale}",
-                    " Rationale: {rationale}",
-                    &[("rationale", rationale)],
-                ));
-            }
-            text
-        }
-        (_, true) => self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.permanent_plan_materialized",
-            "我已按开发态流程生成并填充 `external_skills/{skill_name}` 的初始实现，并完成文档同步、编译检查和协议级 smoke test。它仍未注册、未启用；接下来只需要人工复核后显式启用。",
-            "I scaffolded and filled the first implementation for `external_skills/{skill_name}` through the developer extension flow, and I already synced docs, ran cargo check, and passed a protocol smoke test. It is still neither registered nor enabled; the next step is explicit human review and enablement.",
-            &[("skill_name", skill_name)],
-        ),
+    let mut payload = json!({
+        "message_key": "clawd.msg.self_extension.permanent_plan",
+        "reason_code": if materialized { "self_extension_permanent_plan_materialized" } else { "self_extension_permanent_plan_pending" },
+        "skill_name": skill_name,
+        "skill_path": format!("external_skills/{skill_name}"),
+        "capability_summary": capability_summary,
+        "actions": actions,
+        "materialized": materialized,
+        "registered": false,
+        "enabled": false,
+    });
+    if !rationale.is_empty() {
+        payload["rationale"] = json!(rationale);
     }
+    payload.to_string()
 }
 
 fn localized_permanent_runtime_enabled_reply(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
 ) -> String {
-    self_extension_t_with_vars(
-        state,
-        language,
-        "clawd.msg.self_extension.permanent_enabled",
-        "我已按开发态流程完成 `external_skills/{skill_name}` 的生成、验证、注册、启用，并已重载技能视图。它现在可以被运行时识别，但仍建议先人工复核再正常使用。",
-        "I completed generation, validation, registration, enablement, and skill-view reload for `external_skills/{skill_name}` through the developer extension flow. It is now visible to the runtime, but it should still be reviewed before normal use.",
-        &[("skill_name", skill_name)],
-    )
+    json!({
+        "message_key": "clawd.msg.self_extension.permanent_enabled",
+        "reason_code": "self_extension_permanent_enabled",
+        "skill_name": skill_name,
+        "skill_path": format!("external_skills/{skill_name}"),
+        "registered": true,
+        "enabled": true,
+        "reload_completed": true,
+        "runtime_visible": true,
+    })
+    .to_string()
 }
 
 fn localized_permanent_materialization_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.materialization_failure",
-            "我已生成 `external_skills/{skill_name}` 的脚手架，但自动填充初始实现没有完成。该技能仍未注册、未启用。",
-            "I scaffolded `external_skills/{skill_name}`, but the initial implementation generation did not finish. The skill is still not registered or enabled.",
-            &[("skill_name", skill_name)],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.materialization_failure_with_detail",
-            "我已生成 `external_skills/{skill_name}` 的脚手架，但自动填充初始实现没有完成：{detail}。该技能仍未注册、未启用。",
-            "I scaffolded `external_skills/{skill_name}`, but the initial implementation generation did not finish: {detail}. The skill is still not registered or enabled.",
-            &[("skill_name", skill_name), ("detail", trimmed)],
-        )
-    }
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.materialization_failure",
+        "self_extension_materialization_failure",
+        skill_name,
+        "materialization",
+        detail,
+    )
 }
 
 fn localized_permanent_validation_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.validation_failure",
-            "我已生成并填充 `external_skills/{skill_name}`，但后续的文档同步、编译检查或 smoke test 没有全部通过。该技能仍未注册、未启用。",
-            "I scaffolded and filled `external_skills/{skill_name}`, but the follow-up doc sync, compile check, or smoke test did not fully pass. The skill is still not registered or enabled.",
-            &[("skill_name", skill_name)],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.validation_failure_with_detail",
-            "我已生成并填充 `external_skills/{skill_name}`，但后续的文档同步、编译检查或 smoke test 没有全部通过：{detail}。该技能仍未注册、未启用。",
-            "I scaffolded and filled `external_skills/{skill_name}`, but the follow-up doc sync, compile check, or smoke test did not fully pass: {detail}. The skill is still not registered or enabled.",
-            &[("skill_name", skill_name), ("detail", trimmed)],
-        )
-    }
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.validation_failure",
+        "self_extension_validation_failure",
+        skill_name,
+        "validation",
+        detail,
+    )
 }
 
 fn localized_permanent_registration_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.registration_failure",
-            "我已生成并验证 `external_skills/{skill_name}`，但注册到工作区和技能配置的步骤没有完成。该技能仍未进入运行时。",
-            "I generated and validated `external_skills/{skill_name}`, but the workspace/registry registration step did not complete. The skill is still not in the runtime.",
-            &[("skill_name", skill_name)],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.registration_failure_with_detail",
-            "我已生成并验证 `external_skills/{skill_name}`，但注册到工作区和技能配置的步骤没有完成：{detail}。该技能仍未进入运行时。",
-            "I generated and validated `external_skills/{skill_name}`, but the workspace/registry registration step did not complete: {detail}. The skill is still not in the runtime.",
-            &[("skill_name", skill_name), ("detail", trimmed)],
-        )
-    }
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.registration_failure",
+        "self_extension_registration_failure",
+        skill_name,
+        "registration",
+        detail,
+    )
 }
 
 fn localized_permanent_enable_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.enable_failure",
-            "我已生成、验证并注册 `external_skills/{skill_name}`，但启用或 release 构建没有完成。该技能还不能正常进入运行时。",
-            "I generated, validated, and registered `external_skills/{skill_name}`, but enablement or release build did not complete. The skill is not ready for runtime use yet.",
-            &[("skill_name", skill_name)],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.enable_failure_with_detail",
-            "我已生成、验证并注册 `external_skills/{skill_name}`，但启用或 release 构建没有完成：{detail}。该技能还不能正常进入运行时。",
-            "I generated, validated, and registered `external_skills/{skill_name}`, but enablement or release build did not complete: {detail}. The skill is not ready for runtime use yet.",
-            &[("skill_name", skill_name), ("detail", trimmed)],
-        )
-    }
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.enable_failure",
+        "self_extension_enable_failure",
+        skill_name,
+        "enable",
+        detail,
+    )
 }
 
 fn localized_permanent_reload_failure(
-    state: Option<&AppState>,
-    language: ReplyLanguage,
+    _state: Option<&AppState>,
+    _language: ReplyLanguage,
     skill_name: &str,
     detail: &str,
 ) -> String {
-    let trimmed = detail.trim();
-    if trimmed.is_empty() {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.reload_failure",
-            "我已生成、验证并启用 `external_skills/{skill_name}`，但重载技能视图没有完成。请手动 reload 或重启 clawd。",
-            "I generated, validated, and enabled `external_skills/{skill_name}`, but skill-view reload did not finish. Please reload skills manually or restart clawd.",
-            &[("skill_name", skill_name)],
-        )
-    } else {
-        self_extension_t_with_vars(
-            state,
-            language,
-            "clawd.msg.self_extension.reload_failure_with_detail",
-            "我已生成、验证并启用 `external_skills/{skill_name}`，但重载技能视图没有完成：{detail}。请手动 reload 或重启 clawd。",
-            "I generated, validated, and enabled `external_skills/{skill_name}`, but skill-view reload did not finish: {detail}. Please reload skills manually or restart clawd.",
-            &[("skill_name", skill_name), ("detail", trimmed)],
-        )
-    }
+    self_extension_failure_machine_payload(
+        "clawd.msg.self_extension.reload_failure",
+        "self_extension_reload_failure",
+        skill_name,
+        "reload",
+        detail,
+    )
 }
 
 async fn compose_permanent_extension_failure_reply(
@@ -554,10 +408,17 @@ async fn compose_permanent_extension_failure_reply(
     skill_name: &str,
     phase: &str,
     detail: &str,
-    default_text: &str,
+    _default_text: &str,
 ) -> String {
+    let default_payload = self_extension_failure_machine_payload(
+        &self_extension_message_key_from_reason(reason_code),
+        reason_code,
+        skill_name,
+        phase,
+        detail,
+    );
     let (Some(state), Some(task)) = (state, task) else {
-        return default_text.to_string();
+        return default_payload;
     };
     let language_hint = crate::language_policy::task_response_language_hint(state, task, request);
     let mut observed_facts = Vec::new();
@@ -589,7 +450,7 @@ async fn compose_permanent_extension_failure_reply(
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        default_text,
+        &default_payload,
     )
     .await
 }
@@ -602,10 +463,17 @@ async fn compose_temporary_extension_failure_reply(
     request: &str,
     phase: &str,
     detail: &str,
-    default_text: &str,
+    _default_text: &str,
 ) -> String {
+    let default_payload = self_extension_failure_machine_payload(
+        &self_extension_message_key_from_reason(reason_code),
+        reason_code,
+        "",
+        phase,
+        detail,
+    );
     let (Some(state), Some(task)) = (state, task) else {
-        return default_text.to_string();
+        return default_payload;
     };
     let language_hint = crate::language_policy::task_response_language_hint(state, task, request);
     let mut observed_facts = vec![
@@ -636,7 +504,7 @@ async fn compose_temporary_extension_failure_reply(
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        default_text,
+        &default_payload,
     )
     .await
 }

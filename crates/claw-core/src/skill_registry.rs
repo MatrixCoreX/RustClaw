@@ -69,6 +69,23 @@ impl PlannerCapabilityEffect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryDedupScope {
+    #[default]
+    Args,
+    Action,
+}
+
+impl RegistryDedupScope {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Args => "args",
+            Self::Action => "action",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PlannerCapabilityMapping {
     pub name: String,
@@ -84,6 +101,12 @@ pub struct PlannerCapabilityMapping {
     pub risk_level: Option<SkillRiskLevel>,
     #[serde(default)]
     pub preferred: bool,
+    #[serde(default)]
+    pub once_per_task: Option<bool>,
+    #[serde(default)]
+    pub dedup_scope: Option<RegistryDedupScope>,
+    #[serde(default)]
+    pub idempotent: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -302,6 +325,9 @@ pub struct SkillManifest {
     pub retryable: Option<bool>,
     pub group: Option<String>,
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
+    pub once_per_task: Option<bool>,
+    pub dedup_scope: Option<RegistryDedupScope>,
+    pub idempotent: Option<bool>,
     pub supported_os: Vec<String>,
     pub required_bins: Vec<String>,
     pub optional_bins: Vec<String>,
@@ -386,6 +412,12 @@ pub struct SkillRegistryEntry {
     pub confirmation_exempt_when: Vec<BTreeMap<String, TomlValue>>,
     #[serde(default)]
     pub retryable: Option<bool>,
+    #[serde(default)]
+    pub once_per_task: Option<bool>,
+    #[serde(default)]
+    pub dedup_scope: Option<RegistryDedupScope>,
+    #[serde(default)]
+    pub idempotent: Option<bool>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -552,9 +584,78 @@ fn normalize_planner_capabilities(
             optional: normalize_schema_tokens(&mapping.optional),
             risk_level: mapping.risk_level,
             preferred: mapping.preferred,
+            once_per_task: mapping.once_per_task,
+            dedup_scope: mapping.dedup_scope,
+            idempotent: mapping.idempotent,
         });
     }
     out
+}
+
+fn matching_planner_capability<'a>(
+    entry: &'a SkillRegistryEntry,
+    action: Option<&str>,
+) -> Option<&'a PlannerCapabilityMapping> {
+    let action = trim_optional_string(action).map(|value| normalize_schema_token(&value))?;
+    entry
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+}
+
+fn once_per_task_from_effect(effect: PlannerCapabilityEffect) -> bool {
+    matches!(
+        effect,
+        PlannerCapabilityEffect::Mutate | PlannerCapabilityEffect::External
+    )
+}
+
+fn dedup_scope_from_effect(effect: PlannerCapabilityEffect) -> RegistryDedupScope {
+    match effect {
+        PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate => {
+            RegistryDedupScope::Args
+        }
+        PlannerCapabilityEffect::Mutate | PlannerCapabilityEffect::External => {
+            RegistryDedupScope::Action
+        }
+    }
+}
+
+fn idempotent_from_effect(effect: PlannerCapabilityEffect) -> bool {
+    matches!(
+        effect,
+        PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate
+    )
+}
+
+fn legacy_entry_is_high_risk_or_side_effect(entry: &SkillRegistryEntry) -> bool {
+    entry.side_effect.unwrap_or(false)
+        || entry.requires_confirmation.unwrap_or(false)
+        || entry.risk_level == Some(SkillRiskLevel::High)
+}
+
+fn legacy_once_per_task_default(entry: &SkillRegistryEntry) -> bool {
+    legacy_entry_is_high_risk_or_side_effect(entry)
+}
+
+fn legacy_dedup_scope_default(entry: &SkillRegistryEntry) -> RegistryDedupScope {
+    if legacy_entry_is_high_risk_or_side_effect(entry) {
+        RegistryDedupScope::Action
+    } else {
+        RegistryDedupScope::Args
+    }
+}
+
+fn legacy_idempotent_default(entry: &SkillRegistryEntry) -> bool {
+    if let Some(side_effect) = entry.side_effect {
+        return !side_effect;
+    }
+    if entry.requires_confirmation.unwrap_or(false)
+        || entry.risk_level == Some(SkillRiskLevel::High)
+    {
+        return false;
+    }
+    false
 }
 
 fn normalize_matrix_admission(config: &MatrixAdmissionConfig) -> MatrixAdmissionConfig {
@@ -1049,6 +1150,9 @@ impl SkillsRegistry {
             retryable: entry.retryable,
             group: trim_optional_string(entry.group.as_deref()),
             primary_fallback_role: entry.primary_fallback_role,
+            once_per_task: entry.once_per_task,
+            dedup_scope: entry.dedup_scope,
+            idempotent: entry.idempotent,
             supported_os: entry.supported_os.clone(),
             required_bins: entry.required_bins.clone(),
             optional_bins: entry.optional_bins.clone(),
@@ -1067,6 +1171,77 @@ impl SkillsRegistry {
             Some(entry) => entry.planner_capabilities.as_slice(),
             None => &[],
         }
+    }
+
+    pub fn has_semantic_tag(&self, canonical_name: &str, tag: &str) -> bool {
+        let tag = tag.trim().to_ascii_lowercase();
+        if tag.is_empty() {
+            return false;
+        }
+        let canonical_name = self
+            .resolve_canonical(canonical_name)
+            .unwrap_or(canonical_name);
+        self.get(canonical_name)
+            .map(|entry| entry.semantic_tags.iter().any(|value| value == &tag))
+            .unwrap_or(false)
+    }
+
+    pub fn resolved_once_per_task(&self, canonical_name: &str, action: Option<&str>) -> bool {
+        let Some(entry) = self.get(canonical_name) else {
+            return false;
+        };
+        if let Some(mapping) = matching_planner_capability(entry, action) {
+            if let Some(value) = mapping.once_per_task {
+                return value;
+            }
+            if let Some(effect) = mapping.effect {
+                return once_per_task_from_effect(effect);
+            }
+        }
+        if let Some(value) = entry.once_per_task {
+            return value;
+        }
+        legacy_once_per_task_default(entry)
+    }
+
+    pub fn resolved_dedup_scope(
+        &self,
+        canonical_name: &str,
+        action: Option<&str>,
+    ) -> RegistryDedupScope {
+        let Some(entry) = self.get(canonical_name) else {
+            return RegistryDedupScope::Args;
+        };
+        if let Some(mapping) = matching_planner_capability(entry, action) {
+            if let Some(value) = mapping.dedup_scope {
+                return value;
+            }
+            if let Some(effect) = mapping.effect {
+                return dedup_scope_from_effect(effect);
+            }
+        }
+        if let Some(value) = entry.dedup_scope {
+            return value;
+        }
+        legacy_dedup_scope_default(entry)
+    }
+
+    pub fn resolved_idempotent(&self, canonical_name: &str, action: Option<&str>) -> bool {
+        let Some(entry) = self.get(canonical_name) else {
+            return false;
+        };
+        if let Some(mapping) = matching_planner_capability(entry, action) {
+            if let Some(value) = mapping.idempotent {
+                return value;
+            }
+            if let Some(effect) = mapping.effect {
+                return idempotent_from_effect(effect);
+            }
+        }
+        if let Some(value) = entry.idempotent {
+            return value;
+        }
+        legacy_idempotent_default(entry)
     }
 
     pub fn matrix_admission(&self, canonical_name: &str) -> Option<&MatrixAdmissionConfig> {

@@ -5,7 +5,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use toml::Value as TomlValue;
 
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
@@ -280,19 +280,346 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     let exit_code = out.status.code().unwrap_or(-1);
     if out.status.success() {
         let output = format!("exit={exit_code}\n{text}");
-        Ok((
-            output.clone(),
-            json!({
-                "action": action,
-                "raw_action": raw_action,
-                "subcommand": subcmd,
-                "exit_code": exit_code,
-                "output": output,
-            }),
-        ))
+        let extra = git_success_extra(
+            action.as_str(),
+            raw_action,
+            subcmd,
+            exit_code,
+            &text,
+            &output,
+        );
+        Ok((output.clone(), extra))
     } else {
         Err(format!("git command failed: exit={exit_code}\n{text}"))
     }
+}
+
+fn git_success_extra(
+    action: &str,
+    raw_action: &str,
+    subcommand: &str,
+    exit_code: i32,
+    command_text: &str,
+    output: &str,
+) -> Value {
+    let mut root = Map::new();
+    root.insert("schema_version".to_string(), json!(1));
+    root.insert("action".to_string(), json!(action));
+    root.insert("raw_action".to_string(), json!(raw_action));
+    root.insert("subcommand".to_string(), json!(subcommand));
+    root.insert("exit_code".to_string(), json!(exit_code));
+    root.insert("output".to_string(), json!(output));
+    let mut field_value = Map::new();
+    field_value.insert("exit_code".to_string(), json!(exit_code));
+    field_value.insert("action".to_string(), json!(action));
+
+    match action {
+        "status" => append_git_status_extra(command_text, &mut root, &mut field_value),
+        "current_branch" => append_current_branch_extra(command_text, &mut root, &mut field_value),
+        "changed_files" => append_changed_files_extra(command_text, &mut root, &mut field_value),
+        "log" => append_git_log_extra(command_text, &mut root, &mut field_value),
+        "rev_parse" => append_rev_parse_extra(command_text, &mut root, &mut field_value),
+        "branch" => append_branch_list_extra(command_text, &mut root, &mut field_value),
+        "remote" => append_remote_list_extra(command_text, &mut root, &mut field_value),
+        _ => {}
+    }
+
+    root.insert("field_value".to_string(), Value::Object(field_value));
+    Value::Object(root)
+}
+
+fn append_git_status_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let summary = parse_git_status_summary(text);
+    if let Some(branch) = summary.branch.as_deref() {
+        root.insert("branch".to_string(), json!(branch));
+        root.insert("current_branch".to_string(), json!(branch));
+        field_value.insert("branch".to_string(), json!(branch));
+        field_value.insert("current_branch".to_string(), json!(branch));
+    }
+    if let Some(upstream) = summary.upstream.as_deref() {
+        root.insert("upstream".to_string(), json!(upstream));
+        field_value.insert("upstream".to_string(), json!(upstream));
+    }
+    if let Some(ahead) = summary.ahead {
+        root.insert("ahead".to_string(), json!(ahead));
+        field_value.insert("ahead".to_string(), json!(ahead));
+    }
+    if let Some(behind) = summary.behind {
+        root.insert("behind".to_string(), json!(behind));
+        field_value.insert("behind".to_string(), json!(behind));
+    }
+    root.insert("clean".to_string(), json!(summary.clean));
+    root.insert(
+        "worktree_state".to_string(),
+        json!(if summary.clean { "clean" } else { "dirty" }),
+    );
+    root.insert("changed_count".to_string(), json!(summary.changed_count));
+    root.insert("staged_count".to_string(), json!(summary.staged_count));
+    root.insert("unstaged_count".to_string(), json!(summary.unstaged_count));
+    root.insert(
+        "untracked_count".to_string(),
+        json!(summary.untracked_count),
+    );
+    root.insert("changed_files".to_string(), json!(summary.changed_files));
+    field_value.insert("clean".to_string(), json!(summary.clean));
+    field_value.insert(
+        "worktree_state".to_string(),
+        json!(if summary.clean { "clean" } else { "dirty" }),
+    );
+    field_value.insert("changed_count".to_string(), json!(summary.changed_count));
+    field_value.insert("staged_count".to_string(), json!(summary.staged_count));
+    field_value.insert("unstaged_count".to_string(), json!(summary.unstaged_count));
+    field_value.insert(
+        "untracked_count".to_string(),
+        json!(summary.untracked_count),
+    );
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct GitStatusSummary {
+    branch: Option<String>,
+    upstream: Option<String>,
+    ahead: Option<u64>,
+    behind: Option<u64>,
+    clean: bool,
+    changed_count: usize,
+    staged_count: usize,
+    unstaged_count: usize,
+    untracked_count: usize,
+    changed_files: Vec<String>,
+}
+
+fn parse_git_status_summary(text: &str) -> GitStatusSummary {
+    let mut summary = GitStatusSummary::default();
+    for line in text
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+    {
+        if let Some(header) = line.strip_prefix("## ") {
+            parse_git_status_branch_header(header, &mut summary);
+            continue;
+        }
+        if line.len() < 3 {
+            continue;
+        }
+        let code = &line[..2];
+        let path = line[3..].trim();
+        if path.is_empty() {
+            continue;
+        }
+        summary.changed_count += 1;
+        if code == "??" {
+            summary.untracked_count += 1;
+        } else {
+            let bytes = code.as_bytes();
+            if bytes.first().is_some_and(|ch| *ch != b' ') {
+                summary.staged_count += 1;
+            }
+            if bytes.get(1).is_some_and(|ch| *ch != b' ') {
+                summary.unstaged_count += 1;
+            }
+        }
+        summary.changed_files.push(normalize_git_status_path(path));
+    }
+    summary.clean = summary.changed_count == 0;
+    summary
+}
+
+fn parse_git_status_branch_header(header: &str, summary: &mut GitStatusSummary) {
+    let branch_part = header
+        .split_once(' ')
+        .map(|(head, _)| head)
+        .unwrap_or(header)
+        .trim();
+    if let Some((branch, upstream)) = branch_part.split_once("...") {
+        if !branch.trim().is_empty() {
+            summary.branch = Some(branch.trim().to_string());
+        }
+        if !upstream.trim().is_empty() {
+            summary.upstream = Some(upstream.trim().to_string());
+        }
+    } else if !branch_part.is_empty() {
+        summary.branch = Some(branch_part.to_string());
+    }
+    if let Some((_, bracket_tail)) = header.split_once('[') {
+        if let Some((bracket, _)) = bracket_tail.split_once(']') {
+            parse_git_status_ahead_behind(bracket, summary);
+        }
+    }
+}
+
+fn parse_git_status_ahead_behind(bracket: &str, summary: &mut GitStatusSummary) {
+    let parts = bracket
+        .split([',', ' '])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    for pair in parts.windows(2) {
+        match pair[0] {
+            "ahead" => summary.ahead = pair[1].parse::<u64>().ok(),
+            "behind" => summary.behind = pair[1].parse::<u64>().ok(),
+            _ => {}
+        }
+    }
+}
+
+fn normalize_git_status_path(path: &str) -> String {
+    path.split(" -> ")
+        .last()
+        .unwrap_or(path)
+        .trim()
+        .trim_matches('"')
+        .to_string()
+}
+
+fn append_current_branch_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    if let Some(branch) = first_non_empty_line(text) {
+        root.insert("branch".to_string(), json!(branch));
+        root.insert("current_branch".to_string(), json!(branch));
+        field_value.insert("branch".to_string(), json!(branch));
+        field_value.insert("current_branch".to_string(), json!(branch));
+    }
+}
+
+fn append_changed_files_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let files = non_empty_lines(text);
+    root.insert("changed_files".to_string(), json!(files));
+    root.insert("changed_count".to_string(), json!(files.len()));
+    field_value.insert("changed_count".to_string(), json!(files.len()));
+}
+
+fn append_git_log_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let commits = parse_git_log_commits(text);
+    let subjects = commits
+        .iter()
+        .filter_map(|commit| commit.get("subject").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    root.insert("commits".to_string(), json!(commits));
+    root.insert("commit_count".to_string(), json!(subjects.len()));
+    root.insert("subjects".to_string(), json!(subjects));
+    field_value.insert("commit_count".to_string(), json!(subjects.len()));
+}
+
+fn parse_git_log_commits(text: &str) -> Vec<Value> {
+    non_empty_lines(text)
+        .into_iter()
+        .filter_map(|line| {
+            let (sha, subject) = line.split_once(' ')?;
+            Some(json!({
+                "sha": sha,
+                "subject": subject.trim(),
+            }))
+        })
+        .collect()
+}
+
+fn append_rev_parse_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    if let Some(revision) = first_non_empty_line(text) {
+        root.insert("revision".to_string(), json!(revision));
+        field_value.insert("revision".to_string(), json!(revision));
+    }
+}
+
+fn append_branch_list_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let branches = parse_branch_list(text);
+    let current_branch = branches
+        .iter()
+        .find(|branch| branch.get("current").and_then(Value::as_bool) == Some(true))
+        .and_then(|branch| branch.get("name").and_then(Value::as_str))
+        .map(str::to_string);
+    root.insert("branches".to_string(), json!(branches));
+    root.insert("branch_count".to_string(), json!(branches.len()));
+    if let Some(branch) = current_branch {
+        root.insert("current_branch".to_string(), json!(branch));
+        field_value.insert("current_branch".to_string(), json!(branch));
+    }
+    field_value.insert("branch_count".to_string(), json!(branches.len()));
+}
+
+fn parse_branch_list(text: &str) -> Vec<Value> {
+    text.lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let current = line.trim_start().starts_with('*');
+            let name = line.trim_start_matches(['*', ' ']).trim().to_string();
+            json!({
+                "name": name,
+                "current": current,
+            })
+        })
+        .collect()
+}
+
+fn append_remote_list_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let remotes = parse_remote_list(text);
+    root.insert("remotes".to_string(), json!(remotes));
+    root.insert("remote_count".to_string(), json!(remotes.len()));
+    field_value.insert("remote_count".to_string(), json!(remotes.len()));
+}
+
+fn parse_remote_list(text: &str) -> Vec<Value> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?;
+            let url = parts.next()?;
+            let direction = parts
+                .next()
+                .map(|value| value.trim_matches(['(', ')']))
+                .unwrap_or("");
+            Some(json!({
+                "name": name,
+                "url": url,
+                "direction": direction,
+            }))
+        })
+        .collect()
+}
+
+fn first_non_empty_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn non_empty_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn normalize_action(raw: &str) -> String {
