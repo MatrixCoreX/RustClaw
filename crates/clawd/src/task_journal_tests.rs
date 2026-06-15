@@ -250,6 +250,12 @@ fn agent_decides_shadow_attribution_is_machine_readable() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/route_gate_kind")
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/old_first_layer_decision")
             .and_then(Value::as_str),
         Some("planner_execute")
@@ -270,7 +276,7 @@ fn agent_decides_shadow_attribution_is_machine_readable() {
         summary
             .pointer("/rollout_attribution/0/decision")
             .and_then(Value::as_str),
-        Some("planner_execute")
+        Some("execute")
     );
     assert_eq!(
         summary
@@ -334,6 +340,12 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
             .pointer("/rollout_attribution/0/event")
             .and_then(Value::as_str),
         Some("agent_decides_shadow_first_action")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/route_gate_kind")
+            .and_then(Value::as_str),
+        Some("execute")
     );
     assert_eq!(
         summary
@@ -407,6 +419,12 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
             .pointer("/rollout_attribution/0/decision_envelope/initial_hint_ref")
             .and_then(Value::as_str),
         Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/initial_gate_ref")
+            .and_then(Value::as_str),
+        Some("execute")
     );
     assert_eq!(
         summary
@@ -671,6 +689,7 @@ fn agent_loop_decision_envelope_schema_drift() {
         "schema_version",
         "source",
         "initial_hint_ref",
+        "initial_gate_ref",
         "semantic_authority",
         "fallback_gate_policy",
         "decision",

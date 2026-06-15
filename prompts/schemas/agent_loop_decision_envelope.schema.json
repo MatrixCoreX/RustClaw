@@ -9,6 +9,7 @@
     "schema_version",
     "source",
     "initial_hint_ref",
+    "initial_gate_ref",
     "semantic_authority",
     "fallback_gate_policy",
     "decision",
@@ -40,7 +41,12 @@
     },
     "initial_hint_ref": {
       "type": "string",
-      "description": "Machine ref for the pre-agent first-layer hint. This is an initial hint, not the semantic authority."
+      "description": "Legacy machine ref for the pre-agent first-layer hint. This is retained for trace compatibility, not semantic authority."
+    },
+    "initial_gate_ref": {
+      "type": "string",
+      "enum": ["chat", "clarify", "execute"],
+      "description": "Gate-kind machine ref derived from AskMode. Planner-loop decisions use this as the comparable pre-agent gate signal."
     },
     "semantic_authority": {
       "type": "string",

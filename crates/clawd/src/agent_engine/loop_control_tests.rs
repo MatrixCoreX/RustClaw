@@ -1645,10 +1645,13 @@ fn agent_decides_shadow_switch_records_route_snapshot_only() {
     );
     assert_eq!(
         boundary
-            .pointer("/pre_agent_gates/intent_normalizer/current_decision")
+            .pointer("/pre_agent_gates/intent_normalizer/current_gate_kind")
             .and_then(serde_json::Value::as_str),
-        Some("planner_execute")
+        Some("execute")
     );
+    assert!(boundary
+        .pointer("/pre_agent_gates/intent_normalizer/current_decision")
+        .is_none());
     assert_eq!(
         boundary
             .pointer("/pre_agent_gates/post_route_policy/authority_target")
@@ -1817,10 +1820,13 @@ fn boundary_context_exposes_normalizer_hints_as_machine_fields() {
     );
     assert_eq!(
         boundary
-            .pointer("/normalizer_hints/decision_hint")
+            .pointer("/normalizer_hints/gate_kind_hint")
             .and_then(serde_json::Value::as_str),
-        Some("planner_execute")
+        Some("execute")
     );
+    assert!(boundary
+        .pointer("/normalizer_hints/decision_hint")
+        .is_none());
     assert_eq!(
         boundary
             .pointer("/normalizer_hints/output_contract/semantic_kind")
