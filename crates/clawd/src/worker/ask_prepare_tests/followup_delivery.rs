@@ -1360,7 +1360,7 @@ fn task_replace_merge_discards_prior_goal() {
     let merged = merged_prompt_from_task_turn_analysis(
         Some("别写长文，先做方案"),
         None,
-        "算了，改成 X thread",
+        "算了，改成短帖串",
         Some(&crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskReplace),
             target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReplaceActive),
@@ -1371,7 +1371,7 @@ fn task_replace_merge_discards_prior_goal() {
     )
     .expect("merged prompt");
     assert!(merged.contains("别写长文，先做方案"));
-    assert!(merged.contains("算了，改成 X thread"));
+    assert!(merged.contains("算了，改成短帖串"));
     assert!(merged.contains("\"deliverable\":\"thread\""));
     assert!(merged.contains("replace it with this new goal"));
 }

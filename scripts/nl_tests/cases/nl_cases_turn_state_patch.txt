@@ -6,7 +6,7 @@ task_append_split_sentence_cn|帮我写个方案|面向老板|不要太技术，
 task_append_split_sentence_en|Help me write a proposal|It is for executives|Keep it non-technical and under 40 words. Output only the body.
 task_correct_version_cn|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
 task_correct_version_en|Write one deployment note that mentions Python 3.10|Correction: not Python 3.10, use Python 3.11|Output only that sentence
-task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成 X thread|只输出前三条，每条一行
-task_replace_goal_en|Write a long article about RustClaw|Actually, replace it with an X thread|Output only the first three lines
+task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成短帖串|只输出前三条，每条一行
+task_replace_goal_en|Write a long article about RustClaw|Actually, replace it with a short thread|Output only the first three lines
 task_scope_update_cn|帮我做一个测试计划|先只看登录模块|只输出三个测试点
 task_scope_update_en|Help me create a test plan|Only focus on the login module first|Output exactly three test points
