@@ -129,14 +129,6 @@ impl FirstLayerDecision {
             Self::PlannerExecute => "planner_execute",
         }
     }
-
-    pub(crate) fn gate_kind(self) -> RouteGateKind {
-        match self {
-            Self::Clarify => RouteGateKind::Clarify,
-            Self::DirectAnswer => RouteGateKind::Chat,
-            Self::PlannerExecute => RouteGateKind::Execute,
-        }
-    }
 }
 
 impl RouteGateKind {

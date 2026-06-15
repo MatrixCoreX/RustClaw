@@ -399,8 +399,8 @@ impl RiskCeiling {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct RouteResult {
-    /// Runtime mode derived from the first-layer decision. This is the semantic
-    /// authority; route labels for logs/journals are derived from this field.
+    /// Runtime mode for ask-flow dispatch. Legacy route labels for logs and
+    /// journals are derived from this field.
     pub(crate) ask_mode: AskMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
@@ -427,6 +427,7 @@ impl RouteResult {
         self.ask_mode.route_label()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_first_layer_decision(&mut self, decision: FirstLayerDecision) {
         let finalize = self
             .ask_mode
@@ -437,11 +438,24 @@ impl RouteResult {
         ));
     }
 
+    pub(crate) fn set_chat_gate(&mut self) {
+        self.set_ask_mode(AskMode::direct_answer());
+    }
+
+    pub(crate) fn set_clarify_gate(&mut self) {
+        self.set_ask_mode(AskMode::clarify());
+    }
+
+    pub(crate) fn set_execute_gate(&mut self) {
+        let finalize = self
+            .ask_mode
+            .act_finalize_style()
+            .unwrap_or(ActFinalizeStyle::Plain);
+        self.set_ask_mode(AskMode::Act { finalize });
+    }
+
     pub(crate) fn set_planner_execute_finalize(&mut self, finalize: ActFinalizeStyle) {
-        self.set_ask_mode(AskMode::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::PlannerExecute,
-            finalize,
-        ));
+        self.set_ask_mode(AskMode::Act { finalize });
     }
 
     pub(crate) fn first_layer_decision(&self) -> FirstLayerDecision {
@@ -449,7 +463,7 @@ impl RouteResult {
     }
 
     pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
-        self.first_layer_decision().gate_kind()
+        self.ask_mode.gate_kind()
     }
 
     pub(crate) fn is_chat_gate(&self) -> bool {
