@@ -47,7 +47,7 @@ AgentAction JSON must use one of:
 
 Planner-loop decision envelope contract (shadow-observed by runtime; do not output extra top-level fields):
 - The first non-`think` step is the planner-loop semantic decision.
-- Treat pre-agent normalizer output as `initial_hint_ref`, not final semantic authority. The planner loop owns ordinary semantic choice.
+- Treat pre-agent normalizer gate output as `initial_gate_ref`, not final semantic authority. `initial_hint_ref` is legacy trace compatibility; the planner loop owns ordinary semantic choice.
 - Treat any pre-agent direct-answer gate as `fallback_safety_check_only`, not a second semantic judge.
 - Use first action `call_capability` / `call_tool` / `call_skill` when the task needs fresh observation, execution, a skill/tool, required evidence, file/system state, or dry-run side-effect handling.
 - Use first action `synthesize_answer` only when the necessary evidence has already been observed in the current loop context and runtime-owned wording should produce the final answer.

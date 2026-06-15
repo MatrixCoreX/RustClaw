@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 mod decision_envelope;
 use self::decision_envelope::{
     agent_action_capability_delta, agent_loop_decision_envelope_json,
-    agent_loop_round_plan_decision_envelope_json, route_gate_agent_decision_delta,
-    first_non_think_action_capability_ref, first_non_think_action_decision,
-    output_contract_ref_for_route,
+    agent_loop_round_plan_decision_envelope_json, first_non_think_action_capability_ref,
+    first_non_think_action_decision, output_contract_ref_for_route,
+    route_gate_agent_decision_delta,
 };
 
 #[path = "task_journal_evidence_collect.rs"]
@@ -286,6 +286,7 @@ pub(crate) struct TaskJournalRolloutAttribution {
     pub(crate) confidence: Option<f64>,
     pub(crate) risk_level: Option<String>,
     pub(crate) output_contract_ref: Option<String>,
+    pub(crate) route_gate_kind: Option<String>,
     pub(crate) old_first_layer_decision: Option<String>,
     pub(crate) agent_decision: Option<String>,
     pub(crate) decision_delta: Option<String>,
@@ -415,7 +416,8 @@ impl TaskJournalRolloutAttribution {
             outcome: "shadow_only".to_string(),
             reason_code: Some("agent_decides_shadow_not_evaluated".to_string()),
             owner_layer: Some("agent_loop_shadow".to_string()),
-            decision: Some(route.first_layer_decision().as_str().to_string()),
+            decision: Some(route.gate_kind().as_str().to_string()),
+            route_gate_kind: Some(route.gate_kind().as_str().to_string()),
             old_first_layer_decision: Some(route.first_layer_decision().as_str().to_string()),
             agent_decision: Some("not_evaluated".to_string()),
             decision_delta: Some("not_evaluated".to_string()),
@@ -444,7 +446,7 @@ impl TaskJournalRolloutAttribution {
         let agent_decision = first_non_think_action_decision(actions);
         let decision_delta = route_gate_agent_decision_delta(route.gate_kind(), agent_decision);
         let route_layer_that_disagreed =
-            (decision_delta == "different_gate").then(|| "first_layer_vs_agent_loop".to_string());
+            (decision_delta == "different_gate").then(|| "route_gate_vs_agent_loop".to_string());
         let required_evidence = contract.required_evidence_fields.clone();
         let output_contract_ref = output_contract_ref_for_route(route);
         Self {
@@ -455,6 +457,7 @@ impl TaskJournalRolloutAttribution {
             owner_layer: Some("agent_loop_shadow".to_string()),
             decision: Some(agent_decision.to_string()),
             capability_ref: first_non_think_action_capability_ref(actions).map(str::to_string),
+            route_gate_kind: Some(route.gate_kind().as_str().to_string()),
             old_first_layer_decision: Some(route.first_layer_decision().as_str().to_string()),
             agent_decision: Some(agent_decision.to_string()),
             decision_delta: Some(decision_delta.to_string()),
@@ -504,6 +507,7 @@ fn rollout_attribution_json(attribution: &TaskJournalRolloutAttribution) -> Valu
         "confidence": attribution.confidence,
         "risk_level": attribution.risk_level.as_deref(),
         "output_contract_ref": attribution.output_contract_ref.as_deref(),
+        "route_gate_kind": attribution.route_gate_kind.as_deref(),
         "old_first_layer_decision": attribution.old_first_layer_decision.as_deref(),
         "agent_decision": attribution.agent_decision.as_deref(),
         "decision_delta": attribution.decision_delta.as_deref(),

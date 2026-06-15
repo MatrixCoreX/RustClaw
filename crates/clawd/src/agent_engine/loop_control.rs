@@ -874,7 +874,6 @@ fn normalizer_hints_json(route: &RouteResult) -> Value {
         "schema_version": 1,
         "source": "route_result_machine_fields",
         "available": true,
-        "decision_hint": route.first_layer_decision().as_str(),
         "gate_kind_hint": route.gate_kind().as_str(),
         "route_confidence": route.route_confidence,
         "candidate_contracts": [
@@ -983,7 +982,6 @@ fn intent_normalizer_initial_hint_json(route: &RouteResult) -> Value {
         "boundary_allowed": false,
         "semantic_migration_target": "planner_loop_decision_envelope",
         "available": true,
-        "current_decision": route.first_layer_decision().as_str(),
         "current_gate_kind": route.gate_kind().as_str(),
         "output_contract_ref": crate::TaskContract::from_route_result(route).compact_prompt_line(),
     })
