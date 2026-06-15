@@ -77,7 +77,7 @@ fn task_replace_clarify_is_resolved_when_active_task_exists() {
         active_observed_facts: None,
     };
     assert!(super::should_resolve_task_replace_clarify_with_active_task(
-        "Actually, replace it with an X thread",
+        "Actually, replace it with a short thread",
         Some(&snapshot),
         Some(TurnType::TaskReplace),
         Some(TargetTaskPolicy::ReplaceActive),
