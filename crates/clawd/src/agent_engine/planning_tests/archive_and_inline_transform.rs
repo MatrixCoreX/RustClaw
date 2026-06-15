@@ -588,6 +588,9 @@ fn lightweight_tool_spec_includes_route_task_contract() {
     let spec = build_lightweight_tool_spec(Some(&route), None);
 
     assert!(spec.contains("task_contract"));
+    assert!(spec.contains("route_gate_kind=execute"));
+    assert!(!spec.contains("ask_mode="));
+    assert!(!spec.contains("derived_route_label="));
     assert!(spec.contains("intent_kind=planner_execute"));
     assert!(spec.contains("target_object=directory"));
     assert!(spec.contains("operation=list"));
@@ -758,6 +761,7 @@ fn lightweight_tool_spec_includes_contract_and_auto_locator() {
     route.output_contract.locator_hint = "UI/package.json".to_string();
     let rendered = build_lightweight_tool_spec(Some(&route), Some("/tmp/UI/package.json"));
     assert!(rendered.contains("planning_class=lightweight_execution"));
+    assert!(rendered.contains("route_gate_kind=execute"));
     assert!(rendered.contains("response_shape=scalar"));
     assert!(rendered.contains("locator_hint=UI/package.json"));
     assert!(rendered.contains("auto_locator_path=/tmp/UI/package.json"));

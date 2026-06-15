@@ -1032,8 +1032,7 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
     let direct_observation_passthrough_allowed =
         !route_disallows_direct_observation_passthrough(route);
     serde_json::json!({
-        "ask_mode": route.ask_mode.as_str(),
-        "derived_route_label": route.derived_route_label(),
+        "route_gate_kind": route.gate_kind().as_str(),
         "response_shape": route.output_contract.response_shape.as_str(),
         "exact_sentence_count": route.output_contract.exact_sentence_count,
         "requires_content_evidence": route.output_contract.requires_content_evidence,
