@@ -417,11 +417,23 @@ if model_io_path.exists():
         if str(row.get('task_id') or '') == task_id:
             model_rows.append(row)
 
-route_chat = any(re.search(r'derived_route_label=Chat\b', line) for line in clawd_lines)
-route_act = any(re.search(r'derived_route_label=Act\b', line) for line in clawd_lines)
-route_chat_act = any(re.search(r'derived_route_label=ChatAct\b', line) for line in clawd_lines)
+route_chat = any(
+    re.search(r'route_gate_kind=chat\b', line)
+    or re.search(r'derived_route_label=Chat\b', line)
+    for line in clawd_lines
+)
+route_act = any(
+    re.search(r'route_gate_kind=execute\b', line)
+    or re.search(r'derived_route_label=Act\b', line)
+    for line in clawd_lines
+)
+route_chat_act = any(
+    re.search(r'ask_mode=planner_execute_chat_wrapped\b', line)
+    or re.search(r'derived_route_label=ChatAct\b', line)
+    for line in clawd_lines
+)
 route_clarify = any(
-    re.search(r'first_layer_decision=clarify\b|derived_route_label=AskClarify\b', line)
+    re.search(r'route_gate_kind=clarify\b|first_layer_decision=clarify\b|derived_route_label=AskClarify\b', line)
     for line in clawd_lines
 )
 has_exec = any('executor_step_execute' in line for line in clawd_lines)

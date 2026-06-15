@@ -181,10 +181,10 @@ def print_case(path: Path, obj: dict[str, Any], max_chars: int) -> None:
     print(f"CASE {case_id} turn={turn_id} status={status}")
     print(f"PROMPT: {extract_prompt(obj)}")
     print(
-        "ROUTE: first_layer={first_layer} routed_mode={mode} gate={gate} reason={reason}".format(
-            first_layer=route.get("first_layer_decision", ""),
-            mode=route.get("routed_mode", ""),
+        "ROUTE: gate={gate} routed_mode={mode} legacy_first_layer={first_layer} reason={reason}".format(
             gate=route.get("route_gate_kind", ""),
+            mode=route.get("routed_mode", ""),
+            first_layer=route.get("first_layer_decision", ""),
             reason=compact(route.get("route_reason"), max_chars),
         )
     )
