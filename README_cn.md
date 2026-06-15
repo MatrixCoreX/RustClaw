@@ -48,11 +48,11 @@
 ## 当前推荐入口
 
 - 项目总览：`README.zh-CN.md`
-- 运行时 / LLM 流程图与说明（与当前 `clawd` 实现一致）：`README.zh-CN.md` 内 **「规划优先架构」** 一节（含 Mermaid）
+- 运行时 / LLM 流程图与说明（与当前 `clawd` 实现一致）：`README.zh-CN.md` 内 **「Agent Loop 架构」** 一节（含 Mermaid）
 - 使用手册：`USAGE.md`
 - 技能接入统一入口：`docs/skill_integration_guide.md`
 - UI 说明：`UI/README.md`
 
 ## 架构与运行时流程
 
-完整架构导语、**运行时流程**与 **LLM 请求流程**的两张图及条目说明，均以 `README.zh-CN.md` 为准；请直接打开该文件，从 **「规划优先架构」** 开始阅读。不要在本索引页维护第二套流程图，以免与总览不同步。
+完整架构导语、**运行时流程**与 **LLM 请求流程**的两张图及条目说明，均以 `README.zh-CN.md` 为准；请直接打开该文件，从 **「Agent Loop 架构」** 开始阅读。不要在本索引页维护第二套流程图，以免与总览不同步。
