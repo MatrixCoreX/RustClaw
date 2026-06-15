@@ -975,7 +975,7 @@ pub(super) fn apply_direct_answer_gate_outcome(
             if question.is_empty() {
                 DirectAnswerPreflight::DirectAnswer
             } else {
-                route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+                route.set_clarify_gate();
                 route.needs_clarify = true;
                 route.clarify_question = question.to_string();
                 append_route_reason(route, "direct_answer_gate_clarify");
@@ -1173,7 +1173,7 @@ pub(super) fn apply_direct_answer_gate_unbound_deictic_clarify(
     preserved_contract.locator_kind = crate::OutputLocatorKind::None;
     preserved_contract.locator_hint.clear();
 
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.clarify_question.clear();
     route.wants_file_delivery = preserved_contract.delivery_required

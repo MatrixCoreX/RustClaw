@@ -166,7 +166,7 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
 
     route_result.needs_clarify = false;
     route_result.clarify_question.clear();
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route_result.set_execute_gate();
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     super::append_route_reason(
         route_result,

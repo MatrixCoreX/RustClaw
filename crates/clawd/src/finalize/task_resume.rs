@@ -201,10 +201,7 @@ pub(super) fn direct_chat_answer_verifier_retry_applicable(
 ) -> bool {
     verifier.high_confidence_gap()
         && verifier.should_retry
-        && matches!(
-            route_result.first_layer_decision(),
-            crate::FirstLayerDecision::DirectAnswer
-        )
+        && route_result.is_chat_gate()
         && route_result
             .route_reason
             .contains("active_text_followup_route_repair")

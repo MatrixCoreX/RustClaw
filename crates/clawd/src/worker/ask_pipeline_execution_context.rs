@@ -90,10 +90,7 @@ fn pure_direct_chat_current_request_route(
     {
         return false;
     }
-    matches!(
-        route_result.first_layer_decision(),
-        crate::FirstLayerDecision::DirectAnswer
-    )
+    route_result.is_chat_gate()
 }
 
 fn turn_analysis_allows_current_request_only_freeform_rewrite(
