@@ -19,9 +19,9 @@ Current repository highlights:
 - local browser UI in `UI/`, including a standalone NNI device-signing page
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 
-## Planner-First Architecture
+## Agent Loop Architecture
 
-RustClaw's main natural-language path uses a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run the intent-normalizer LLM for routing signals and the first-layer decision, optionally use the contract-repair judge for schema-backed semantic repair, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
+RustClaw's main natural-language path is moving to a Codex / Claude style agent loop. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, and budget guards, then lets the agent loop own ordinary low-risk semantic decisions when `semantic_route_authority = "agent_loop_default"` selects an eligible class. The intent normalizer is now an initial structured hint for those classes, not the final semantic authority. Legacy pre-agent routing remains as a compatibility and rollback path for direct chat, clarification, schedule, high-risk, delivery, and non-eligible cases until the release-deprecation gates are complete.
 
 ### Runtime Flow
 
@@ -46,12 +46,14 @@ flowchart TD
     CM --> VF
     CM --> EV
     CM --> Q
-    EC --> E2[Post-route policy<br/>locator + contract matrix guards]
+    EC --> E2[Boundary post-route policy<br/>locator + contract matrix guards]
     E2 -->|schedule direct| SD[Schedule direct finalize]
     E2 -->|resume discussion| RD[Resume discussion prompt]
     E2 -->|resume execution| H
     E2 -->|runtime-grounded scalar/direct candidate| RDC[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|standard ask| F{FirstLayerDecision}
+    E2 -->|ordinary ask| SA{semantic_route_authority}
+    SA -->|agent_loop_default + eligible class| H[Agent-loop semantic authority<br/>decision envelope + runtime context]
+    SA -->|legacy / shadow / non-eligible| F{Boundary dispatch<br/>compatibility path}
     F -->|Clarify| G[Clarify question]
     F -->|DirectAnswer| DG[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
     DG -->|grounded candidate| VP
@@ -59,7 +61,7 @@ flowchart TD
     DG -->|clarify| G
     DG -->|promote to execute| H
     CH --> CR[Chat response LLM]
-    F -->|PlannerExecute| H[Use execution prompt/context]
+    F -->|PlannerExecute fallback| H
     SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> RV
     H --> I[Planner / runtime loop]
     I --> ID{Narrow deterministic<br/>observation contract?}
@@ -107,19 +109,20 @@ flowchart TD
     R -. optional .-> V[Memory preference LLM fallback]
 ```
 
-- `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
-- `Intent normalizer LLM`: emits `first_layer_decision`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields. Runtime then derives `ask_mode` and a log-only route label. When schema repair marks a semantic contract as suspect, an optional contract-repair judge LLM can refine the structured contract before dispatch. **Clarify vs DirectAnswer vs PlannerExecute is decided before planner JSON**, not via a `clarify` action inside the planner steps.
+- `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is boundary context, not a separate “taxonomy engine” LLM.
+- `Intent normalizer LLM`: emits `first_layer_decision`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields. Runtime then derives `ask_mode` and a log-only route label. When schema repair marks a semantic contract as suspect, an optional contract-repair judge LLM can refine the structured contract before dispatch. Under `agent_loop_default`, eligible low-risk planner-execute classes treat these fields as initial hints and let the loop decision envelope own the ordinary semantic decision.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
 - `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
 - `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
-- `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It can refine the gate from structured state, but it is not a separate semantic router.
+- `Boundary post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It consumes machine fields and safety state; it should not grow into a language-specific semantic router.
 - `Task contract matrix`: keeps semantic kind, allowed action, required evidence, and response shape in one shared contract used by post-route guards, direct-answer preflight, plan verification, evidence coverage checks, and final delivery.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
-- `FirstLayerDecision`: keeps the runtime gate to `Clarify / DirectAnswer / PlannerExecute`. `AskMode` is the code-facing dispatch type; route labels such as `AskClarify`, `Chat`, `Act`, and `ChatAct` are derived only for logs and journals, not stored as a second routing state.
+- `semantic_route_authority`: current live config uses `agent_loop_default`. For eligible low-risk classes such as structured field reads, exact path/name lists, bound path summaries, recent artifact judgments, and scalar counts, ordinary semantic authority moves into the agent loop. `legacy` remains a hot rollback token; `shadow` and `agent_loop_canary` are rollout modes.
+- `FirstLayerDecision / boundary dispatch`: keeps compatibility handling for `Clarify / DirectAnswer / PlannerExecute` when a case is not selected for agent-loop authority. `AskMode` is the code-facing dispatch type; route labels such as `AskClarify`, `Chat`, `Act`, and `ChatAct` are derived only for logs and journals, not stored as a second routing state.
 - `Direct-answer candidate / optional preflight`: before a normal chat answer is sent, the runtime can reuse a grounded scalar/direct candidate when it matches current runtime facts; otherwise it can run a lightweight contract/advice-only check. It keeps pure chat in `DirectAnswer`, but can promote tool-backed requests to `PlannerExecute` or ask one clarification when the normalizer was too weak.
 - `Chat response LLM`: handles confirmed `DirectAnswer` replies; pure chat requests do not enter the execution planner loop.
-- `Planner / runtime loop`: for `PlannerExecute`, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
-- `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
+- `Planner / runtime loop`: for selected agent-loop authority and `PlannerExecute` fallback, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today; execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
+- `Agent-loop runtime context`: reuses the ask context bundle, boundary snapshot, contract, visible capabilities, memory policy output, and resolved prompt, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
 - `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier and contract action gate then check visibility, allowed actions, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
 - `call_skill` / direct `run_skill`: planner `call_skill` enters `execution_adapters::run_skill`, and both planner and direct task paths converge on `run_skill_with_runner`. The shared dispatcher applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
@@ -145,18 +148,21 @@ flowchart TD
     CM --> Kv
     CM --> Ev
     CM --> R
-    Ec --> E2[Post-route policy<br/>locator + contract matrix guards]
+    Ec --> E2[Boundary post-route policy<br/>locator + contract matrix guards]
     E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
     E2 -->|runtime-grounded scalar/direct candidate| Gd[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|first_layer_decision=clarify| F[Clarify question]
-    E2 -->|first_layer_decision=direct_answer| G0[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
+    E2 -->|ordinary ask| As{semantic_route_authority}
+    As -->|agent_loop_default + eligible class| H[Build agent-loop runtime context]
+    As -->|legacy / shadow / non-eligible| Bd{Boundary dispatch<br/>compatibility path}
+    Bd -->|first_layer_decision=clarify| F[Clarify question]
+    Bd -->|first_layer_decision=direct_answer| G0[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
     G0 -->|grounded candidate| VP
     G0 -->|direct| G[Build direct-answer chat prompt]
     G0 -->|clarify| F
     G0 -->|promote to execute| H
-    E2 -->|first_layer_decision=planner_execute| H[Build planner/runtime context]
+    Bd -->|first_layer_decision=planner_execute| H
     SK[Skill registry + generated skill docs<br/>planner capabilities] --> H
     SK --> Kr
     G --> Ic[Next LLM request<br/>Chat response]
@@ -200,13 +206,14 @@ flowchart TD
     S -. optional background .-> U[Memory preference extraction LLM]
 ```
 
-- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer. If schema normalization flags a semantic contract that cannot be safely repaired deterministically, an optional contract-repair judge LLM can run before the ask context bundle is dispatched.
+- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer. Under `agent_loop_default`, its route fields are initial hints for eligible ordinary semantic classes rather than the final semantic authority. If schema normalization flags a semantic contract that cannot be safely repaired deterministically, an optional contract-repair judge LLM can run before the ask context bundle is dispatched.
 - This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
-- `Build chat prompt / planner runtime context`: combines mode, session state, working context, and output contract for follow-on requests. The full planner prompt is only needed when the current loop round actually calls the planner LLM.
+- `Build chat prompt / agent-loop runtime context`: combines mode, session state, boundary snapshot, working context, visible capabilities, and output contract for follow-on requests. The full planner prompt is only needed when the current loop round actually calls the planner LLM.
 - `Task contract matrix`: shares the same semantic kind, allowed action, required evidence, and response-shape contract across post-route policy, direct-answer preflight, plan verification, evidence coverage checks, final delivery, and generated NL evaluations.
 - `Skill registry + generated skill docs`: planner prompts and resolver mappings are built from enabled skill views, generated interface documents, and `planner_capabilities`, so skill capability growth should be data/contract driven.
 - `DirectAnswer candidate / preflight`: **DirectAnswer** may reuse a runtime-grounded direct candidate or run a lightweight preflight LLM before the chat reply is sent. If the request is confirmed as direct answer, chat response runs and finalizes; if it detects missing required information, the request becomes clarification; if it detects real tool/workspace/system evidence is needed, it is promoted into `PlannerExecute`.
-- `PlannerExecute`: usually uses one-or-more **planner** calls per loop round; narrow deterministic observation contracts can skip the planner LLM for that round and emit runtime-built observation steps instead. Planner JSON steps are `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Prefer `call_capability`; `call_tool` and `call_skill` remain compatible direct actions. `AskMode` finalization style controls whether the execution result is returned plainly or chat-wrapped.
+- `semantic_route_authority`: current config sets `agent_loop_default`, which selects any eligible low-risk migration class instead of a single canary token. Non-eligible or high-risk cases stay on compatibility dispatch until their deletion gates pass.
+- `PlannerExecute / agent loop`: usually uses one-or-more **planner** calls per loop round; narrow deterministic observation contracts can skip the planner LLM for that round and emit runtime-built observation steps instead. Planner JSON steps are `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Prefer `call_capability`; `call_tool` and `call_skill` remain compatible direct actions. `AskMode` finalization style controls whether the execution result is returned plainly or chat-wrapped.
 - `CapabilityResolver / PlanVerifier`: `call_capability` is normalized into the current tool/skill implementation before execution. The verifier and contract action gate block unavailable capabilities, disallowed actions, missing required fields, risk-budget violations, and unsafe mutation plans before the executor sees them.
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
