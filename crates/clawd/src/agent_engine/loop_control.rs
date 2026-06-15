@@ -15,10 +15,13 @@ mod loop_control_answer_recovery;
 mod loop_control_answer_recovery_parse;
 #[path = "loop_control_answer_recovery_text.rs"]
 mod loop_control_answer_recovery_text;
+#[path = "loop_control_local_health_recovery.rs"]
+mod loop_control_local_health_recovery;
 
 use loop_control_answer_recovery::*;
 use loop_control_answer_recovery_parse::*;
 use loop_control_answer_recovery_text::*;
+use loop_control_local_health_recovery::*;
 
 fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
     !loop_state.delivery_messages.is_empty()
@@ -1337,6 +1340,9 @@ pub(super) async fn run_agent_with_loop(
                 return Ok(reply);
             }
             if try_recover_http_health_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
+            if try_recover_local_health_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
             if try_recover_generic_path_content_read_range_answer_verifier_gap(
