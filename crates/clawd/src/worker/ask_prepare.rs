@@ -726,7 +726,7 @@ fn promote_active_clarify_structured_payload_reply_to_execute(
         return;
     }
 
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route_result.set_execute_gate();
     route_result.needs_clarify = false;
     route_result.clarify_question.clear();
     route_result.resolved_intent = hit.resolved_intent.clone();
@@ -817,7 +817,7 @@ fn promote_active_clarify_locator_reply_to_execute(
     }
     let already_executable = route_result.is_execute_gate() && !route_result.needs_clarify;
     if !already_executable {
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+        route_result.set_execute_gate();
         route_result.needs_clarify = false;
         route_result.clarify_question.clear();
         route_result.resolved_intent = hit.resolved_intent.clone();

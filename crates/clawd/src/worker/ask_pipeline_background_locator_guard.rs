@@ -101,7 +101,7 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
         return false;
     }
     route_result.needs_clarify = false;
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::DirectAnswer);
+    route_result.set_chat_gate();
     route_result.clarify_question.clear();
     route_result.output_contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Scalar,

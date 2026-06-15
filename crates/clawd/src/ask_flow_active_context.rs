@@ -162,7 +162,7 @@ pub(super) fn promote_clarify_recent_execution_judgment_context_to_chat(
     let Some(route) = ctx.route_result.as_mut() else {
         return false;
     };
-    route.set_first_layer_decision(crate::FirstLayerDecision::DirectAnswer);
+    route.set_chat_gate();
     route.needs_clarify = false;
     route.clarify_question.clear();
     append_route_reason(route, "clarify_recent_execution_judgment_to_chat");
@@ -220,7 +220,7 @@ pub(crate) fn promote_active_anchor_observed_judgment_to_chat(
     let Some(route) = ctx.route_result.as_mut() else {
         return false;
     };
-    route.set_first_layer_decision(crate::FirstLayerDecision::DirectAnswer);
+    route.set_chat_gate();
     route.needs_clarify = false;
     route.clarify_question.clear();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
@@ -270,7 +270,7 @@ pub(super) fn promote_clarify_config_risk_assessment_default_config_to_planner(
     let Some(route) = ctx.route_result.as_mut() else {
         return false;
     };
-    route.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route.set_execute_gate();
     route.needs_clarify = false;
     route.clarify_question.clear();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;

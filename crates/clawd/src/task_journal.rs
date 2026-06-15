@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 mod decision_envelope;
 use self::decision_envelope::{
     agent_action_capability_delta, agent_loop_decision_envelope_json,
-    agent_loop_round_plan_decision_envelope_json, first_layer_agent_decision_delta,
+    agent_loop_round_plan_decision_envelope_json, route_gate_agent_decision_delta,
     first_non_think_action_capability_ref, first_non_think_action_decision,
     output_contract_ref_for_route,
 };
@@ -442,8 +442,7 @@ impl TaskJournalRolloutAttribution {
     ) -> Self {
         let contract = crate::TaskContract::from_route_result(route);
         let agent_decision = first_non_think_action_decision(actions);
-        let decision_delta =
-            first_layer_agent_decision_delta(route.first_layer_decision(), agent_decision);
+        let decision_delta = route_gate_agent_decision_delta(route.gate_kind(), agent_decision);
         let route_layer_that_disagreed =
             (decision_delta == "different_gate").then(|| "first_layer_vs_agent_loop".to_string());
         let required_evidence = contract.required_evidence_fields.clone();

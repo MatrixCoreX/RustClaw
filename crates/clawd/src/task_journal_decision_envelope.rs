@@ -234,22 +234,18 @@ pub(super) fn first_non_think_action_capability_ref(
     })
 }
 
-pub(super) fn first_layer_agent_decision_delta(
-    first_layer: crate::FirstLayerDecision,
+pub(super) fn route_gate_agent_decision_delta(
+    route_gate: crate::RouteGateKind,
     agent_decision: &str,
 ) -> &'static str {
-    use crate::FirstLayerDecision;
-    let same_gate = match first_layer {
-        FirstLayerDecision::Clarify => matches!(agent_decision, "respond"),
-        FirstLayerDecision::DirectAnswer => {
-            matches!(agent_decision, "respond" | "synthesize_answer")
-        }
-        FirstLayerDecision::PlannerExecute => {
-            matches!(
-                agent_decision,
-                "call_tool" | "call_skill" | "call_capability"
-            )
-        }
+    use crate::RouteGateKind;
+    let same_gate = match route_gate {
+        RouteGateKind::Clarify => matches!(agent_decision, "respond"),
+        RouteGateKind::Chat => matches!(agent_decision, "respond" | "synthesize_answer"),
+        RouteGateKind::Execute => matches!(
+            agent_decision,
+            "call_tool" | "call_skill" | "call_capability"
+        ),
     };
     if same_gate {
         "same_gate"
@@ -283,23 +279,9 @@ fn agent_loop_decision_from_first_action(
     match first_non_think_action_decision(actions) {
         "call_tool" | "call_skill" | "call_capability" => "call_capability",
         "synthesize_answer" => "synthesize_answer",
-        "respond"
-            if matches!(
-                route.first_layer_decision(),
-                crate::FirstLayerDecision::Clarify
-            ) =>
-        {
-            "clarify"
-        }
+        "respond" if route.is_clarify_gate() => "clarify",
         "respond" => "respond",
-        "no_action"
-            if matches!(
-                route.first_layer_decision(),
-                crate::FirstLayerDecision::Clarify
-            ) =>
-        {
-            "clarify"
-        }
+        "no_action" if route.is_clarify_gate() => "clarify",
         "no_action" | "think" => "respond",
         _ => "respond",
     }

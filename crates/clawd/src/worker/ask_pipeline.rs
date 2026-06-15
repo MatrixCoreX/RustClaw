@@ -234,17 +234,17 @@ fn log_route_guard_record(
     owner_layer: &'static str,
     reason_code: &'static str,
     outcome: &'static str,
-    before_decision: crate::FirstLayerDecision,
+    before_gate_kind: crate::RouteGateKind,
     route_result: &crate::RouteResult,
 ) {
     info!(
-        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_decision={} after_decision={} needs_clarify={} locator_kind={} semantic_kind={} response_shape={} delivery_required={} content_evidence={}",
+        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_gate_kind={} after_gate_kind={} needs_clarify={} locator_kind={} semantic_kind={} response_shape={} delivery_required={} content_evidence={}",
         task.task_id,
         owner_layer,
         reason_code,
         outcome,
-        before_decision.as_str(),
-        route_result.first_layer_decision().as_str(),
+        before_gate_kind.as_str(),
+        route_result.gate_kind().as_str(),
         route_result.needs_clarify,
         route_result.output_contract.locator_kind.as_str(),
         route_result.output_contract.semantic_kind.as_str(),
@@ -319,10 +319,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         append_route_reason(&mut route_result, "deictic_memory_only_requires_clarify");
         log_route_guard_record(
@@ -330,7 +330,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "deictic_memory_only_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -341,10 +341,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         append_route_reason(
             &mut route_result,
@@ -355,7 +355,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "unbound_model_context_target_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -365,10 +365,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -381,7 +381,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "bare_topic_model_supplied_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -392,10 +392,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -408,7 +408,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "implicit_workspace_file_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -469,10 +469,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -485,7 +485,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "model_completed_workspace_file_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -496,10 +496,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -512,7 +512,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "inferred_missing_workspace_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -522,9 +522,9 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -537,7 +537,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "active_anchor_file_delivery_requires_structured_reference",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -547,10 +547,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -563,7 +563,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "bare_topic_model_supplied_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -577,10 +577,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         append_route_reason(&mut route_result, "background_locator_requires_clarify");
         log_route_guard_record(
@@ -588,7 +588,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "background_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -624,10 +624,10 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         append_route_reason(
             &mut route_result,
@@ -638,7 +638,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "locatorless_observation_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -648,10 +648,10 @@ fn apply_ask_post_route(
         &session_snapshot,
         recent_execution_context,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
@@ -664,7 +664,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "unbound_targeted_evidence_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -676,7 +676,7 @@ fn apply_ask_post_route(
     ) {
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         append_route_reason(
             &mut route_result,
@@ -693,9 +693,9 @@ fn apply_ask_post_route(
         &route_result,
         has_authoritative_deictic_anchor,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         route_result.wants_file_delivery = true;
         route_result.output_contract.delivery_required = true;
@@ -712,7 +712,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "unbound_existing_file_delivery_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -728,9 +728,9 @@ fn apply_ask_post_route(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.wants_file_delivery = true;
         route_result.output_contract.delivery_required = true;
@@ -747,14 +747,14 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "directory_file_delivery_requires_structured_selection",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
     if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis, &session_snapshot) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         if route_result.clarify_question.trim().is_empty() {
             mark_deictic_missing_locator_clarify(&mut route_result);
         }
@@ -764,7 +764,7 @@ fn apply_ask_post_route(
             "worker_locator_guard",
             "deictic_bare_locator_requires_clarify",
             "blocked",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -776,14 +776,14 @@ fn apply_ask_post_route(
         has_authoritative_deictic_anchor,
         turn_analysis,
     ) {
-        let before_decision = route_result.first_layer_decision();
+        let before_gate_kind = route_result.gate_kind();
         promote_structured_anchor_direct_answer_to_evidence(&mut route_result);
         log_route_guard_record(
             task,
             "worker_active_task_guard",
             "structured_anchor_direct_answer_requires_evidence",
             "promoted",
-            before_decision,
+            before_gate_kind,
             &route_result,
         );
     }
@@ -846,9 +846,7 @@ fn apply_ask_post_route(
         post_route.auto_locator_path.as_deref(),
     ) {
         post_route.execution_route_result.needs_clarify = true;
-        post_route
-            .execution_route_result
-            .set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        post_route.execution_route_result.set_clarify_gate();
         mark_deictic_missing_locator_clarify(&mut post_route.execution_route_result);
         post_route
             .execution_route_result
@@ -951,9 +949,7 @@ fn apply_ask_post_route(
         "directory_file_delivery_requires_structured_selection",
     ) {
         post_route.execution_route_result.needs_clarify = true;
-        post_route
-            .execution_route_result
-            .set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        post_route.execution_route_result.set_clarify_gate();
         post_route
             .execution_route_result
             .output_contract
@@ -1200,10 +1196,10 @@ pub(super) async fn execute_ask_dispatch(
             None,
         );
         tracing::info!(
-            "agent_loop_authority_selected_migration_class task_id={} selected_migration_class={} previous_first_layer_decision={}",
+            "agent_loop_authority_selected_migration_class task_id={} selected_migration_class={} previous_gate_kind={}",
             task.task_id,
             selected_class,
-            route_result.first_layer_decision().as_str(),
+            route_result.gate_kind().as_str(),
         );
         return Ok(Some(
             crate::agent_engine::run_agent_with_tools(

@@ -112,12 +112,10 @@ fn direct_answer_active_text_rewrite_should_verify(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    matches!(
-        route_result.first_layer_decision(),
-        crate::FirstLayerDecision::DirectAnswer
-    ) && route_result
-        .route_reason
-        .contains("active_text_followup_route_repair")
+    route_result.is_chat_gate()
+        && route_result
+            .route_reason
+            .contains("active_text_followup_route_repair")
         && journal
             .context_bundle_summary
             .as_deref()

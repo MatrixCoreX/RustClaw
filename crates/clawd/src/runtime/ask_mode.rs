@@ -1,12 +1,11 @@
 //! Runtime ask-mode model.
 //!
-//! First-layer semantic routing is only `FirstLayerDecision`:
-//! `clarify`, `direct_answer`, or `planner_execute`.
-//! `AskMode` is the runtime projection of that decision plus execution finalization
-//! style or resume behavior; it must not infer semantics from derived route labels.
+//! `AskMode` is the runtime ask-flow state: chat/clarify entries and planner
+//! execution entries carry the information needed for dispatch. Legacy
+//! `FirstLayerDecision` values are still accepted as compatibility input and
+//! emitted as log/journal hints, but dispatch should use `AskMode` directly.
 
 use super::types::FirstLayerDecision;
-#[cfg(test)]
 use super::types::RouteGateKind;
 
 /// Runtime ask mode after first-layer convergence.
@@ -138,9 +137,14 @@ impl AskMode {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn gate_kind(&self) -> RouteGateKind {
-        self.first_layer_decision().gate_kind()
+        match self {
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenClarify,
+            } => RouteGateKind::Clarify,
+            AskMode::ClarifyOrChat { .. } => RouteGateKind::Chat,
+            AskMode::Act { .. } => RouteGateKind::Execute,
+        }
     }
 
     #[cfg(test)]
