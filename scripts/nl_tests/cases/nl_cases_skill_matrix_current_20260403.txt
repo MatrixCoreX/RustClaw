@@ -49,7 +49,6 @@ chat_act|skill_stock_600519_quote|skill:stock,network|查一下 600519 的最新
 chat_act|skill_crypto_btc_quote|skill:crypto,network|查一下 BTCUSDT 的最新价格，简短告诉我
 chat_act|skill_image_vision_remote_describe|skill:image_vision,network|看一下这张图片并用一句话描述它：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
 file|skill_image_edit_remote_restyle|skill:image_edit,network,side_effect|把这张图片改成像素风并保存到 document/rust_icon_pixel.png，然后把文件发给我：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
-chat_act|skill_x_draft_preview|skill:x,network|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL skill smoke，不要真正发布，只给我预览结果
 
 # Optional templates: higher risk or fixture-dependent
 # chat_act|skill_install_module_jq|skill:install_module,local,side_effect,high_risk|如果系统里没有 jq 就安装它；如果已经安装了就直接告诉我

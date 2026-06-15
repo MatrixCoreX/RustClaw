@@ -12,5 +12,5 @@ context_exists_with_path_semantic_contract|先记一下，“那个文件”指 
 context_quantity_compare_semantic_contract|先看一下 scripts/nl_tests/fixtures/device_local/docs 目录有多少个直接子项，只输出数字|再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字|上上个目录和上个目录相比，哪个直接子项更多？只用一句话
 task_append_split_sentence_cn|帮我写个方案|面向老板|不要太技术，控制在 80 字内，只输出正文
 task_correct_version_cn|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
-task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成 X thread|只输出前三条，每条一行
+task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成短帖串|只输出前三条，每条一行
 task_scope_update_cn|帮我做一个测试计划|先只看登录模块|只输出三个测试点
