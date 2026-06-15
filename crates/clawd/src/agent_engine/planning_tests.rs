@@ -323,44 +323,44 @@ fn actions_as_json(actions: &[AgentAction]) -> serde_json::Value {
     serde_json::to_value(actions).expect("serialize")
 }
 
-// Test bodies are split by function into submodules to keep this helper file maintainable.
-#[path = "planning_tests/split_01.rs"]
-mod split_01;
-#[path = "planning_tests/split_02.rs"]
-mod split_02;
-#[path = "planning_tests/split_03.rs"]
-mod split_03;
-#[path = "planning_tests/split_04.rs"]
-mod split_04;
-#[path = "planning_tests/split_05.rs"]
-mod split_05;
-#[path = "planning_tests/split_06.rs"]
-mod split_06;
-#[path = "planning_tests/split_07.rs"]
-mod split_07;
-#[path = "planning_tests/split_08.rs"]
-mod split_08;
-#[path = "planning_tests/split_09.rs"]
-mod split_09;
-#[path = "planning_tests/split_10.rs"]
-mod split_10;
-#[path = "planning_tests/split_11.rs"]
-mod split_11;
-#[path = "planning_tests/split_12.rs"]
-mod split_12;
-#[path = "planning_tests/split_13.rs"]
-mod split_13;
-#[path = "planning_tests/split_14.rs"]
-mod split_14;
-#[path = "planning_tests/split_15.rs"]
-mod split_15;
-#[path = "planning_tests/split_16.rs"]
-mod split_16;
-#[path = "planning_tests/split_17.rs"]
-mod split_17;
-#[path = "planning_tests/split_18.rs"]
-mod split_18;
-#[path = "planning_tests/split_19.rs"]
-mod split_19;
-#[path = "planning_tests/split_20.rs"]
-mod split_20;
+// Test bodies live in functionally named submodules to keep this helper file maintainable.
+#[path = "planning_tests/archive_and_inline_transform.rs"]
+mod archive_and_inline_transform;
+#[path = "planning_tests/capability_read_sqlite_existence.rs"]
+mod capability_read_sqlite_existence;
+#[path = "planning_tests/config_structured_field_reads.rs"]
+mod config_structured_field_reads;
+#[path = "planning_tests/content_excerpt_and_log_synthesis.rs"]
+mod content_excerpt_and_log_synthesis;
+#[path = "planning_tests/contract_hints_and_selectors.rs"]
+mod contract_hints_and_selectors;
+#[path = "planning_tests/delivery_archive_config_edit.rs"]
+mod delivery_archive_config_edit;
+#[path = "planning_tests/directory_locator_and_workspace_summary.rs"]
+mod directory_locator_and_workspace_summary;
+#[path = "planning_tests/explicit_command_sequences.rs"]
+mod explicit_command_sequences;
+#[path = "planning_tests/file_paths_workspace_and_raw_command.rs"]
+mod file_paths_workspace_and_raw_command;
+#[path = "planning_tests/git_runtime_status_and_observation.rs"]
+mod git_runtime_status_and_observation;
+#[path = "planning_tests/log_excerpt_quantity_and_skill_policy.rs"]
+mod log_excerpt_quantity_and_skill_policy;
+#[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
+mod missing_paths_and_multi_target_metadata;
+#[path = "planning_tests/scalar_count_and_hidden_entries.rs"]
+mod scalar_count_and_hidden_entries;
+#[path = "planning_tests/scalar_path_and_inventory_repair.rs"]
+mod scalar_path_and_inventory_repair;
+#[path = "planning_tests/schema_and_template_aliases.rs"]
+mod schema_and_template_aliases;
+#[path = "planning_tests/session_alias_and_content_evidence.rs"]
+mod session_alias_and_content_evidence;
+#[path = "planning_tests/structured_keys_and_scalar_fields.rs"]
+mod structured_keys_and_scalar_fields;
+#[path = "planning_tests/system_basic_aliases_and_quantity.rs"]
+mod system_basic_aliases_and_quantity;
+#[path = "planning_tests/terminal_placeholder_rewrite.rs"]
+mod terminal_placeholder_rewrite;
+#[path = "planning_tests/terminal_synthesis_and_directory_inventory.rs"]
+mod terminal_synthesis_and_directory_inventory;

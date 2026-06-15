@@ -561,6 +561,32 @@ pub(crate) async fn execute_ask_routed(
                 )
                 .await;
             }
+            if crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+                && agent_run_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.route_result.as_ref())
+                    .is_some_and(route_allows_agent_loop_pure_chat_submode)
+            {
+                let mut loop_ctx = agent_run_context.clone();
+                if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
+                    route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+                    append_route_reason(route, "pure_chat_agent_loop_submode");
+                }
+                tracing::info!(
+                    "{} worker_once: ask pure_chat_agent_loop_submode task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+                return execute_via_planner_loop(
+                    state,
+                    task,
+                    prompt_with_memory,
+                    execution_user_request,
+                    &crate::AskMode::planner_execute_chat_wrapped(),
+                    loop_ctx,
+                )
+                .await;
+            }
             let mut direct_answer_gate_approved = false;
             let skip_direct_answer_gate =
                 direct_answer_gate_can_skip_for_self_contained_payload(
@@ -650,15 +676,18 @@ pub(crate) async fn execute_ask_routed(
                                     .unwrap_or("direct_answer_gate_requires_clarify");
                                 let structured_clarify_context =
                                     route_structured_clarify_context(Some(&gate_ctx));
-                                crate::intent_router::generate_or_reuse_clarify_question(
+                                crate::finalize::render_clarify_question(
                                     state,
                                     task,
-                                    &current_turn_user_request,
-                                    clarify_reason,
-                                    structured_clarify_context.as_deref(),
-                                    None,
-                                    crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
-                                    crate::fallback::ClarifyFallbackSource::IntentUnresolved,
+                                    crate::finalize::ClarifyRenderRequest {
+                                        user_request: &current_turn_user_request,
+                                        resolver_reason: clarify_reason,
+                                        candidate_context: structured_clarify_context.as_deref(),
+                                        preferred_question: None,
+                                        policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                                        fallback_source:
+                                            crate::fallback::ClarifyFallbackSource::IntentUnresolved,
+                                    },
                                 )
                                 .await
                             } else {
@@ -845,17 +874,19 @@ pub(crate) async fn execute_ask_routed(
             } else {
                 crate::intent_router::ClarifyQuestionPolicy::AllowModel
             };
-            let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+            let clarify = crate::finalize::render_clarify_question(
                 state,
                 task,
-                resolved_prompt,
-                clarify_reason,
-                structured_clarify_context.as_deref(),
-                preferred_clarify.as_deref(),
-                clarify_policy,
-                // §7.2: ask_flow 路由到 AskClarify 但 route_result 也没给 clarify_question
-                // → IntentUnresolved（与 ask_pipeline 同语义）。
-                crate::fallback::ClarifyFallbackSource::IntentUnresolved,
+                crate::finalize::ClarifyRenderRequest {
+                    user_request: resolved_prompt,
+                    resolver_reason: clarify_reason,
+                    candidate_context: structured_clarify_context.as_deref(),
+                    preferred_question: preferred_clarify.as_deref(),
+                    policy: clarify_policy,
+                    // §7.2: ask_flow 路由到 AskClarify 但 route_result 也没给 clarify_question
+                    // → IntentUnresolved（与 ask_pipeline 同语义）。
+                    fallback_source: crate::fallback::ClarifyFallbackSource::IntentUnresolved,
+                },
             )
             .await;
             Ok(with_agent_decides_shadow_snapshot(

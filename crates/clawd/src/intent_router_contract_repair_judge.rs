@@ -154,6 +154,7 @@ pub(super) fn apply_contract_repair_judge_output(
     if !repair.apply || repair.confidence < 0.60 {
         return false;
     }
+    let original_decision = parse_first_layer_decision_text(&out.decision);
     let Some(mut decision) = parse_first_layer_decision_text(&repair.decision) else {
         return false;
     };
@@ -234,6 +235,19 @@ pub(super) fn apply_contract_repair_judge_output(
         execution_recipe = IntentExecutionRecipeOut::default();
     }
 
+    if !contract_repair_judge_output_is_schema_backed(
+        original_decision,
+        out.output_contract.as_ref(),
+        out.wants_file_delivery,
+        decision,
+        needs_clarify,
+        &output_contract,
+        &execution_recipe,
+        &repair.reason,
+    ) {
+        return false;
+    }
+
     out.decision = decision.as_str().to_string();
     out.needs_clarify = needs_clarify;
     out.clarify_question = clarify_question;
@@ -293,6 +307,94 @@ pub(super) fn apply_contract_repair_judge_output(
         out.target_task_policy = TargetTaskPolicy::ReuseActive.as_str().to_string();
     }
     true
+}
+
+fn contract_repair_judge_output_is_schema_backed(
+    original_decision: Option<FirstLayerDecision>,
+    original_output_contract: Option<&IntentOutputContractOut>,
+    original_wants_file_delivery: bool,
+    repaired_decision: FirstLayerDecision,
+    needs_clarify: bool,
+    output_contract: &IntentOutputContractOut,
+    execution_recipe: &IntentExecutionRecipeOut,
+    reason: &str,
+) -> bool {
+    if contract_repair_reason_has_allowed_machine_override(reason) {
+        return true;
+    }
+    if original_decision.is_some_and(|decision| decision == repaired_decision) {
+        return true;
+    }
+    if matches!(repaired_decision, FirstLayerDecision::Clarify) {
+        return needs_clarify;
+    }
+    if matches!(repaired_decision, FirstLayerDecision::PlannerExecute) {
+        return repaired_contract_has_execution_signal(output_contract)
+            || repaired_recipe_has_execution_signal(execution_recipe);
+    }
+    if matches!(repaired_decision, FirstLayerDecision::DirectAnswer) {
+        return !needs_clarify
+            && original_contract_has_execution_signal(
+                original_output_contract,
+                original_wants_file_delivery,
+            )
+            && !repaired_contract_has_execution_signal(output_contract)
+            && !repaired_recipe_has_execution_signal(execution_recipe);
+    }
+    false
+}
+
+fn contract_repair_reason_has_allowed_machine_override(reason: &str) -> bool {
+    [
+        ACTIVE_TASK_INVALID_BINDING_CONTINUATION_MARKER,
+        EXECUTION_FAILED_STEP_CONTRACT_MARKER,
+        GENERATED_FILE_DELIVERY_RUNTIME_TARGET_MARKER,
+    ]
+    .iter()
+    .any(|marker| repair_reason_has_machine_marker(reason, marker))
+}
+
+fn repaired_contract_has_execution_signal(output_contract: &IntentOutputContractOut) -> bool {
+    let contract = parse_output_contract(
+        Some(output_contract.clone()),
+        repaired_contract_wants_file_delivery(output_contract),
+    );
+    contract.requires_content_evidence
+        || contract.delivery_required
+        || contract.locator_kind != OutputLocatorKind::None
+        || contract.delivery_intent != OutputDeliveryIntent::None
+        || contract.semantic_kind != OutputSemanticKind::None
+        || matches!(
+            contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        )
+}
+
+fn original_contract_has_execution_signal(
+    output_contract: Option<&IntentOutputContractOut>,
+    wants_file_delivery: bool,
+) -> bool {
+    let Some(output_contract) = output_contract else {
+        return wants_file_delivery;
+    };
+    let contract = parse_output_contract(Some(output_contract.clone()), wants_file_delivery);
+    wants_file_delivery
+        || contract.requires_content_evidence
+        || contract.delivery_required
+        || contract.locator_kind != OutputLocatorKind::None
+        || contract.delivery_intent != OutputDeliveryIntent::None
+        || contract.semantic_kind != OutputSemanticKind::None
+        || matches!(
+            contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        )
+}
+
+fn repaired_recipe_has_execution_signal(execution_recipe: &IntentExecutionRecipeOut) -> bool {
+    !matches!(
+        crate::execution_recipe::parse_execution_recipe_kind_text(&execution_recipe.kind),
+        crate::execution_recipe::ExecutionRecipeKind::None
+    )
 }
 
 fn generated_file_delivery_repair_allows_runtime_target(

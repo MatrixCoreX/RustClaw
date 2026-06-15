@@ -330,6 +330,31 @@ impl TaskJournalRolloutAttribution {
         }
     }
 
+    pub(crate) fn selected_contract_structured_evidence_block(
+        summary: Option<&TaskJournalAnswerVerifierSummary>,
+        selected_class: impl Into<String>,
+    ) -> Self {
+        Self {
+            switch_name: "structured_evidence_required_for_selected_contracts".to_string(),
+            event: "selected_contract_structured_evidence_block".to_string(),
+            outcome: "blocked".to_string(),
+            reason_code: Some("selected_contract_missing_structured_evidence".to_string()),
+            owner_layer: Some("answer_verifier".to_string()),
+            decision: Some("blocked".to_string()),
+            failure_attribution: Some(
+                crate::contract_matrix::FailureAttribution::ContractGap
+                    .as_str()
+                    .to_string(),
+            ),
+            missing_evidence_fields: summary
+                .map(|summary| summary.missing_evidence_fields.clone())
+                .unwrap_or_default(),
+            confidence: summary.map(|summary| summary.confidence),
+            output_contract_ref: Some(selected_class.into()),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn registry_idempotency_guard_block(
         reason_code: impl Into<String>,
         skill: impl Into<String>,
@@ -385,7 +410,7 @@ impl TaskJournalRolloutAttribution {
         let contract = crate::TaskContract::from_route_result(route);
         let required_evidence = contract.required_evidence_fields.clone();
         Self {
-            switch_name: "agent_decides_semantic_route".to_string(),
+            switch_name: "semantic_route_authority".to_string(),
             event: "agent_decides_shadow_snapshot".to_string(),
             outcome: "shadow_only".to_string(),
             reason_code: Some("agent_decides_shadow_not_evaluated".to_string()),
@@ -424,7 +449,7 @@ impl TaskJournalRolloutAttribution {
         let required_evidence = contract.required_evidence_fields.clone();
         let output_contract_ref = output_contract_ref_for_route(route);
         Self {
-            switch_name: "agent_decides_semantic_route".to_string(),
+            switch_name: "semantic_route_authority".to_string(),
             event: "agent_decides_shadow_first_action".to_string(),
             outcome: "shadow_only".to_string(),
             reason_code: Some("agent_decides_shadow_delta_observed".to_string()),
@@ -502,13 +527,15 @@ fn rollout_attribution_json(attribution: &TaskJournalRolloutAttribution) -> Valu
 }
 
 fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
-    let first_issue_reason_code = verify.issues.first().map(|issue| issue.kind.reason_code());
+    let first_issue = verify.issues.first();
     json!({
         "approved": verify.approved,
         "mode": verify.mode.as_str(),
         "owner_layer": "plan_verifier",
         "blocked_reason": verify.blocked_reason.as_deref().map(crate::truncate_for_log),
-        "blocked_reason_code": first_issue_reason_code,
+        "blocked_reason_code": first_issue.map(|issue| issue.kind.reason_code()),
+        "blocked_status_code": first_issue.map(|issue| issue.kind.status_code()),
+        "blocked_message_key": first_issue.map(|issue| issue.kind.message_key()),
         "shadow_blocked_reason": verify.shadow_blocked_reason.as_deref().map(crate::truncate_for_log),
         "needs_confirmation": verify.needs_confirmation,
         "issue_count": verify.issues.len(),
@@ -516,13 +543,15 @@ fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
 }
 
 fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
-    let first_issue_reason_code = verify.issues.first().map(|issue| issue.kind.reason_code());
+    let first_issue = verify.issues.first();
     json!({
         "approved": verify.approved,
         "mode": verify.mode.as_str(),
         "owner_layer": "plan_verifier",
         "blocked_reason": verify.blocked_reason.as_deref().map(crate::truncate_for_log),
-        "blocked_reason_code": first_issue_reason_code,
+        "blocked_reason_code": first_issue.map(|issue| issue.kind.reason_code()),
+        "blocked_status_code": first_issue.map(|issue| issue.kind.status_code()),
+        "blocked_message_key": first_issue.map(|issue| issue.kind.message_key()),
         "shadow_blocked_reason": verify.shadow_blocked_reason.as_deref().map(crate::truncate_for_log),
         "needs_confirmation": verify.needs_confirmation,
         "issues": verify.issues.iter().map(|issue| {
@@ -530,6 +559,8 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
                 "step_id": &issue.step_id,
                 "kind": issue.kind.as_str(),
                 "reason_code": issue.kind.reason_code(),
+                "status_code": issue.kind.status_code(),
+                "message_key": issue.kind.message_key(),
                 "owner_layer": "plan_verifier",
                 "failure_attribution": issue.kind.failure_attribution().as_str(),
                 "detail": crate::truncate_for_log(&issue.detail),

@@ -135,6 +135,39 @@ pub(super) fn build_missing_delivery_clarify_reason(
     }
 }
 
+pub(super) fn build_pending_user_input_clarify_reason(
+    loop_state: &crate::agent_engine::LoopState,
+    fallback: String,
+) -> String {
+    if !loop_state.pending_user_input_required {
+        return fallback;
+    }
+    let mut parts = Vec::new();
+    for key in [
+        "agent_loop.terminal_intent",
+        "agent_loop.clarify_reason_code",
+        "agent_loop.missing_slot",
+        "agent_loop.message_key",
+        "agent_loop.field_path",
+        "agent_loop.locator_kind",
+    ] {
+        if let Some(value) = loop_state
+            .output_vars
+            .get(key)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    if parts.is_empty() {
+        fallback
+    } else {
+        parts.join("; ")
+    }
+}
+
 fn observed_execution_facts_for_missing_delivery(
     loop_state: &crate::agent_engine::LoopState,
     clarify_reason: &str,
@@ -359,15 +392,17 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
             .unwrap_or(false)
     {
         let structured_clarify_context = route_structured_clarify_context(agent_run_context);
-        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+        let clarify = crate::finalize::render_clarify_question(
             state,
             task,
-            user_text,
-            clarify_reason,
-            structured_clarify_context.as_deref(),
-            preferred_route_clarify_question(agent_run_context),
-            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
-            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            crate::finalize::ClarifyRenderRequest {
+                user_request: user_text,
+                resolver_reason: clarify_reason,
+                candidate_context: structured_clarify_context.as_deref(),
+                preferred_question: preferred_route_clarify_question(agent_run_context),
+                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            },
         )
         .await;
         let mut delivery_messages = Vec::new();

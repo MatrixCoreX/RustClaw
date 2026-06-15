@@ -84,6 +84,10 @@ pub(super) fn apply_structured_contract_hint_repair(
             output_contract.locator_kind = OutputLocatorKind::None;
             output_contract.locator_hint.clear();
         }
+        OutputSemanticKind::ToolDiscovery => {
+            output_contract.locator_kind = OutputLocatorKind::None;
+            output_contract.locator_hint.clear();
+        }
         OutputSemanticKind::DockerPs
         | OutputSemanticKind::DockerImages
         | OutputSemanticKind::DockerLogs
@@ -100,7 +104,9 @@ pub(super) fn apply_structured_contract_hint_repair(
         req_surface,
         workspace_root,
     );
-    if output_contract.requires_content_evidence {
+    if output_contract.requires_content_evidence
+        || output_contract.semantic_kind == OutputSemanticKind::ToolDiscovery
+    {
         *needs_clarify = false;
         clarify_question.clear();
         *first_layer_decision = FirstLayerDecision::PlannerExecute;
@@ -163,6 +169,7 @@ pub(super) fn contract_hint_fallback_decision(
 
 fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> OutputResponseShape {
     match kind {
+        OutputSemanticKind::ToolDiscovery => OutputResponseShape::Free,
         OutputSemanticKind::RawCommandOutput
         | OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ServiceStatus

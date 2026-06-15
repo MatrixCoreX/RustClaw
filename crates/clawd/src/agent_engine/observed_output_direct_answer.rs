@@ -51,12 +51,15 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
     if route.is_some_and(|route| {
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
     }) {
-        if let Some(answer) =
-            latest_process_basic_service_status_direct_answer_candidate(loop_state, response_shape)
-                .and_then(|answer| {
-                    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
-                })
-        {
+        if let Some(answer) = latest_process_basic_service_status_direct_answer_candidate(
+            state,
+            loop_state,
+            response_shape,
+            prefers_english_free_text,
+        )
+        .and_then(|answer| {
+            matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+        }) {
             return Some(answer);
         }
     }

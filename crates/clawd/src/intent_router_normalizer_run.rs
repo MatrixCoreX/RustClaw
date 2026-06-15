@@ -1117,7 +1117,7 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} derived_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} derived_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
@@ -1144,6 +1144,7 @@ pub(crate) async fn run_intent_normalizer(
                 .unwrap_or_else(|| "none".to_string()),
             contract_repair_report.source_csv(),
             contract_repair_report.detail_csv(),
+            contract_repair_report.class_csv(),
             turn_analysis_log,
         );
         return build_normalizer_output_with_final_gate(

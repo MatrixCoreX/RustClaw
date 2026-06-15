@@ -427,6 +427,37 @@ fn direct_answer_route_skips_answer_verifier() {
 }
 
 #[test]
+fn tool_discovery_context_only_route_skips_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ToolDiscovery;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "current capabilities");
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "`fs_basic`, `git_basic`, `weather`"
+    ));
+}
+
+#[test]
+fn non_tool_discovery_semantic_route_still_uses_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize");
+
+    assert!(should_verify_answer(&route, &journal, "summary"));
+}
+
+#[test]
 fn active_text_rewrite_direct_answer_uses_answer_verifier() {
     let mut route = route_with_mode(crate::AskMode::direct_answer());
     route.route_reason = "active_text_followup_route_repair".to_string();

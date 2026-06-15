@@ -124,6 +124,11 @@ pub(super) fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
             crate::OutputSemanticKind::PackageManagerDetection
         }
+        "tool_discovery"
+        | "capability_discovery"
+        | "capability_inventory"
+        | "skill_discovery"
+        | "skill_inventory" => crate::OutputSemanticKind::ToolDiscovery,
         "archive_list" => crate::OutputSemanticKind::ArchiveList,
         "archive_read" => crate::OutputSemanticKind::ArchiveRead,
         "archive_pack" => crate::OutputSemanticKind::ArchivePack,
