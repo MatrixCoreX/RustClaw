@@ -961,7 +961,7 @@ fn active_task_context_only_memory_context(
 ) -> bool {
     if !has_active_session_state
         || route_result.needs_clarify
-        || route_result.first_layer_decision() != crate::FirstLayerDecision::DirectAnswer
+        || !route_result.is_chat_gate()
         || route_result.wants_file_delivery
         || route_result.schedule_kind != crate::ScheduleKind::None
         || route_result.should_refresh_long_term_memory
@@ -1004,9 +1004,7 @@ fn current_request_only_memory_context(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     has_active_session_state: bool,
 ) -> bool {
-    if has_active_session_state
-        || route_result.first_layer_decision() != crate::FirstLayerDecision::DirectAnswer
-    {
+    if has_active_session_state || !route_result.is_chat_gate() {
         return false;
     }
     if let Some(analysis) = turn_analysis {

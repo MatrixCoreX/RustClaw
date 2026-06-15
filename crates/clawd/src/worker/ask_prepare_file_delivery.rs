@@ -161,7 +161,7 @@ fn bind_structural_file_delivery_to_recent_read_target(
         return false;
     };
     route_result.needs_clarify = false;
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route_result.set_execute_gate();
     if route_result.resolved_intent.trim().is_empty() {
         route_result.resolved_intent = format!("file_delivery_target: {bound_target}");
     } else if !route_result.resolved_intent.contains(&bound_target) {
@@ -298,7 +298,7 @@ pub(super) fn append_active_delivery_content_target_token(
 
 fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = true;
-    route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route_result.set_clarify_gate();
     route_result.clarify_question.clear();
     route_result.wants_file_delivery = false;
     route_result.output_contract.delivery_required = false;
@@ -316,7 +316,7 @@ fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult)
 fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
     if route_result.is_clarify_gate() {
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+        route_result.set_execute_gate();
     }
     route_result.clarify_question.clear();
     route_result.wants_file_delivery = true;

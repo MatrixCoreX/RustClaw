@@ -196,10 +196,10 @@ pub(crate) async fn execute_ask_routed(
     };
     let route_label = ask_mode.route_label();
     tracing::info!(
-        "{} worker_once: ask task_id={} first_layer_decision={} ask_mode={} derived_route_label={} agent_mode={} override={}",
+        "{} worker_once: ask task_id={} route_gate_kind={} ask_mode={} derived_route_label={} agent_mode={} override={}",
         crate::highlight_tag("routing"),
         task.task_id,
-        ask_mode.first_layer_decision().as_str(),
+        ask_mode.gate_kind().as_str(),
         route_ask_mode_for_log
             .as_ref()
             .map(crate::AskMode::as_str)
@@ -209,44 +209,43 @@ pub(crate) async fn execute_ask_routed(
         override_reason.unwrap_or("")
     );
     let mut agent_run_context = agent_run_context;
-    let mut first_layer_decision = ask_mode.first_layer_decision();
+    let mut effective_ask_mode = ask_mode.clone();
     let current_turn_user_request_for_process =
         task_payload_text(task).unwrap_or_else(|| execution_user_request.to_string());
-    if matches!(first_layer_decision, crate::FirstLayerDecision::Clarify)
+    if effective_ask_mode.is_clarify_only()
         && promote_clarify_recent_execution_judgment_context_to_chat(
             state,
             agent_run_context.as_mut(),
         )
     {
-        first_layer_decision = crate::FirstLayerDecision::DirectAnswer;
+        effective_ask_mode = crate::AskMode::direct_answer();
         tracing::info!(
             "{} worker_once: ask clarify_recent_execution_judgment_to_chat task_id={}",
             crate::highlight_tag("routing"),
             task.task_id
         );
     }
-    if matches!(first_layer_decision, crate::FirstLayerDecision::Clarify)
+    if effective_ask_mode.is_clarify_only()
         && promote_clarify_config_risk_assessment_default_config_to_planner(
             state,
             &current_turn_user_request_for_process,
             agent_run_context.as_mut(),
         )
     {
-        first_layer_decision = crate::FirstLayerDecision::PlannerExecute;
+        effective_ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         tracing::info!(
             "{} worker_once: ask config_risk_default_main_config_to_planner task_id={}",
             crate::highlight_tag("routing"),
             task.task_id
         );
     }
-    if matches!(
-        first_layer_decision,
-        crate::FirstLayerDecision::PlannerExecute
-    ) && promote_active_anchor_observed_judgment_to_chat(
-        &current_turn_user_request_for_process,
-        agent_run_context.as_mut(),
-    ) {
-        first_layer_decision = crate::FirstLayerDecision::DirectAnswer;
+    if effective_ask_mode.act_finalize_style().is_some()
+        && promote_active_anchor_observed_judgment_to_chat(
+            &current_turn_user_request_for_process,
+            agent_run_context.as_mut(),
+        )
+    {
+        effective_ask_mode = crate::AskMode::direct_answer();
         tracing::info!(
             "{} worker_once: ask active_anchor_observed_judgment_to_chat task_id={}",
             crate::highlight_tag("routing"),
@@ -420,8 +419,12 @@ pub(crate) async fn execute_ask_routed(
     }
     let current_turn_user_request =
         task_payload_text(task).unwrap_or_else(|| execution_user_request.to_string());
-    match first_layer_decision {
-        crate::FirstLayerDecision::DirectAnswer => {
+    match effective_ask_mode {
+        crate::AskMode::ClarifyOrChat {
+            entry:
+                crate::ChatEntryStrategy::NormalizerThenChat
+                | crate::ChatEntryStrategy::ResumeFollowupDiscussion,
+        } => {
             if let Some(candidate) = normalizer_chat_direct_answer_candidate(
                 state,
                 resolved_prompt,
@@ -832,18 +835,13 @@ pub(crate) async fn execute_ask_routed(
                 agent_run_context.as_ref(),
             ))
         }
-        crate::FirstLayerDecision::PlannerExecute => {
+        mode @ crate::AskMode::Act { .. } => {
             let effective_ask_mode = agent_run_context
                 .as_ref()
                 .and_then(|ctx| ctx.route_result.as_ref())
                 .map(|route| route.ask_mode.clone())
-                .filter(|mode| {
-                    matches!(
-                        mode.first_layer_decision(),
-                        crate::FirstLayerDecision::PlannerExecute
-                    )
-                })
-                .unwrap_or_else(|| ask_mode.clone());
+                .filter(|mode| mode.act_finalize_style().is_some())
+                .unwrap_or(mode);
             execute_via_planner_loop(
                 state,
                 task,
@@ -854,7 +852,9 @@ pub(crate) async fn execute_ask_routed(
             )
             .await
         }
-        crate::FirstLayerDecision::Clarify => {
+        crate::AskMode::ClarifyOrChat {
+            entry: crate::ChatEntryStrategy::NormalizerThenClarify,
+        } => {
             let clarify_reason = agent_run_context
                 .as_ref()
                 .and_then(|ctx| ctx.route_result.as_ref())

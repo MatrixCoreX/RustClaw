@@ -303,14 +303,12 @@ pub(crate) fn decide_planner_memory_use_policy(
             "standalone_planner_uses_knowledge_docs_without_stable_facts",
         );
     }
-    let reason = match ask_mode.first_layer_decision() {
-        crate::FirstLayerDecision::PlannerExecute => {
+    let reason = match ask_mode.gate_kind() {
+        crate::RouteGateKind::Execute => {
             "planner_execution_uses_goals_preferences_and_stable_facts"
         }
-        crate::FirstLayerDecision::DirectAnswer => {
-            "direct_answer_keeps_planner_promotion_context_stable"
-        }
-        crate::FirstLayerDecision::Clarify => "clarify_path_keeps_planner_context_stable",
+        crate::RouteGateKind::Chat => "direct_answer_keeps_planner_promotion_context_stable",
+        crate::RouteGateKind::Clarify => "clarify_path_keeps_planner_context_stable",
     };
     MemoryUseDecision::planner_scoped(max_chars, reason)
 }
@@ -356,14 +354,14 @@ pub(crate) fn decide_chat_memory_use_policy(
     let reason = if include_active_recent_context {
         "chat_with_active_session_state_allows_bounded_recent_context"
     } else {
-        match ask_mode.first_layer_decision() {
-            crate::FirstLayerDecision::DirectAnswer => {
+        match ask_mode.gate_kind() {
+            crate::RouteGateKind::Chat => {
                 "pure_direct_answer_uses_stable_memory_without_long_term_summary"
             }
-            crate::FirstLayerDecision::PlannerExecute => {
+            crate::RouteGateKind::Execute => {
                 "planner_chat_finalization_uses_stable_memory_without_long_term_summary"
             }
-            crate::FirstLayerDecision::Clarify => {
+            crate::RouteGateKind::Clarify => {
                 "clarify_chat_path_uses_stable_memory_without_long_term_summary"
             }
         }

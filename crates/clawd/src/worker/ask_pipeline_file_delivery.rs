@@ -71,7 +71,7 @@ pub(super) fn prebind_direct_file_delivery_locator_before_deictic_guard(
             return false;
         }
         route_result.needs_clarify = true;
-        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.set_clarify_gate();
         route_result.clarify_question.clear();
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
