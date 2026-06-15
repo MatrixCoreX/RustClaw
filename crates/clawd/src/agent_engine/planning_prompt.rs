@@ -134,9 +134,8 @@ pub(super) fn build_lightweight_tool_spec(
     if let Some(route) = route_result {
         lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
         lines.push(format!(
-            "- ask_mode={} derived_route_label={} response_shape={} semantic_kind={} locator_kind={}",
-            route.ask_mode.as_str(),
-            route.derived_route_label(),
+            "- route_gate_kind={} response_shape={} semantic_kind={} locator_kind={}",
+            route.gate_kind().as_str(),
             route.output_contract.response_shape.as_str(),
             route.output_contract.semantic_kind.as_str(),
             route.output_contract.locator_kind.as_str(),
