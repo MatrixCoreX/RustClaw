@@ -105,6 +105,31 @@
         "content": {
           "type": "string",
           "description": "User-visible message body. Planner-stage Respond steps are still checked by runtime delivery classifiers and output contracts before publication; placeholder or pre-observation content must be grounded by prior observed evidence or a synthesize_answer step."
+        },
+        "terminal_intent": {
+          "type": "string",
+          "enum": ["answer", "clarify", "cannot_proceed", "needs_confirmation", "continue"],
+          "description": "Optional machine terminal intent for the respond step. Runtime records this as structured state; it is not a rendered user reply."
+        },
+        "clarify_reason_code": {
+          "type": "string",
+          "description": "Stable machine reason code when terminal_intent is clarify."
+        },
+        "missing_slot": {
+          "type": "string",
+          "description": "Stable missing slot token when terminal_intent is clarify."
+        },
+        "message_key": {
+          "type": "string",
+          "description": "Optional i18n message key for downstream language rendering."
+        },
+        "field_path": {
+          "type": "string",
+          "description": "Optional structured field path related to the missing slot."
+        },
+        "locator_kind": {
+          "type": "string",
+          "description": "Optional machine locator kind related to the missing slot."
         }
       },
       "additionalProperties": false

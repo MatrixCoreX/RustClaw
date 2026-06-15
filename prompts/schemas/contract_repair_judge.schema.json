@@ -124,6 +124,7 @@
             "config_mutation",
             "config_risk_assessment",
             "package_manager_detection",
+            "tool_discovery",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",

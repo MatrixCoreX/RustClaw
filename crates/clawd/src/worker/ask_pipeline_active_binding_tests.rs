@@ -2,6 +2,7 @@ use super::{
     prebind_active_bound_target_for_locatorless_content_evidence,
     prebind_active_bound_target_from_matching_locator_hint,
     prebind_active_listing_target_for_locatorless_scalar_count,
+    prebind_current_workspace_root_hint_for_scalar_count,
     prebind_session_alias_locator_from_current_request,
     repair_service_status_file_locator_to_content_excerpt,
 };
@@ -246,6 +247,104 @@ fn active_listing_target_prebinds_locatorless_scalar_count_clarify() {
     assert!(route
         .route_reason
         .contains("active_listing_target_prebound_for_locatorless_scalar_count"));
+}
+
+#[test]
+fn current_workspace_scope_marker_prebinds_locatorless_scalar_count_clarify() {
+    let root = make_temp_root("workspace_scalar_count_marker");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.route_reason =
+        "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+
+    assert!(prebind_current_workspace_root_hint_for_scalar_count(
+        &state,
+        "count top-level workspace entries",
+        &mut route,
+    ));
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(
+        route.output_contract.locator_hint,
+        root.display().to_string()
+    );
+    assert!(route
+        .route_reason
+        .contains("current_workspace_root_hint_prebound_for_scalar_count"));
+}
+
+#[test]
+fn current_workspace_scope_marker_prebinds_scalar_count_despite_deictic_surface() {
+    let root = make_temp_root("workspace_scalar_count_deictic_marker");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.route_reason =
+        "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+
+    assert!(prebind_current_workspace_root_hint_for_scalar_count(
+        &state,
+        "列出仓库顶层目录，但不要把 .git 算进去，只告诉我其它的有几个",
+        &mut route,
+    ));
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(
+        route.output_contract.locator_hint,
+        root.display().to_string()
+    );
+    assert!(route
+        .route_reason
+        .contains("current_workspace_root_hint_prebound_for_scalar_count"));
+}
+
+#[test]
+fn locatorless_scalar_count_clarify_without_workspace_authority_is_not_prebound() {
+    let state = test_state_with_root(make_temp_root("workspace_scalar_count_no_authority"));
+    let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.route_reason = "semantic_contract_requires_evidence".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+
+    assert!(!prebind_current_workspace_root_hint_for_scalar_count(
+        &state,
+        "count entries",
+        &mut route,
+    ));
+    assert!(route.needs_clarify);
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
 }
 
 #[test]

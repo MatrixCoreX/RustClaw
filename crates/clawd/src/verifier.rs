@@ -134,6 +134,56 @@ impl VerifyIssueKind {
             Self::ContractPreferredActionAvailable => "verify_contract_preferred_action_available",
         }
     }
+
+    pub(crate) fn status_code(self) -> &'static str {
+        match self {
+            Self::SkillNotVisible => "skill_not_visible",
+            Self::CapabilityUnavailable => "capability_unavailable",
+            Self::MissingRequiredArg => "missing_required_arg",
+            Self::DefaultCreationTargetApplied => "default_creation_target_applied",
+            Self::UnresolvedTemplateArg => "unresolved_template_arg",
+            Self::InvalidDependsOn => "invalid_depends_on",
+            Self::ConfirmationRequired => "confirmation_required",
+            Self::RiskBudgetExceeded => "risk_budget_exceeded",
+            Self::PrimaryFallbackConflict => "primary_fallback_conflict",
+            Self::RouteClarifyRequired => "route_clarify_required",
+            Self::RecipeInspectBeforeMutateRequired => "recipe_inspect_before_mutate_required",
+            Self::RecipeValidationAfterMutateRequired => "recipe_validation_after_mutate_required",
+            Self::RecipeTargetScopeRequired => "recipe_target_scope_required",
+            Self::ContractActionRejected => "contract_action_rejected",
+            Self::ContractMissing => "contract_missing",
+            Self::ContractPolicyViolation => "contract_policy_violation",
+            Self::ContractPreferredActionAvailable => "contract_preferred_action_available",
+        }
+    }
+
+    pub(crate) fn message_key(self) -> &'static str {
+        match self {
+            Self::SkillNotVisible => "clawd.verify.skill_not_visible",
+            Self::CapabilityUnavailable => "clawd.verify.capability_unavailable",
+            Self::MissingRequiredArg => "clawd.verify.missing_required_arg",
+            Self::DefaultCreationTargetApplied => "clawd.verify.default_creation_target_applied",
+            Self::UnresolvedTemplateArg => "clawd.verify.unresolved_template_arg",
+            Self::InvalidDependsOn => "clawd.verify.invalid_depends_on",
+            Self::ConfirmationRequired => "clawd.verify.confirmation_required",
+            Self::RiskBudgetExceeded => "clawd.verify.risk_budget_exceeded",
+            Self::PrimaryFallbackConflict => "clawd.verify.primary_fallback_conflict",
+            Self::RouteClarifyRequired => "clawd.verify.route_clarify_required",
+            Self::RecipeInspectBeforeMutateRequired => {
+                "clawd.verify.recipe_inspect_before_mutate_required"
+            }
+            Self::RecipeValidationAfterMutateRequired => {
+                "clawd.verify.recipe_validation_after_mutate_required"
+            }
+            Self::RecipeTargetScopeRequired => "clawd.verify.recipe_target_scope_required",
+            Self::ContractActionRejected => "clawd.verify.contract_action_rejected",
+            Self::ContractMissing => "clawd.verify.contract_missing",
+            Self::ContractPolicyViolation => "clawd.verify.contract_policy_violation",
+            Self::ContractPreferredActionAvailable => {
+                "clawd.verify.contract_preferred_action_available"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

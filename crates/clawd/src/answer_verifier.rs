@@ -20,11 +20,11 @@ mod answer_verifier_scalar;
 
 use answer_verifier_delivery_raw::*;
 use answer_verifier_matrix::*;
-pub(crate) use answer_verifier_runtime::verify_answer_observe_only;
-use answer_verifier_runtime::*;
 #[cfg(test)]
+pub(crate) use answer_verifier_runtime::local_compound_listing_answer_verifier_gap;
+use answer_verifier_runtime::*;
 pub(crate) use answer_verifier_runtime::{
-    local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
+    local_missing_evidence_verifier_gap, verify_answer_observe_only,
 };
 use answer_verifier_scalar::*;
 
@@ -91,6 +91,9 @@ pub(crate) fn should_verify_answer(
     if finalizer_terminal_blocker_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
+    if context_only_tool_discovery_answer_can_skip_answer_verifier(route_result) {
+        return false;
+    }
     let task_contract = TaskContract::from_route_result(route_result);
     let active_text_rewrite =
         direct_answer_active_text_rewrite_should_verify(route_result, journal);
@@ -119,6 +122,15 @@ fn direct_answer_active_text_rewrite_should_verify(
             .context_bundle_summary
             .as_deref()
             .is_some_and(|summary| summary.contains("Most recent generated output:"))
+}
+
+fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {
+    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ToolDiscovery
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && !route_result.wants_file_delivery
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 pub(crate) fn structurally_satisfies_answer_contract(

@@ -246,7 +246,7 @@ fn agent_decides_shadow_attribution_is_machine_readable() {
         summary
             .pointer("/rollout_attribution/0/switch_name")
             .and_then(Value::as_str),
-        Some("agent_decides_semantic_route")
+        Some("semantic_route_authority")
     );
     assert_eq!(
         summary
@@ -428,6 +428,12 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/decision_envelope/terminal_intent")
+            .and_then(Value::as_str),
+        Some("continue")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/decision_envelope/reason_code")
             .and_then(Value::as_str),
         Some("agent_loop_first_action_call_capability")
@@ -456,6 +462,19 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
             .and_then(Value::as_str),
         Some("defer_until_observation")
     );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/evidence_needed")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/answer_shape")
+            .and_then(Value::as_str),
+        Some("name_list")
+    );
 }
 
 #[test]
@@ -482,9 +501,21 @@ fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/decision_envelope/terminal_intent")
+            .and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/decision_envelope/reason_code")
             .and_then(Value::as_str),
         Some("agent_loop_first_action_clarify")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/clarify_reason_code")
+            .and_then(Value::as_str),
+        Some("clarify_missing_structured_slots")
     );
     assert_eq!(
         summary
@@ -503,6 +534,82 @@ fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
             .pointer("/rollout_attribution/0/decision_envelope/language_rendering_policy")
             .and_then(Value::as_str),
         Some("finalizer_llm_i18n")
+    );
+}
+
+#[test]
+fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let plan = crate::PlanResult {
+        goal: "collect missing locator".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_locator",
+                "missing_slot": "locator",
+                "message_key": "clawd.msg.clarify.missing_locator",
+                "field_path": "package.name",
+                "locator_kind": "path"
+            }),
+            depends_on: Vec::new(),
+            why: "structured clarify".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let envelope =
+        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &plan);
+
+    assert_eq!(
+        envelope.get("decision").and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        envelope.get("terminal_intent").and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        envelope.get("reason_code").and_then(Value::as_str),
+        Some("agent_loop_respond_terminal_intent_clarify")
+    );
+    assert_eq!(
+        envelope.get("clarify_reason_code").and_then(Value::as_str),
+        Some("missing_locator")
+    );
+    assert_eq!(
+        envelope.get("missing_slot").and_then(Value::as_str),
+        Some("locator")
+    );
+    assert_eq!(
+        envelope
+            .get("missing_slots")
+            .and_then(Value::as_array)
+            .and_then(|slots| slots.first())
+            .and_then(Value::as_str),
+        Some("locator")
+    );
+    assert_eq!(
+        envelope.get("validation_status").and_then(Value::as_str),
+        Some("valid")
+    );
+    assert_eq!(
+        envelope.get("message_key").and_then(Value::as_str),
+        Some("clawd.msg.clarify.missing_locator")
+    );
+    assert_eq!(
+        envelope.get("field_path").and_then(Value::as_str),
+        Some("package.name")
+    );
+    assert_eq!(
+        envelope.get("locator_kind").and_then(Value::as_str),
+        Some("path")
     );
 }
 
@@ -567,14 +674,19 @@ fn agent_loop_decision_envelope_schema_drift() {
         "semantic_authority",
         "fallback_gate_policy",
         "decision",
+        "terminal_intent",
         "reason_code",
+        "clarify_reason_code",
         "validation_status",
         "validation_reason_code",
         "confidence",
         "missing_slots",
+        "missing_slot",
         "capability_ref",
         "output_contract_ref",
         "required_evidence",
+        "evidence_needed",
+        "answer_shape",
         "risk_level",
         "delivery_required",
         "language_rendering_policy",
@@ -598,6 +710,25 @@ fn agent_loop_decision_envelope_schema_drift() {
         assert!(
             decisions.iter().any(|value| value.as_str() == Some(token)),
             "decision enum missing `{token}`"
+        );
+    }
+    let terminal_intents = properties
+        .get("terminal_intent")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("terminal_intent enum");
+    for token in [
+        "answer",
+        "clarify",
+        "cannot_proceed",
+        "needs_confirmation",
+        "continue",
+    ] {
+        assert!(
+            terminal_intents
+                .iter()
+                .any(|value| value.as_str() == Some(token)),
+            "terminal_intent enum missing `{token}`"
         );
     }
     let rendering_policies = properties
@@ -854,6 +985,14 @@ fn trace_json_includes_verifier_issue_failure_attribution() {
         Some("verify_contract_action_rejected")
     );
     assert_eq!(
+        issue.get("status_code").and_then(Value::as_str),
+        Some("contract_action_rejected")
+    );
+    assert_eq!(
+        issue.get("message_key").and_then(Value::as_str),
+        Some("clawd.verify.contract_action_rejected")
+    );
+    assert_eq!(
         issue.get("owner_layer").and_then(Value::as_str),
         Some("plan_verifier")
     );
@@ -867,6 +1006,14 @@ fn trace_json_includes_verifier_issue_failure_attribution() {
     assert_eq!(
         verify.get("blocked_reason_code").and_then(Value::as_str),
         Some("verify_contract_action_rejected")
+    );
+    assert_eq!(
+        verify.get("blocked_status_code").and_then(Value::as_str),
+        Some("contract_action_rejected")
+    );
+    assert_eq!(
+        verify.get("blocked_message_key").and_then(Value::as_str),
+        Some("clawd.verify.contract_action_rejected")
     );
     assert_eq!(
         verify.get("owner_layer").and_then(Value::as_str),

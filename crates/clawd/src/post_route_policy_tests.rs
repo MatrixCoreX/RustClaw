@@ -49,7 +49,7 @@ fn fuzzy_candidates_force_clarify_for_locator_requests() {
         result.gate_record.reason_code,
         "post_route_fuzzy_locator_candidates"
     );
-    assert_eq!(result.gate_record.owner_layer, "post_route_policy");
+    assert_eq!(result.gate_record.owner_layer, "boundary_locator_gate");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
 }
 
@@ -65,6 +65,7 @@ fn missing_locator_still_forces_clarify() {
         result.gate_record.reason_code,
         "post_route_missing_path_scoped_locator"
     );
+    assert_eq!(result.gate_record.owner_layer, "boundary_locator_gate");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
 }
 
@@ -381,8 +382,62 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
         result.gate_record.reason_code,
         "post_route_upstream_clarify_required"
     );
+    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn background_marker_clarifies_when_legacy_semantic_repair_allowed() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.route_reason = "background_locator_requires_clarify".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+
+    let result = apply_post_route_policy(route, LocatorResolution::None);
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::clarify()
+    );
+    assert!(result.execution_route_result.needs_clarify);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_upstream_clarify_required"
+    );
+    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
+}
+
+#[test]
+fn selected_agent_loop_route_defers_legacy_semantic_repair_to_loop() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.route_reason = "background_locator_requires_clarify".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+
+    let result = apply_post_route_policy_with_options(
+        route,
+        LocatorResolution::None,
+        PostRoutePolicyOptions {
+            allow_legacy_semantic_repair: false,
+        },
+    );
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::planner_execute_chat_wrapped()
+    );
+    assert!(!result.execution_route_result.needs_clarify);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_legacy_semantic_repair_deferred_to_agent_loop"
+    );
+    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
+    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::NoChange);
 }
 
 #[test]
@@ -810,6 +865,11 @@ fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
     assert_eq!(
         result.execution_route_result.output_contract.semantic_kind,
         OutputSemanticKind::None
+    );
+    assert_eq!(result.gate_record.owner_layer, "boundary_contract_gate");
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_contract_refined"
     );
 }
 

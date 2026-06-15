@@ -81,9 +81,28 @@ fn trace_json_includes_round_decision_envelope() {
     );
     assert_eq!(
         trace
+            .pointer("/rounds/0/decision_envelope/terminal_intent")
+            .and_then(Value::as_str),
+        Some("continue")
+    );
+    assert_eq!(
+        trace
             .pointer("/rounds/0/decision_envelope/capability_ref")
             .and_then(Value::as_str),
         Some("fs.read_text_range")
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/evidence_needed")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/answer_shape")
+            .and_then(Value::as_str),
+        Some("free")
     );
 }
 

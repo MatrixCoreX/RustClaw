@@ -904,6 +904,16 @@ pub(super) fn direct_answer_gate_contract_is_pure_chat(
         )
 }
 
+pub(super) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResult) -> bool {
+    route.is_chat_gate()
+        && !route.needs_clarify
+        && !route.wants_file_delivery
+        && !route.should_refresh_long_term_memory
+        && route.risk_ceiling != crate::RiskCeiling::High
+        && matches!(route.schedule_kind, crate::ScheduleKind::None)
+        && direct_answer_gate_contract_is_pure_chat(&route.output_contract)
+}
+
 pub(super) fn direct_answer_gate_self_contained_inline_json_chat(
     current_user_request: &str,
 ) -> bool {
@@ -1242,6 +1252,7 @@ pub(super) fn direct_answer_gate_contract_allows_locatorless_execution(
         | crate::OutputSemanticKind::WorkspaceProjectSummary
         | crate::OutputSemanticKind::GitCommitSubject
         | crate::OutputSemanticKind::GitRepositoryState
+        | crate::OutputSemanticKind::ToolDiscovery
         | crate::OutputSemanticKind::DockerPs
         | crate::OutputSemanticKind::DockerImages
         | crate::OutputSemanticKind::DockerLogs

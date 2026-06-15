@@ -683,6 +683,46 @@ fn verifier_issue_failure_attribution_groups_contract_policy_kinds() {
 }
 
 #[test]
+fn verifier_issue_kinds_expose_stable_machine_fields() {
+    let kinds = [
+        VerifyIssueKind::SkillNotVisible,
+        VerifyIssueKind::CapabilityUnavailable,
+        VerifyIssueKind::MissingRequiredArg,
+        VerifyIssueKind::DefaultCreationTargetApplied,
+        VerifyIssueKind::UnresolvedTemplateArg,
+        VerifyIssueKind::InvalidDependsOn,
+        VerifyIssueKind::ConfirmationRequired,
+        VerifyIssueKind::RiskBudgetExceeded,
+        VerifyIssueKind::PrimaryFallbackConflict,
+        VerifyIssueKind::RouteClarifyRequired,
+        VerifyIssueKind::RecipeInspectBeforeMutateRequired,
+        VerifyIssueKind::RecipeValidationAfterMutateRequired,
+        VerifyIssueKind::RecipeTargetScopeRequired,
+        VerifyIssueKind::ContractActionRejected,
+        VerifyIssueKind::ContractMissing,
+        VerifyIssueKind::ContractPolicyViolation,
+        VerifyIssueKind::ContractPreferredActionAvailable,
+    ];
+
+    for kind in kinds {
+        assert!(!kind.reason_code().is_empty(), "{kind:?} reason_code");
+        assert!(
+            kind.reason_code().starts_with("verify_"),
+            "{kind:?} reason_code prefix"
+        );
+        assert!(!kind.status_code().is_empty(), "{kind:?} status_code");
+        assert!(
+            kind.message_key().starts_with("clawd.verify."),
+            "{kind:?} message_key namespace"
+        );
+        assert!(
+            !kind.failure_attribution().as_str().is_empty(),
+            "{kind:?} failure attribution"
+        );
+    }
+}
+
+#[test]
 fn observe_mode_records_preferred_contract_action_without_blocking() {
     let state = test_state();
     let task = test_task();

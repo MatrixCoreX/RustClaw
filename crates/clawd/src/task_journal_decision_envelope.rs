@@ -9,7 +9,11 @@ pub(super) fn agent_loop_round_plan_decision_envelope_json(
         .iter()
         .filter_map(crate::PlanStep::to_agent_action)
         .collect::<Vec<_>>();
-    agent_loop_round_decision_envelope_json(route, &actions)
+    let mut envelope = agent_loop_round_decision_envelope_json(route, &actions);
+    if let Some(intent) = structured_respond_terminal_intent_from_plan(plan) {
+        apply_structured_respond_terminal_intent(&mut envelope, intent);
+    }
+    envelope
 }
 
 fn agent_loop_round_decision_envelope_json(
@@ -26,6 +30,128 @@ fn agent_loop_round_decision_envelope_json(
     )
 }
 
+#[derive(Debug, Clone)]
+struct StructuredRespondTerminalIntent {
+    terminal_intent: String,
+    clarify_reason_code: Option<String>,
+    missing_slot: Option<String>,
+    message_key: Option<String>,
+    field_path: Option<String>,
+    locator_kind: Option<String>,
+}
+
+fn structured_respond_terminal_intent_from_plan(
+    plan: &crate::PlanResult,
+) -> Option<StructuredRespondTerminalIntent> {
+    plan.steps
+        .iter()
+        .find_map(structured_respond_terminal_intent_from_plan_step)
+        .or_else(|| {
+            super::raw_plan_steps(&plan.raw_plan_text)
+                .iter()
+                .find_map(structured_respond_terminal_intent_from_raw_step)
+        })
+}
+
+fn structured_respond_terminal_intent_from_plan_step(
+    step: &crate::PlanStep,
+) -> Option<StructuredRespondTerminalIntent> {
+    (step.action_type == "respond")
+        .then(|| structured_respond_terminal_intent_from_object(&step.args))?
+}
+
+fn structured_respond_terminal_intent_from_raw_step(
+    step: &Value,
+) -> Option<StructuredRespondTerminalIntent> {
+    let raw_type = step
+        .get("type")
+        .or_else(|| step.get("action_type"))
+        .or_else(|| step.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    (raw_type == "respond").then(|| structured_respond_terminal_intent_from_object(step))?
+}
+
+fn structured_respond_terminal_intent_from_object(
+    value: &Value,
+) -> Option<StructuredRespondTerminalIntent> {
+    let terminal_intent = string_field(value, &["terminal_intent"])?.to_string();
+    if !matches!(
+        terminal_intent.as_str(),
+        "answer" | "clarify" | "cannot_proceed" | "needs_confirmation" | "continue"
+    ) {
+        return None;
+    }
+    Some(StructuredRespondTerminalIntent {
+        terminal_intent,
+        clarify_reason_code: string_field(value, &["clarify_reason_code"]).map(str::to_string),
+        missing_slot: string_field(value, &["missing_slot"]).map(str::to_string),
+        message_key: string_field(value, &["message_key"]).map(str::to_string),
+        field_path: string_field(value, &["field_path"]).map(str::to_string),
+        locator_kind: string_field(value, &["locator_kind"]).map(str::to_string),
+    })
+}
+
+fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_structured_respond_terminal_intent(
+    envelope: &mut Value,
+    intent: StructuredRespondTerminalIntent,
+) {
+    let Some(obj) = envelope.as_object_mut() else {
+        return;
+    };
+    if intent.terminal_intent == "clarify" {
+        obj.insert("decision".to_string(), json!("clarify"));
+        obj.insert(
+            "reason_code".to_string(),
+            json!("agent_loop_respond_terminal_intent_clarify"),
+        );
+        obj.insert(
+            "clarify_reason_code".to_string(),
+            json!(intent
+                .clarify_reason_code
+                .as_deref()
+                .unwrap_or("clarify_missing_structured_slots")),
+        );
+        if let Some(missing_slot) = intent.missing_slot.as_deref() {
+            obj.insert("missing_slots".to_string(), json!([missing_slot]));
+            obj.insert("missing_slot".to_string(), json!(missing_slot));
+            obj.insert("validation_status".to_string(), json!("valid"));
+            obj.insert(
+                "validation_reason_code".to_string(),
+                json!("agent_loop_decision_shadow_valid"),
+            );
+        } else {
+            obj.insert("validation_status".to_string(), json!("shadow_invalid"));
+            obj.insert(
+                "validation_reason_code".to_string(),
+                json!("clarify_missing_structured_slots"),
+            );
+        }
+        obj.insert(
+            "language_rendering_policy".to_string(),
+            json!("finalizer_llm_i18n"),
+        );
+    }
+    obj.insert("terminal_intent".to_string(), json!(intent.terminal_intent));
+    if let Some(message_key) = intent.message_key {
+        obj.insert("message_key".to_string(), json!(message_key));
+    }
+    if let Some(field_path) = intent.field_path {
+        obj.insert("field_path".to_string(), json!(field_path));
+    }
+    if let Some(locator_kind) = intent.locator_kind {
+        obj.insert("locator_kind".to_string(), json!(locator_kind));
+    }
+}
+
 pub(super) fn agent_loop_decision_envelope_json(
     route: &crate::RouteResult,
     actions: &[crate::AgentAction],
@@ -37,6 +163,9 @@ pub(super) fn agent_loop_decision_envelope_json(
     let decision = agent_loop_decision_from_first_action(route, actions);
     let (validation_status, validation_reason_code) =
         agent_loop_decision_validation(route, actions, decision, &contract);
+    let terminal_intent = agent_loop_terminal_intent(decision);
+    let missing_slot = contract.missing_parameters.first().map(String::as_str);
+    let answer_shape = agent_loop_answer_shape(route);
     json!({
         "schema_version": 1,
         "source": source,
@@ -44,14 +173,22 @@ pub(super) fn agent_loop_decision_envelope_json(
         "semantic_authority": semantic_authority,
         "fallback_gate_policy": "fallback_safety_check_only",
         "decision": decision,
+        "terminal_intent": terminal_intent,
         "reason_code": agent_loop_decision_reason_code(decision, actions),
+        "clarify_reason_code": agent_loop_clarify_reason_code(
+            decision,
+            validation_reason_code,
+        ),
         "validation_status": validation_status,
         "validation_reason_code": validation_reason_code,
         "confidence": null,
         "missing_slots": &contract.missing_parameters,
+        "missing_slot": missing_slot,
         "capability_ref": first_non_think_action_capability_ref(actions),
         "output_contract_ref": output_contract_ref,
         "required_evidence": &contract.required_evidence_fields,
+        "evidence_needed": &contract.required_evidence_fields,
+        "answer_shape": answer_shape,
         "risk_level": route.risk_ceiling.as_str(),
         "delivery_required": route.output_contract.delivery_required || route.wants_file_delivery,
         "language_rendering_policy": agent_loop_language_rendering_policy(decision),
@@ -179,6 +316,28 @@ fn agent_loop_decision_reason_code(decision: &str, actions: &[crate::AgentAction
         "respond" => "agent_loop_first_action_respond",
         _ => "agent_loop_first_action_unknown",
     }
+}
+
+fn agent_loop_terminal_intent(decision: &str) -> &'static str {
+    match decision {
+        "call_capability" => "continue",
+        "clarify" => "clarify",
+        "respond" | "synthesize_answer" => "answer",
+        _ => "cannot_proceed",
+    }
+}
+
+fn agent_loop_clarify_reason_code(
+    decision: &str,
+    validation_reason_code: &'static str,
+) -> Option<&'static str> {
+    (decision == "clarify").then_some(validation_reason_code)
+}
+
+fn agent_loop_answer_shape(route: &crate::RouteResult) -> String {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .map(|shape| shape.as_str().to_string())
+        .unwrap_or_else(|| route.output_contract.response_shape.as_str().to_string())
 }
 
 fn agent_loop_language_rendering_policy(decision: &str) -> &'static str {

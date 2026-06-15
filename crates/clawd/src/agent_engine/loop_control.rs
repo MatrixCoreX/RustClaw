@@ -83,6 +83,133 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructuredRespondTerminalIntent {
+    terminal_intent: String,
+    clarify_reason_code: Option<String>,
+    missing_slot: Option<String>,
+    message_key: Option<String>,
+    field_path: Option<String>,
+    locator_kind: Option<String>,
+}
+
+fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn raw_plan_steps(raw_plan_text: &str) -> Vec<Value> {
+    let Some(value) =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw_plan_text)
+    else {
+        return Vec::new();
+    };
+    if let Some(steps) = value.get("steps").and_then(Value::as_array) {
+        return steps.clone();
+    }
+    if let Some(actions) = value.get("actions").and_then(Value::as_array) {
+        return actions.clone();
+    }
+    value.as_array().cloned().unwrap_or_default()
+}
+
+fn structured_respond_terminal_intent_from_object(
+    value: &Value,
+) -> Option<StructuredRespondTerminalIntent> {
+    let terminal_intent = string_field(value, &["terminal_intent"])?.to_ascii_lowercase();
+    if !matches!(
+        terminal_intent.as_str(),
+        "answer" | "clarify" | "cannot_proceed" | "needs_confirmation" | "continue"
+    ) {
+        return None;
+    }
+    Some(StructuredRespondTerminalIntent {
+        terminal_intent,
+        clarify_reason_code: string_field(value, &["clarify_reason_code"]).map(str::to_string),
+        missing_slot: string_field(value, &["missing_slot"]).map(str::to_string),
+        message_key: string_field(value, &["message_key"]).map(str::to_string),
+        field_path: string_field(value, &["field_path"]).map(str::to_string),
+        locator_kind: string_field(value, &["locator_kind"]).map(str::to_string),
+    })
+}
+
+fn structured_respond_terminal_intent_from_plan_step(
+    step: &crate::PlanStep,
+) -> Option<StructuredRespondTerminalIntent> {
+    (step.action_type == "respond")
+        .then(|| structured_respond_terminal_intent_from_object(&step.args))?
+}
+
+fn structured_respond_terminal_intent_from_raw_step(
+    step: &Value,
+) -> Option<StructuredRespondTerminalIntent> {
+    let raw_type = string_field(step, &["type", "action_type", "action"])?.to_ascii_lowercase();
+    (raw_type == "respond").then(|| structured_respond_terminal_intent_from_object(step))?
+}
+
+fn structured_respond_terminal_intent_from_plan(
+    plan: &crate::PlanResult,
+) -> Option<StructuredRespondTerminalIntent> {
+    plan.steps
+        .iter()
+        .find_map(structured_respond_terminal_intent_from_plan_step)
+        .or_else(|| {
+            raw_plan_steps(&plan.raw_plan_text)
+                .iter()
+                .find_map(structured_respond_terminal_intent_from_raw_step)
+        })
+}
+
+fn actions_allow_structured_respond_terminal_intent(actions: &[AgentAction]) -> bool {
+    actions.iter().all(|action| {
+        matches!(
+            action,
+            AgentAction::Respond { .. } | AgentAction::Think { .. }
+        )
+    })
+}
+
+fn apply_structured_respond_clarify_to_loop_state(
+    loop_state: &mut LoopState,
+    intent: &StructuredRespondTerminalIntent,
+) -> RoundOutcome {
+    loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    for (key, value) in [
+        (
+            "agent_loop.clarify_reason_code",
+            intent.clarify_reason_code.as_deref(),
+        ),
+        ("agent_loop.missing_slot", intent.missing_slot.as_deref()),
+        ("agent_loop.message_key", intent.message_key.as_deref()),
+        ("agent_loop.field_path", intent.field_path.as_deref()),
+        ("agent_loop.locator_kind", intent.locator_kind.as_deref()),
+    ] {
+        if let Some(value) = value {
+            loop_state
+                .output_vars
+                .insert(key.to_string(), value.to_string());
+        }
+    }
+    loop_state.history_compact.push(format!(
+        "round={} structured_respond_terminal_intent=clarify missing_slot={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or("")
+    ));
+    RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("structured_respond_clarify".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    }
+}
+
 fn last_executable_action(actions: &[AgentAction]) -> Option<&AgentAction> {
     actions.iter().rev().find(|action| {
         matches!(
@@ -463,6 +590,22 @@ async fn run_agent_round(
         &prepared_round.actions,
         loop_state,
     );
+    if let Some(intent) = structured_respond_terminal_intent_from_plan(&prepared_round.plan_result)
+        .filter(|intent| intent.terminal_intent == "clarify")
+        .filter(|_| actions_allow_structured_respond_terminal_intent(&prepared_round.actions))
+    {
+        let outcome = apply_structured_respond_clarify_to_loop_state(loop_state, &intent);
+        info!(
+            "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+            task.task_id,
+            loop_state.round_no,
+            outcome.executed_actions,
+            outcome.no_progress,
+            outcome.stop_signal.as_deref().unwrap_or(""),
+            crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
+        );
+        return Ok(outcome);
+    }
     let actions = prepared_round.actions;
     let mut outcome = execute_actions_once(
         state,
@@ -589,9 +732,19 @@ pub(super) fn boundary_context_snapshot_json(
 ) -> Value {
     let semantic_route_authority = policy.effective_semantic_route_authority();
     let output_contract = route_result.map(|route| &route.output_contract);
-    let eligible_migration_class = route_result
-        .map(super::migration_class::agent_decides_eligible_migration_class)
+    let eligibility = route_result.map(super::migration_class::agent_loop_eligibility);
+    let eligible_migration_class = eligibility
+        .map(|eligibility| eligibility.compatibility_migration_class())
         .unwrap_or("none");
+    let eligibility_bucket = eligibility
+        .map(|eligibility| eligibility.bucket_token())
+        .unwrap_or("none");
+    let eligibility_blocked_reason = eligibility
+        .map(|eligibility| eligibility.blocked_reason)
+        .unwrap_or("route_unavailable");
+    let eligibility_boundary_requirements = eligibility
+        .map(|eligibility| eligibility.boundary_requirements)
+        .unwrap_or(&[] as &[&str]);
     let selected_migration_class =
         policy.selected_migration_class_for_eligible(eligible_migration_class);
     let agent_loop_selected =
@@ -626,6 +779,13 @@ pub(super) fn boundary_context_snapshot_json(
                 "none"
             },
         },
+        "normalizer_hints": route_result
+            .map(normalizer_hints_json)
+            .unwrap_or_else(|| json!({
+                "schema_version": 1,
+                "source": "route_result_machine_fields",
+                "available": false,
+            })),
         "session": {
             "user_id_present": task.user_id != 0,
             "chat_id_present": task.chat_id != 0,
@@ -647,9 +807,12 @@ pub(super) fn boundary_context_snapshot_json(
         },
         "budget": {
             "profile": budget_profile.as_str(),
-            "agent_decides_migration_class": policy.agent_decides_migration_class.as_str(),
+            "agent_loop_canary_bucket": policy.agent_loop_canary_bucket.as_str(),
             "eligible_migration_class": eligible_migration_class,
             "selected_migration_class": selected_migration_class,
+            "agent_loop_eligibility_bucket": eligibility_bucket,
+            "agent_loop_eligibility_blocked_reason": eligibility_blocked_reason,
+            "agent_loop_boundary_requirements": eligibility_boundary_requirements,
             "max_rounds": policy.max_rounds,
             "max_steps": policy.max_steps,
             "max_tool_calls": policy.max_tool_calls,
@@ -703,6 +866,74 @@ pub(super) fn boundary_context_snapshot_json(
         },
         "pre_agent_gates": pre_agent_gate_summary_json(route_result, agent_run_context),
     })
+}
+
+fn normalizer_hints_json(route: &RouteResult) -> Value {
+    let contract = &route.output_contract;
+    json!({
+        "schema_version": 1,
+        "source": "route_result_machine_fields",
+        "available": true,
+        "decision_hint": route.first_layer_decision().as_str(),
+        "gate_kind_hint": route.gate_kind().as_str(),
+        "route_confidence": route.route_confidence,
+        "candidate_contracts": [
+            crate::TaskContract::from_route_result(route).compact_prompt_line()
+        ],
+        "output_contract": {
+            "response_shape": contract.response_shape.as_str(),
+            "semantic_kind": contract.semantic_kind.as_str(),
+            "locator_kind": contract.locator_kind.as_str(),
+            "locator_hint_present": !contract.locator_hint.trim().is_empty(),
+            "delivery_intent": contract.delivery_intent.as_str(),
+            "delivery_required": contract.delivery_required,
+            "requires_content_evidence": contract.requires_content_evidence,
+        },
+        "candidate_locators": normalizer_candidate_locators_json(route),
+        "missing_slot_hints": normalizer_missing_slot_hints(route),
+        "risk_hints": normalizer_risk_hints(route),
+    })
+}
+
+fn normalizer_candidate_locators_json(route: &RouteResult) -> Vec<Value> {
+    let contract = &route.output_contract;
+    let mut locators = Vec::new();
+    if contract.locator_kind != crate::OutputLocatorKind::None
+        || !contract.locator_hint.trim().is_empty()
+    {
+        locators.push(json!({
+            "kind": contract.locator_kind.as_str(),
+            "hint": contract.locator_hint.trim(),
+            "hint_present": !contract.locator_hint.trim().is_empty(),
+        }));
+    }
+    locators
+}
+
+fn normalizer_missing_slot_hints(route: &RouteResult) -> Vec<&'static str> {
+    let contract = &route.output_contract;
+    let locator_missing = contract.locator_kind == crate::OutputLocatorKind::None
+        && contract.locator_hint.trim().is_empty();
+    let mut hints = Vec::new();
+    if route.needs_clarify {
+        hints.push("clarify_required");
+    }
+    if locator_missing && (contract.delivery_required || route.wants_file_delivery) {
+        hints.push("delivery_locator");
+    }
+    if locator_missing && contract.requires_content_evidence {
+        hints.push("content_evidence_locator");
+    }
+    hints
+}
+
+fn normalizer_risk_hints(route: &RouteResult) -> Vec<&'static str> {
+    match route.risk_ceiling {
+        crate::RiskCeiling::Unknown => Vec::new(),
+        crate::RiskCeiling::Low => vec!["risk_ceiling_low"],
+        crate::RiskCeiling::Medium => vec!["risk_ceiling_medium"],
+        crate::RiskCeiling::High => vec!["risk_ceiling_high"],
+    }
 }
 
 fn pre_agent_gate_summary_json(
@@ -1016,8 +1247,15 @@ pub(super) async fn run_agent_with_loop(
             agent_run_context,
         )
         .await?;
-        attach_answer_verifier_if_missing(state, task, user_text, agent_run_context, &mut reply)
-            .await;
+        attach_answer_verifier_if_missing(
+            state,
+            task,
+            user_text,
+            &policy,
+            agent_run_context,
+            &mut reply,
+        )
+        .await;
         let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
@@ -1122,6 +1360,7 @@ async fn attach_answer_verifier_if_missing(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
+    policy: &AgentLoopGuardPolicy,
     agent_run_context: Option<&AgentRunContext>,
     reply: &mut AskReply,
 ) {
@@ -1137,6 +1376,19 @@ async fn attach_answer_verifier_if_missing(
     if journal.answer_verifier_summary.is_some() {
         return;
     }
+    if let Some((selected_class, answer_verifier)) =
+        selected_contract_structured_evidence_gap(policy, route_result, journal)
+    {
+        journal.record_answer_verifier_summary(answer_verifier);
+        let summary = journal.answer_verifier_summary.as_ref();
+        journal.rollout_attribution.push(
+            crate::task_journal::TaskJournalRolloutAttribution::selected_contract_structured_evidence_block(
+                summary,
+                selected_class,
+            ),
+        );
+        return;
+    }
     if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,
@@ -1149,6 +1401,20 @@ async fn attach_answer_verifier_if_missing(
     {
         journal.record_answer_verifier_summary(answer_verifier);
     }
+}
+
+fn selected_contract_structured_evidence_gap(
+    policy: &AgentLoopGuardPolicy,
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<(&'static str, crate::answer_verifier::AnswerVerifierOut)> {
+    if !policy.structured_evidence_required_for_selected_contracts {
+        return None;
+    }
+    let selected_class =
+        super::agent_loop_authority_selected_migration_class_for_policy(policy, route_result)?;
+    crate::answer_verifier::local_missing_evidence_verifier_gap(route_result, journal)
+        .map(|gap| (selected_class, gap))
 }
 
 #[cfg(test)]

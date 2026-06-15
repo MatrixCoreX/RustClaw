@@ -1268,34 +1268,11 @@ fn direct_answer_prefers_process_basic_status_over_later_system_info() {
 
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("process status should override generic system info");
-    let value: serde_json::Value = serde_json::from_str(&answer).expect("structured status json");
-
-    assert_eq!(
-        value
-            .get("status_source")
-            .and_then(serde_json::Value::as_str),
-        Some("process_basic.ps")
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&answer).is_err(),
+        "one-sentence service status should not expose structured JSON"
     );
-    assert_eq!(
-        value.get("target").and_then(serde_json::Value::as_str),
-        Some("telegramd")
-    );
-    assert_eq!(
-        value
-            .get("process_filter")
-            .and_then(serde_json::Value::as_str),
-        Some("telegramd")
-    );
-    assert_eq!(
-        value.get("status").and_then(serde_json::Value::as_str),
-        Some("not_running")
-    );
-    assert_eq!(
-        value.get("running").and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        value.get("match_count").and_then(serde_json::Value::as_u64),
-        Some(0)
-    );
+    assert!(answer.contains("telegramd"));
+    assert!(answer.contains("not running"));
+    assert!(answer.contains("process_basic"));
 }

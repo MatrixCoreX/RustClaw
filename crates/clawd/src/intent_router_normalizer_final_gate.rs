@@ -126,7 +126,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         first_layer_repair_codes,
     );
     info!(
-        "{} intent_normalizer_first_layer_gate task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={}",
+        "{} intent_normalizer_first_layer_gate task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         crate::highlight_tag("routing"),
         task.task_id,
         first_layer_gate_record.owner_layer,
@@ -140,6 +140,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         first_layer_gate_record.needs_clarify,
         first_layer_gate_record.output_contract_ref,
         first_layer_gate_record.repair_codes.join(","),
+        first_layer_gate_record.repair_classes.join(","),
     );
     IntentNormalizerOutput {
         resolved_user_intent,

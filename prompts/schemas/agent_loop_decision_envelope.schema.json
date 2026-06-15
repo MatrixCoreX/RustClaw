@@ -12,14 +12,19 @@
     "semantic_authority",
     "fallback_gate_policy",
     "decision",
+    "terminal_intent",
     "reason_code",
+    "clarify_reason_code",
     "validation_status",
     "validation_reason_code",
     "confidence",
     "missing_slots",
+    "missing_slot",
     "capability_ref",
     "output_contract_ref",
     "required_evidence",
+    "evidence_needed",
+    "answer_shape",
     "risk_level",
     "delivery_required",
     "language_rendering_policy"
@@ -51,9 +56,18 @@
       "type": "string",
       "enum": ["respond", "clarify", "call_capability", "synthesize_answer"]
     },
+    "terminal_intent": {
+      "type": "string",
+      "enum": ["answer", "clarify", "cannot_proceed", "needs_confirmation", "continue"],
+      "description": "Stable terminal/continuation intent derived from the planner-loop decision. This is machine state, not a rendered user reply."
+    },
     "reason_code": {
       "type": "string",
       "description": "Stable machine reason code for the shadow decision."
+    },
+    "clarify_reason_code": {
+      "type": ["string", "null"],
+      "description": "Stable machine reason for clarify terminal intent. Null for non-clarify decisions."
     },
     "validation_status": {
       "type": "string",
@@ -72,6 +86,10 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "missing_slot": {
+      "type": ["string", "null"],
+      "description": "Primary missing slot when terminal_intent=clarify; null when no structured slot is missing."
+    },
     "capability_ref": {
       "type": ["string", "null"],
       "description": "Capability, tool, or skill ref selected by the first planner action."
@@ -83,11 +101,32 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "evidence_needed": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Evidence fields still required by the task contract before a trustworthy final answer."
+    },
+    "answer_shape": {
+      "type": "string",
+      "description": "Machine final-answer shape token from the contract matrix or coarse output shape fallback."
+    },
     "risk_level": {
       "type": "string"
     },
     "delivery_required": {
       "type": "boolean"
+    },
+    "message_key": {
+      "type": ["string", "null"],
+      "description": "Optional i18n message key for downstream finalizer or language policy rendering."
+    },
+    "field_path": {
+      "type": ["string", "null"],
+      "description": "Optional structured field path attached to a clarify terminal intent."
+    },
+    "locator_kind": {
+      "type": ["string", "null"],
+      "description": "Optional machine locator kind attached to a clarify terminal intent."
     },
     "language_rendering_policy": {
       "type": "string",

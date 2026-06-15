@@ -373,7 +373,9 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::ImageUnderstanding => return TaskTargetObject::Web,
         OutputSemanticKind::PublishingPreview => return TaskTargetObject::Web,
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
-        OutputSemanticKind::PackageManagerDetection => return TaskTargetObject::System,
+        OutputSemanticKind::PackageManagerDetection | OutputSemanticKind::ToolDiscovery => {
+            return TaskTargetObject::System;
+        }
         _ => {}
     }
     match route.output_contract.locator_kind {
@@ -394,6 +396,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::ArchiveList
+        | OutputSemanticKind::ToolDiscovery
         | OutputSemanticKind::DockerPs
         | OutputSemanticKind::DockerImages
         | OutputSemanticKind::DockerLogs => TaskOperation::List,
@@ -462,6 +465,7 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
             | OutputSemanticKind::SqliteTableListing
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::ArchiveList
+            | OutputSemanticKind::ToolDiscovery
             | OutputSemanticKind::DockerPs
             | OutputSemanticKind::DockerImages
     ) {

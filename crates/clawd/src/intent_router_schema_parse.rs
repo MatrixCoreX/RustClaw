@@ -396,6 +396,11 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
             OutputSemanticKind::PackageManagerDetection
         }
+        "tool_discovery"
+        | "capability_discovery"
+        | "capability_inventory"
+        | "skill_discovery"
+        | "skill_inventory" => OutputSemanticKind::ToolDiscovery,
         "archive_list" | "archive_listing" | "archive_contents" => OutputSemanticKind::ArchiveList,
         "archive_read" | "archive_member_read" | "archive_file_read" => {
             OutputSemanticKind::ArchiveRead

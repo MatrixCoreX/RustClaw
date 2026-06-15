@@ -249,9 +249,9 @@ use language_closeout::{
 mod missing_delivery;
 use missing_delivery::{
     build_finalizer_clarify_reason, build_missing_delivery_clarify_reason,
-    finalizer_requires_clarify, observed_execution_without_publishable_delivery_reply,
-    observed_synthesis_unavailable_reply, pending_confirmation_resume_payload,
-    successful_delivery_final_status,
+    build_pending_user_input_clarify_reason, finalizer_requires_clarify,
+    observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
+    pending_confirmation_resume_payload, successful_delivery_final_status,
 };
 #[cfg(test)]
 #[allow(unused_imports)]
@@ -1026,16 +1026,18 @@ pub(crate) async fn finalize_loop_reply(
             return Ok(reply);
         }
         let structured_clarify_context = route_structured_clarify_context(agent_run_context);
-        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+        let clarify = crate::finalize::render_clarify_question(
             state,
             task,
-            user_text,
-            &clarify_reason,
-            structured_clarify_context.as_deref(),
-            preferred_route_clarify_question(agent_run_context),
-            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
-            // §7.2: finalize 触发 requires_clarify（无 evidence 可合成）→ SynthesisEmpty。
-            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            crate::finalize::ClarifyRenderRequest {
+                user_request: user_text,
+                resolver_reason: &clarify_reason,
+                candidate_context: structured_clarify_context.as_deref(),
+                preferred_question: preferred_route_clarify_question(agent_run_context),
+                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                // §7.2: finalize 触发 requires_clarify（无 evidence 可合成）→ SynthesisEmpty。
+                fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            },
         )
         .await;
         let delivery_messages = vec![clarify.clone()];
@@ -1084,7 +1086,10 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if delivery_deduped.is_empty() {
-        let clarify_reason = build_missing_delivery_clarify_reason(finalizer_summary.as_ref());
+        let clarify_reason = build_pending_user_input_clarify_reason(
+            &loop_state,
+            build_missing_delivery_clarify_reason(finalizer_summary.as_ref()),
+        );
         if let Some(reply) = observed_execution_without_publishable_delivery_reply(
             state,
             task,
@@ -1099,16 +1104,18 @@ pub(crate) async fn finalize_loop_reply(
             return Ok(reply);
         }
         let structured_clarify_context = route_structured_clarify_context(agent_run_context);
-        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+        let clarify = crate::finalize::render_clarify_question(
             state,
             task,
-            user_text,
-            &clarify_reason,
-            structured_clarify_context.as_deref(),
-            preferred_route_clarify_question(agent_run_context),
-            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
-            // §7.2: 执行结束但 delivery 全空（最常见的"我需要确认一下..."触发点之一）→ SynthesisEmpty。
-            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            crate::finalize::ClarifyRenderRequest {
+                user_request: user_text,
+                resolver_reason: &clarify_reason,
+                candidate_context: structured_clarify_context.as_deref(),
+                preferred_question: preferred_route_clarify_question(agent_run_context),
+                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                // §7.2: 执行结束但 delivery 全空（最常见的"我需要确认一下..."触发点之一）→ SynthesisEmpty。
+                fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+            },
         )
         .await;
         let delivery_messages = vec![clarify.clone()];
