@@ -61,7 +61,6 @@ continuous|typical_alias_file_ko_turn4|typical,alias,file,scalar,turn_chain,ko,c
 schedule|typical_schedule_clarify_zh|typical,schedule,clarify,zh,client_like|每天早上 8 点提醒我开会
 config_edit_smoke|typical_config_edit_plan_no_write_zh|typical,act,config,mutate,dry_run,tool:config_edit,zh,client_like|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
 config_edit_smoke|typical_config_edit_apply_temp_zh|typical,act,config,mutate,sandbox,tool:config_edit,zh,client_like|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程
-chat_act|typical_x_draft_preview_zh|typical,network,dry_run,skill:x,zh,client_like|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL typical smoke，不要真正发布，只给我预览结果
 chat_act|typical_weather_beijing_zh|typical,network,skill:weather,zh,client_like|查一下 Beijing 今天天气，简短告诉我
 chat_act|typical_stock_quote_zh|typical,network,skill:stock,zh,client_like|查一下 600519 的最新行情，简短告诉我
 chat_act|typical_crypto_quote_zh|typical,network,skill:crypto,zh,client_like|查一下 BTCUSDT 的最新价格，简短告诉我

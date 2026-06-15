@@ -4,8 +4,9 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=98 files_skipped_risky=2 files_skipped_temp=21 rows_deduped=684 rows_emitted=1448 rows_expect_dropped=300 rows_output=2100 rows_padded=652 rows_seen=1822 rows_skipped_risky=5
+# stats=files_seen=98 files_skipped_risky=2 files_skipped_temp=21 rows_deduped=684 rows_emitted=1446 rows_expect_dropped=300 rows_output=2100 rows_padded=654 rows_seen=1820 rows_skipped_excluded_skill=0 rows_skipped_risky=5
 # target_rows=0 means no row-count padding.
+# Default external publishing-channel exclusions are configured in the aggregate builder.
 # Format: suite|name|tags|prompt|expect=optional substring
 
 # source: scripts/nl_tests/cases/_adversarial_v1/cases.txt
@@ -605,7 +606,6 @@ continuous|nl_cases_client_like_typical_coverage_20260605_typical_alias_file_ko_
 continuous|nl_cases_client_like_typical_coverage_20260605_typical_alias_file_ko_turn4|typical,alias,file,scalar,turn_chain,ko,client_like,client_like,aggregate|"자료A"의 제목만 읽고 제목만 출력해 주세요.
 config_edit_smoke|nl_cases_client_like_typical_coverage_20260605_typical_config_edit_plan_no_write_zh|typical,act,config,mutate,dry_run,tool:config_edit,zh,client_like,client_like,aggregate|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
 config_edit_smoke|nl_cases_client_like_typical_coverage_20260605_typical_config_edit_apply_temp_zh|typical,act,config,mutate,sandbox,tool:config_edit,zh,client_like,client_like,aggregate,side_effect|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程
-chat_act|nl_cases_client_like_typical_coverage_20260605_typical_x_draft_preview_zh|typical,network,dry_run,skill:x,zh,client_like,client_like,aggregate|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL typical smoke，不要真正发布，只给我预览结果
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_weather_beijing_zh|typical,network,skill:weather,zh,client_like,client_like,aggregate|查一下 Beijing 今天天气，简短告诉我
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_stock_quote_zh|typical,network,skill:stock,zh,client_like,client_like,aggregate|查一下 600519 的最新行情，简短告诉我
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_crypto_quote_zh|typical,network,skill:crypto,zh,client_like,client_like,aggregate|查一下 BTCUSDT 的最新价格，简短告诉我
@@ -1053,7 +1053,7 @@ continuous|nl_cases_llm_first_semantic_contract_task_correct_version_cn_turn1|le
 continuous|nl_cases_llm_first_semantic_contract_task_correct_version_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|不对，不是 Python 3.10，是 Python 3.11
 continuous|nl_cases_llm_first_semantic_contract_task_correct_version_cn_turn3|legacy_shape,turn_chain,client_like,aggregate|只输出那一句说明
 continuous|nl_cases_llm_first_semantic_contract_task_replace_goal_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我写一篇关于 RustClaw 的长文
-continuous|nl_cases_llm_first_semantic_contract_task_replace_goal_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|算了，别写长文了，改成 X thread
+continuous|nl_cases_llm_first_semantic_contract_task_replace_goal_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|算了，别写长文了，改成短帖串
 continuous|nl_cases_llm_first_semantic_contract_task_replace_goal_cn_turn3|legacy_shape,turn_chain,client_like,aggregate|只输出前三条，每条一行
 continuous|nl_cases_llm_first_semantic_contract_task_scope_update_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我做一个测试计划
 continuous|nl_cases_llm_first_semantic_contract_task_scope_update_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|先只看登录模块
@@ -1196,7 +1196,6 @@ chat_act|nl_cases_skill_matrix_current_20260403_skill_browser_web_open_extract|s
 chat_act|nl_cases_skill_matrix_current_20260403_skill_web_search_extract_rust_async|skill:web_search_extract,network,client_like,aggregate|搜索 rust async tutorial，提取前 3 个结果并简短总结
 chat_act|nl_cases_skill_matrix_current_20260403_skill_image_vision_remote_describe|skill:image_vision,network,client_like,aggregate|看一下这张图片并用一句话描述它：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
 file|nl_cases_skill_matrix_current_20260403_skill_image_edit_remote_restyle|skill:image_edit,network,side_effect,client_like,aggregate|把这张图片改成像素风并保存到 document/rust_icon_pixel.png，然后把文件发给我：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
-chat_act|nl_cases_skill_matrix_current_20260403_skill_x_draft_preview|skill:x,network,client_like,aggregate,dry_run|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL skill smoke，不要真正发布，只给我预览结果
 # source: scripts/nl_tests/cases/nl_cases_surface_state_residuals.txt
 chat_act|nl_cases_surface_state_residuals_fixture_readme_head_read|cn,client_like,aggregate|读一下 scripts/nl_tests/fixtures/device_local/README.md 开头 3 行
 chat_act|nl_cases_surface_state_residuals_inline_json_markdown_table_focus|cn,client_like,aggregate|把这个 JSON 数组按 score 从高到低排一下，再转成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
@@ -1373,10 +1372,10 @@ continuous|nl_cases_turn_state_patch_task_correct_version_en_turn1|legacy_shape,
 continuous|nl_cases_turn_state_patch_task_correct_version_en_turn2|legacy_shape,turn_chain,client_like,aggregate|Correction: not Python 3.10, use Python 3.11
 continuous|nl_cases_turn_state_patch_task_correct_version_en_turn3|legacy_shape,turn_chain,client_like,aggregate|Output only that sentence
 continuous|nl_cases_turn_state_patch_task_replace_goal_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我写一篇关于 RustClaw 的长文
-continuous|nl_cases_turn_state_patch_task_replace_goal_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|算了，别写长文了，改成 X thread
+continuous|nl_cases_turn_state_patch_task_replace_goal_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|算了，别写长文了，改成短帖串
 continuous|nl_cases_turn_state_patch_task_replace_goal_cn_turn3|legacy_shape,turn_chain,client_like,aggregate|只输出前三条，每条一行
 continuous|nl_cases_turn_state_patch_task_replace_goal_en_turn1|legacy_shape,turn_chain,client_like,aggregate|Write a long article about RustClaw
-continuous|nl_cases_turn_state_patch_task_replace_goal_en_turn2|legacy_shape,turn_chain,client_like,aggregate|Actually, replace it with an X thread
+continuous|nl_cases_turn_state_patch_task_replace_goal_en_turn2|legacy_shape,turn_chain,client_like,aggregate|Actually, replace it with a short thread
 continuous|nl_cases_turn_state_patch_task_replace_goal_en_turn3|legacy_shape,turn_chain,client_like,aggregate|Output only the first three lines
 continuous|nl_cases_turn_state_patch_task_scope_update_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我做一个测试计划
 continuous|nl_cases_turn_state_patch_task_scope_update_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|先只看登录模块
@@ -2134,7 +2133,6 @@ continuous|nl_cases_client_like_typical_coverage_20260605_typical_alias_file_ko_
 continuous|nl_cases_client_like_typical_coverage_20260605_typical_alias_file_ko_repeat02_turn4|typical,alias,file,scalar,turn_chain,ko,client_like,client_like,aggregate|"자료A"의 제목만 읽고 제목만 출력해 주세요.
 config_edit_smoke|nl_cases_client_like_typical_coverage_20260605_typical_config_edit_plan_no_write_zh_repeat02|typical,act,config,mutate,dry_run,tool:config_edit,zh,client_like,client_like,aggregate|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
 config_edit_smoke|nl_cases_client_like_typical_coverage_20260605_typical_config_edit_apply_temp_zh_repeat02|typical,act,config,mutate,sandbox,tool:config_edit,zh,client_like,client_like,aggregate,side_effect|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程
-chat_act|nl_cases_client_like_typical_coverage_20260605_typical_x_draft_preview_zh_repeat02|typical,network,dry_run,skill:x,zh,client_like,client_like,aggregate|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL typical smoke，不要真正发布，只给我预览结果
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_weather_beijing_zh_repeat02|typical,network,skill:weather,zh,client_like,client_like,aggregate|查一下 Beijing 今天天气，简短告诉我
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_stock_quote_zh_repeat02|typical,network,skill:stock,zh,client_like,client_like,aggregate|查一下 600519 的最新行情，简短告诉我
 chat_act|nl_cases_client_like_typical_coverage_20260605_typical_crypto_quote_zh_repeat02|typical,network,skill:crypto,zh,client_like,client_like,aggregate|查一下 BTCUSDT 的最新价格，简短告诉我
@@ -2228,3 +2226,6 @@ continuous|nl_cases_context_surface_state_residuals_context_switch_readme_to_ser
 continuous|nl_cases_context_surface_state_residuals_context_sqlite_then_model_log_compare_repeat02_turn1|turn_chain,client_like,aggregate|先看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 有哪些表
 continuous|nl_cases_context_surface_state_residuals_context_sqlite_then_model_log_compare_repeat02_turn2|turn_chain,client_like,aggregate|再看一下 scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 4 行
 continuous|nl_cases_context_surface_state_residuals_context_sqlite_then_model_log_compare_repeat02_turn3|turn_chain,client_like,aggregate|上一个更像结构定义还是运行记录
+continuous|nl_cases_context_surface_state_residuals_context_case_only_report_then_delivery_repeat02_turn1|turn_chain,client_like,aggregate|先去 scripts/nl_tests/fixtures/locator_smart/case_only 找 report.md，只输出路径
+continuous|nl_cases_context_surface_state_residuals_context_case_only_report_then_delivery_repeat02_turn2|turn_chain,client_like,aggregate|把这个文件发给我
+continuous|nl_cases_context_surface_state_residuals_context_case_only_report_then_delivery_repeat02_turn3|turn_chain,client_like,aggregate|只说文件名

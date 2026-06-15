@@ -85,6 +85,10 @@ GENERATED_FILE_NAMES = {
     "nl_cases_client_like_all_aggregate.txt",
 }
 
+EXCLUDED_SAFE_AGGREGATE_TAGS = {
+    "skill:x",
+}
+
 RISKY_PROMPT_PATTERNS = [
     r"\{\{[^}]+\}\}",  # unresolved harness placeholders
     r"\bset\s+server\.listen\b",
@@ -158,6 +162,11 @@ def append_tag(value: str, tag: str) -> str:
     if tag.lower() not in lower_tags:
         tags.append(tag)
     return ",".join(tags)
+
+
+def has_excluded_safe_aggregate_tag(value: str) -> bool:
+    lower_tags = {item.lower() for item in split_tag_values(value)}
+    return bool(lower_tags & EXCLUDED_SAFE_AGGREGATE_TAGS)
 
 
 def derive_metadata_tags(row: CaseRow) -> CaseRow:
@@ -433,6 +442,7 @@ def build_rows(
         "rows_seen": 0,
         "rows_expect_dropped": 0,
         "rows_skipped_risky": 0,
+        "rows_skipped_excluded_skill": 0,
         "rows_emitted": 0,
         "rows_deduped": 0,
     }
@@ -461,6 +471,9 @@ def build_rows(
                     stats["rows_skipped_risky"] += 1
                     continue
                 row = derive_metadata_tags(row)
+                if has_excluded_safe_aggregate_tag(row.tags):
+                    stats["rows_skipped_excluded_skill"] += 1
+                    continue
                 if row.suite != "continuous":
                     key = (canonical_prompt_key(row.prompt), row.expect.strip())
                     if key in seen:
@@ -520,6 +533,7 @@ def render_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int],
         "# stats="
         + " ".join(f"{key}={value}" for key, value in sorted(stats.items())),
         "# target_rows=0 means no row-count padding.",
+        "# Default external publishing-channel exclusions are configured in the aggregate builder.",
         "# Format: suite|name|tags|prompt|expect=optional substring",
         "",
     ]
