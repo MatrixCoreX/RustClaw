@@ -12,8 +12,9 @@ use super::{
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
-    try_recover_http_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,
-    try_recover_rss_news_answer_verifier_gap, try_recover_structured_count_answer_verifier_gap,
+    try_recover_http_health_answer_verifier_gap, try_recover_local_health_answer_verifier_gap,
+    try_recover_log_analyze_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
+    try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
@@ -2177,5 +2178,7 @@ fn boundary_context_marks_direct_answer_execution_promotion_as_planner_migration
     );
 }
 
+#[path = "loop_control_tests/local_health_recovery.rs"]
+mod local_health_recovery;
 #[path = "loop_control_tests/observed_finalize.rs"]
 mod observed_finalize;
