@@ -799,3 +799,48 @@ fn contract_repair_judge_output_rejects_low_confidence() {
     assert_eq!(out.decision, "direct_answer");
     assert_eq!(out.resolved_user_intent, "总结刚才的对话");
 }
+
+#[test]
+fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal() {
+    let mut out = super::IntentNormalizerOut {
+        resolved_user_intent: "summarize the prior discussion".to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "direct_answer".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut::default()),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let repair = super::ContractRepairJudgeOut {
+        apply: true,
+        reason: "ordinary_semantic_route_change".to_string(),
+        confidence: 0.91,
+        decision: "planner_execute".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        resolved_user_intent: "summarize the prior discussion".to_string(),
+        output_contract: Some(super::IntentOutputContractOut::default()),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        state_patch: None,
+    };
+
+    assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
+    assert_eq!(out.decision, "direct_answer");
+    assert!(out.output_contract.is_some());
+    assert!(out.execution_recipe.is_some());
+}

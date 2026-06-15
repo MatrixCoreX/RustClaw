@@ -28,8 +28,7 @@ fn base_policy() -> AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required: false,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_decides_semantic_route: false,
-        agent_decides_migration_class: "none".to_string(),
+        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard: false,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides {
@@ -135,9 +134,8 @@ fn rollout_switches_default_to_false_when_config_missing() {
         policy.semantic_route_authority,
         SemanticRouteAuthority::Legacy
     );
-    assert!(!policy.agent_decides_semantic_route);
     assert!(!policy.records_agent_decides_attribution());
-    assert_eq!(policy.agent_decides_migration_class, "none");
+    assert_eq!(policy.agent_loop_canary_bucket, "none");
     assert!(!policy.registry_idempotency_guard);
     assert!(!policy.structured_evidence_required_for_selected_contracts);
 
@@ -232,12 +230,8 @@ structured_evidence_required_for_selected_contracts = true
         policy.semantic_route_authority,
         SemanticRouteAuthority::Shadow
     );
-    assert!(policy.agent_decides_semantic_route);
     assert!(policy.records_agent_decides_attribution());
-    assert_eq!(
-        policy.agent_decides_migration_class,
-        "structured_field_read"
-    );
+    assert_eq!(policy.agent_loop_canary_bucket, "structured_field_read");
     assert!(policy.registry_idempotency_guard);
     assert!(policy.structured_evidence_required_for_selected_contracts);
 
@@ -281,7 +275,6 @@ semantic_route_authority = "{token}"
         let policy = load_agent_loop_guard_policy(&state);
 
         assert_eq!(policy.semantic_route_authority, expected);
-        assert_eq!(policy.agent_decides_semantic_route, records);
         assert_eq!(policy.records_agent_decides_attribution(), records);
         assert_eq!(policy.uses_agent_loop_semantic_authority(), agent_authority);
         let _ = std::fs::remove_dir_all(root);
@@ -310,14 +303,13 @@ semantic_route_authority = "let the agent decide from user text"
         policy.semantic_route_authority,
         SemanticRouteAuthority::Legacy
     );
-    assert!(!policy.agent_decides_semantic_route);
     assert!(!policy.records_agent_decides_attribution());
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn agent_decides_migration_class_rejects_unknown_tokens() {
-    let root = temp_support_workspace("agent-decides-class-invalid");
+fn legacy_agent_decides_migration_class_rejects_unknown_tokens() {
+    let root = temp_support_workspace("agent-loop-canary-bucket-invalid");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("create config dir");
     std::fs::write(
@@ -333,13 +325,13 @@ agent_decides_migration_class = "freeform_user_phrase"
 
     let policy = load_agent_loop_guard_policy(&state);
 
-    assert_eq!(policy.agent_decides_migration_class, "none");
+    assert_eq!(policy.agent_loop_canary_bucket, "none");
 
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn agent_decides_migration_class_accepts_low_risk_tokens_only() {
+fn agent_loop_canary_bucket_accepts_low_risk_tokens_only() {
     for token in [
         "none",
         "bound_path_summary",
@@ -347,6 +339,11 @@ fn agent_decides_migration_class_accepts_low_risk_tokens_only() {
         "exact_path_list",
         "recent_artifacts_judgment",
         "scalar_count",
+        "low_risk_status_observation",
+        "low_risk_config_read",
+        "low_risk_log_observation",
+        "low_risk_workspace_question",
+        "low_risk_tool_discovery",
     ] {
         let root = temp_support_workspace(&format!("agent-decides-class-{token}"));
         let config_dir = root.join("configs");
@@ -356,7 +353,7 @@ fn agent_decides_migration_class_accepts_low_risk_tokens_only() {
             format!(
                 r#"
 [agent.loop_guard]
-agent_decides_migration_class = "{token}"
+agent_loop_canary_bucket = "{token}"
 "#
             ),
         )
@@ -366,7 +363,7 @@ agent_decides_migration_class = "{token}"
 
         let policy = load_agent_loop_guard_policy(&state);
 
-        assert_eq!(policy.agent_decides_migration_class, token);
+        assert_eq!(policy.agent_loop_canary_bucket, token);
         let _ = std::fs::remove_dir_all(root);
     }
 }

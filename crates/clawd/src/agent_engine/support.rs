@@ -88,8 +88,7 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) answer_verifier_retry_limit: usize,
     pub(super) answer_verifier_enforce_required: bool,
     pub(super) semantic_route_authority: SemanticRouteAuthority,
-    pub(super) agent_decides_semantic_route: bool,
-    pub(super) agent_decides_migration_class: String,
+    pub(super) agent_loop_canary_bucket: String,
     pub(super) registry_idempotency_guard: bool,
     pub(super) structured_evidence_required_for_selected_contracts: bool,
     pub(super) fast_read: LoopRecipeOverrides,
@@ -100,13 +99,7 @@ pub(super) struct AgentLoopGuardPolicy {
 
 impl AgentLoopGuardPolicy {
     pub(super) fn effective_semantic_route_authority(&self) -> SemanticRouteAuthority {
-        if self.semantic_route_authority == SemanticRouteAuthority::Legacy
-            && self.agent_decides_semantic_route
-        {
-            SemanticRouteAuthority::Shadow
-        } else {
-            self.semantic_route_authority
-        }
+        self.semantic_route_authority
     }
 
     pub(super) fn records_agent_decides_attribution(&self) -> bool {
@@ -129,7 +122,7 @@ impl AgentLoopGuardPolicy {
         if self.effective_semantic_route_authority() == SemanticRouteAuthority::AgentLoopDefault {
             return eligible_migration_class;
         }
-        if self.agent_decides_migration_class == eligible_migration_class {
+        if self.agent_loop_canary_bucket == eligible_migration_class {
             eligible_migration_class
         } else {
             "none"
@@ -143,9 +136,6 @@ impl AgentLoopGuardPolicy {
         }
         if self.effective_semantic_route_authority() != SemanticRouteAuthority::Legacy {
             switches.push("semantic_route_authority");
-        }
-        if self.agent_decides_semantic_route {
-            switches.push("agent_decides_semantic_route");
         }
         if self.registry_idempotency_guard {
             switches.push("registry_idempotency_guard");
@@ -343,7 +333,7 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
     cursor.as_bool().unwrap_or(fallback)
 }
 
-fn parse_agent_decides_migration_class(root: &TomlValue) -> String {
+fn parse_agent_loop_canary_bucket(root: &TomlValue) -> String {
     const ALLOWED: &[&str] = &[
         "none",
         "bound_path_summary",
@@ -351,6 +341,40 @@ fn parse_agent_decides_migration_class(root: &TomlValue) -> String {
         "exact_path_list",
         "recent_artifacts_judgment",
         "scalar_count",
+        "low_risk_status_observation",
+        "low_risk_config_read",
+        "low_risk_log_observation",
+        "low_risk_workspace_question",
+        "low_risk_tool_discovery",
+    ];
+    let mut cursor = root;
+    for key in ["agent", "loop_guard", "agent_loop_canary_bucket"] {
+        let Some(next) = cursor.get(key) else {
+            return parse_legacy_agent_decides_migration_class(root);
+        };
+        cursor = next;
+    }
+    let value = cursor.as_str().unwrap_or("none").trim();
+    if ALLOWED.contains(&value) {
+        value.to_string()
+    } else {
+        "none".to_string()
+    }
+}
+
+fn parse_legacy_agent_decides_migration_class(root: &TomlValue) -> String {
+    const ALLOWED: &[&str] = &[
+        "none",
+        "bound_path_summary",
+        "structured_field_read",
+        "exact_path_list",
+        "recent_artifacts_judgment",
+        "scalar_count",
+        "low_risk_status_observation",
+        "low_risk_config_read",
+        "low_risk_log_observation",
+        "low_risk_workspace_question",
+        "low_risk_tool_discovery",
     ];
     let mut cursor = root;
     for key in ["agent", "loop_guard", "agent_decides_migration_class"] {
@@ -429,9 +453,6 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         } else {
             SemanticRouteAuthority::Legacy
         });
-    let agent_decides_semantic_route = parsed_semantic_route_authority
-        .map(SemanticRouteAuthority::records_agent_decides_attribution)
-        .unwrap_or(legacy_agent_decides_semantic_route);
     let policy = AgentLoopGuardPolicy {
         max_steps: parse_usize_from_toml(
             &parsed,
@@ -475,8 +496,7 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             false,
         ),
         semantic_route_authority,
-        agent_decides_semantic_route,
-        agent_decides_migration_class: parse_agent_decides_migration_class(&parsed),
+        agent_loop_canary_bucket: parse_agent_loop_canary_bucket(&parsed),
         registry_idempotency_guard: parse_bool_from_toml(
             &parsed,
             &["agent", "loop_guard", "registry_idempotency_guard"],

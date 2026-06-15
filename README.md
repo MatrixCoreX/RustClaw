@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path is moving to a Codex / Claude style agent loop. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, and budget guards, then lets the agent loop own ordinary low-risk semantic decisions when `semantic_route_authority = "agent_loop_default"` selects an eligible class. The intent normalizer is now an initial structured hint for those classes, not the final semantic authority. Legacy pre-agent routing remains as a compatibility and rollback path for direct chat, clarification, schedule, high-risk, delivery, and non-eligible cases until the release-deprecation gates are complete.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: answer, clarify, call a capability, synthesize, continue, or stop. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
 
 ### Runtime Flow
 
@@ -51,9 +51,8 @@ flowchart TD
     E2 -->|resume discussion| RD[Resume discussion prompt]
     E2 -->|resume execution| H
     E2 -->|runtime-grounded scalar/direct candidate| RDC[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|ordinary ask| SA{semantic_route_authority}
-    SA -->|agent_loop_default + eligible class| H[Agent-loop semantic authority<br/>decision envelope + runtime context]
-    SA -->|legacy / shadow / non-eligible| F{Boundary dispatch<br/>compatibility path}
+    E2 -->|ordinary eligible ask| H[Agent-loop semantic authority<br/>decision envelope + runtime context]
+    E2 -->|rollback / non-eligible / release-gated| F{Boundary dispatch<br/>compatibility path}
     F -->|Clarify| G[Clarify question]
     F -->|DirectAnswer| DG[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
     DG -->|grounded candidate| VP
@@ -117,10 +116,10 @@ flowchart TD
 - `Boundary post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It consumes machine fields and safety state; it should not grow into a language-specific semantic router.
 - `Task contract matrix`: keeps semantic kind, allowed action, required evidence, and response shape in one shared contract used by post-route guards, direct-answer preflight, plan verification, evidence coverage checks, and final delivery.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
-- `semantic_route_authority`: current live config uses `agent_loop_default`. For eligible low-risk classes such as structured field reads, exact path/name lists, bound path summaries, recent artifact judgments, and scalar counts, ordinary semantic authority moves into the agent loop. `legacy` remains a hot rollback token; `shadow` and `agent_loop_canary` are rollout modes.
+- `semantic_route_authority`: current live config uses `agent_loop_default`. For eligible low-risk buckets such as structured reads, exact path/name lists, grounded summaries, recent artifact judgments, scalar counts, status/config/log observations, workspace questions, and tool discovery, ordinary semantic authority is in the agent loop. `legacy` remains a short-term emergency rollback token; `shadow` and `agent_loop_canary` are rollout/debug modes, not the long-term architecture.
 - `FirstLayerDecision / boundary dispatch`: keeps compatibility handling for `Clarify / DirectAnswer / PlannerExecute` when a case is not selected for agent-loop authority. `AskMode` is the code-facing dispatch type; route labels such as `AskClarify`, `Chat`, `Act`, and `ChatAct` are derived only for logs and journals, not stored as a second routing state.
 - `Direct-answer candidate / optional preflight`: before a normal chat answer is sent, the runtime can reuse a grounded scalar/direct candidate when it matches current runtime facts; otherwise it can run a lightweight contract/advice-only check. It keeps pure chat in `DirectAnswer`, but can promote tool-backed requests to `PlannerExecute` or ask one clarification when the normalizer was too weak.
-- `Chat response LLM`: handles confirmed `DirectAnswer` replies; pure chat requests do not enter the execution planner loop.
+- `Chat response LLM`: compatibility direct-answer paths can still use a chat prompt, while the default low-risk pure-chat submode can finish inside the agent loop with a structured `respond` terminal intent.
 - `Planner / runtime loop`: for selected agent-loop authority and `PlannerExecute` fallback, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today; execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
 - `Agent-loop runtime context`: reuses the ask context bundle, boundary snapshot, contract, visible capabilities, memory policy output, and resolved prompt, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
@@ -153,9 +152,8 @@ flowchart TD
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
     E2 -->|runtime-grounded scalar/direct candidate| Gd[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|ordinary ask| As{semantic_route_authority}
-    As -->|agent_loop_default + eligible class| H[Build agent-loop runtime context]
-    As -->|legacy / shadow / non-eligible| Bd{Boundary dispatch<br/>compatibility path}
+    E2 -->|ordinary eligible ask| H[Build agent-loop runtime context]
+    E2 -->|rollback / non-eligible / release-gated| Bd{Boundary dispatch<br/>compatibility path}
     Bd -->|first_layer_decision=clarify| F[Clarify question]
     Bd -->|first_layer_decision=direct_answer| G0[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
     G0 -->|grounded candidate| VP
@@ -212,7 +210,7 @@ flowchart TD
 - `Task contract matrix`: shares the same semantic kind, allowed action, required evidence, and response-shape contract across post-route policy, direct-answer preflight, plan verification, evidence coverage checks, final delivery, and generated NL evaluations.
 - `Skill registry + generated skill docs`: planner prompts and resolver mappings are built from enabled skill views, generated interface documents, and `planner_capabilities`, so skill capability growth should be data/contract driven.
 - `DirectAnswer candidate / preflight`: **DirectAnswer** may reuse a runtime-grounded direct candidate or run a lightweight preflight LLM before the chat reply is sent. If the request is confirmed as direct answer, chat response runs and finalizes; if it detects missing required information, the request becomes clarification; if it detects real tool/workspace/system evidence is needed, it is promoted into `PlannerExecute`.
-- `semantic_route_authority`: current config sets `agent_loop_default`, which selects any eligible low-risk migration class instead of a single canary token. Non-eligible or high-risk cases stay on compatibility dispatch until their deletion gates pass.
+- `semantic_route_authority`: current config sets `agent_loop_default`, which selects any eligible low-risk bucket instead of a single canary token. Non-eligible, high-risk, delivery-gated, or release-gated cases stay on compatibility dispatch until their deletion gates pass.
 - `PlannerExecute / agent loop`: usually uses one-or-more **planner** calls per loop round; narrow deterministic observation contracts can skip the planner LLM for that round and emit runtime-built observation steps instead. Planner JSON steps are `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Prefer `call_capability`; `call_tool` and `call_skill` remain compatible direct actions. `AskMode` finalization style controls whether the execution result is returned plainly or chat-wrapped.
 - `CapabilityResolver / PlanVerifier`: `call_capability` is normalized into the current tool/skill implementation before execution. The verifier and contract action gate block unavailable capabilities, disallowed actions, missing required fields, risk-budget violations, and unsafe mutation plans before the executor sees them.
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
@@ -643,6 +641,13 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 ```
 
 ## NL Regression Shortcuts
+
+Use the smallest affected NL set while code is still moving, then widen coverage only at phase or release gates:
+
+1. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
+2. Typical aggregate: compressed representative coverage after a phase batch.
+3. Canary: 500 client-like cases before changing default authority or deleting old gates.
+4. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
 
 Focused long-tail closed-loop entries:
 

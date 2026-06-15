@@ -255,6 +255,7 @@ fn contract_repair_report_marks_structured_alias_repair() {
     assert!(report
         .detail_csv()
         .contains("decision_promoted_by_output_contract"));
+    assert_eq!(report.class_csv(), "schema_normalization");
 }
 
 #[test]
@@ -331,6 +332,7 @@ fn contract_repair_report_marks_command_payload_as_raw_output() {
     assert!(report
         .detail_csv()
         .contains("execution_recipe_command_payload"));
+    assert_eq!(report.class_csv(), "schema_normalization");
 }
 
 #[test]

@@ -57,75 +57,75 @@ use scalar_count_filter::{
     scalar_count_filter_hint_from_route,
 };
 
-#[path = "planning_split_01_action_supports_direct_observed_finalize.rs"]
-mod planning_split_01_action_supports_direct_observed_finalize;
-#[path = "planning_split_02_session_alias_targets_missing_from.rs"]
-mod planning_split_02_session_alias_targets_missing_from;
-#[path = "planning_split_03_directory_entry_groups_auto_locator.rs"]
-mod planning_split_03_directory_entry_groups_auto_locator;
-#[path = "planning_split_04_scalar_count_filter_deterministic_plan.rs"]
-mod planning_split_04_scalar_count_filter_deterministic_plan;
-#[path = "planning_split_05_preferred_structured_action_for_contract.rs"]
-mod planning_split_05_preferred_structured_action_for_contract;
-#[path = "planning_split_06_directory_has_unique_entry_for.rs"]
-mod planning_split_06_directory_has_unique_entry_for;
-#[path = "planning_split_07_route_has_inline_transform_contract.rs"]
-mod planning_split_07_route_has_inline_transform_contract;
-#[path = "planning_split_08_scalar_count_explicit_count_path.rs"]
-mod planning_split_08_scalar_count_explicit_count_path;
-#[path = "planning_split_09_strip_configured_command_prefix.rs"]
-mod planning_split_09_strip_configured_command_prefix;
-#[path = "planning_split_10_canonicalize_legacy_file_config_capabilities.rs"]
-mod planning_split_10_canonicalize_legacy_file_config_capabilities;
-#[path = "planning_split_11_is_read_range_action.rs"]
-mod planning_split_11_is_read_range_action;
-#[path = "planning_split_12_rewrite_structured_multi_field_read.rs"]
-mod planning_split_12_rewrite_structured_multi_field_read;
-#[path = "planning_split_13_string_list_from_value.rs"]
-mod planning_split_13_string_list_from_value;
-#[path = "planning_split_14_runtime_status_scalar_deterministic_plan.rs"]
-mod planning_split_14_runtime_status_scalar_deterministic_plan;
-#[path = "planning_split_15_system_basic_action_path_and.rs"]
-mod planning_split_15_system_basic_action_path_and;
-#[path = "planning_split_16_action_targets_route_locator_artifact.rs"]
-mod planning_split_16_action_targets_route_locator_artifact;
-#[path = "planning_split_17_executed_step_scalar_compare_observation.rs"]
-mod planning_split_17_executed_step_scalar_compare_observation;
-#[path = "planning_split_18_action_observed_paths_for_explicit.rs"]
-mod planning_split_18_action_observed_paths_for_explicit;
-#[path = "planning_split_19_rewrite_single_target_structured_field.rs"]
-mod planning_split_19_rewrite_single_target_structured_field;
-#[path = "planning_split_20_rewrite_sqlite_table_listing_plan.rs"]
-mod planning_split_20_rewrite_sqlite_table_listing_plan;
-#[path = "planning_split_21_shell_sequence_part_can_run.rs"]
-mod planning_split_21_shell_sequence_part_can_run;
-#[path = "planning_split_22_concrete_respond_has_structural_observation.rs"]
-mod planning_split_22_concrete_respond_has_structural_observation;
-use planning_split_01_action_supports_direct_observed_finalize::*;
-use planning_split_02_session_alias_targets_missing_from::*;
-use planning_split_03_directory_entry_groups_auto_locator::*;
-use planning_split_04_scalar_count_filter_deterministic_plan::*;
-use planning_split_05_preferred_structured_action_for_contract::*;
-use planning_split_06_directory_has_unique_entry_for::*;
-use planning_split_07_route_has_inline_transform_contract::*;
-use planning_split_08_scalar_count_explicit_count_path::*;
-use planning_split_09_strip_configured_command_prefix::*;
-pub(in crate::agent_engine) use planning_split_09_strip_configured_command_prefix::{
+#[path = "action_route_locator_artifact.rs"]
+mod action_route_locator_artifact;
+#[path = "concrete_respond_structural_observation.rs"]
+mod concrete_respond_structural_observation;
+#[path = "configured_command_prefix.rs"]
+mod configured_command_prefix;
+#[path = "direct_observed_finalize_support.rs"]
+mod direct_observed_finalize_support;
+#[path = "directory_entry_group_locator.rs"]
+mod directory_entry_group_locator;
+#[path = "directory_unique_entry.rs"]
+mod directory_unique_entry;
+#[path = "explicit_observed_paths.rs"]
+mod explicit_observed_paths;
+#[path = "inline_transform_contract.rs"]
+mod inline_transform_contract;
+#[path = "legacy_file_config_capabilities.rs"]
+mod legacy_file_config_capabilities;
+#[path = "preferred_structured_action.rs"]
+mod preferred_structured_action;
+#[path = "read_range_action.rs"]
+mod read_range_action;
+#[path = "runtime_status_scalar_plan.rs"]
+mod runtime_status_scalar_plan;
+#[path = "scalar_compare_observation.rs"]
+mod scalar_compare_observation;
+#[path = "scalar_count_deterministic_plan.rs"]
+mod scalar_count_deterministic_plan;
+#[path = "scalar_count_explicit_path.rs"]
+mod scalar_count_explicit_path;
+#[path = "session_alias_target_coverage.rs"]
+mod session_alias_target_coverage;
+#[path = "shell_sequence_part.rs"]
+mod shell_sequence_part;
+#[path = "single_target_structured_field_rewrite.rs"]
+mod single_target_structured_field_rewrite;
+#[path = "sqlite_table_listing_rewrite.rs"]
+mod sqlite_table_listing_rewrite;
+#[path = "structured_multi_field_read_rewrite.rs"]
+mod structured_multi_field_read_rewrite;
+#[path = "system_basic_action_path.rs"]
+mod system_basic_action_path;
+#[path = "value_string_list.rs"]
+mod value_string_list;
+use action_route_locator_artifact::*;
+use concrete_respond_structural_observation::*;
+use configured_command_prefix::*;
+pub(in crate::agent_engine) use configured_command_prefix::{
     explicit_command_segment, explicit_execution_command_segment,
 };
-use planning_split_10_canonicalize_legacy_file_config_capabilities::*;
-use planning_split_11_is_read_range_action::*;
-use planning_split_12_rewrite_structured_multi_field_read::*;
-use planning_split_13_string_list_from_value::*;
-use planning_split_14_runtime_status_scalar_deterministic_plan::*;
-use planning_split_15_system_basic_action_path_and::*;
-use planning_split_16_action_targets_route_locator_artifact::*;
-use planning_split_17_executed_step_scalar_compare_observation::*;
-use planning_split_18_action_observed_paths_for_explicit::*;
-use planning_split_19_rewrite_single_target_structured_field::*;
-use planning_split_20_rewrite_sqlite_table_listing_plan::*;
-use planning_split_21_shell_sequence_part_can_run::*;
-use planning_split_22_concrete_respond_has_structural_observation::*;
+use direct_observed_finalize_support::*;
+use directory_entry_group_locator::*;
+use directory_unique_entry::*;
+use explicit_observed_paths::*;
+use inline_transform_contract::*;
+use legacy_file_config_capabilities::*;
+use preferred_structured_action::*;
+use read_range_action::*;
+use runtime_status_scalar_plan::*;
+use scalar_compare_observation::*;
+use scalar_count_deterministic_plan::*;
+use scalar_count_explicit_path::*;
+use session_alias_target_coverage::*;
+use shell_sequence_part::*;
+use single_target_structured_field_rewrite::*;
+use sqlite_table_listing_rewrite::*;
+use structured_multi_field_read_rewrite::*;
+use system_basic_action_path::*;
+use value_string_list::*;
 
 pub(super) async fn plan_round_actions(
     state: &AppState,

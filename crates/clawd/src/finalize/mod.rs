@@ -14,6 +14,7 @@
 //!
 //! 详见 docs/p33_finalize_merge_proposal.md。
 
+mod clarify;
 mod helpers;
 mod journal;
 mod loop_reply;
@@ -25,6 +26,9 @@ pub(crate) use journal::{build_from_loop_state, ensure_task_metrics};
 
 // === HELPER 层（已物理位于 finalize/helpers.rs，Stage 2.1）===
 // 纯函数工具（planner artifact / delivery token 分类 / FinalizerDisposition 等）
+pub(crate) use clarify::{
+    clarify_fallback_source_or_default, render_clarify_question, ClarifyRenderRequest,
+};
 pub(crate) use helpers::*;
 
 // === TASK 层（已物理位于 finalize/task.rs，Stage 2.2）===

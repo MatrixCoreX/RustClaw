@@ -97,6 +97,100 @@ async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machin
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_replaces_process_basic_json_synthesis_for_service_status() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-process-basic-json-synthesis");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent =
+        "检查 telegramd 服务进程当前是否仍在运行，并用一句话解释其状态".to_string();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some(
+            "我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态".to_string(),
+        ),
+        ..Default::default()
+    };
+    let process_output = serde_json::json!({
+        "extra": {
+            "action": "ps",
+            "exit_code": 0,
+            "filter": "telegramd",
+            "limit": 200,
+            "match_count": 0,
+            "output": "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd",
+            "platform": "linux",
+            "process_count": 0,
+            "running": false,
+            "status": "not_running"
+        },
+        "text": "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd"
+    })
+    .to_string();
+    let json_synthesis = serde_json::json!({
+        "exit_code": 0,
+        "match_count": 0,
+        "process_filter": "telegramd",
+        "running": false,
+        "status": "not_running",
+        "status_source": "process_basic.ps",
+        "target": "telegramd"
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "process_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(process_output),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(json_synthesis.clone()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.last_publishable_synthesis_output = Some(json_synthesis.clone());
+    loop_state.last_user_visible_respond = Some(json_synthesis.clone());
+    loop_state.delivery_messages.push(json_synthesis);
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should replace machine JSON with a service status answer");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&reply.text).is_err(),
+        "service status reply should not expose machine JSON: {}",
+        reply.text
+    );
+    assert!(reply.text.contains("telegramd"), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("process_basic"),
+        "reply should preserve the observation source: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_does_not_infer_service_status_from_raw_systemd_text() {
     let state = test_state();
     let task = claimed_task("task-service-status-raw-systemd-text");

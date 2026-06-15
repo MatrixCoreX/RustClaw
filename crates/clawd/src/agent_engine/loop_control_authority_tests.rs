@@ -19,8 +19,7 @@ fn test_policy() -> AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required: false,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_decides_semantic_route: false,
-        agent_decides_migration_class: "none".to_string(),
+        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard: false,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides::default(),
@@ -78,7 +77,7 @@ fn structured_field_route() -> RouteResult {
 fn agent_loop_default_selects_any_eligible_low_risk_class_without_canary_token() {
     let mut policy = test_policy();
     policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
-    policy.agent_decides_migration_class = "none".to_string();
+    policy.agent_loop_canary_bucket = "none".to_string();
     let route = structured_field_route();
 
     assert_eq!(
@@ -106,13 +105,64 @@ fn agent_loop_default_selects_any_eligible_low_risk_class_without_canary_token()
             .and_then(serde_json::Value::as_str),
         Some("structured_field_read")
     );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_bucket")
+            .and_then(serde_json::Value::as_str),
+        Some("low_risk_structured_read")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_blocked_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+}
+
+#[test]
+fn agent_loop_default_selects_generic_low_risk_bucket_without_canary_token() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    policy.agent_loop_canary_bucket = "none".to_string();
+    let mut route = structured_field_route();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+
+    assert_eq!(
+        crate::agent_engine::agent_loop_authority_selected_migration_class_for_policy(
+            &policy, &route
+        ),
+        Some("low_risk_status_observation")
+    );
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/selected_migration_class")
+            .and_then(serde_json::Value::as_str),
+        Some("low_risk_status_observation")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_bucket")
+            .and_then(serde_json::Value::as_str),
+        Some("low_risk_status_observation")
+    );
 }
 
 #[test]
 fn agent_loop_canary_still_requires_selected_migration_class() {
     let mut policy = test_policy();
     policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
-    policy.agent_decides_migration_class = "exact_path_list".to_string();
+    policy.agent_loop_canary_bucket = "exact_path_list".to_string();
     let route = structured_field_route();
 
     assert_eq!(

@@ -378,6 +378,57 @@ fn structured_contract_hint_repair_keeps_package_manager_locatorless() {
 }
 
 #[test]
+fn structured_contract_hint_repair_keeps_tool_discovery_context_only() {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let req = concat!(
+        "request.\n",
+        "[CONTRACT_TEST_HINT]\n",
+        "semantic_kind=tool_discovery\n",
+        "[/CONTRACT_TEST_HINT]"
+    );
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "model-supplied-background-locator".to_string(),
+        ..IntentOutputContract::default()
+    };
+    let mut needs_clarify = true;
+    let mut clarify_question = "provide locator".to_string();
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let surface_req = super::request_without_contract_test_hint(req);
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+    let mut wants_file_delivery = false;
+    let reason = super::apply_structured_contract_hint_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        &mut wants_file_delivery,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(reason, Some("structured_contract_hint_repair"));
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ToolDiscovery);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+}
+
+#[test]
 fn structured_contract_hint_repair_sets_generated_file_delivery_defaults() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -562,6 +613,44 @@ fn contract_hint_fallback_keeps_package_manager_locatorless() {
         decision.output_contract.semantic_kind,
         OutputSemanticKind::PackageManagerDetection
     );
+    assert_eq!(
+        decision.output_contract.locator_kind,
+        OutputLocatorKind::None
+    );
+    assert!(decision.output_contract.locator_hint.is_empty());
+}
+
+#[test]
+fn contract_hint_fallback_keeps_tool_discovery_context_only() {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let req = concat!(
+        "request.\n",
+        "[CONTRACT_TEST_HINT]\n",
+        "semantic_kind=tool_discovery\n",
+        "[/CONTRACT_TEST_HINT]"
+    );
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let decision = super::contract_hint_fallback_decision(
+        req,
+        &surface,
+        workspace_root,
+        "normalizer_parse_failed_contract_hint",
+    )
+    .expect("contract hint fallback");
+
+    assert!(!decision.needs_clarify);
+    assert_eq!(
+        decision.output_contract.semantic_kind,
+        OutputSemanticKind::ToolDiscovery
+    );
+    assert_eq!(
+        decision.output_contract.response_shape,
+        OutputResponseShape::Free
+    );
+    assert!(!decision.output_contract.requires_content_evidence);
     assert_eq!(
         decision.output_contract.locator_kind,
         OutputLocatorKind::None

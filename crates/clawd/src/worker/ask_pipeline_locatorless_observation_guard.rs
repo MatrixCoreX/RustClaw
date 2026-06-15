@@ -23,6 +23,7 @@ pub(super) fn semantic_kind_can_execute_without_locator(kind: crate::OutputSeman
             | crate::OutputSemanticKind::ImageUnderstanding
             | crate::OutputSemanticKind::PublishingPreview
             | crate::OutputSemanticKind::PackageManagerDetection
+            | crate::OutputSemanticKind::ToolDiscovery
             | crate::OutputSemanticKind::DockerPs
             | crate::OutputSemanticKind::DockerImages
             | crate::OutputSemanticKind::DockerLogs

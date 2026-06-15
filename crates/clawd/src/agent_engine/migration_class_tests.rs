@@ -1,4 +1,6 @@
-use super::agent_decides_eligible_migration_class;
+use super::{
+    agent_decides_eligible_migration_class, agent_loop_eligibility, AgentLoopEligibilityBucket,
+};
 use crate::{
     AskMode, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
     OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
@@ -53,13 +55,19 @@ fn exact_path_list_accepts_path_and_inventory_contracts() {
 }
 
 #[test]
-fn exact_path_list_requires_bound_locator_and_content_evidence() {
+fn exact_path_list_requires_bound_locator_and_task_contract_evidence() {
     let mut route = route_result(OutputResponseShape::Strict, OutputSemanticKind::FileNames);
     route.output_contract.locator_hint.clear();
     assert_eq!(agent_decides_eligible_migration_class(&route), "none");
 
     route.output_contract.locator_hint = "docs".to_string();
     route.output_contract.requires_content_evidence = false;
+    assert_eq!(
+        agent_decides_eligible_migration_class(&route),
+        "exact_path_list"
+    );
+
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     assert_eq!(agent_decides_eligible_migration_class(&route), "none");
 }
 
@@ -93,7 +101,7 @@ fn bound_path_summary_accepts_grounded_summary_contracts() {
 }
 
 #[test]
-fn bound_path_summary_requires_bound_locator_content_evidence_and_summary_shape() {
+fn bound_path_summary_requires_bound_locator_task_contract_evidence_and_summary_shape() {
     let mut route = route_result(
         OutputResponseShape::Free,
         OutputSemanticKind::ContentExcerptSummary,
@@ -103,7 +111,10 @@ fn bound_path_summary_requires_bound_locator_content_evidence_and_summary_shape(
 
     route.output_contract.locator_hint = "docs".to_string();
     route.output_contract.requires_content_evidence = false;
-    assert_eq!(agent_decides_eligible_migration_class(&route), "none");
+    assert_eq!(
+        agent_decides_eligible_migration_class(&route),
+        "bound_path_summary"
+    );
 
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -111,4 +122,132 @@ fn bound_path_summary_requires_bound_locator_content_evidence_and_summary_shape(
         agent_decides_eligible_migration_class(&route),
         "bound_path_summary"
     );
+}
+
+#[test]
+fn eligibility_maps_legacy_classes_to_general_buckets() {
+    for (shape, kind, expected_class, expected_bucket) in [
+        (
+            OutputResponseShape::Scalar,
+            OutputSemanticKind::ScalarPathOnly,
+            "structured_field_read",
+            AgentLoopEligibilityBucket::LowRiskStructuredRead,
+        ),
+        (
+            OutputResponseShape::Strict,
+            OutputSemanticKind::FileNames,
+            "exact_path_list",
+            AgentLoopEligibilityBucket::LowRiskListing,
+        ),
+        (
+            OutputResponseShape::Free,
+            OutputSemanticKind::ContentExcerptSummary,
+            "bound_path_summary",
+            AgentLoopEligibilityBucket::LowRiskGroundedSummary,
+        ),
+        (
+            OutputResponseShape::OneSentence,
+            OutputSemanticKind::RecentArtifactsJudgment,
+            "recent_artifacts_judgment",
+            AgentLoopEligibilityBucket::LowRiskMetadataJudgment,
+        ),
+        (
+            OutputResponseShape::Scalar,
+            OutputSemanticKind::ScalarCount,
+            "scalar_count",
+            AgentLoopEligibilityBucket::LowRiskScalarObservation,
+        ),
+    ] {
+        let route = route_result(shape, kind);
+        let eligibility = agent_loop_eligibility(&route);
+
+        assert!(eligibility.eligible);
+        assert_eq!(eligibility.bucket, Some(expected_bucket));
+        assert_eq!(eligibility.compatibility_migration_class(), expected_class);
+    }
+}
+
+#[test]
+fn eligibility_adds_generic_low_risk_buckets() {
+    for (shape, kind, expected_class, expected_bucket) in [
+        (
+            OutputResponseShape::Strict,
+            OutputSemanticKind::ServiceStatus,
+            "low_risk_status_observation",
+            AgentLoopEligibilityBucket::LowRiskStatusObservation,
+        ),
+        (
+            OutputResponseShape::Strict,
+            OutputSemanticKind::StructuredKeys,
+            "low_risk_config_read",
+            AgentLoopEligibilityBucket::LowRiskConfigRead,
+        ),
+        (
+            OutputResponseShape::Strict,
+            OutputSemanticKind::DockerLogs,
+            "low_risk_log_observation",
+            AgentLoopEligibilityBucket::LowRiskLogObservation,
+        ),
+    ] {
+        let route = route_result(shape, kind);
+        let eligibility = agent_loop_eligibility(&route);
+
+        assert!(eligibility.eligible);
+        assert_eq!(eligibility.bucket, Some(expected_bucket));
+        assert_eq!(eligibility.compatibility_migration_class(), expected_class);
+    }
+
+    let mut workspace = route_result(OutputResponseShape::Free, OutputSemanticKind::None);
+    workspace.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    workspace.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&workspace);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskWorkspaceQuestion)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "low_risk_workspace_question"
+    );
+
+    let mut tool_discovery =
+        route_result(OutputResponseShape::Free, OutputSemanticKind::ToolDiscovery);
+    tool_discovery.output_contract.requires_content_evidence = false;
+    tool_discovery.output_contract.locator_kind = OutputLocatorKind::None;
+    tool_discovery.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&tool_discovery);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskToolDiscovery)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "low_risk_tool_discovery"
+    );
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"planner_context_available"));
+}
+
+#[test]
+fn eligibility_blocks_non_boundary_safe_routes_with_machine_reasons() {
+    let mut route = route_result(OutputResponseShape::Strict, OutputSemanticKind::FileNames);
+    route.risk_ceiling = RiskCeiling::High;
+    let eligibility = agent_loop_eligibility(&route);
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.blocked_reason, "risk_ceiling_high");
+
+    route.risk_ceiling = RiskCeiling::Low;
+    route.schedule_kind = ScheduleKind::Create;
+    let eligibility = agent_loop_eligibility(&route);
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.blocked_reason, "schedule_active");
+
+    route.schedule_kind = ScheduleKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    let eligibility = agent_loop_eligibility(&route);
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.blocked_reason, "side_effect_operation");
 }

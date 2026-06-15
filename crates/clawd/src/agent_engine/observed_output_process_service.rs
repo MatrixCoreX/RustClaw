@@ -42,8 +42,10 @@ struct ProcessBasicPsStatusObservation {
 }
 
 pub(super) fn latest_process_basic_service_status_direct_answer_candidate(
+    state: Option<&AppState>,
     loop_state: &LoopState,
     response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
 ) -> Option<String> {
     let idx = latest_successful_step_index(loop_state, |step| step.skill == "process_basic")?;
     let body = loop_state.executed_step_results[idx]
@@ -52,7 +54,19 @@ pub(super) fn latest_process_basic_service_status_direct_answer_candidate(
         .map(str::trim)
         .filter(|body| !body.is_empty())?;
     let body = normalized_success_body_for_direct_answer(body);
-    process_basic_service_status_structured_direct_answer_candidate(&body, response_shape)
+    process_basic_service_status_structured_scalar_candidate(&body, response_shape)
+        .or_else(|| {
+            process_basic_ps_status_observation(&body).map(|observation| {
+                process_basic_service_status_sentence(
+                    state,
+                    &observation.status,
+                    observation.match_count,
+                    observation.process_name.as_deref(),
+                    observation.target.as_deref(),
+                    prefer_english,
+                )
+            })
+        })
         .or_else(|| {
             process_basic_port_list_structured_direct_answer_candidate(&body, response_shape)
         })
@@ -68,7 +82,7 @@ pub(super) fn latest_process_basic_service_status_direct_answer_candidate(
         })
 }
 
-fn process_basic_service_status_structured_direct_answer_candidate(
+fn process_basic_service_status_structured_scalar_candidate(
     body: &str,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> Option<String> {
@@ -76,44 +90,7 @@ fn process_basic_service_status_structured_direct_answer_candidate(
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
         return Some(observation.status);
     }
-    if !process_basic_body_has_structured_ps_observation(body) {
-        return None;
-    }
-    let mut payload = serde_json::Map::new();
-    payload.insert(
-        "status_source".to_string(),
-        serde_json::json!("process_basic.ps"),
-    );
-    payload.insert("status".to_string(), serde_json::json!(observation.status));
-    payload.insert(
-        "running".to_string(),
-        serde_json::json!(observation.running),
-    );
-    payload.insert(
-        "match_count".to_string(),
-        serde_json::json!(observation.match_count),
-    );
-    if let Some(target) = observation.target {
-        payload.insert("target".to_string(), serde_json::json!(target));
-    }
-    if let Some(filter) = observation.filter {
-        payload.insert("process_filter".to_string(), serde_json::json!(filter));
-    }
-    if let Some(process_name) = observation.process_name {
-        payload.insert("process_name".to_string(), serde_json::json!(process_name));
-    }
-    if let Some(exit_code) = observation.exit_code {
-        payload.insert("exit_code".to_string(), serde_json::json!(exit_code));
-    }
-    Some(serde_json::Value::Object(payload).to_string())
-}
-
-fn process_basic_body_has_structured_ps_observation(body: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(body.trim())
-        .ok()
-        .as_ref()
-        .and_then(process_basic_ps_observation_value)
-        .is_some()
+    None
 }
 
 fn process_basic_ps_status_observation(body: &str) -> Option<ProcessBasicPsStatusObservation> {
@@ -444,6 +421,7 @@ pub(super) fn process_basic_service_status_direct_answer_candidate(
     {
         return Some(answer);
     }
+    let observation = process_basic_ps_status_observation(body);
     let rows = process_basic_table_rows(body);
     let status = if rows.is_empty() {
         "not_running"
@@ -451,15 +429,28 @@ pub(super) fn process_basic_service_status_direct_answer_candidate(
         "running"
     };
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        return Some(status.to_string());
+        return Some(
+            observation
+                .map(|observation| observation.status)
+                .unwrap_or_else(|| status.to_string()),
+        );
     }
     if let Some(answer) =
         process_basic_ps_inventory_direct_answer_candidate(state, &rows, prefer_english)
     {
         return Some(answer);
     }
+    if let Some(observation) = observation {
+        return Some(process_basic_service_status_sentence(
+            state,
+            &observation.status,
+            observation.match_count,
+            observation.process_name.as_deref(),
+            observation.target.as_deref(),
+            prefer_english,
+        ));
+    }
     let no_match_filter = process_basic_no_match_filter(body);
-    let row_count_text = rows.len().to_string();
     let comm = rows
         .first()
         .and_then(|row| row.split_whitespace().last())
@@ -472,34 +463,62 @@ pub(super) fn process_basic_service_status_direct_answer_candidate(
     } else {
         comm
     };
-    let key = if rows.is_empty() {
-        "clawd.msg.process_basic_service_status_not_running"
-    } else {
+    Some(process_basic_service_status_sentence(
+        state,
+        status,
+        rows.len() as u64,
+        Some(comm),
+        Some(subject),
+        prefer_english,
+    ))
+}
+
+fn process_basic_service_status_sentence(
+    state: Option<&AppState>,
+    status: &str,
+    count: u64,
+    comm: Option<&str>,
+    subject: Option<&str>,
+    prefer_english: bool,
+) -> String {
+    let running = status == "running";
+    let key = if running {
         "clawd.msg.process_basic_service_status_running"
-    };
-    let (zh, en) = if rows.is_empty() {
-        (
-            "{subject} 未运行：process_basic 没有返回匹配的进程记录。",
-            "{subject} is not running: process_basic returned no matching process records.",
-        )
     } else {
+        "clawd.msg.process_basic_service_status_not_running"
+    };
+    let (zh, en) = if running {
         (
             "{subject} 正在运行：process_basic 返回 {count} 条进程记录，COMM={comm}。",
             "{subject} is running: process_basic returned {count} process record(s), COMM={comm}.",
         )
+    } else {
+        (
+            "{subject} 未运行：process_basic 没有返回匹配的进程记录。",
+            "{subject} is not running: process_basic returned no matching process records.",
+        )
     };
-    Some(observed_t_with_vars(
+    let count_text = count.to_string();
+    let comm = comm
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let subject = subject
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("process");
+    observed_t_with_vars(
         state,
         key,
         zh,
         en,
         prefer_english,
         &[
-            ("count", row_count_text.as_str()),
+            ("count", count_text.as_str()),
             ("comm", comm),
             ("subject", subject),
         ],
-    ))
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -327,6 +327,51 @@ fn actionable_route_repairs_respond_only_plan_before_any_observation() {
 }
 
 #[test]
+fn pure_chat_agent_loop_submode_allows_respond_only_plan_before_observation() {
+    let loop_state = LoopState::new(2);
+    let actions = vec![AgentAction::Respond {
+        content: "final answer".to_string(),
+    }];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn tool_discovery_route_allows_context_only_respond_plan() {
+    let loop_state = LoopState::new(2);
+    let actions = vec![AgentAction::Respond {
+        content: "capability inventory".to_string(),
+    }];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ToolDiscovery;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn plain_act_path_action_rejects_readonly_file_plan_before_execution() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(

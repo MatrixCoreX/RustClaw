@@ -1053,9 +1053,53 @@ pub(super) fn should_force_actionable_plan_repair(
     if has_discussion_followup_action(actions) && loop_state.has_tool_or_skill_output {
         return false;
     }
+    if route_allows_pure_chat_submode_terminal_respond(route_result, actions) {
+        return false;
+    }
+    if route_allows_context_only_terminal_respond(route_result, actions) {
+        return false;
+    }
     let requires_action_before_reply =
         !loop_state.has_tool_or_skill_output && route_result.is_execute_gate();
     route_result.output_contract.requires_content_evidence || requires_action_before_reply
+}
+
+fn route_allows_pure_chat_submode_terminal_respond(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode")
+        || route_result.needs_clarify
+        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    is_plain_respond_only_plan(actions)
+        .map(str::trim)
+        .is_some_and(|content| !content.is_empty())
+}
+
+fn route_allows_context_only_terminal_respond(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ToolDiscovery
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    is_plain_respond_only_plan(actions)
+        .map(str::trim)
+        .is_some_and(|content| !content.is_empty())
 }
 
 pub(super) fn required_session_alias_targets_from_loop_state(

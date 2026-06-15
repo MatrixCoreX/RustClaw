@@ -1,4 +1,4 @@
-use super::planning_split_08_scalar_count_explicit_count_path::ScalarCountInventoryKind;
+use super::scalar_count_explicit_path::ScalarCountInventoryKind;
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

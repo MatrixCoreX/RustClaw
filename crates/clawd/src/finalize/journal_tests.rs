@@ -79,7 +79,7 @@ fn build_from_loop_state_records_rollout_switches() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
         "rollout_switches_enabled".to_string(),
-        "registry_idempotency_guard,agent_decides_semantic_route".to_string(),
+        "registry_idempotency_guard,semantic_route_authority".to_string(),
     );
 
     let journal = build_from_loop_state(
@@ -96,8 +96,8 @@ fn build_from_loop_state_records_rollout_switches() {
     assert_eq!(
         journal.rollout_switches_enabled,
         vec![
-            "agent_decides_semantic_route".to_string(),
-            "registry_idempotency_guard".to_string()
+            "registry_idempotency_guard".to_string(),
+            "semantic_route_authority".to_string()
         ]
     );
     assert_eq!(
@@ -105,14 +105,14 @@ fn build_from_loop_state_records_rollout_switches() {
             .to_summary_json()
             .pointer("/rollout_switches_enabled/0")
             .and_then(serde_json::Value::as_str),
-        Some("agent_decides_semantic_route")
+        Some("registry_idempotency_guard")
     );
     assert_eq!(
         journal
             .to_trace_json()
             .pointer("/rollout_switches_enabled/1")
             .and_then(serde_json::Value::as_str),
-        Some("registry_idempotency_guard")
+        Some("semantic_route_authority")
     );
 }
 

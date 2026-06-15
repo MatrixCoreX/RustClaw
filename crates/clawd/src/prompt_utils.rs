@@ -253,7 +253,16 @@ fn canonicalize_plan_action_step_value(value: Value) -> (Value, bool) {
         "call_tool" => &["type", "tool", "args"],
         "call_capability" => &["type", "capability", "args"],
         "synthesize_answer" => &["type", "evidence_refs"],
-        "respond" => &["type", "content"],
+        "respond" => &[
+            "type",
+            "content",
+            "terminal_intent",
+            "clarify_reason_code",
+            "missing_slot",
+            "message_key",
+            "field_path",
+            "locator_kind",
+        ],
         _ => return (Value::Object(map), false),
     };
     let original_len = map.len();

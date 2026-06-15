@@ -1,0 +1,6 @@
+chat_act|tool_discovery_zh_current_capabilities|agent_loop,tool_discovery,capability,zh,client_like|你现在可以使用哪些工具和技能？按类别简短列出来。
+chat_act|tool_discovery_en_current_capabilities|agent_loop,tool_discovery,capability,en,client_like|What tools and skills can you use right now? Group them briefly by purpose.
+chat_act|tool_discovery_ja_current_capabilities|agent_loop,tool_discovery,capability,ja,client_like|今使えるツールとスキルを、用途ごとに短く教えてください。
+chat_act|tool_discovery_ko_current_capabilities|agent_loop,tool_discovery,capability,ko,client_like|지금 사용할 수 있는 도구와 스킬을 용도별로 짧게 알려주세요.
+chat_act|tool_discovery_zh_no_fake_status|agent_loop,tool_discovery,capability,zh,client_like|不用检查系统状态，只告诉我当前 agent 有哪些可调用能力。
+chat_act|tool_discovery_en_no_execution_needed|agent_loop,tool_discovery,capability,en,client_like|Without running a system check, summarize the callable capabilities currently visible to you.

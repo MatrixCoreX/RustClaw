@@ -226,7 +226,7 @@ struct AppliedAskPostRoute {
 fn clarify_fallback_source_or_default(
     source: Option<crate::fallback::ClarifyFallbackSource>,
 ) -> crate::fallback::ClarifyFallbackSource {
-    source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
+    crate::finalize::clarify_fallback_source_or_default(source)
 }
 
 fn log_route_guard_record(
@@ -829,8 +829,16 @@ fn apply_ask_post_route(
         } else {
             crate::post_route_policy::LocatorResolution::None
         };
-    let mut post_route =
-        crate::post_route_policy::apply_post_route_policy(route_result.clone(), locator_resolution);
+    let post_route_options = crate::post_route_policy::PostRoutePolicyOptions {
+        allow_legacy_semantic_repair:
+            crate::agent_engine::agent_loop_authority_selected_migration_class(state, &route_result)
+                .is_none(),
+    };
+    let mut post_route = crate::post_route_policy::apply_post_route_policy_with_options(
+        route_result.clone(),
+        locator_resolution,
+        post_route_options,
+    );
     if auto_locator_scalar_file_without_current_locator_should_force_clarify(
         state,
         prompt,
@@ -1068,10 +1076,25 @@ fn route_reason_has_marker_prefix(route_result: &crate::RouteResult, marker_pref
 }
 
 fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> bool {
+    if marker.trim().is_empty() {
+        return false;
+    }
     route_result
         .route_reason
         .split(';')
-        .any(|part| part.trim() == marker)
+        .any(|part| route_reason_part_has_marker(part.trim(), marker))
+}
+
+fn route_reason_part_has_marker(part: &str, marker: &str) -> bool {
+    part.match_indices(marker).any(|(start, _)| {
+        let before = part[..start].chars().next_back();
+        let after = part[start + marker.len()..].chars().next();
+        !is_route_reason_marker_char(before) && !is_route_reason_marker_char(after)
+    })
+}
+
+fn is_route_reason_marker_char(ch: Option<char>) -> bool {
+    ch.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn append_route_reason(route_result: &mut crate::RouteResult, reason: &'static str) {
@@ -1303,17 +1326,19 @@ pub(super) async fn execute_ask_dispatch(
             crate::intent_router::ClarifyQuestionPolicy::AllowModel
         };
         let fallback_source = clarify_fallback_source_or_default(clarify_fallback_source);
-        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+        let clarify = crate::finalize::render_clarify_question(
             state,
             task,
-            prompt,
-            clarify_reason,
-            Some(&clarify_context),
-            preferred_clarify_question,
-            clarify_policy,
-            // §7.2: 路由阶段没拿到可用 clarify_question + 非 fuzzy_locator 触发的 SafeFallback。
-            // normalizer LLM 失败必须暴露为 LlmUnavailable，不能伪装成“我没看懂”。
-            fallback_source,
+            crate::finalize::ClarifyRenderRequest {
+                user_request: prompt,
+                resolver_reason: clarify_reason,
+                candidate_context: Some(&clarify_context),
+                preferred_question: preferred_clarify_question,
+                policy: clarify_policy,
+                // §7.2: 路由阶段没拿到可用 clarify_question + 非 fuzzy_locator 触发的 SafeFallback。
+                // normalizer LLM 失败必须暴露为 LlmUnavailable，不能伪装成“我没看懂”。
+                fallback_source,
+            },
         )
         .await;
         return Ok(Some(Ok(with_agent_decides_shadow_snapshot(

@@ -1,5 +1,34 @@
 use super::*;
 
+#[test]
+fn pending_user_input_clarify_reason_prefers_structured_machine_fields() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_locator".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.field_path".to_string(),
+        "output_contract.locator_hint".to_string(),
+    );
+
+    let reason = build_pending_user_input_clarify_reason(&loop_state, "fallback".to_string());
+
+    assert!(reason.contains("agent_loop.terminal_intent=clarify"));
+    assert!(reason.contains("agent_loop.clarify_reason_code=missing_locator"));
+    assert!(reason.contains("agent_loop.missing_slot=locator"));
+    assert!(reason.contains("agent_loop.field_path=output_contract.locator_hint"));
+    assert!(!reason.contains("fallback"));
+}
+
 #[tokio::test]
 async fn observed_execution_without_delivery_reply_attaches_raw_summary() {
     let state = test_state();

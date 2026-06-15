@@ -105,6 +105,50 @@ fn validate_against_schema_strips_plan_result_noise_fields() {
 }
 
 #[test]
+fn validate_against_schema_preserves_structured_respond_intent_fields() {
+    let raw = r#"{
+        "steps":[
+            {
+                "type":"RESPOND",
+                "content":"",
+                "terminal_intent":"clarify",
+                "clarify_reason_code":"missing_locator",
+                "missing_slot":"locator",
+                "message_key":"clawd.msg.clarify.missing_locator",
+                "field_path":"package.name",
+                "locator_kind":"path",
+                "description":"ignored action noise"
+            }
+        ]
+    }"#;
+    let validated = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
+        .expect("structured respond intent should pass plan schema");
+    assert!(validated.schema_normalized);
+    assert_eq!(
+        validated
+            .value
+            .pointer("/steps/0/terminal_intent")
+            .and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        validated
+            .value
+            .pointer("/steps/0/missing_slot")
+            .and_then(Value::as_str),
+        Some("locator")
+    );
+    assert_eq!(
+        validated
+            .value
+            .pointer("/steps/0/message_key")
+            .and_then(Value::as_str),
+        Some("clawd.msg.clarify.missing_locator")
+    );
+    assert!(validated.value.pointer("/steps/0/description").is_none());
+}
+
+#[test]
 fn validate_against_schema_projects_normalizer_shaped_direct_answer_gate_output() {
     let raw = r#"{
         "resolved_user_intent": "List current listening ports and highlight notable ports",
@@ -312,6 +356,7 @@ fn validate_against_schema_preserves_direct_answer_gate_semantic_enums() {
         "config_mutation",
         "config_risk_assessment",
         "package_manager_detection",
+        "tool_discovery",
     ];
 
     for semantic_kind in semantic_kinds {
