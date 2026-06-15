@@ -69,6 +69,12 @@ fn trace_json_includes_round_decision_envelope() {
     );
     assert_eq!(
         trace
+            .pointer("/rounds/0/decision_envelope/initial_gate_ref")
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        trace
             .pointer("/rounds/0/decision_envelope/semantic_authority")
             .and_then(Value::as_str),
         Some("planner_loop_runtime")
