@@ -40,6 +40,10 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
+fn terminal_user_answer_stop_signal(loop_state: &LoopState) -> Option<&'static str> {
+    has_authoritative_delivery(loop_state).then_some("terminal_user_answer_ready")
+}
+
 fn reply_final_status_is_clarify(reply: &AskReply) -> bool {
     reply
         .task_journal
@@ -624,6 +628,11 @@ async fn run_agent_round(
         agent_run_context,
     )
     .await?;
+    if outcome.stop_signal.is_none() {
+        if let Some(stop_signal) = terminal_user_answer_stop_signal(loop_state) {
+            outcome.stop_signal = Some(stop_signal.to_string());
+        }
+    }
     if outcome.stop_signal.is_none()
         && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
     {

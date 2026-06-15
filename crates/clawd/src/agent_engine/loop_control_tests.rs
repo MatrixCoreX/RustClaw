@@ -8,7 +8,7 @@ use super::{
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
-    try_preserve_rss_source_hosts_from_structured_evidence,
+    terminal_user_answer_stop_signal, try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
@@ -2185,3 +2185,5 @@ mod local_health_recovery;
 mod observed_finalize;
 #[path = "loop_control_tests/recent_artifacts_recovery.rs"]
 mod recent_artifacts_recovery;
+#[path = "loop_control_tests/terminal_answer_stop.rs"]
+mod terminal_answer_stop;
