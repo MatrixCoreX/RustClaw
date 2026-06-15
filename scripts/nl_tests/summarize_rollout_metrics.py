@@ -34,9 +34,24 @@ COUNTER_FIELDS = (
     "contract_match_counts",
     "final_answer_shape_counts",
     "capability_counts",
+    "planner_first_action_counts",
+    "delivery_consistent_counts",
     "rollout_switch_counts",
     "rollout_event_counts",
     "rollout_reason_counts",
+    "configured_migration_class_counts",
+    "eligible_migration_class_counts",
+    "selected_migration_class_counts",
+    "agent_loop_eligibility_bucket_counts",
+    "agent_loop_eligibility_blocked_reason_counts",
+    "agent_loop_authority_enabled_counts",
+    "semantic_routing_activation_state_counts",
+    "semantic_routing_authority_counts",
+    "semantic_routing_chosen_authority_counts",
+    "semantic_routing_runtime_default_authority_counts",
+    "semantic_routing_normalizer_role_counts",
+    "semantic_routing_post_route_role_counts",
+    "semantic_routing_direct_answer_gate_role_counts",
 )
 CLARIFICATION_FINAL_STATUS_KEYS = {"clarify", "clarification_requested"}
 VERIFIER_BLOCK_KEYS = {"False", "false"}
@@ -57,6 +72,10 @@ def get_path(obj: dict[str, Any], *keys: str) -> Any:
             return None
         cur = cur.get(key)
     return cur
+
+
+def dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def safe_int(value: Any) -> int:
@@ -318,6 +337,40 @@ def step_results(trace: dict[str, Any]) -> list[dict[str, Any]]:
     return [step for step in steps if isinstance(step, dict)]
 
 
+def trace_rounds(trace: dict[str, Any]) -> list[dict[str, Any]]:
+    rounds = trace.get("rounds")
+    if not isinstance(rounds, list):
+        return []
+    return [round_item for round_item in rounds if isinstance(round_item, dict)]
+
+
+def planner_first_action(trace: dict[str, Any]) -> str:
+    for round_item in trace_rounds(trace):
+        plan = dict_value(round_item.get("plan_result"))
+        steps = plan.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for key in ("action_ref", "capability", "tool", "skill", "action"):
+                value = step.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            step_type = step.get("type")
+            if isinstance(step_type, str) and step_type.strip():
+                return step_type.strip()
+    return "not_recorded"
+
+
+def bool_token(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "missing"
+    return str(value)
+
+
 def count_tool_calls(steps: list[dict[str, Any]]) -> tuple[int, int]:
     tool_calls = 0
     external_tool_calls = 0
@@ -480,9 +533,24 @@ def summarize_run(
     contract_match_counts: Counter[str] = Counter()
     final_answer_shape_counts: Counter[str] = Counter()
     capability_counts: Counter[str] = Counter()
+    planner_first_action_counts: Counter[str] = Counter()
+    delivery_consistent_counts: Counter[str] = Counter()
     by_prompt_totals: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"count": 0, "elapsed_ms": 0, "prompt_truncation_count": 0}
     )
+    configured_migration_class_counts: Counter[str] = Counter()
+    eligible_migration_class_counts: Counter[str] = Counter()
+    selected_migration_class_counts: Counter[str] = Counter()
+    agent_loop_eligibility_bucket_counts: Counter[str] = Counter()
+    agent_loop_eligibility_blocked_reason_counts: Counter[str] = Counter()
+    agent_loop_authority_enabled_counts: Counter[str] = Counter()
+    semantic_routing_activation_state_counts: Counter[str] = Counter()
+    semantic_routing_authority_counts: Counter[str] = Counter()
+    semantic_routing_chosen_authority_counts: Counter[str] = Counter()
+    semantic_routing_runtime_default_authority_counts: Counter[str] = Counter()
+    semantic_routing_normalizer_role_counts: Counter[str] = Counter()
+    semantic_routing_post_route_role_counts: Counter[str] = Counter()
+    semantic_routing_direct_answer_gate_role_counts: Counter[str] = Counter()
     parse_errors = 0
     total_llm_calls = 0
     total_llm_elapsed_ms = 0
@@ -538,6 +606,8 @@ def summarize_run(
         semantic_kind_counts[str(contract.get("semantic_kind") or "unknown")] += 1
         contract_match_counts[str(contract.get("contract_match") or "unknown")] += 1
         final_answer_shape_counts[str(contract.get("final_answer_shape") or "unknown")] += 1
+        delivery_consistent_counts[bool_token(metrics.get("delivery_consistent"))] += 1
+        planner_first_action_counts[planner_first_action(trace)] += 1
 
         total_rounds += safe_int(summary.get("round_count"))
         total_steps += safe_int(summary.get("step_count"))
@@ -564,6 +634,51 @@ def summarize_run(
                     rollout_event_counts[event.strip()] += 1
                 if isinstance(reason, str) and reason.strip():
                     rollout_reason_counts[reason.strip()] += 1
+                boundary_context = dict_value(item.get("boundary_context"))
+                boundary_budget = dict_value(boundary_context.get("budget"))
+                semantic_routing = dict_value(boundary_context.get("semantic_routing"))
+                configured_migration_class_counts[
+                    str(boundary_budget.get("agent_decides_migration_class") or "unknown")
+                ] += 1
+                eligible_migration_class_counts[
+                    str(boundary_budget.get("eligible_migration_class") or "unknown")
+                ] += 1
+                selected_migration_class_counts[
+                    str(boundary_budget.get("selected_migration_class") or "unknown")
+                ] += 1
+                agent_loop_eligibility_bucket_counts[
+                    str(boundary_budget.get("agent_loop_eligibility_bucket") or "unknown")
+                ] += 1
+                agent_loop_eligibility_blocked_reason_counts[
+                    str(
+                        boundary_budget.get("agent_loop_eligibility_blocked_reason")
+                        or "unknown"
+                    )
+                ] += 1
+                agent_loop_authority_enabled_counts[
+                    bool_token(semantic_routing.get("agent_loop_authority_enabled"))
+                ] += 1
+                semantic_routing_activation_state_counts[
+                    str(semantic_routing.get("activation_state") or "not_recorded")
+                ] += 1
+                semantic_routing_authority_counts[
+                    str(semantic_routing.get("ordinary_semantic_authority") or "not_recorded")
+                ] += 1
+                semantic_routing_chosen_authority_counts[
+                    str(semantic_routing.get("chosen_authority") or "not_recorded")
+                ] += 1
+                semantic_routing_runtime_default_authority_counts[
+                    str(semantic_routing.get("runtime_default_authority") or "not_recorded")
+                ] += 1
+                semantic_routing_normalizer_role_counts[
+                    str(semantic_routing.get("normalizer_role") or "not_recorded")
+                ] += 1
+                semantic_routing_post_route_role_counts[
+                    str(semantic_routing.get("post_route_role") or "not_recorded")
+                ] += 1
+                semantic_routing_direct_answer_gate_role_counts[
+                    str(semantic_routing.get("direct_answer_gate_role") or "not_recorded")
+                ] += 1
 
         steps = step_results(trace)
         for step in steps:
@@ -604,9 +719,50 @@ def summarize_run(
         "contract_match_counts": dict(sorted(contract_match_counts.items())),
         "final_answer_shape_counts": dict(sorted(final_answer_shape_counts.items())),
         "capability_counts": dict(sorted(capability_counts.items())),
+        "planner_first_action_counts": dict(sorted(planner_first_action_counts.items())),
+        "delivery_consistent_counts": dict(sorted(delivery_consistent_counts.items())),
         "rollout_switch_counts": dict(sorted(rollout_switch_counts.items())),
         "rollout_event_counts": dict(sorted(rollout_event_counts.items())),
         "rollout_reason_counts": dict(sorted(rollout_reason_counts.items())),
+        "configured_migration_class_counts": dict(
+            sorted(configured_migration_class_counts.items())
+        ),
+        "eligible_migration_class_counts": dict(
+            sorted(eligible_migration_class_counts.items())
+        ),
+        "selected_migration_class_counts": dict(
+            sorted(selected_migration_class_counts.items())
+        ),
+        "agent_loop_eligibility_bucket_counts": dict(
+            sorted(agent_loop_eligibility_bucket_counts.items())
+        ),
+        "agent_loop_eligibility_blocked_reason_counts": dict(
+            sorted(agent_loop_eligibility_blocked_reason_counts.items())
+        ),
+        "agent_loop_authority_enabled_counts": dict(
+            sorted(agent_loop_authority_enabled_counts.items())
+        ),
+        "semantic_routing_activation_state_counts": dict(
+            sorted(semantic_routing_activation_state_counts.items())
+        ),
+        "semantic_routing_authority_counts": dict(
+            sorted(semantic_routing_authority_counts.items())
+        ),
+        "semantic_routing_chosen_authority_counts": dict(
+            sorted(semantic_routing_chosen_authority_counts.items())
+        ),
+        "semantic_routing_runtime_default_authority_counts": dict(
+            sorted(semantic_routing_runtime_default_authority_counts.items())
+        ),
+        "semantic_routing_normalizer_role_counts": dict(
+            sorted(semantic_routing_normalizer_role_counts.items())
+        ),
+        "semantic_routing_post_route_role_counts": dict(
+            sorted(semantic_routing_post_route_role_counts.items())
+        ),
+        "semantic_routing_direct_answer_gate_role_counts": dict(
+            sorted(semantic_routing_direct_answer_gate_role_counts.items())
+        ),
         "llm": {
             "total_calls": total_llm_calls,
             "total_elapsed_ms": total_llm_elapsed_ms,

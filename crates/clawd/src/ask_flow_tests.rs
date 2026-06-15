@@ -31,8 +31,8 @@ use super::{
     promote_inline_json_transform_context_to_planner, recent_count_comparison_direct_answer,
     replacement_pairs_from_state_patch, required_visible_literals_from_state_patch,
     resolved_intent_declares_structured_scalar_extraction,
-    route_contract_requests_filename_only_output, route_structured_clarify_context,
-    runtime_approval_wait_status_direct_answer_candidate,
+    route_allows_agent_loop_pure_chat_submode, route_contract_requests_filename_only_output,
+    route_structured_clarify_context, runtime_approval_wait_status_direct_answer_candidate,
     runtime_scalar_path_direct_answer_candidate, session_alias_target_direct_answer_candidate,
     structural_alias_binding_ack, task_payload_text, token_looks_like_pathlike_locator,
     ActiveTaskFactualRewriteReview, DirectAnswerGateContractOut, DirectAnswerGateOut,
@@ -56,6 +56,7 @@ fn schema_enum_strings(schema: &serde_json::Value, path: &[&str]) -> Vec<String>
 }
 
 include!("ask_flow_tests/gate_core.rs");
+include!("ask_flow_tests/agent_loop_submode.rs");
 include!("ask_flow_tests/gate_policy.rs");
 include!("ask_flow_tests/chat_context.rs");
 include!("ask_flow_tests/active_task_literals.rs");

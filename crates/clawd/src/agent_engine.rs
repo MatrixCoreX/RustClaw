@@ -64,6 +64,10 @@ pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool
     load_agent_loop_guard_policy(state).answer_verifier_enforce_required
 }
 
+pub(crate) fn agent_loop_semantic_authority_enabled(state: &AppState) -> bool {
+    load_agent_loop_guard_policy(state).uses_agent_loop_semantic_authority()
+}
+
 pub(crate) fn agent_loop_authority_selected_migration_class(
     state: &AppState,
     route: &crate::RouteResult,

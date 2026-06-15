@@ -625,6 +625,7 @@ fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -
             | OutputSemanticKind::CommandOutputSummary
             | OutputSemanticKind::ServiceStatus
             | OutputSemanticKind::PackageManagerDetection
+            | OutputSemanticKind::ToolDiscovery
             | OutputSemanticKind::DockerPs
             | OutputSemanticKind::DockerImages
             | OutputSemanticKind::DockerLogs

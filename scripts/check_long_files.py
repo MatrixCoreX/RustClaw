@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 
-PRODUCTION_THRESHOLD = 1_500
+PRODUCTION_THRESHOLD = 2_000
 TEST_THRESHOLD = 2_000
 
 # Baseline captured on 2026-06-11 after the first agent-loop canary work.

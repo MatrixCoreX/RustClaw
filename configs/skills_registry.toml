@@ -266,6 +266,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 [[skills]]
 name = "schedule"
 enabled = true
+planner_visible = false
 kind = "builtin"
 planner_kind = "workflow"
 group = "workflow"
@@ -394,6 +395,9 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["python3", "npm", "cargo", "go"]
 platform_notes = ["Language ecosystem installers are action-dependent; use package_manager for OS packages."]
+planner_capabilities = [
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 
 [[skills]]
 name = "process_basic"
@@ -489,6 +493,12 @@ prompt_file = "prompts/skills/db_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["SQLite access is implemented in-process; no sqlite3 CLI dependency."]
+planner_capabilities = [
+  { name = "database.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "database.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "database.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], optional = ["db_path", "path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -628,6 +638,9 @@ capabilities = [
 # §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
+planner_capabilities = [
+  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
@@ -652,6 +665,11 @@ capabilities = [
 ]
 # §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
 side_effect = true
+planner_capabilities = [
+  { name = "image.edit", action = "edit", effect = "external", required = ["instruction"], optional = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "image.outpaint", action = "outpaint", effect = "external", required = ["instruction"], optional = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "image.restyle", action = "restyle", effect = "external", required = ["instruction"], optional = ["image", "images", "mask", "size", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 input_schema = { type = "object", required = ["instruction"], properties = { action = { type = "string", enum = ["edit", "outpaint", "restyle", "add_remove"] }, instruction = { type = "string" }, image = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] }, images = { type = "array", items = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] } }, mask = { anyOf = [ { type = "string" }, { type = "object" } ] }, size = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
@@ -665,6 +683,14 @@ aliases = []
 timeout_seconds = 120
 prompt_file = "prompts/skills/audio_transcribe.md"
 output_kind = "text"
+capabilities = ["llm", "net", "fs.read"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+planner_capabilities = [
+  { name = "audio.transcribe", action = "transcribe", effect = "observe", required = ["audio_path|path|url|audio|file"], optional = ["language", "response_language", "vendor", "model", "timeout_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
 
 [[skills]]
 name = "audio_synthesize"
@@ -678,6 +704,9 @@ prompt_file = "prompts/skills/audio_synthesize.md"
 output_kind = "text"
 capabilities = ["llm", "net", "fs.write"]
 side_effect = true
+planner_capabilities = [
+  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -718,6 +747,9 @@ prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "logs.analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
 input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, max_lines = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -867,6 +899,14 @@ aliases = ["地图商户", "商户推荐", "附近商户", "高德地图", "高�
 timeout_seconds = 20
 prompt_file = "prompts/skills/map_merchant.md"
 output_kind = "text"
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+planner_capabilities = [
+  { name = "map.merchant_recommend", action = "recommend", effect = "observe", optional = ["provider", "city", "address", "place", "keyword", "category", "cuisine", "price_level", "max_distance_meters", "sort_by", "top_k", "latitude", "longitude"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
 
 # Phase 5 示例（可选）：
 # - runner 技能可配置 runner_name，未配则用 name 作为执行名。
@@ -916,6 +956,9 @@ prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["Pure structured-data transform; no filesystem or command dependency."]
+planner_capabilities = [
+  { name = "data.transform", action = "transform_data", effect = "observe", required = ["data|records|csv_text|csv|input"], optional = ["ops", "output_format", "result_shape", "strict", "null_policy"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
 input_schema = { type = "object", properties = { action = { type = "string" }, input = {}, records = { type = "array" }, csv = { type = "string" }, operation = { type = "string" }, fields = { type = "array", items = { type = "string" } } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -933,6 +976,10 @@ risk_level = "medium"
 capabilities = ["llm"]
 auto_invocable = false
 retryable = true
+planner_capabilities = [
+  { name = "invest_copy.draft", action = "draft", effect = "external", required = ["data", "person"], optional = ["source_note", "channel", "compliance", "locale", "language", "use_heuristic"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "invest_copy.list_investors", action = "list_investors", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+]
 
 [[skills]]
 name = "web_search_extract"
@@ -1059,5 +1106,13 @@ auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = false
+planner_capabilities = [
+  { name = "extension.assess_gap", action = "assess_gap", effect = "observe", required = ["request"], optional = ["mode_hint"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "extension.permanent_plan", action = "permanent_extension_plan", effect = "observe", required = ["request"], optional = ["mode_hint"], risk_level = "medium", idempotent = true, dedup_scope = "args" },
+  { name = "extension.temporary_plan", action = "temporary_fix_plan", effect = "observe", required = ["request"], optional = ["mode_hint"], risk_level = "medium", idempotent = true, dedup_scope = "args" },
+  { name = "extension.scaffold_skill", action = "scaffold_external_skill", effect = "mutate", required = ["skill_name"], optional = ["capability_summary", "actions"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "extension.validate_skill", action = "validate_external_skill", effect = "validate", required = ["skill_name"], optional = ["actions"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args" },
+  { name = "extension.register_skill", action = "register_external_skill", effect = "mutate", required = ["skill_name", "confirm"], optional = ["actions"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["assess_gap", "enable_external_skill", "implement_external_skill", "register_external_skill", "validate_external_skill", "permanent_extension_plan", "temporary_fix_plan", "temporary_fix_execute", "scaffold_external_skill"] }, request = { type = "string" }, mode_hint = { type = "string", enum = ["auto", "temporary_fix", "permanent_extension", "manual_review"] }, confirm = { type = "boolean" }, allow_package_install = { type = "boolean" }, plan = { type = "object" }, skill_name = { type = "string" }, capability_summary = { type = "string" }, actions = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }

@@ -1,9 +1,12 @@
 use super::{
-    answer_verifier_retry_summary, boundary_context_snapshot_json, evaluate_round_outcome,
-    initial_execution_recipe_spec, mark_reply_failed_after_answer_verifier_exhausted,
+    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
+    boundary_context_snapshot_json, evaluate_round_outcome, initial_execution_recipe_spec,
+    mark_reply_failed_after_answer_verifier_exhausted,
     maybe_record_agent_decides_shadow_attribution,
     maybe_record_agent_decides_shadow_first_action_attribution, parse_log_analyze_finding,
-    should_stop_for_observed_finalize, suppress_answer_verifier_retry_if_structurally_satisfied,
+    selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
+    structured_respond_terminal_intent_from_plan,
+    suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
     try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
@@ -86,6 +89,112 @@ fn test_task() -> ClaimedTask {
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     }
+}
+
+fn plan_result_with_raw_and_steps(
+    raw_plan_text: &str,
+    steps: Vec<crate::PlanStep>,
+) -> crate::PlanResult {
+    crate::PlanResult {
+        goal: "test".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps,
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: raw_plan_text.to_string(),
+    }
+}
+
+#[test]
+fn structured_respond_clarify_step_marks_loop_pending_user_input() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_locator",
+                "missing_slot": "locator",
+                "message_key": "clawd.clarify.locator_required",
+                "field_path": "output_contract.locator_hint",
+                "locator_kind": "path"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut loop_state = LoopState::new(2);
+    let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
+
+    assert!(loop_state.pending_user_input_required);
+    assert_eq!(outcome.executed_actions, 0);
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("structured_respond_clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.terminal_intent")
+            .map(String::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.missing_slot")
+            .map(String::as_str),
+        Some("locator")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.message_key")
+            .map(String::as_str),
+        Some("clawd.clarify.locator_required")
+    );
+}
+
+#[test]
+fn structured_respond_clarify_reads_raw_plan_when_normalized_step_loses_fields() {
+    let raw_plan = r#"{
+        "steps": [{
+            "type": "respond",
+            "content": "",
+            "terminal_intent": "clarify",
+            "clarify_reason_code": "missing_locator",
+            "missing_slot": "locator",
+            "field_path": "output_contract.locator_hint"
+        }]
+    }"#;
+    let plan = plan_result_with_raw_and_steps(
+        raw_plan,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({"content": ""}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("raw intent");
+    assert_eq!(intent.terminal_intent, "clarify");
+    assert_eq!(
+        intent.clarify_reason_code.as_deref(),
+        Some("missing_locator")
+    );
+    assert_eq!(intent.missing_slot.as_deref(), Some("locator"));
+    assert_eq!(
+        intent.field_path.as_deref(),
+        Some("output_contract.locator_hint")
+    );
 }
 
 #[test]
@@ -1353,8 +1462,7 @@ fn test_policy() -> AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required: false,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_decides_semantic_route: false,
-        agent_decides_migration_class: "none".to_string(),
+        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard: false,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
@@ -1364,10 +1472,54 @@ fn test_policy() -> AgentLoopGuardPolicy {
     }
 }
 
+fn selected_scalar_path_route() -> RouteResult {
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route
+}
+
+#[test]
+fn selected_contract_structured_evidence_gate_respects_switch() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    let route = selected_scalar_path_route();
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-evidence-off", "ask", "read field");
+
+    assert!(selected_contract_structured_evidence_gap(&policy, &route, &journal).is_none());
+}
+
+#[test]
+fn selected_contract_structured_evidence_gate_reports_missing_machine_fields() {
+    let mut policy = test_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    policy.structured_evidence_required_for_selected_contracts = true;
+    let route = selected_scalar_path_route();
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-evidence-on", "ask", "read field");
+
+    let (selected_class, gap) =
+        selected_contract_structured_evidence_gap(&policy, &route, &journal)
+            .expect("missing evidence gap");
+
+    assert_eq!(selected_class, "structured_field_read");
+    assert!(!gap.pass);
+    assert!(gap.should_retry);
+    assert!(gap
+        .answer_incomplete_reason
+        .starts_with("missing_required_evidence:"));
+    assert!(gap
+        .retry_instruction
+        .starts_with("collect_required_evidence_fields:"));
+    assert!(!gap.missing_evidence_fields.is_empty());
+}
+
 #[test]
 fn agent_decides_shadow_switch_records_route_snapshot_only() {
     let mut policy = test_policy();
-    policy.agent_decides_semantic_route = true;
+    policy.semantic_route_authority = SemanticRouteAuthority::Shadow;
     let route = route_result(OutputResponseShape::Free);
     let task = test_task();
     let mut loop_state = LoopState::new(2);
@@ -1392,7 +1544,7 @@ fn agent_decides_shadow_switch_records_route_snapshot_only() {
     );
     assert_eq!(loop_state.rollout_attribution.len(), 1);
     let attribution = &loop_state.rollout_attribution[0];
-    assert_eq!(attribution.switch_name, "agent_decides_semantic_route");
+    assert_eq!(attribution.switch_name, "semantic_route_authority");
     assert_eq!(
         attribution.reason_code.as_deref(),
         Some("agent_decides_shadow_not_evaluated")
@@ -1544,7 +1696,7 @@ fn agent_decides_shadow_switch_records_route_snapshot_only() {
 #[test]
 fn agent_decides_shadow_records_first_action_delta_without_execution() {
     let mut policy = test_policy();
-    policy.agent_decides_semantic_route = true;
+    policy.semantic_route_authority = SemanticRouteAuthority::Shadow;
     let route = route_result(OutputResponseShape::Free);
     let task = test_task();
     let mut loop_state = LoopState::new(2);
@@ -1588,7 +1740,7 @@ fn agent_decides_shadow_records_first_action_delta_without_execution() {
         attribution
             .boundary_context
             .as_ref()
-            .and_then(|value| value.pointer("/budget/agent_decides_migration_class"))
+            .and_then(|value| value.pointer("/budget/agent_loop_canary_bucket"))
             .and_then(serde_json::Value::as_str),
         Some("none")
     );
@@ -1597,7 +1749,7 @@ fn agent_decides_shadow_records_first_action_delta_without_execution() {
 #[test]
 fn boundary_context_marks_structured_field_read_migration_eligibility() {
     let mut policy = test_policy();
-    policy.agent_decides_migration_class = "structured_field_read".to_string();
+    policy.agent_loop_canary_bucket = "structured_field_read".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint =
@@ -1626,14 +1778,72 @@ fn boundary_context_marks_structured_field_read_migration_eligibility() {
             .and_then(serde_json::Value::as_str),
         Some("structured_field_read")
     );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_bucket")
+            .and_then(serde_json::Value::as_str),
+        Some("low_risk_structured_read")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_blocked_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+}
+
+#[test]
+fn boundary_context_exposes_normalizer_hints_as_machine_fields() {
+    let policy = test_policy();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.route_confidence = Some(0.82);
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        super::LoopBudgetProfile::FastRead,
+    );
+
+    assert_eq!(
+        boundary
+            .pointer("/normalizer_hints/source")
+            .and_then(serde_json::Value::as_str),
+        Some("route_result_machine_fields")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/normalizer_hints/decision_hint")
+            .and_then(serde_json::Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/normalizer_hints/output_contract/semantic_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("scalar_path_only")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/normalizer_hints/candidate_locators/0/hint")
+            .and_then(serde_json::Value::as_str),
+        Some("README.md")
+    );
+    assert!(boundary
+        .pointer("/normalizer_hints/candidate_contracts/0")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value.starts_with("- task_contract ")));
 }
 
 #[test]
 fn boundary_context_marks_agent_loop_canary_authority_for_selected_class() {
     let mut policy = test_policy();
     policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
-    policy.agent_decides_semantic_route = true;
-    policy.agent_decides_migration_class = "structured_field_read".to_string();
+    policy.agent_loop_canary_bucket = "structured_field_read".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_hint = "README.md".to_string();
@@ -1697,8 +1907,7 @@ fn boundary_context_marks_agent_loop_canary_authority_for_selected_class() {
 fn agent_loop_canary_uses_agent_decision_for_selected_class() {
     let mut policy = test_policy();
     policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
-    policy.agent_decides_semantic_route = true;
-    policy.agent_decides_migration_class = "structured_field_read".to_string();
+    policy.agent_loop_canary_bucket = "structured_field_read".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
     route.risk_ceiling = RiskCeiling::Low;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
@@ -1719,8 +1928,7 @@ fn agent_loop_canary_uses_agent_decision_for_selected_class() {
 fn agent_loop_canary_falls_back_to_legacy_for_unselected_class() {
     let mut policy = test_policy();
     policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopCanary;
-    policy.agent_decides_semantic_route = true;
-    policy.agent_decides_migration_class = "exact_path_list".to_string();
+    policy.agent_loop_canary_bucket = "exact_path_list".to_string();
     let mut route = route_result(OutputResponseShape::Scalar);
     route.risk_ceiling = RiskCeiling::Low;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
@@ -1758,7 +1966,7 @@ fn agent_loop_canary_falls_back_to_legacy_for_unselected_class() {
 
 fn selected_migration_class_for(route: RouteResult, selected: &str) -> Option<String> {
     let mut policy = test_policy();
-    policy.agent_decides_migration_class = selected.to_string();
+    policy.agent_loop_canary_bucket = selected.to_string();
     let boundary = boundary_context_snapshot_json(
         &test_task(),
         &policy,

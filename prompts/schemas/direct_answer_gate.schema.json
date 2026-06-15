@@ -138,6 +138,7 @@
             "image_understanding",
             "publishing_preview",
             "package_manager_detection",
+            "tool_discovery",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",

@@ -293,6 +293,7 @@ fn semantic_kind_can_use_locatorless_default_for_observation(kind: OutputSemanti
         kind,
         OutputSemanticKind::ServiceStatus
             | OutputSemanticKind::PackageManagerDetection
+            | OutputSemanticKind::ToolDiscovery
             | OutputSemanticKind::WeatherQuery
             | OutputSemanticKind::MarketQuote
             | OutputSemanticKind::WebSearchSummary

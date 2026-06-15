@@ -605,6 +605,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "docker_container_lifecycle" => Some(crate::OutputSemanticKind::DockerContainerLifecycle),
         "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
         "package_manager_detection" => Some(crate::OutputSemanticKind::PackageManagerDetection),
+        "tool_discovery" => Some(crate::OutputSemanticKind::ToolDiscovery),
         _ => None,
     }
 }
@@ -1309,7 +1310,7 @@ pub(super) async fn prepare_ask_routing(
     )
     .await;
     info!(
-        "first_layer_gate_record task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={}",
+        "first_layer_gate_record task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         task.task_id,
         normalizer_out.first_layer_gate_record.owner_layer,
         normalizer_out.first_layer_gate_record.reason_code,
@@ -1323,6 +1324,7 @@ pub(super) async fn prepare_ask_routing(
         normalizer_out.first_layer_gate_record.needs_clarify,
         normalizer_out.first_layer_gate_record.output_contract_ref,
         normalizer_out.first_layer_gate_record.repair_codes.join(","),
+        normalizer_out.first_layer_gate_record.repair_classes.join(","),
     );
     // Phase 0.4: 若 normalizer 已给出 schedule_intent，缓存起来，后续
     // `schedule.compile` 技能可以直接复用，避免对同一段文本再跑一次

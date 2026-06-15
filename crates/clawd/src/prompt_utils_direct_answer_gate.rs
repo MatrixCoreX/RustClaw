@@ -208,6 +208,11 @@ pub(super) fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static 
         "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
             "package_manager_detection"
         }
+        "tool_discovery"
+        | "capability_discovery"
+        | "capability_inventory"
+        | "skill_discovery"
+        | "skill_inventory" => "tool_discovery",
         "sqlite_table_listing" => "sqlite_table_listing",
         "sqlite_table_names_only" => "sqlite_table_names_only",
         "sqlite_database_kind_judgment" => "sqlite_database_kind_judgment",

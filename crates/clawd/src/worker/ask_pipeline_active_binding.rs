@@ -312,25 +312,34 @@ pub(super) fn prebind_current_workspace_root_hint_for_scalar_count(
     prompt: &str,
     route_result: &mut crate::RouteResult,
 ) -> bool {
-    if unresolved_deictic_prompt_blocks_workspace_root_prebind(prompt) {
+    let has_current_workspace_scope_marker = super::route_reason_has_marker(
+        route_result,
+        "current_workspace_scope_from_current_request",
+    );
+    if unresolved_deictic_prompt_blocks_workspace_root_prebind(prompt)
+        && !has_current_workspace_scope_marker
+    {
         return false;
     }
-    if !scalar_count_workspace_root_prebind_has_semantic_authority(state, prompt, route_result) {
+    let has_workspace_scope_authority =
+        scalar_count_workspace_root_prebind_has_semantic_authority(state, prompt, route_result);
+    if !has_workspace_scope_authority {
         return false;
     }
+    let can_repair_locator_kind = route_result.output_contract.locator_kind
+        == crate::OutputLocatorKind::None
+        && has_current_workspace_scope_marker;
     let can_promote_clarify = route_result.needs_clarify
         && route_result.is_clarify_gate()
-        && super::text_contains_workspace_root_locator(
-            &route_result.resolved_intent,
-            &state.skill_rt.workspace_root,
-        );
+        && has_workspace_scope_authority;
     if (!route_result.is_execute_gate() && !can_promote_clarify)
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarCount
         || !scalar_count_route_allows_workspace_root_prebind(route_result)
-        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+        || (route_result.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+            && !can_repair_locator_kind)
         || !route_result.output_contract.locator_hint.trim().is_empty()
     {
         return false;
@@ -344,6 +353,7 @@ pub(super) fn prebind_current_workspace_root_hint_for_scalar_count(
             "current_workspace_root_hint_prebound_for_scalar_count",
         )
     } else {
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
         route_result.output_contract.locator_hint = locator_hint;
         super::append_route_reason(
             route_result,
