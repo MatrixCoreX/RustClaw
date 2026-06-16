@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # RustClaw 小屏监控：480×320 全屏，健康状态慢刷新、日志温和刷新，左侧龙虾动图 + RustClaw 标题。
-# 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
+# 启动时会确保本机 RustClaw/clawd 已拉起。按 F11 或 Escape 退出全屏/关闭。
 
 import json
 import logging
@@ -83,6 +83,7 @@ from small_screen_overview_ui import (
     build_overview_layout as overview_build_layout,
     render_dashboard_overview as overview_render_dashboard,
 )
+from small_screen_rustclaw_bootstrap import ensure_rustclaw_started
 from small_screen_settings_ui import (
     close_wifi_to_settings as settings_close_wifi_to_settings,
     open_wifi_from_settings as settings_open_wifi_from_settings,
@@ -1254,6 +1255,10 @@ class SmallScreenApp:
                 pass
             sys.exit(0)
         self._lock_fd = fd
+        try:
+            ensure_rustclaw_started()
+        except Exception as exc:
+            print(f"RustClaw startup check failed: {exc}", file=sys.stderr)
         if not os.environ.get("DISPLAY"):
             os.environ["DISPLAY"] = ":0"
         try:
