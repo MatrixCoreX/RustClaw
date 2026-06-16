@@ -295,6 +295,7 @@ fn current_workspace_unmentioned_locator_hint_should_force_clarify(
         || current_request_has_concrete_locator_surface(prompt)
         || current_request_has_self_contained_structured_payload(prompt)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        || current_workspace_scope_marker_allows_scalar_count_root_hint(route_result)
         || current_workspace_scope_observation_can_execute_without_locator(prompt, route_result)
     {
         return false;
@@ -340,6 +341,22 @@ fn current_workspace_target_binding_should_force_clarify(
         crate::OutputDeliveryIntent::DirectoryLookup
             | crate::OutputDeliveryIntent::DirectoryBatchFiles
     )
+}
+
+fn current_workspace_scope_marker_allows_scalar_count_root_hint(
+    route_result: &crate::RouteResult,
+) -> bool {
+    route_reason_has_marker(route_result, "current_workspace_scope_from_current_request")
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && !route_result.output_contract.locator_hint.trim().is_empty()
+        && route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && !route_result.wants_file_delivery
+        && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+        && matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
+        )
 }
 
 fn current_workspace_scope_observation_can_execute_without_locator(
