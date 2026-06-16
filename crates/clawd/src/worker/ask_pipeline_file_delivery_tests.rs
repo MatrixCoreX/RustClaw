@@ -3,6 +3,7 @@ use super::{
     direct_existing_file_delivery_token, prebind_direct_file_delivery_locator_before_deictic_guard,
     prebind_file_delivery_locator_from_recent_ordered_resolved_prompt,
     prebind_file_delivery_locator_from_resolved_prompt_path,
+    prebind_file_delivery_missing_locator_from_resolved_prompt_path,
     unbound_existing_file_delivery_route_should_force_clarify,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
@@ -525,6 +526,48 @@ fn file_delivery_locator_prebinds_from_resolved_prompt_path_before_unbound_guard
     assert!(route
         .route_reason
         .contains("file_delivery_locator_prebound_from_resolved_prompt_path"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn file_delivery_missing_locator_prebinds_from_resolved_prompt_path() {
+    let root = make_temp_root("delivery_missing_resolved_prompt_prebind");
+    std::fs::create_dir_all(root.join("document")).expect("document dir");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.resolved_intent =
+        "User requests to deliver the file at document/missing.txt.".to_string();
+    route.wants_file_delivery = true;
+    route.needs_clarify = true;
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+
+    assert!(
+        prebind_file_delivery_missing_locator_from_resolved_prompt_path(
+            &state,
+            "User requests to deliver the file at document/missing.txt.",
+            &mut route,
+        )
+    );
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+    );
+    assert!(route
+        .output_contract
+        .locator_hint
+        .ends_with("document/missing.txt"));
+    assert!(route
+        .route_reason
+        .contains("file_delivery_missing_locator_prebound_from_resolved_prompt_path"));
     let _ = std::fs::remove_dir_all(root);
 }
 

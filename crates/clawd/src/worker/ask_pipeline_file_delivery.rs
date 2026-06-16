@@ -160,6 +160,93 @@ pub(super) fn prebind_file_delivery_locator_from_resolved_prompt_path(
     true
 }
 
+pub(super) fn prebind_file_delivery_missing_locator_from_resolved_prompt_path(
+    state: &crate::AppState,
+    resolved_prompt: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.output_contract.delivery_required
+        || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    let Some(path) = explicit_workspace_path_from_text_allow_missing(state, resolved_prompt)
+        .or_else(|| {
+            explicit_workspace_path_from_text_allow_missing(state, &route_result.resolved_intent)
+        })
+    else {
+        return false;
+    };
+    if std::path::Path::new(&path).is_file() {
+        return false;
+    }
+    route_result.wants_file_delivery = true;
+    if route_result.needs_clarify || route_result.is_chat_gate() {
+        return super::promote_clarify_observation_to_execute_with_locator(
+            route_result,
+            crate::OutputLocatorKind::Path,
+            path,
+            "file_delivery_missing_locator_prebound_from_resolved_prompt_path",
+        );
+    }
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = path;
+    super::append_route_reason(
+        route_result,
+        "file_delivery_missing_locator_prebound_from_resolved_prompt_path",
+    );
+    true
+}
+
+fn explicit_workspace_path_from_text_allow_missing(
+    state: &crate::AppState,
+    text: &str,
+) -> Option<String> {
+    let workspace_root = state
+        .skill_rt
+        .workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| state.skill_rt.workspace_root.clone());
+    crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+        .into_iter()
+        .filter(|locator| locator.locator_kind == crate::OutputLocatorKind::Path)
+        .find_map(|locator| {
+            let raw = locator.locator_hint.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            let candidate = std::path::Path::new(raw);
+            let joined = if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                workspace_root.join(candidate)
+            };
+            let normalized = normalize_missing_path_lexically(&joined);
+            normalized
+                .starts_with(&workspace_root)
+                .then(|| normalized.display().to_string())
+        })
+}
+
+fn normalize_missing_path_lexically(path: &std::path::Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            std::path::Component::RootDir => out.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::Normal(part) => out.push(part),
+        }
+    }
+    out
+}
+
 fn route_requires_existing_file_delivery(route_result: &crate::RouteResult) -> bool {
     if matches!(
         route_result.output_contract.semantic_kind,
