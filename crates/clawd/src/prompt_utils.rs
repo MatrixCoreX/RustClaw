@@ -332,6 +332,226 @@ fn canonicalize_plan_result_object(mut map: serde_json::Map<String, Value>) -> (
     (Value::Object(out), normalized)
 }
 
+fn canonicalize_schedule_intent_schema_object(
+    mut map: serde_json::Map<String, Value>,
+) -> (Value, bool) {
+    let mut normalized = false;
+    if let Some(Value::Object(mut intent)) = map.remove("schedule_intent") {
+        for (outer_key, inner_key) in [
+            ("schedule_kind", "kind"),
+            ("timezone", "timezone"),
+            ("raw", "raw"),
+            ("reason", "reason"),
+            ("needs_clarify", "needs_clarify"),
+            ("clarify_question", "clarify_question"),
+            ("confidence", "confidence"),
+        ] {
+            if !intent.contains_key(inner_key) {
+                if let Some(value) = map.remove(outer_key) {
+                    intent.insert(inner_key.to_string(), value);
+                }
+            }
+        }
+        if !intent.contains_key("raw") {
+            if let Some(value) = map.remove("resolved_user_intent") {
+                intent.insert("raw".to_string(), value);
+            }
+        }
+        map = intent;
+        normalized = true;
+    }
+    canonicalize_schedule_intent_fields(map, normalized)
+}
+
+fn canonicalize_schedule_intent_fields(
+    mut map: serde_json::Map<String, Value>,
+    mut normalized: bool,
+) -> (Value, bool) {
+    for field in [
+        "kind",
+        "timezone",
+        "target_job_id",
+        "raw",
+        "reason",
+        "clarify_question",
+    ] {
+        normalized |= canonicalize_string_field(&mut map, field, "");
+    }
+    if !map.contains_key("needs_clarify") {
+        map.insert("needs_clarify".to_string(), Value::Bool(false));
+        normalized = true;
+    }
+    if !map.get("needs_clarify").is_some_and(Value::is_boolean) {
+        let value = map
+            .get("needs_clarify")
+            .and_then(Value::as_str)
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes"))
+            .unwrap_or(false);
+        map.insert("needs_clarify".to_string(), Value::Bool(value));
+        normalized = true;
+    }
+    normalized |= canonicalize_number_field(&mut map, "confidence", 0.0);
+    normalized |= canonicalize_schedule_value(&mut map);
+    normalized |= canonicalize_schedule_task_value(&mut map);
+    (Value::Object(map), normalized)
+}
+
+fn canonicalize_string_field(
+    map: &mut serde_json::Map<String, Value>,
+    field: &str,
+    default: &str,
+) -> bool {
+    match map.get_mut(field) {
+        Some(Value::String(_)) => false,
+        Some(Value::Null) | None => {
+            map.insert(field.to_string(), Value::String(default.to_string()));
+            true
+        }
+        Some(slot) => {
+            *slot = Value::String(schema_scalar_text(slot));
+            true
+        }
+    }
+}
+
+fn canonicalize_number_field(
+    map: &mut serde_json::Map<String, Value>,
+    field: &str,
+    default: f64,
+) -> bool {
+    let value = map.get(field).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str()?.trim().parse::<f64>().ok())
+    });
+    if let Some(value) = value.filter(|value| value.is_finite()) {
+        map.insert(field.to_string(), Value::from(value.clamp(0.0, 1.0)));
+        return true;
+    }
+    if !map.contains_key(field) {
+        map.insert(field.to_string(), Value::from(default));
+        return true;
+    }
+    false
+}
+
+fn canonicalize_schedule_value(map: &mut serde_json::Map<String, Value>) -> bool {
+    let mut normalized = false;
+    let schedule = map
+        .entry("schedule".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if let Value::String(raw) = schedule {
+        *schedule = serde_json::from_str::<Value>(raw)
+            .ok()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+        normalized = true;
+    }
+    if !schedule.is_object() {
+        *schedule = Value::Object(serde_json::Map::new());
+        normalized = true;
+    }
+    let Some(schedule) = schedule.as_object_mut() else {
+        return normalized;
+    };
+    for field in ["type", "run_at", "time", "cron"] {
+        normalized |= canonicalize_string_field(schedule, field, "");
+    }
+    for field in ["weekday", "every_minutes"] {
+        let value = schedule
+            .get(field)
+            .and_then(|value| {
+                value
+                    .as_i64()
+                    .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+            })
+            .unwrap_or(0);
+        schedule.insert(field.to_string(), Value::from(value));
+    }
+    normalized
+}
+
+fn canonicalize_schedule_task_value(map: &mut serde_json::Map<String, Value>) -> bool {
+    let message = map
+        .remove("message")
+        .map(|value| schema_scalar_text(&value));
+    let mut normalized = message.is_some();
+    let task = map
+        .entry("task".to_string())
+        .or_insert_with(|| schedule_task_value_from_message(message.as_deref().unwrap_or("")));
+    if let Value::String(raw) = task {
+        *task = schedule_task_value_from_message(raw);
+        return true;
+    }
+    if !task.is_object() {
+        *task = schedule_task_value_from_message(message.as_deref().unwrap_or(""));
+        return true;
+    }
+    let Some(task) = task.as_object_mut() else {
+        return normalized;
+    };
+    let has_payload = task.get("payload").is_some();
+    if !task.get("kind").is_some_and(Value::is_string) {
+        task.insert(
+            "kind".to_string(),
+            Value::String(if has_payload || message.is_some() {
+                "ask".to_string()
+            } else {
+                String::new()
+            }),
+        );
+        normalized = true;
+    }
+    match task.get_mut("payload") {
+        Some(Value::Object(_)) => {}
+        Some(Value::String(raw)) => {
+            let mut payload = serde_json::Map::new();
+            payload.insert("message".to_string(), Value::String(raw.trim().to_string()));
+            task.insert("payload".to_string(), Value::Object(payload));
+            normalized = true;
+        }
+        Some(Value::Null) | None => {
+            let mut payload = serde_json::Map::new();
+            if let Some(message) = message.as_deref().filter(|value| !value.is_empty()) {
+                payload.insert("message".to_string(), Value::String(message.to_string()));
+            }
+            task.insert("payload".to_string(), Value::Object(payload));
+            normalized = true;
+        }
+        Some(slot) => {
+            let mut payload = serde_json::Map::new();
+            payload.insert(
+                "message".to_string(),
+                Value::String(schema_scalar_text(slot)),
+            );
+            task.insert("payload".to_string(), Value::Object(payload));
+            normalized = true;
+        }
+    }
+    normalized
+}
+
+fn schedule_task_value_from_message(message: &str) -> Value {
+    let mut payload = serde_json::Map::new();
+    if !message.trim().is_empty() {
+        payload.insert(
+            "message".to_string(),
+            Value::String(message.trim().to_string()),
+        );
+    }
+    let mut task = serde_json::Map::new();
+    task.insert("kind".to_string(), Value::String("ask".to_string()));
+    task.insert("payload".to_string(), Value::Object(payload));
+    Value::Object(task)
+}
+
+fn schema_scalar_text(value: &Value) -> String {
+    value
+        .as_str()
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| value.to_string())
+}
+
 fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value, bool) {
     match (schema_id, value) {
         (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
@@ -405,6 +625,9 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
             (json!({ "steps": steps }), true)
         }
         (PromptSchemaId::PlanResult, Value::Object(map)) => canonicalize_plan_result_object(map),
+        (PromptSchemaId::ScheduleIntent, Value::Object(map)) => {
+            canonicalize_schedule_intent_schema_object(map)
+        }
         (PromptSchemaId::DirectAnswerGate, Value::Object(map)) => {
             canonicalize_direct_answer_gate_object(map)
         }
