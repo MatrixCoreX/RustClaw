@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-SWITCH_NAME = "agent_decides_semantic_route"
+PRIMARY_SWITCH_NAME = "semantic_route_authority"
+LEGACY_SWITCH_NAME = "agent_decides_semantic_route"
+ROUTE_DELTA_SWITCH_NAMES = {PRIMARY_SWITCH_NAME, LEGACY_SWITCH_NAME}
 PRE_PLANNER_PROMPTS = {
     "normalizer",
     "contract_repair",
@@ -47,6 +49,7 @@ COUNTER_FIELDS = (
     "finalizer_answer_shape_counts",
     "finalizer_answer_shape_class_counts",
     "event_counts",
+    "switch_name_counts",
     "outcome_counts",
     "decision_delta_counts",
     "old_first_layer_decision_counts",
@@ -418,6 +421,7 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
     finalizer_shape_class_counts: Counter[str] = Counter()
     event_counts: Counter[str] = Counter()
     outcome_counts: Counter[str] = Counter()
+    switch_name_counts: Counter[str] = Counter()
     decision_delta_counts: Counter[str] = Counter()
     old_decision_counts: Counter[str] = Counter()
     agent_decision_counts: Counter[str] = Counter()
@@ -542,9 +546,11 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
                 str(round_decision_envelope.get("validation_reason_code") or "not_recorded")
             ] += 1
         for item in rollout_items(obj):
-            if item.get("switch_name") != SWITCH_NAME:
+            switch_name = str(item.get("switch_name") or "")
+            if switch_name not in ROUTE_DELTA_SWITCH_NAMES:
                 continue
             attribution_items += 1
+            switch_name_counts[switch_name] += 1
             task = task_id(obj)
             if task:
                 tasks_with_items.add(task)
@@ -659,10 +665,12 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "run_dir": str(run_dir),
-        "switch_name": SWITCH_NAME,
+        "switch_names": sorted(ROUTE_DELTA_SWITCH_NAMES),
         "turn_files": len(paths),
         "parse_errors": parse_errors,
         "parse_error_examples": parse_error_examples,
+        "tasks_with_route_delta_items": len(tasks_with_items),
+        "route_delta_items": attribution_items,
         "tasks_with_agent_decides_items": len(tasks_with_items),
         "agent_decides_items": attribution_items,
         "status_counts": counter_json(status_counts),
@@ -700,6 +708,7 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
             "tool_call_count": total_tool_calls,
         },
         "event_counts": counter_json(event_counts),
+        "switch_name_counts": counter_json(switch_name_counts),
         "outcome_counts": counter_json(outcome_counts),
         "decision_delta_counts": counter_json(decision_delta_counts),
         "old_first_layer_decision_counts": counter_json(old_decision_counts),
@@ -804,11 +813,15 @@ def summarize_run_dirs(run_dirs: list[Path], max_examples: int) -> dict[str, Any
     summaries = [summarize_run(run_dir, max_examples) for run_dir in run_dirs]
     turn_files = sum(safe_int(summary.get("turn_files")) for summary in summaries)
     parse_errors = sum(safe_int(summary.get("parse_errors")) for summary in summaries)
-    agent_decides_items = sum(
-        safe_int(summary.get("agent_decides_items")) for summary in summaries
+    route_delta_items = sum(
+        safe_int(summary.get("route_delta_items") or summary.get("agent_decides_items"))
+        for summary in summaries
     )
     tasks_with_items = sum(
-        safe_int(summary.get("tasks_with_agent_decides_items"))
+        safe_int(
+            summary.get("tasks_with_route_delta_items")
+            or summary.get("tasks_with_agent_decides_items")
+        )
         for summary in summaries
     )
     total_llm_calls = sum(
@@ -876,12 +889,14 @@ def summarize_run_dirs(run_dirs: list[Path], max_examples: int) -> dict[str, Any
         "schema_version": 1,
         "run_dir": "multiple",
         "run_dirs": [str(run_dir) for run_dir in run_dirs],
-        "switch_name": SWITCH_NAME,
+        "switch_names": sorted(ROUTE_DELTA_SWITCH_NAMES),
         "turn_files": turn_files,
         "parse_errors": parse_errors,
         "parse_error_examples": parse_error_examples,
+        "tasks_with_route_delta_items": tasks_with_items,
+        "route_delta_items": route_delta_items,
         "tasks_with_agent_decides_items": tasks_with_items,
-        "agent_decides_items": agent_decides_items,
+        "agent_decides_items": route_delta_items,
         "llm": {
             "total_calls": total_llm_calls,
             "total_elapsed_ms": total_llm_elapsed_ms,
@@ -921,7 +936,7 @@ def main() -> int:
     parser.add_argument(
         "--require-items",
         action="store_true",
-        help="Exit non-zero when no agent_decides_semantic_route attribution was found.",
+        help="Exit non-zero when no route-delta attribution was found.",
     )
     args = parser.parse_args()
 
@@ -930,7 +945,7 @@ def main() -> int:
             raise SystemExit(f"run dir not found: {run_dir}")
     summary = summarize_run_dirs(args.run_dirs, max(args.max_examples, 0))
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2))
-    if args.require_items and summary["agent_decides_items"] <= 0:
+    if args.require_items and summary["route_delta_items"] <= 0:
         return 2
     return 0 if summary["parse_errors"] == 0 else 1
 

@@ -7,7 +7,7 @@ Each row targets one `case` number from a client-like continuous run and may
 assert only the fields that matter for that regression:
 
 ```json
-{"case": 12, "status": "succeeded", "first_layer": "planner_execute", "capability_any": ["filesystem.list_entries"], "executed_any": ["fs_basic"], "final_shape": "list"}
+{"case": 12, "status": "succeeded", "route_gate": "execute", "capability_any": ["filesystem.list_entries"], "executed_any": ["fs_basic"], "final_shape": "list"}
 ```
 
 Supported fields:
@@ -17,12 +17,12 @@ Supported fields:
 - `stop_signal_any`
 - `stop_failure_attribution`
 - `stop_failure_attribution_any`
-- `first_layer`
-- `first_layer_any`
-- `routed_mode`
-- `routed_mode_any`
 - `route_gate`
 - `route_gate_any`
+- `routed_mode`
+- `routed_mode_any`
+- `first_layer` (legacy compatibility assertion)
+- `first_layer_any` (legacy compatibility assertion)
 - `capability_any`
 - `planned_action_any`
 - `planned_action_all`
