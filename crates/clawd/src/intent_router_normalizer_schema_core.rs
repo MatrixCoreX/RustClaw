@@ -314,6 +314,7 @@ fn normalize_schedule_intent_for_schema(obj: &mut serde_json::Map<String, Value>
                 *value = Value::Null;
                 return;
             }
+            normalize_schedule_intent_object_for_schema(intent);
             for field in ["schedule", "task"] {
                 match intent.get_mut(field) {
                     Some(Value::Object(_)) => {}
@@ -358,6 +359,154 @@ fn normalize_schedule_intent_for_schema(obj: &mut serde_json::Map<String, Value>
             *value = Value::Null;
         }
     }
+}
+
+fn normalize_schedule_intent_object_for_schema(intent: &mut serde_json::Map<String, Value>) {
+    normalize_schedule_intent_string_field(intent, "kind");
+    normalize_schedule_intent_string_field(intent, "timezone");
+    normalize_schedule_intent_string_field(intent, "target_job_id");
+    normalize_schedule_intent_string_field(intent, "raw");
+    normalize_schedule_intent_string_field(intent, "reason");
+    normalize_schedule_intent_string_field(intent, "clarify_question");
+    normalize_bool_field_with_default(intent, "needs_clarify", false);
+    intent
+        .entry("needs_clarify".to_string())
+        .or_insert(Value::Bool(false));
+    normalize_confidence_field(intent, "confidence");
+    intent
+        .entry("confidence".to_string())
+        .or_insert_with(|| Value::from(0.0));
+    normalize_schedule_intent_schedule_field(intent);
+    normalize_schedule_intent_task_field(intent);
+}
+
+fn normalize_schedule_intent_string_field(
+    intent: &mut serde_json::Map<String, Value>,
+    field: &str,
+) {
+    match intent.get_mut(field) {
+        Some(Value::String(_)) => {}
+        Some(Value::Null) | None => {
+            intent.insert(field.to_string(), Value::String(String::new()));
+        }
+        Some(slot) => {
+            *slot = Value::String(scalar_json_value_text(slot).unwrap_or_default());
+        }
+    }
+}
+
+fn normalize_schedule_intent_schedule_field(intent: &mut serde_json::Map<String, Value>) {
+    let schedule = intent
+        .entry("schedule".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    match schedule {
+        Value::Object(schedule) => {
+            for field in ["type", "run_at", "time", "cron"] {
+                match schedule.get_mut(field) {
+                    Some(Value::String(_)) => {}
+                    Some(Value::Null) | None => {
+                        schedule.insert(field.to_string(), Value::String(String::new()));
+                    }
+                    Some(slot) => {
+                        *slot = Value::String(scalar_json_value_text(slot).unwrap_or_default());
+                    }
+                }
+            }
+            for field in ["weekday", "every_minutes"] {
+                let numeric = schedule
+                    .get(field)
+                    .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+                    .unwrap_or(0);
+                schedule.insert(field.to_string(), Value::from(numeric));
+            }
+        }
+        Value::String(raw) => {
+            *schedule = serde_json::from_str::<Value>(raw)
+                .ok()
+                .filter(Value::is_object)
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            if let Value::Object(schedule) = schedule {
+                for field in ["type", "run_at", "time", "cron"] {
+                    schedule
+                        .entry(field.to_string())
+                        .or_insert_with(|| Value::String(String::new()));
+                }
+                for field in ["weekday", "every_minutes"] {
+                    schedule.entry(field.to_string()).or_insert(Value::from(0));
+                }
+            }
+        }
+        _ => {
+            *schedule = Value::Object(serde_json::Map::new());
+        }
+    }
+}
+
+fn normalize_schedule_intent_task_field(intent: &mut serde_json::Map<String, Value>) {
+    let message = intent
+        .remove("message")
+        .and_then(|value| scalar_json_value_text(&value));
+    let task = intent
+        .entry("task".to_string())
+        .or_insert_with(|| schedule_task_from_message(message.as_deref().unwrap_or_default()));
+    match task {
+        Value::String(raw) => {
+            *task = schedule_task_from_message(raw);
+        }
+        Value::Object(task) => {
+            let has_payload = task.get("payload").is_some();
+            if !task.get("kind").is_some_and(Value::is_string) {
+                task.insert(
+                    "kind".to_string(),
+                    Value::String(if has_payload || message.is_some() {
+                        "ask".to_string()
+                    } else {
+                        String::new()
+                    }),
+                );
+            }
+            match task.get_mut("payload") {
+                Some(Value::Object(_)) => {}
+                Some(Value::String(raw)) => {
+                    let mut payload = serde_json::Map::new();
+                    payload.insert("message".to_string(), Value::String(raw.trim().to_string()));
+                    task.insert("payload".to_string(), Value::Object(payload));
+                }
+                Some(Value::Null) | None => {
+                    if let Some(message) = message.as_deref().filter(|value| !value.is_empty()) {
+                        let mut payload = serde_json::Map::new();
+                        payload.insert("message".to_string(), Value::String(message.to_string()));
+                        task.insert("payload".to_string(), Value::Object(payload));
+                    } else {
+                        task.insert("payload".to_string(), Value::Object(serde_json::Map::new()));
+                    }
+                }
+                Some(slot) => {
+                    let text = scalar_json_value_text(slot).unwrap_or_default();
+                    let mut payload = serde_json::Map::new();
+                    payload.insert("message".to_string(), Value::String(text));
+                    task.insert("payload".to_string(), Value::Object(payload));
+                }
+            }
+        }
+        _ => {
+            *task = schedule_task_from_message(message.as_deref().unwrap_or_default());
+        }
+    }
+}
+
+fn schedule_task_from_message(message: &str) -> Value {
+    let mut payload = serde_json::Map::new();
+    if !message.trim().is_empty() {
+        payload.insert(
+            "message".to_string(),
+            Value::String(message.trim().to_string()),
+        );
+    }
+    let mut task = serde_json::Map::new();
+    task.insert("kind".to_string(), Value::String("ask".to_string()));
+    task.insert("payload".to_string(), Value::Object(payload));
+    Value::Object(task)
 }
 
 fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
