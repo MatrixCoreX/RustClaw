@@ -95,7 +95,7 @@ semantic_route_authority = "agent_loop_default"
 # 兼容说明/Compatibility: 旧 `agent_decides_migration_class` 会被读取并映射到本字段；
 # 新配置不要再写旧字段名。
 # 用途/Purpose: registry 幂等/去重治理灰度开关；当前只接线读取，默认关闭.
-# 建议修改/Recommended change: 运行时消费已接入但默认关闭；500/2000 NL canary 通过前保持 false.
+# 建议修改/Recommended change: 运行时消费已接入但默认关闭；500 canary + 2100 safe aggregate 通过前保持 false.
 # 风险/Risk: 提前开启可能改变重复动作、外部副作用和查询收敛行为.
 registry_idempotency_guard = false
 # 用途/Purpose: selected agent-loop contracts 结构化证据强制门禁；只检查机器 evidence coverage.

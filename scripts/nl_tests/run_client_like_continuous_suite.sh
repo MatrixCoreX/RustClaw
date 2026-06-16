@@ -449,7 +449,7 @@ values = []
 for parent in (summary, trace):
     route = (parent or {}).get("route_result") or {}
     values.append(str(route.get("route_reason") or ""))
-    values.append(str(route.get("first_layer_decision") or ""))
+    values.append(str(route.get("route_gate_kind") or ""))
 values.append(str(summary.get("final_stop_signal") or ""))
 values.append(str(trace.get("final_stop_signal") or ""))
 joined = ";".join(values)
