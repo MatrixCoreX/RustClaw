@@ -99,6 +99,7 @@ use file_delivery::{
     prebind_direct_file_delivery_locator_before_deictic_guard,
     prebind_file_delivery_locator_from_recent_ordered_resolved_prompt,
     prebind_file_delivery_locator_from_resolved_prompt_path,
+    prebind_file_delivery_missing_locator_from_resolved_prompt_path,
     unbound_existing_file_delivery_route_should_force_clarify,
 };
 use locator_hint_binding::{
@@ -433,6 +434,11 @@ fn apply_ask_post_route(
         &session_snapshot,
     );
     prebind_file_delivery_locator_from_resolved_prompt_path(
+        state,
+        resolved_prompt,
+        &mut route_result,
+    );
+    prebind_file_delivery_missing_locator_from_resolved_prompt_path(
         state,
         resolved_prompt,
         &mut route_result,
