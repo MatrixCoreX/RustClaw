@@ -140,6 +140,36 @@ fn bound_current_workspace_count_does_not_trigger_unbound_fallback_guard() {
 }
 
 #[test]
+fn current_workspace_scope_marker_allows_root_hint_scalar_count() {
+    let root = make_temp_root("current_workspace_scope_marker_root_hint");
+    let mut route = executable_filename_route();
+    route.route_reason =
+        "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = root.display().to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "count direct workspace children and output only the number",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn bound_current_workspace_content_summary_does_not_trigger_unbound_fallback_guard() {
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
