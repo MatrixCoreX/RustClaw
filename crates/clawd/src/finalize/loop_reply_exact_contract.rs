@@ -66,7 +66,53 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
     }
+    if command_output_summary_allows_exact_observed_output(route) {
+        let Some((answer, summary)) = exact_contract_fallback_observed_answer(route, loop_state)
+        else {
+            return;
+        };
+        let answer = answer.trim();
+        if answer.is_empty()
+            || crate::finalize::parse_delivery_token(answer).is_some()
+            || crate::finalize::looks_like_planner_artifact(answer)
+            || crate::finalize::looks_like_internal_trace_artifact(answer)
+        {
+            return;
+        }
+        if delivery_messages
+            .last()
+            .is_some_and(|message| message.trim() == answer)
+        {
+            loop_state.last_user_visible_respond = Some(answer.to_string());
+            *finalizer_summary = Some(summary);
+            return;
+        }
+        info!(
+            "delivery exact_contract_command_output_summary_observed task_id={} previous={} observed={}",
+            task_id,
+            crate::truncate_for_log(
+                delivery_messages
+                    .last()
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            ),
+            crate::truncate_for_log(answer)
+        );
+        log_deterministic_delivery_record(
+            task_id,
+            "exact_contract_command_output_summary_observed",
+            "replaced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        delivery_messages.clear();
+        delivery_messages.push(answer.to_string());
+        loop_state.last_user_visible_respond = Some(answer.to_string());
+        *finalizer_summary = Some(summary);
+        return;
+    }
     if route_expects_synthesis_over_raw_observation(route)
+        && !command_output_summary_allows_exact_observed_output(route)
         && delivery_matches_latest_publishable_synthesis(loop_state, delivery_messages)
     {
         info!(
@@ -266,6 +312,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             && !(has_prior_step_error && allow_prior_step_error_replacement)
             && !scalar_value_contract
             && route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+            && !command_output_summary_allows_exact_observed_output(route)
             && planned_delivery_is_explicit_contractual_answer(route, synthesis)
         {
             info!(
@@ -290,6 +337,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && !(has_prior_step_error && allow_prior_step_error_replacement)
         && !scalar_value_contract
         && route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+        && !command_output_summary_allows_exact_observed_output(route)
         && !route_requires_observed_semantic_projection(route)
         && current_synthesis_satisfies_matrix_shape(
             task_id,
@@ -328,6 +376,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     if !current_delivery_is_publishable_synthesis
         && !scalar_value_contract
         && route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+        && !command_output_summary_allows_exact_observed_output(route)
         && delivery_messages
             .last()
             .is_some_and(|message| planned_delivery_is_explicit_contractual_answer(route, message))
@@ -411,31 +460,44 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         }
     }
     let synthetic_task = synthetic_task_for_matrix_shape_check(task_id);
-    let Some((answer, summary)) =
-        latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state)
-            .or_else(|| {
-                deterministic_matrix_observed_shape_answer(
-                    state,
-                    &synthetic_task,
-                    &route.resolved_intent,
-                    loop_state,
-                    agent_run_context,
-                )
-            })
-            .or_else(|| {
-                direct_quantity_comparison_from_compare_paths(
-                    state,
-                    &route.resolved_intent,
-                    loop_state,
-                    agent_run_context,
-                )
-            })
-            .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
-            .or_else(|| latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state))
-            .or_else(|| {
-                direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-            })
-            .or_else(|| exact_contract_fallback_observed_answer(route, loop_state))
+    let prefer_exact_observed_command_output =
+        command_output_summary_allows_exact_observed_output(route);
+    let observed_candidate = if prefer_exact_observed_command_output {
+        exact_contract_fallback_observed_answer(route, loop_state)
+    } else {
+        None
+    };
+    let Some((answer, summary)) = observed_candidate
+        .or_else(|| {
+            (!prefer_exact_observed_command_output)
+                .then(|| latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state))
+                .flatten()
+        })
+        .or_else(|| {
+            deterministic_matrix_observed_shape_answer(
+                state,
+                &synthetic_task,
+                &route.resolved_intent,
+                loop_state,
+                agent_run_context,
+            )
+        })
+        .or_else(|| {
+            direct_quantity_comparison_from_compare_paths(
+                state,
+                &route.resolved_intent,
+                loop_state,
+                agent_run_context,
+            )
+        })
+        .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
+        .or_else(|| {
+            (!prefer_exact_observed_command_output)
+                .then(|| latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state))
+                .flatten()
+        })
+        .or_else(|| direct_structured_observed_answer(Some(state), loop_state, agent_run_context))
+        .or_else(|| exact_contract_fallback_observed_answer(route, loop_state))
     else {
         return;
     };
@@ -523,8 +585,9 @@ fn exact_contract_fallback_observed_answer(
         .ok()
         .and_then(|value| exact_contract_answer_from_json(route, &value))
         .or_else(|| {
-            (route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput)
-                .then(|| body.to_string())
+            (route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+                || command_output_summary_allows_exact_observed_output(route))
+            .then(|| body.to_string())
         })
         .or_else(|| single_line_observation_answer(route, body))?;
     let candidate = match crate::output_contract_verifier::verify_output_contract(
@@ -558,6 +621,11 @@ fn exact_contract_fallback_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn command_output_summary_allows_exact_observed_output(route: &crate::RouteResult) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
 }
 
 fn exact_fallback_candidate_is_machine_grounded(

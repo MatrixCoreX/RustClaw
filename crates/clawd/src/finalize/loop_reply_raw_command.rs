@@ -600,5 +600,6 @@ pub(super) fn output_contract_requests_exact_delivery(route: &crate::RouteResult
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys
-    )
+    ) || (route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict)
 }

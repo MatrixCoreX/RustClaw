@@ -81,9 +81,9 @@ user_rpm = 20
 # 除非某个 skill 的专用配置文件明确提供并启用独立覆盖项，否则不要为每个文本 skill 单独指定模型。
 # Text skills use this global selection by default; per-skill text model overrides should be explicit and opt-in.
 # 默认模型名 / Default selected model.
-selected_model = "MiniMax-M3"
+selected_model = "mimo-v2.5-pro"
 # 默认厂商标识 / Default selected vendor.
-selected_vendor = "minimax"
+selected_vendor = "mimo"
 
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
@@ -219,7 +219,7 @@ timeout_seconds = 180
 # 风险/Risk: base_url、api_format、模型名必须与小米 MiMo 当前网关保持一致.
 [llm.mimo]
 api_key = ""
-base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 max_concurrency = 1
 model = "mimo-v2.5-pro"
 models = [
