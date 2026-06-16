@@ -1086,3 +1086,56 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
     );
     assert!(finalizer_summary.is_none());
 }
+
+#[test]
+fn strict_command_output_summary_prefers_exact_observed_command_output() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let observed = "/home/guagua/rustclaw\nguagua\nThinkPad-X1\n";
+    let synthesis =
+        "The current working directory is /home/guagua/rustclaw. The logged-in user is guagua. The hostname is ThinkPad-X1.";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", observed));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    let mut delivery_messages = vec![synthesis.to_string()];
+    let mut route = scalar_route_result();
+    route.resolved_intent =
+        "Run system commands and output each result on a separate line without summary."
+            .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-strict-command-output-summary",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(
+        delivery_messages,
+        vec!["/home/guagua/rustclaw\nguagua\nThinkPad-X1"]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("/home/guagua/rustclaw\nguagua\nThinkPad-X1")
+    );
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.format_ok),
+        Some(true)
+    );
+}
