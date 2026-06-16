@@ -1525,6 +1525,62 @@ fn normalizer_schema_normalization_drops_none_schedule_intent_object_with_string
 }
 
 #[test]
+fn normalizer_schema_normalization_preserves_create_schedule_intent_task_text() {
+    let raw = r#"{
+          "resolved_user_intent":"Create a daily reminder in the current conversation.",
+          "resume_behavior":"none",
+          "schedule_kind":"create",
+          "schedule_intent":{
+            "kind":"create",
+            "timezone":"Asia/Shanghai",
+            "schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},
+            "task":"daily reminder message",
+            "target_job_id":null,
+            "raw":"Create a daily reminder in the current conversation.",
+            "reason":"",
+            "needs_clarify":false,
+            "clarify_question":"",
+            "confidence":0.95
+          },
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"schedule fields are complete",
+          "confidence":0.95,
+          "decision":"planner_execute",
+          "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","semantic_kind":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"},
+          "turn_type":"task_request",
+          "target_task_policy":"standalone",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "");
+    let parsed = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("normalized schedule intent should validate")
+    .value;
+    let intent = parsed
+        .schedule_intent
+        .expect("create schedule intent should be preserved");
+    assert_eq!(intent.target_job_id, "");
+    assert_eq!(intent.task.kind, "ask");
+    assert_eq!(
+        intent
+            .task
+            .payload
+            .get("message")
+            .and_then(|value| value.as_str()),
+        Some("daily reminder message")
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_recovers_scalar_output_contract_answer_candidate() {
     let raw = r#"{
           "resolved_user_intent":"查询之前记住的测试编号",
