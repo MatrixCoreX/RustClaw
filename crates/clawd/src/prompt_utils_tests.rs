@@ -921,6 +921,46 @@ fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
 }
 
 #[test]
+fn schedule_intent_schema_canonicalizes_normalizer_envelope() {
+    let raw = r#"{
+      "resolved_user_intent":"Create a daily reminder in the current conversation.",
+      "resume_behavior":"none",
+      "schedule_kind":"create",
+      "schedule_intent":{
+        "timezone":"Asia/Shanghai",
+        "schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},
+        "message":"daily reminder message"
+      },
+      "needs_clarify":false,
+      "clarify_question":"",
+      "reason":"schedule fields are complete",
+      "confidence":0.93
+    }"#;
+    let validated = super::validate_against_schema::<crate::ScheduleIntentOutput>(
+        raw,
+        super::PromptSchemaId::ScheduleIntent,
+    )
+    .expect("schedule intent envelope should canonicalize")
+    .value;
+
+    assert_eq!(validated.kind, "create");
+    assert_eq!(validated.target_job_id, "");
+    assert_eq!(
+        validated.raw,
+        "Create a daily reminder in the current conversation."
+    );
+    assert_eq!(validated.task.kind, "ask");
+    assert_eq!(
+        validated
+            .task
+            .payload
+            .get("message")
+            .and_then(|value| value.as_str()),
+        Some("daily reminder message")
+    );
+}
+
+#[test]
 fn parse_llm_json_raw_or_any_with_repair_keeps_valid_json() {
     let raw = r#"{"decision":"direct_answer","confidence":0.9}"#;
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
