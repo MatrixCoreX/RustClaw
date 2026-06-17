@@ -1400,6 +1400,7 @@ class SmallScreenApp:
         self._llm_info_frame = None
         self._llm_info_pady = (0, 8)
         self._llm_join_in_progress = False
+        self._llm_join_epoch = 0
         self._llm_content = None
         self._llm_dot_labels = []
         self._llm_lobster_count = 0
@@ -3799,6 +3800,35 @@ class SmallScreenApp:
         self._cancel_llm_clear_job()
         self._llm_clear_job = self.root.after(5000, self._clear_llm_info_display)
 
+    def _llm_join_is_active(self):
+        return bool(self._llm_join_in_progress or getattr(self, "_llm_lobster_job", None))
+
+    def _bump_llm_join_epoch(self):
+        self._llm_join_epoch = int(getattr(self, "_llm_join_epoch", 0)) + 1
+        return self._llm_join_epoch
+
+    def _stop_llm_join_activity(self, clear_info=False):
+        self._bump_llm_join_epoch()
+        self._cancel_llm_clear_job()
+        self._stop_llm_animation()
+        self._llm_join_in_progress = False
+        self._llm_pubkey_loading = False
+        self._llm_signing = False
+        if clear_info:
+            self._clear_llm_info_display()
+        else:
+            self._llm_join_status = ""
+        try:
+            self._llm_join_btn.config(text=self._t("llm_join"))
+        except tk.TclError:
+            pass
+        try:
+            self._llm_test_btn.config(state=tk.NORMAL)
+        except tk.TclError:
+            pass
+        self._refresh_llm_join_button_state()
+        self._refresh_llm_pubkey_label()
+
     def _stop_llm_animation(self):
         if self._llm_lobster_job:
             try:
@@ -3819,10 +3849,13 @@ class SmallScreenApp:
         else:
             self._llm_dot_labels = []
         self._llm_lobster_count = 0
+        self._llm_matrix_cols = []
+        self._llm_matrix_max_rows = 0
 
     def _start_llm_test_join_flow(self):
-        if self._llm_join_in_progress:
+        if self._llm_join_is_active():
             return
+        join_epoch = self._bump_llm_join_epoch()
         self._cancel_llm_clear_job()
         self._stop_llm_animation()
         self._llm_join_in_progress = True
@@ -3840,8 +3873,12 @@ class SmallScreenApp:
 
         def worker():
             pubkey_hex, pubkey_error = read_slot0_pubkey_via_helper()
+            if join_epoch != self._llm_join_epoch:
+                return
             if not pubkey_hex:
                 def finish_pubkey_failed():
+                    if join_epoch != self._llm_join_epoch:
+                        return
                     self._stop_llm_animation()
                     self._llm_join_in_progress = False
                     self._llm_pubkey_loading = False
@@ -3868,6 +3905,8 @@ class SmallScreenApp:
             now_ts = int(time.time())
 
             def switch_to_signing():
+                if join_epoch != self._llm_join_epoch:
+                    return
                 self._llm_pubkey_loading = False
                 self._llm_pubkey_hex = pubkey_hex or ""
                 self._llm_pubkey_error = ""
@@ -3880,8 +3919,12 @@ class SmallScreenApp:
 
             self._post_ui(switch_to_signing)
             payload, sign_error = sign_unix_time_via_helper(now_ts)
+            if join_epoch != self._llm_join_epoch:
+                return
 
             def finish():
+                if join_epoch != self._llm_join_epoch:
+                    return
                 self._llm_join_in_progress = False
                 self._llm_pubkey_loading = False
                 self._llm_pubkey_hex = pubkey_hex or ""
@@ -3935,8 +3978,9 @@ class SmallScreenApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _start_llm_remote_join_flow(self):
-        if self._llm_join_in_progress:
+        if self._llm_join_is_active():
             return
+        join_epoch = self._bump_llm_join_epoch()
         self._cancel_llm_clear_job()
         self._stop_llm_animation()
         self._llm_join_in_progress = True
@@ -3954,8 +3998,12 @@ class SmallScreenApp:
 
         def worker():
             pubkey_hex, pubkey_error = read_slot0_pubkey_via_helper()
+            if join_epoch != self._llm_join_epoch:
+                return
             if not pubkey_hex:
                 def finish_pubkey_failed():
+                    if join_epoch != self._llm_join_epoch:
+                        return
                     self._finish_llm_remote_join_failed(pubkey_error or self._t("llm_pubkey_error"))
 
                 self._post_ui(finish_pubkey_failed)
@@ -3965,6 +4013,8 @@ class SmallScreenApp:
             node_error = ""
             if not nodes:
                 def finish_no_nodes():
+                    if join_epoch != self._llm_join_epoch:
+                        return
                     self._llm_pubkey_hex = pubkey_hex or ""
                     self._finish_llm_remote_join_failed(node_error or self._t("llm_remote_nodes_empty"))
 
@@ -3972,6 +4022,8 @@ class SmallScreenApp:
                 return
 
             def switch_to_requesting():
+                if join_epoch != self._llm_join_epoch:
+                    return
                 self._llm_pubkey_loading = False
                 self._llm_pubkey_hex = pubkey_hex or ""
                 self._llm_pubkey_error = ""
@@ -3981,8 +4033,12 @@ class SmallScreenApp:
             self._post_ui(switch_to_requesting)
 
             task, task_error = request_nni_join_task(self._auth_key, nodes)
+            if join_epoch != self._llm_join_epoch:
+                return
             if not task or not task.get("challenge"):
                 def finish_task_failed():
+                    if join_epoch != self._llm_join_epoch:
+                        return
                     self._finish_llm_remote_join_failed(task_error or "nni_join_challenge_missing")
 
                 self._post_ui(finish_task_failed)
@@ -3991,6 +4047,8 @@ class SmallScreenApp:
             challenge = str(task.get("challenge") or "").strip()
 
             def switch_to_signing():
+                if join_epoch != self._llm_join_epoch:
+                    return
                 self._llm_join_status = self._t("llm_remote_join_signing")
                 self._llm_signing = True
                 self._llm_signature_hex = ""
@@ -4002,9 +4060,13 @@ class SmallScreenApp:
             self._post_ui(switch_to_signing)
 
             payload, sign_error = sign_challenge_via_helper(challenge)
+            if join_epoch != self._llm_join_epoch:
+                return
             signature = str((payload or {}).get("signature") or "").strip()
             if not signature:
                 def finish_sign_failed():
+                    if join_epoch != self._llm_join_epoch:
+                        return
                     self._finish_llm_remote_join_failed(sign_error or "nni_join_signature_missing")
 
                 self._post_ui(finish_sign_failed)
@@ -4016,8 +4078,12 @@ class SmallScreenApp:
                 task.get("node_url"),
                 signature,
             )
+            if join_epoch != self._llm_join_epoch:
+                return
 
             def finish():
+                if join_epoch != self._llm_join_epoch:
+                    return
                 self._llm_join_in_progress = False
                 self._llm_pubkey_loading = False
                 self._llm_pubkey_hex = pubkey_hex or ""
@@ -4760,22 +4826,11 @@ class SmallScreenApp:
         self._llm_matrix_tick()
 
     def _on_llm_join_click(self):
-        """加入/停止：未运行时开始画龙虾点（每 0.5 秒一个），运行时停止并恢复按钮为加入。"""
+        """加入/停止：未运行时开始远端加入，运行中点击停止会结束签名或动画。"""
         if getattr(self, "_closing", False) or self._view_mode != "gallery":
             return
-        if self._llm_join_in_progress:
-            return
-        if self._llm_lobster_job:
-            self._stop_llm_animation()
-            self._clear_llm_info_display()
-            try:
-                self._llm_join_btn.config(text=self._t("llm_join"))
-            except tk.TclError:
-                pass
-            try:
-                self._llm_test_btn.config(state=tk.NORMAL)
-            except tk.TclError:
-                pass
+        if self._llm_join_is_active():
+            self._stop_llm_join_activity(clear_info=True)
             return
         if self._llm_remote_nodes_loading or not self._llm_remote_nodes:
             self._llm_info_hidden = False
@@ -4801,11 +4856,9 @@ class SmallScreenApp:
     def _on_llm_test_join_click(self):
         if getattr(self, "_closing", False) or self._view_mode != "gallery":
             return
-        if self._llm_join_in_progress:
+        if self._llm_join_is_active():
+            self._stop_llm_join_activity(clear_info=True)
             return
-        if self._llm_lobster_job:
-            self._stop_llm_animation()
-            self._clear_llm_info_display()
         for w in self._llm_content.winfo_children():
             w.destroy()
         self._llm_dot_labels.clear()
