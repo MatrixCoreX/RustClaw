@@ -1017,6 +1017,7 @@ export default function App() {
   const [localImportPickerOpen, setLocalImportPickerOpen] = useState(false);
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const fileImportInputRef = useRef<HTMLInputElement | null>(null);
+  const workspaceUpdateSilentFailuresRef = useRef(0);
   const [llmConfigLoading, setLlmConfigLoading] = useState(false);
   const [llmConfigError, setLlmConfigError] = useState<string | null>(null);
   const [llmConfigData, setLlmConfigData] = useState<LlmConfigResponse | null>(null);
@@ -1756,9 +1757,11 @@ export default function App() {
     }
   };
 
-  const fetchHealth = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchHealth = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await apiFetch(`/v1/health`);
       const body = (await res.json()) as ApiResponse<HealthResponse>;
@@ -1767,10 +1770,14 @@ export default function App() {
       }
       setHealth(body.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setError(message);
+      if (!options?.silent) {
+        const message = err instanceof Error ? err.message : "未知错误";
+        setError(message);
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -3096,6 +3103,13 @@ export default function App() {
       const res = await apiFetch("/v1/admin/workspace-update", { method: "POST" });
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
+        if (res.status === 409 && body.data) {
+          setWorkspaceUpdateStatus(body.data);
+          setWorkspaceUpdateMessage(
+            t("更新已经在进行中，下面会继续刷新现有进度。", "An update is already running. Existing progress will keep refreshing."),
+          );
+          return;
+        }
         throw new Error(body.error || `更新启动失败 (${res.status})`);
       }
       setWorkspaceUpdateStatus(body.data);
@@ -3596,9 +3610,22 @@ export default function App() {
     if (status !== "running" && status !== "restarting") return;
     const interval = window.setInterval(async () => {
       const next = await fetchWorkspaceUpdateStatus(true);
+      if (!next) {
+        workspaceUpdateSilentFailuresRef.current += 1;
+        if (status === "restarting" && workspaceUpdateSilentFailuresRef.current >= 3) {
+          setWorkspaceUpdateMessage(
+            t(
+              "RustClaw 可能仍在重启。你可以稍后点击“检查远端版本”确认服务是否恢复。",
+              "RustClaw may still be restarting. You can click Check remote shortly to confirm recovery.",
+            ),
+          );
+        }
+        return;
+      }
+      workspaceUpdateSilentFailuresRef.current = 0;
       if (next?.status === "restarting") {
         await sleep(1800);
-        await fetchHealth();
+        await fetchHealth({ silent: true });
       }
     }, 2500);
     return () => window.clearInterval(interval);
@@ -4525,12 +4552,20 @@ export default function App() {
       }),
     [health?.memory_rss_bytes, health?.uptime_seconds, isOnline],
   );
-  const workspaceUpdateRunning =
-    workspaceUpdateStatus?.status === "running" || workspaceUpdateStatus?.status === "restarting";
+  const workspaceUpdateRestarting = workspaceUpdateStatus?.status === "restarting";
+  const workspaceUpdateRunning = workspaceUpdateStatus?.status === "running" || workspaceUpdateRestarting;
   const workspaceUpdateHasRemoteDiff =
     Boolean(workspaceUpdateStatus?.old_commit) &&
     Boolean(workspaceUpdateStatus?.remote_commit) &&
     workspaceUpdateStatus?.old_commit !== workspaceUpdateStatus?.remote_commit;
+  const workspaceUpdateKnownUpToDate =
+    Boolean(workspaceUpdateStatus?.old_commit) &&
+    Boolean(workspaceUpdateStatus?.remote_commit) &&
+    workspaceUpdateStatus?.old_commit === workspaceUpdateStatus?.remote_commit &&
+    (workspaceUpdateStatus?.status === "idle" || workspaceUpdateStatus?.status === "up_to_date");
+  const workspaceUpdateDisplayStatus = workspaceUpdateKnownUpToDate
+    ? "up_to_date"
+    : workspaceUpdateStatus?.status;
   const workspaceUpdateStepLabel = (step?: string) => {
     const labels: Record<string, string> = {
       idle: t("空闲", "Idle"),
@@ -4572,6 +4607,50 @@ export default function App() {
   ]
     .filter(Boolean)
     .join("\n\n");
+  const workspaceUpdateNotice = (() => {
+    if (!workspaceUpdateStatus) return null;
+    if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.error) {
+      return {
+        tone: "error" as const,
+        title: workspaceUpdateStatus.error || t("更新失败", "Update failed"),
+        detail: t(
+          "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
+          "Check the log summary below, then fix Git, network, or build issues and retry.",
+        ),
+      };
+    }
+    if (workspaceUpdateRestarting) {
+      return {
+        tone: "success" as const,
+        title: t("构建已完成，RustClaw 正在重启。", "Build completed and RustClaw is restarting."),
+        detail: t(
+          "请等待 10-20 秒；如果页面没有自动恢复，可以稍后点击“检查远端版本”。",
+          "Wait 10-20 seconds. If the page does not recover automatically, click Check remote shortly.",
+        ),
+      };
+    }
+    if (workspaceUpdateStatus.status === "running") {
+      return {
+        tone: "info" as const,
+        title: workspaceUpdateStepLabel(workspaceUpdateStatus.step),
+        detail: t(
+          "更新流程正在进行，编译日志会在下方持续刷新。",
+          "The update is running. Build logs will keep refreshing below.",
+        ),
+      };
+    }
+    if (workspaceUpdateDisplayStatus === "up_to_date") {
+      return {
+        tone: "success" as const,
+        title: t("远端已经是最新版本。", "The remote version is up to date."),
+        detail: t(
+          "如需重新应用当前本地环境，仍可点击完整编译。",
+          "Use Build All if you need to re-apply the current local environment.",
+        ),
+      };
+    }
+    return null;
+  })();
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const isDashboardPage = currentPage === "dashboard";
 
@@ -5023,7 +5102,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => void fetchWorkspaceUpdateStatus(false)}
-                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        disabled={workspaceUpdateLoading || systemRestarting}
                         className="theme-topbar-btn px-3 py-2 text-sm"
                       >
                         {workspaceUpdateLoading && !workspaceUpdateRunning ? (
@@ -5061,7 +5140,7 @@ export default function App() {
                           );
                           if (confirmed) void restartSystem();
                         }}
-                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        disabled={workspaceUpdateLoading || workspaceUpdateStatus?.status === "running" || systemRestarting}
                         className="theme-secondary-btn px-3 py-2 text-sm"
                       >
                         {systemRestarting ? (
@@ -5095,16 +5174,16 @@ export default function App() {
                     <p className="text-[11px] tracking-[0.14em] text-white/45">{t("状态", "Status")}</p>
                     <p
                       className={`mt-2 text-sm font-semibold ${
-                        workspaceUpdateStatus?.status === "failed"
+                        workspaceUpdateDisplayStatus === "failed"
                           ? "text-red-200"
-                          : workspaceUpdateStatus?.status === "up_to_date"
+                          : workspaceUpdateDisplayStatus === "up_to_date"
                             ? "text-emerald-200"
                             : workspaceUpdateRunning
                             ? "text-sky-200"
                             : "text-white/90"
                       }`}
                     >
-                      {workspaceUpdateStatusLabel(workspaceUpdateStatus?.status)}
+                      {workspaceUpdateStatusLabel(workspaceUpdateDisplayStatus)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -5133,22 +5212,18 @@ export default function App() {
                   </div>
                 </div>
 
-                {workspaceUpdateStatus?.status === "up_to_date" ? (
-                  <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100">
-                    {workspaceUpdateStatus.next_step || t("远端已经是最新版本；如需应用当前本地环境，仍可点击完整编译。", "The remote version is up to date; use Build All if you need to apply the current local environment.")}
-                  </div>
-                ) : workspaceUpdateStatus?.error || workspaceUpdateStatus?.next_step ? (
-                  <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-3 text-sm text-red-100">
-                    {workspaceUpdateStatus.error ? (
-                      <p className="font-semibold">{workspaceUpdateStatus.error}</p>
-                    ) : null}
-                    {workspaceUpdateStatus.next_step ? (
-                      <p className="mt-1 text-red-100/80">{workspaceUpdateStatus.next_step}</p>
-                    ) : null}
-                  </div>
-                ) : workspaceUpdateStatus?.status === "restarting" ? (
-                  <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100">
-                    {t("构建已完成，RustClaw 正在重启。请等待 10-20 秒后刷新或观察首页状态恢复。", "Build completed and RustClaw is restarting. Wait 10-20 seconds, then refresh or watch Home recover.")}
+                {workspaceUpdateNotice ? (
+                  <div
+                    className={`mt-4 rounded-xl border px-3 py-3 text-sm ${
+                      workspaceUpdateNotice.tone === "error"
+                        ? "border-red-500/30 bg-red-500/10 text-red-100"
+                        : workspaceUpdateNotice.tone === "success"
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
+                          : "border-sky-400/25 bg-sky-400/10 text-sky-100"
+                    }`}
+                  >
+                    <p className="font-semibold">{workspaceUpdateNotice.title}</p>
+                    <p className="mt-1 opacity-80">{workspaceUpdateNotice.detail}</p>
                   </div>
                 ) : null}
 

@@ -71,14 +71,30 @@ async fn refresh_workspace_update_versions(
     .and_then(|out| first_output_line(&out.stdout_tail));
 
     let mut guard = shared.lock().unwrap();
-    if let Some(local_commit) = local_commit {
+    if let Some(local_commit) = local_commit.clone() {
         guard.old_commit = Some(local_commit.clone());
-        if guard.status == "idle" {
+        if matches!(guard.status.as_str(), "idle" | "up_to_date") {
             guard.new_commit = Some(local_commit);
         }
     }
-    if let Some(remote_commit) = remote_commit {
+    if let Some(remote_commit) = remote_commit.clone() {
         guard.remote_commit = Some(remote_commit);
+    }
+    if matches!(guard.status.as_str(), "idle" | "up_to_date") {
+        match (local_commit.as_deref(), remote_commit.as_deref()) {
+            (Some(local), Some(remote)) if local == remote => {
+                guard.status = "up_to_date".to_string();
+                guard.step = "already_latest".to_string();
+                guard.error = None;
+                guard.next_step = None;
+            }
+            (Some(_), Some(_)) => {
+                guard.status = "idle".to_string();
+                guard.step = "idle".to_string();
+                guard.next_step = None;
+            }
+            _ => {}
+        }
     }
     if let Some(out) = fetch_output {
         if out.exit_code != Some(0) && guard.status == "idle" {
