@@ -197,6 +197,25 @@
     color: var(--theme-icon-soft-color);
   }
 
+  .rustclaw-logo {
+    display: inline-block;
+    flex-shrink: 0;
+    border-radius: 0.75rem;
+    box-shadow:
+      0 8px 18px rgba(0, 0, 0, 0.18),
+      0 0 0 1px rgba(255, 255, 255, 0.16);
+  }
+
+  .rustclaw-logo-header {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .rustclaw-logo-hero {
+    width: 2.4rem;
+    height: 2.4rem;
+  }
+
   .theme-input {
     @apply w-full rounded-xl px-3 py-2 text-sm outline-none focus:ring-2;
     border: 1px solid var(--theme-border-strong);

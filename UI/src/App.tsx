@@ -4782,7 +4782,7 @@ export default function App() {
           <div className="theme-panel p-6 sm:p-8">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("欢迎", "Welcome")}</p>
             <h1 className="mt-4 flex items-center gap-2 text-2xl font-bold sm:text-3xl">
-              <span>🦞</span>
+              <img className="rustclaw-logo rustclaw-logo-hero" src="/rustclaw-logo.svg" alt="" />
               <span>{t("进入 RustClaw 控制台", "Enter RustClaw Console")}</span>
             </h1>
             <p className="mt-4 max-w-xl text-sm leading-7 text-white/70 sm:text-base">
@@ -5002,9 +5002,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => setCurrentPage("dashboard")}
-              className="theme-brand-link truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
+              className="theme-brand-link inline-flex items-center gap-2 truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
             >
-              RustClaw
+              <img className="rustclaw-logo rustclaw-logo-header" src="/rustclaw-logo.svg" alt="" />
+              <span>RustClaw</span>
             </button>
           </div>
 
