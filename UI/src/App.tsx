@@ -924,6 +924,18 @@ function nniPayloadHexField(payload?: NniDevicePayload | null): { label: string;
   return null;
 }
 
+const NNI_RUNTIME_TILES = Array.from({ length: 32 }, (_, index) => {
+  const random = (salt: number) => {
+    const value = Math.sin((index + 1) * (salt + 12.9898)) * 43758.5453;
+    return value - Math.floor(value);
+  };
+  return {
+    delay: -(random(1) * 2.8),
+    duration: 1.1 + random(2) * 1.9,
+    idleOpacity: 0.55 + random(3) * 0.25,
+  };
+});
+
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
@@ -5522,18 +5534,22 @@ export default function App() {
                     </span>
                   </div>
 
-                  <div className="mt-4 min-h-[180px] rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div
+                    className={`nni-runtime-board mt-4 min-h-[180px] rounded-2xl border p-4 ${
+                      nniJoined ? "nni-runtime-board-active" : "nni-runtime-board-idle"
+                    }`}
+                  >
                     <div className="grid h-full min-h-[148px] grid-cols-6 gap-2 sm:grid-cols-8">
-                      {Array.from({ length: 32 }).map((_, index) => (
+                      {NNI_RUNTIME_TILES.map((tile, index) => (
                         <div
                           key={index}
-                          className={`rounded-lg border ${
-                            nniJoined
-                              ? "border-emerald-400/30 bg-emerald-400/15"
-                              : "border-white/10 bg-white/5"
+                          className={`nni-runtime-tile rounded-lg border ${
+                            nniJoined ? "nni-runtime-tile-active" : "nni-runtime-tile-idle"
                           }`}
                           style={{
-                            opacity: nniJoined ? 0.38 + ((index % 6) * 0.1) : 0.75,
+                            animationDelay: `${tile.delay}s`,
+                            animationDuration: `${tile.duration}s`,
+                            opacity: nniJoined ? undefined : tile.idleOpacity,
                           }}
                         />
                       ))}

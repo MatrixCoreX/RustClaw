@@ -443,6 +443,78 @@
     color: var(--theme-text-soft);
   }
 
+  .nni-runtime-board {
+    border-color: var(--theme-border);
+    background:
+      radial-gradient(circle at 18% 12%, rgba(16, 185, 129, 0.12), transparent 30%),
+      rgba(0, 0, 0, 0.2);
+  }
+
+  .nni-runtime-board-active {
+    border-color: rgba(16, 185, 129, 0.22);
+    background:
+      radial-gradient(circle at 18% 12%, rgba(16, 185, 129, 0.18), transparent 30%),
+      radial-gradient(circle at 84% 70%, rgba(34, 197, 94, 0.12), transparent 32%),
+      rgba(0, 0, 0, 0.24);
+  }
+
+  .nni-runtime-tile {
+    min-height: 2rem;
+    transition:
+      background-color 180ms ease,
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      opacity 180ms ease,
+      transform 180ms ease;
+  }
+
+  .nni-runtime-tile-idle {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .nni-runtime-tile-active {
+    border-color: rgba(74, 222, 128, 0.34);
+    background: rgba(52, 211, 153, 0.18);
+    animation-name: nni-runtime-flicker;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    will-change: opacity, transform, box-shadow;
+  }
+
+  @keyframes nni-runtime-flicker {
+    0%,
+    100% {
+      opacity: 0.32;
+      transform: scale(0.98);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+    }
+    18% {
+      opacity: 0.9;
+      transform: scale(1);
+      box-shadow:
+        0 0 12px rgba(52, 211, 153, 0.2),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+    41% {
+      opacity: 0.48;
+      transform: scale(0.99);
+      box-shadow: 0 0 5px rgba(52, 211, 153, 0.08);
+    }
+    63% {
+      opacity: 1;
+      transform: scale(1.015);
+      box-shadow:
+        0 0 16px rgba(52, 211, 153, 0.28),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    }
+    81% {
+      opacity: 0.4;
+      transform: scale(0.985);
+      box-shadow: 0 0 4px rgba(52, 211, 153, 0.08);
+    }
+  }
+
   .setup-substep {
     @apply flex items-center justify-between gap-3 rounded-xl border px-3 py-2;
     border-color: rgba(255, 255, 255, 0.08);
@@ -618,6 +690,25 @@
 
   :root[data-theme="light"] .theme-service-action:hover {
     background: rgba(246, 247, 252, 1);
+  }
+
+  :root[data-theme="light"] .nni-runtime-board {
+    background:
+      radial-gradient(circle at 18% 12%, rgba(23, 122, 83, 0.08), transparent 30%),
+      rgba(255, 255, 255, 0.78);
+  }
+
+  :root[data-theme="light"] .nni-runtime-board-active {
+    border-color: rgba(23, 122, 83, 0.18);
+    background:
+      radial-gradient(circle at 18% 12%, rgba(23, 122, 83, 0.12), transparent 30%),
+      radial-gradient(circle at 84% 70%, rgba(34, 197, 94, 0.08), transparent 32%),
+      rgba(255, 255, 255, 0.88);
+  }
+
+  :root[data-theme="light"] .nni-runtime-tile-idle {
+    border-color: rgba(136, 145, 170, 0.18);
+    background: rgba(255, 255, 255, 0.75);
   }
 
   :root[data-theme="light"] .theme-meta-pill {
