@@ -175,3 +175,13 @@ def sign_unix_time_via_helper(unix_time):
     if payload and payload.get("signature"):
         return payload, ""
     return None, error or "sign failed"
+
+
+def sign_challenge_via_helper(challenge):
+    challenge_text = str(challenge or "").strip()
+    if not challenge_text:
+        return None, "challenge required"
+    payload, error = _run_signature_helper(["sign_challenge", challenge_text])
+    if payload and payload.get("signature"):
+        return payload, ""
+    return None, error or "sign failed"
