@@ -199,6 +199,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/llm/test", post(test_llm_config))
         .route("/nni/device/status", get(nni_device_status))
         .route("/nni/device/action", post(nni_device_action))
+        .route("/nni/join/request", post(nni_join_request))
+        .route("/nni/join/verify", post(nni_join_verify))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
@@ -295,10 +297,13 @@ struct NniDeviceActionRequest {
     action: String,
     #[serde(default)]
     timestamp: Option<i64>,
+    #[serde(default)]
+    challenge: Option<String>,
 }
 
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/nni_internal_llm.rs");
+include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/channel_config.rs");
 include!("ui_routes/logs_usage_debug.rs");

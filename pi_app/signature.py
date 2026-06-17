@@ -299,9 +299,25 @@ def sign_timestamp(cfg, lib_path, unix_time=None):
     }
 
 
+def sign_challenge(cfg, lib_path, challenge):
+    challenge_text = str(challenge or "").strip()
+    if not challenge_text:
+        raise RuntimeError("challenge required")
+    digest = hashlib.sha256(challenge_text.encode("utf-8")).digest()
+    signature = bytearray(64)
+    status = atcab_sign(_slot(), digest, signature)
+    if status != Status.ATCA_SUCCESS:
+        raise RuntimeError(f"sign failed on slot {_slot()}: {status}")
+    return {
+        "challenge": challenge_text,
+        "signature": hexs(signature),
+        **_config_meta(cfg, lib_path),
+    }
+
+
 def main():
     action = (sys.argv[1] if len(sys.argv) > 1 else "pubkey").strip().lower()
-    unix_time = sys.argv[2] if len(sys.argv) > 2 else None
+    action_arg = sys.argv[2] if len(sys.argv) > 2 else None
     cfg, lib_path = build_config()
     initialized = False
     try:
@@ -326,7 +342,9 @@ def main():
         elif action == "tng_root_cert":
             payload = get_tng_root_cert(cfg, lib_path)
         elif action == "sign_timestamp":
-            payload = sign_timestamp(cfg, lib_path, unix_time)
+            payload = sign_timestamp(cfg, lib_path, action_arg)
+        elif action == "sign_challenge":
+            payload = sign_challenge(cfg, lib_path, action_arg)
         else:
             raise RuntimeError(f"unsupported action: {action}")
 

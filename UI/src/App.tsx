@@ -382,6 +382,27 @@ interface NniDeviceActionResponse {
   meta?: NniDeviceMeta | null;
 }
 
+interface NniJoinTaskResponse {
+  status: string;
+  task_id: string;
+  challenge: string;
+  device_pubkey: string;
+  node_url: string;
+  expires_at_ts: number;
+  request_interval_seconds: number;
+}
+
+interface NniJoinVerifyResponse {
+  status: string;
+  task_id: string;
+  device_pubkey: string;
+  node_url: string;
+  compliant: boolean;
+  joined: boolean;
+  verified_at_ts: number;
+  next_allowed_ts: number;
+}
+
 interface WechatConfigResponse {
   config_path: string;
   enabled: boolean;
@@ -631,6 +652,7 @@ const STORAGE_KEYS = {
   lang: "rustclaw.monitor.lang",
   currentPage: "rustclaw.monitor.currentPage",
   themeMode: "rustclaw.monitor.themeMode",
+  nniRemoteNodes: "rustclaw.monitor.nniRemoteNodes",
 } as const;
 
 /** 根据当前页面地址推断 clawd API 的默认 baseUrl；获取不到主机名时用 127.0.0.1 */
@@ -1039,6 +1061,7 @@ export default function App() {
   const [nniActionError, setNniActionError] = useState<string | null>(null);
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniJoined, setNniJoined] = useState(false);
+  const [nniRemoteNodes, setNniRemoteNodes] = useState(() => window.localStorage.getItem(STORAGE_KEYS.nniRemoteNodes)?.trim() ?? "");
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -2517,7 +2540,7 @@ export default function App() {
     }
   };
 
-  const runNniDeviceAction = async (action: string, options?: { joinAfterSign?: boolean }) => {
+  const runNniDeviceAction = async (action: string, options?: { joinAfterSign?: boolean; challenge?: string }) => {
     setNniActionLoading(action);
     setNniActionError(null);
     setNniActionMessage(null);
@@ -2525,7 +2548,7 @@ export default function App() {
       const res = await apiFetch(`/v1/nni/device/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, challenge: options?.challenge }),
       });
       const body = (await res.json()) as ApiResponse<NniDeviceActionResponse>;
       if (!res.ok || !body.ok || !body.data) {
@@ -2576,7 +2599,70 @@ export default function App() {
     }
   };
 
+  const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
+    const nodeUrls = nniRemoteNodeUrls();
+    if (nodeUrls.length === 0) {
+      throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
+    }
+    const res = await apiFetch(`/v1/nni/join/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node_urls: nodeUrls }),
+    });
+    const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `NNI join request failed (${res.status})`);
+    }
+    return body.data;
+  };
+
+  const verifyNniJoinTask = async (taskId: string, nodeUrl: string, signature: string): Promise<NniJoinVerifyResponse | null> => {
+    const res = await apiFetch(`/v1/nni/join/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_id: taskId, node_url: nodeUrl, signature }),
+    });
+    const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `NNI join verify failed (${res.status})`);
+    }
+    return body.data;
+  };
+
+  const nniRemoteNodeUrls = () =>
+    nniRemoteNodes
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+  const testJoinNni = async () => {
+    const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!status?.signature_chip_present) {
+      setNniActionError(
+        status?.message ||
+          t(
+            "未检测到设备签名芯片，暂时不能执行 NNI 测试加入。",
+            "No device signature chip was detected, so this device cannot run the NNI test join yet.",
+          ),
+      );
+      setNniJoined(false);
+      return;
+    }
+    const result = await runNniDeviceAction("sign_timestamp", { joinAfterSign: true });
+    if (result?.payload?.signature) {
+      setNniActionMessage(
+        t(
+          "测试加入已完成：本机已生成时间戳签名，并在本页临时标记为已加入。",
+          "Test join completed: this device generated a timestamp signature and is temporarily marked as joined on this page.",
+        ),
+      );
+    }
+  };
+
   const joinNni = async () => {
+    setNniActionLoading("join_nni");
+    setNniActionError(null);
+    setNniActionMessage(null);
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
     if (!status?.signature_chip_present) {
       setNniActionError(
@@ -2587,9 +2673,38 @@ export default function App() {
           ),
       );
       setNniJoined(false);
+      setNniActionLoading(null);
       return;
     }
-    await runNniDeviceAction("sign_timestamp", { joinAfterSign: true });
+    try {
+      const task = await requestNniJoinTask();
+      if (!task?.challenge) {
+        throw new Error("nni_join_challenge_missing");
+      }
+      const signatureResult = await runNniDeviceAction("sign_challenge", { challenge: task.challenge });
+      const signature = signatureResult?.payload?.signature;
+      if (!signature) {
+        throw new Error("nni_join_signature_missing");
+      }
+      setNniActionLoading("join_nni");
+      const verified = await verifyNniJoinTask(task.task_id, task.node_url, signature);
+      if (!verified?.joined || !verified.compliant) {
+        throw new Error("nni_join_verify_rejected");
+      }
+      setNniJoined(true);
+      setNniActionMessage(
+        t(
+          "设备签名已通过服务端验证，NNI 已开始运行。",
+          "The device signature was verified by the server, and NNI is now running.",
+        ),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniActionError(message);
+      setNniJoined(false);
+    } finally {
+      setNniActionLoading(null);
+    }
   };
 
   const scrollToSkillRow = (skillName: string) => {
@@ -3576,6 +3691,10 @@ export default function App() {
   }, [currentPage]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.nniRemoteNodes, nniRemoteNodes);
+  }, [nniRemoteNodes]);
+
+  useEffect(() => {
     setLlmTestMessage(null);
     setLlmTestError(null);
   }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
@@ -4394,6 +4513,7 @@ export default function App() {
     const labels: Record<string, string> = {
       pubkey: t("读取 slot 0 公钥", "Read Slot 0 public key"),
       sign_timestamp: t("生成时间戳签名", "Sign current timestamp"),
+      sign_challenge: t("生成挑战签名", "Sign challenge"),
       tng_device_pubkey: t("读取 TNG 设备公钥", "Read TNG device public key"),
       tng_device_cert: t("读取设备证书", "Read device certificate"),
       tng_signer_cert: t("读取 signer 证书", "Read signer certificate"),
@@ -4404,6 +4524,7 @@ export default function App() {
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.signature_chip_present === false;
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
+  const nniRemoteNodeCount = nniRemoteNodeUrls().length;
   const pageMeta = useMemo(
     () => ({
       dashboard: {
@@ -5500,17 +5621,42 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => (nniJoined ? setNniJoined(false) : void joinNni())}
-                      disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                      disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing || (!nniJoined && nniRemoteNodeCount === 0)}
                       className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
                       title={
                         nniChipMissing
                           ? t("当前设备缺少签名芯片，不能加入需要设备签名的 NNI。", "This device has no signature chip, so it cannot join signed NNI.")
+                          : nniRemoteNodeCount === 0
+                            ? t("请先填写远程 NNI 节点地址。", "Enter a remote NNI node URL first.")
                           : undefined
                       }
                     >
-                      {nniActionLoading === "sign_timestamp" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      {["join_nni", "sign_challenge"].includes(nniActionLoading || "") ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="h-4 w-4" />
+                      )}
                       {nniJoined ? t("停止", "Stop") : t("加入", "Join")}
                     </button>
+                    {!nniJoined ? (
+                      <button
+                        type="button"
+                        onClick={() => void testJoinNni()}
+                        disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                        title={t(
+                          "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
+                          "Test join only signs a local timestamp and does not contact the remote NNI server.",
+                        )}
+                      >
+                        {nniActionLoading === "sign_timestamp" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <KeyRound className="h-4 w-4" />
+                        )}
+                        {t("测试加入", "Test Join")}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -5609,6 +5755,27 @@ export default function App() {
                     </span>
                   </div>
 
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
+                      {t("远程 NNI 节点", "Remote NNI nodes")}
+                    </label>
+                    <textarea
+                      className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
+                      placeholder={t(
+                        "例如：https://nni-node.example.com\n多个节点可以一行一个，系统会按顺序尝试。",
+                        "Example: https://nni-node.example.com\nUse one node per line. The system will try them in order.",
+                      )}
+                      value={nniRemoteNodes}
+                      onChange={(event) => setNniRemoteNodes(event.target.value)}
+                    />
+                    <p className="mt-2 text-xs leading-5 text-white/50">
+                      {t(
+                        "远程节点负责下发 challenge、验签并记录合规请求；本机只读取公钥和让安全芯片签名。",
+                        "Remote nodes issue challenges, verify signatures, and record compliant requests; this device only reads the public key and asks the secure chip to sign.",
+                      )}
+                    </p>
+                  </div>
+
                   <div
                     className={`nni-runtime-board mt-4 min-h-[180px] rounded-2xl border p-4 ${
                       nniJoined ? "nni-runtime-board-active" : "nni-runtime-board-idle"
@@ -5638,8 +5805,11 @@ export default function App() {
                           "This device has no signature chip, so it will not be marked as joined. Other RustClaw features remain available.",
                         )
                       : nniJoined
-                        ? t("时间戳签名已生成，本页将该设备标记为已加入。", "A timestamp signature was generated, so this page marks the device as joined.")
-                        : t("点击加入会读取设备状态并生成一次当前时间戳签名。", "Click Join to read device status and generate one signature for the current timestamp.")}
+                        ? t("服务端已验证设备签名，NNI 运行入口已开启。", "The server verified the device signature, and the NNI runtime entry is active.")
+                        : t(
+                            "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
+                            "Click Join to request a random challenge from the remote server and enable the runtime after verification. Test Join only signs a local timestamp and does not contact the remote server.",
+                          )}
                   </p>
                 </div>
               </section>
