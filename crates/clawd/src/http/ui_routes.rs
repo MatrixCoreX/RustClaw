@@ -199,6 +199,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/llm/test", post(test_llm_config))
         .route("/nni/device/status", get(nni_device_status))
         .route("/nni/device/action", post(nni_device_action))
+        .route("/nni/config", get(get_nni_config).post(update_nni_config))
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
         .route("/logs/latest", get(logs_latest))
