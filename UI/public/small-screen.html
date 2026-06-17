@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=480, height=320, initial-scale=1, user-scalable=no" />
+  <link rel="icon" type="image/svg+xml" href="/rustclaw-logo.svg" />
   <title>RustClaw 小屏</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,7 +16,8 @@
       padding: 8px;
       overflow: hidden;
     }
-    h1 { font-size: 16px; margin-bottom: 6px; color: #a0a0ff; }
+    h1 { display: flex; align-items: center; gap: 6px; font-size: 16px; margin-bottom: 6px; color: #a0a0ff; }
+    h1 img { width: 20px; height: 20px; border-radius: 6px; }
     .status { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
     .status.ok { color: #6f6; }
     .status.err { color: #f66; }
@@ -28,7 +30,7 @@
   </style>
 </head>
 <body>
-  <h1>RustClaw</h1>
+  <h1><img src="/rustclaw-logo.svg" alt="" />RustClaw</h1>
   <div id="status" class="status">加载中…</div>
   <div id="body" class="grid" style="display:none;">
     <div class="row"><span class="label">版本</span><span id="ver" class="val">--</span></div>
