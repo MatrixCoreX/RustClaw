@@ -8,10 +8,14 @@ import os
 import random
 import re
 import queue
+import errno
+import subprocess
 import sys
 import tkinter as tk
 import threading
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 
 from small_screen_assets import find_assets, find_image_dir, find_splash_image, list_gallery_images
@@ -53,7 +57,7 @@ from small_screen_config import (
     save_us_stock_page_visible,
     save_weather_page_visible,
 )
-from small_screen_cryptoauth_service import read_slot0_pubkey_via_helper, sign_unix_time_via_helper
+from small_screen_cryptoauth_service import read_slot0_pubkey_via_helper, sign_challenge_via_helper, sign_unix_time_via_helper
 from small_screen_formatters import (
     _fmt_signed_pct,
     _line_clamp_text,
@@ -508,6 +512,58 @@ def fetch_clawd_activity(user_key="", lang="CN", lines=300, log_limit=24, messag
         )
     except Exception as e:
         return None, None, str(e)
+
+
+def _api_response_data(raw):
+    body = json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw or "{}"))
+    if not isinstance(body, dict):
+        raise RuntimeError("invalid response")
+    if body.get("ok") is False:
+        raise RuntimeError(str(body.get("error") or "request failed"))
+    return body.get("data") or body
+
+
+def fetch_nni_remote_nodes(user_key=""):
+    try:
+        data = _api_response_data(localhost_api_request("GET", "/v1/nni/config", user_key))
+        nodes = data.get("remote_nodes") if isinstance(data, dict) else []
+        if not isinstance(nodes, list):
+            nodes = []
+        return [str(node).strip() for node in nodes if str(node or "").strip()], None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def request_nni_join_task(user_key="", node_urls=None):
+    payload = {"node_urls": list(node_urls or [])}
+    try:
+        raw = localhost_api_request(
+            "POST",
+            "/v1/nni/join/request",
+            user_key,
+            body=json.dumps(payload).encode("utf-8"),
+        )
+        return _api_response_data(raw), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def verify_nni_join_task(user_key="", task_id="", node_url="", signature=""):
+    payload = {
+        "task_id": str(task_id or "").strip(),
+        "node_url": str(node_url or "").strip(),
+        "signature": str(signature or "").strip(),
+    }
+    try:
+        raw = localhost_api_request(
+            "POST",
+            "/v1/nni/join/verify",
+            user_key,
+            body=json.dumps(payload).encode("utf-8"),
+        )
+        return _api_response_data(raw), None
+    except Exception as exc:
+        return None, str(exc)
 
 
 def fetch_clawd_log_summary(user_key="", lang="CN"):
@@ -1335,6 +1391,10 @@ class SmallScreenApp:
         self._llm_signature_hex = ""
         self._llm_signature_error = ""
         self._llm_signature_timestamp = ""
+        self._llm_signature_context = ""
+        self._llm_join_status = ""
+        self._llm_remote_nodes = []
+        self._llm_remote_nodes_loading = False
         self._llm_info_hidden = True
         self._llm_clear_job = None
         self._llm_info_frame = None
@@ -3603,9 +3663,12 @@ class SmallScreenApp:
             and not self._llm_signature_hex
             and not self._llm_pubkey_error
             and not self._llm_signature_error
+            and not self._llm_join_status
         ):
             return ""
         parts = []
+        if self._llm_join_status:
+            parts.append(str(self._llm_join_status).strip())
         if self._llm_pubkey_loading:
             parts.append(self._t("llm_pubkey_loading"))
         elif self._llm_pubkey_hex:
@@ -3626,8 +3689,13 @@ class SmallScreenApp:
                 self._llm_signature_hex[i:i + 32]
                 for i in range(0, len(self._llm_signature_hex), 32)
             ]
+            signature_label = (
+                self._t("llm_sign_challenge")
+                if self._llm_signature_context == "challenge"
+                else self._t("llm_sign_timestamp")
+            )
             parts.append(
-                self._t("llm_sign_timestamp") + f": {self._llm_signature_timestamp}\n"
+                signature_label + f": {self._llm_signature_timestamp}\n"
                 + self._t("llm_sign_signature") + ":\n"
                 + "\n".join(sig_chunks)
             )
@@ -3677,9 +3745,55 @@ class SmallScreenApp:
         self._llm_signature_hex = ""
         self._llm_signature_error = ""
         self._llm_signature_timestamp = ""
+        self._llm_signature_context = ""
+        self._llm_join_status = ""
         self._llm_signing = False
         self._llm_info_hidden = True
         self._refresh_llm_pubkey_label()
+
+    def _refresh_llm_join_button_state(self):
+        btn = getattr(self, "_llm_join_btn", None)
+        if not btn or not btn.winfo_exists():
+            return
+        if self._llm_join_in_progress or self._llm_lobster_job:
+            state = tk.NORMAL
+        elif self._llm_remote_nodes_loading or not self._llm_remote_nodes:
+            state = tk.DISABLED
+        else:
+            state = tk.NORMAL
+        try:
+            btn.config(state=state, disabledforeground=self._c("fg_dim"))
+        except tk.TclError:
+            pass
+
+    def _load_llm_remote_nodes_for_page(self):
+        if getattr(self, "_closing", False):
+            return
+        self._llm_remote_nodes = []
+        self._llm_remote_nodes_loading = True
+        self._llm_info_hidden = False
+        self._llm_join_status = self._t("llm_remote_nodes_loading")
+        self._refresh_llm_join_button_state()
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            nodes, error = fetch_nni_remote_nodes(self._auth_key)
+
+            def finish():
+                self._llm_remote_nodes_loading = False
+                self._llm_remote_nodes = list(nodes or [])
+                if self._llm_remote_nodes:
+                    self._llm_join_status = ""
+                    self._llm_info_hidden = True
+                else:
+                    self._llm_join_status = error or self._t("llm_remote_nodes_empty")
+                    self._llm_info_hidden = False
+                self._refresh_llm_join_button_state()
+                self._refresh_llm_pubkey_label()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _schedule_llm_info_clear(self):
         self._cancel_llm_clear_job()
@@ -3706,7 +3820,7 @@ class SmallScreenApp:
             self._llm_dot_labels = []
         self._llm_lobster_count = 0
 
-    def _start_llm_pubkey_and_sign_flow(self):
+    def _start_llm_test_join_flow(self):
         if self._llm_join_in_progress:
             return
         self._cancel_llm_clear_job()
@@ -3718,6 +3832,8 @@ class SmallScreenApp:
         self._llm_signature_hex = ""
         self._llm_signature_error = ""
         self._llm_signature_timestamp = ""
+        self._llm_signature_context = "timestamp"
+        self._llm_join_status = self._t("llm_test_join_status")
         self._llm_pubkey_loading = True
         self._llm_signing = False
         self._refresh_llm_pubkey_label()
@@ -3735,8 +3851,13 @@ class SmallScreenApp:
                     self._llm_signature_hex = ""
                     self._llm_signature_error = ""
                     self._llm_signature_timestamp = ""
+                    self._llm_signature_context = ""
                     try:
                         self._llm_join_btn.config(text=self._t("llm_join"))
+                    except tk.TclError:
+                        pass
+                    try:
+                        self._llm_test_btn.config(state=tk.NORMAL)
                     except tk.TclError:
                         pass
                     self._refresh_llm_pubkey_label()
@@ -3754,6 +3875,7 @@ class SmallScreenApp:
                 self._llm_signature_hex = ""
                 self._llm_signature_error = ""
                 self._llm_signature_timestamp = str(now_ts)
+                self._llm_signature_context = "timestamp"
                 self._refresh_llm_pubkey_label()
 
             self._post_ui(switch_to_signing)
@@ -3767,8 +3889,10 @@ class SmallScreenApp:
                 self._llm_signing = False
                 if payload:
                     self._llm_signature_timestamp = str(payload.get("timestamp") or now_ts)
+                    self._llm_signature_context = "timestamp"
                     self._llm_signature_hex = str(payload.get("signature") or "").strip()
                     self._llm_signature_error = ""
+                    self._llm_join_status = self._t("llm_test_join_done")
                     self._schedule_llm_info_clear()
                     if self._theme == "matrix":
                         self._llm_start_matrix_rain()
@@ -3786,13 +3910,22 @@ class SmallScreenApp:
                                 self._llm_join_btn.config(text=self._t("llm_join"))
                             except tk.TclError:
                                 pass
+                            try:
+                                self._llm_test_btn.config(state=tk.NORMAL)
+                            except tk.TclError:
+                                pass
                 else:
                     self._stop_llm_animation()
                     self._llm_signature_timestamp = str(now_ts)
+                    self._llm_signature_context = "timestamp"
                     self._llm_signature_hex = ""
                     self._llm_signature_error = (sign_error or "").strip()
                     try:
                         self._llm_join_btn.config(text=self._t("llm_join"))
+                    except tk.TclError:
+                        pass
+                    try:
+                        self._llm_test_btn.config(state=tk.NORMAL)
                     except tk.TclError:
                         pass
                 self._refresh_llm_pubkey_label()
@@ -3800,6 +3933,145 @@ class SmallScreenApp:
             self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _start_llm_remote_join_flow(self):
+        if self._llm_join_in_progress:
+            return
+        self._cancel_llm_clear_job()
+        self._stop_llm_animation()
+        self._llm_join_in_progress = True
+        self._llm_info_hidden = False
+        self._llm_pubkey_hex = ""
+        self._llm_pubkey_error = ""
+        self._llm_signature_hex = ""
+        self._llm_signature_error = ""
+        self._llm_signature_timestamp = ""
+        self._llm_signature_context = "challenge"
+        self._llm_join_status = self._t("llm_remote_join_loading")
+        self._llm_pubkey_loading = True
+        self._llm_signing = False
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            pubkey_hex, pubkey_error = read_slot0_pubkey_via_helper()
+            if not pubkey_hex:
+                def finish_pubkey_failed():
+                    self._finish_llm_remote_join_failed(pubkey_error or self._t("llm_pubkey_error"))
+
+                self._post_ui(finish_pubkey_failed)
+                return
+
+            nodes = list(getattr(self, "_llm_remote_nodes", []) or [])
+            node_error = ""
+            if not nodes:
+                def finish_no_nodes():
+                    self._llm_pubkey_hex = pubkey_hex or ""
+                    self._finish_llm_remote_join_failed(node_error or self._t("llm_remote_nodes_empty"))
+
+                self._post_ui(finish_no_nodes)
+                return
+
+            def switch_to_requesting():
+                self._llm_pubkey_loading = False
+                self._llm_pubkey_hex = pubkey_hex or ""
+                self._llm_pubkey_error = ""
+                self._llm_join_status = self._t("llm_remote_join_requesting")
+                self._refresh_llm_pubkey_label()
+
+            self._post_ui(switch_to_requesting)
+
+            task, task_error = request_nni_join_task(self._auth_key, nodes)
+            if not task or not task.get("challenge"):
+                def finish_task_failed():
+                    self._finish_llm_remote_join_failed(task_error or "nni_join_challenge_missing")
+
+                self._post_ui(finish_task_failed)
+                return
+
+            challenge = str(task.get("challenge") or "").strip()
+
+            def switch_to_signing():
+                self._llm_join_status = self._t("llm_remote_join_signing")
+                self._llm_signing = True
+                self._llm_signature_hex = ""
+                self._llm_signature_error = ""
+                self._llm_signature_timestamp = challenge[:16] + ("..." if len(challenge) > 16 else "")
+                self._llm_signature_context = "challenge"
+                self._refresh_llm_pubkey_label()
+
+            self._post_ui(switch_to_signing)
+
+            payload, sign_error = sign_challenge_via_helper(challenge)
+            signature = str((payload or {}).get("signature") or "").strip()
+            if not signature:
+                def finish_sign_failed():
+                    self._finish_llm_remote_join_failed(sign_error or "nni_join_signature_missing")
+
+                self._post_ui(finish_sign_failed)
+                return
+
+            verified, verify_error = verify_nni_join_task(
+                self._auth_key,
+                task.get("task_id"),
+                task.get("node_url"),
+                signature,
+            )
+
+            def finish():
+                self._llm_join_in_progress = False
+                self._llm_pubkey_loading = False
+                self._llm_pubkey_hex = pubkey_hex or ""
+                self._llm_pubkey_error = ""
+                self._llm_signing = False
+                self._llm_signature_timestamp = challenge[:16] + ("..." if len(challenge) > 16 else "")
+                self._llm_signature_context = "challenge"
+                self._llm_signature_hex = signature
+                if verified and verified.get("joined") and verified.get("compliant"):
+                    self._llm_signature_error = ""
+                    self._llm_join_status = self._t("llm_remote_join_verified")
+                    if self._theme == "matrix":
+                        self._llm_start_matrix_rain()
+                    else:
+                        if self._llm_lobster_photo is None:
+                            self._llm_lobster_photo = self._llm_load_lobster_icon()
+                        if self._llm_lobster_photo:
+                            self._llm_lobster_tick()
+                    self._schedule_llm_info_clear()
+                else:
+                    self._llm_signature_error = (verify_error or "nni_join_verify_rejected").strip()
+                    self._llm_join_status = self._t("llm_remote_join_failed")
+                    self._stop_llm_animation()
+                    try:
+                        self._llm_join_btn.config(text=self._t("llm_join"))
+                    except tk.TclError:
+                        pass
+                    try:
+                        self._llm_test_btn.config(state=tk.NORMAL)
+                    except tk.TclError:
+                        pass
+                self._refresh_llm_pubkey_label()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_llm_remote_join_failed(self, error):
+        self._stop_llm_animation()
+        self._llm_join_in_progress = False
+        self._llm_pubkey_loading = False
+        self._llm_signing = False
+        self._llm_signature_hex = ""
+        self._llm_signature_error = str(error or "request failed").strip()
+        self._llm_join_status = self._t("llm_remote_join_failed")
+        try:
+            self._llm_join_btn.config(text=self._t("llm_join"))
+        except tk.TclError:
+            pass
+        try:
+            self._llm_test_btn.config(state=tk.NORMAL)
+        except tk.TclError:
+            pass
+        self._refresh_llm_pubkey_label()
 
     def _load_llm_pubkey(self, force=False):
         if self._llm_pubkey_loading:
@@ -4401,6 +4673,12 @@ class SmallScreenApp:
                 command=self._on_llm_join_click, padx=12, pady=4
             )
             self._llm_join_btn.pack(side=tk.RIGHT)
+            self._llm_test_btn = tk.Button(
+                title_row, text=self._t("llm_test_join"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+                activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
+                command=self._on_llm_test_join_click, padx=10, pady=4
+            )
+            self._llm_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
             llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
             self._llm_info_frame = llm_info
             self._llm_info_pady = (0, 6)
@@ -4417,6 +4695,7 @@ class SmallScreenApp:
             )
             self._llm_pubkey_label.pack(fill=tk.X)
             self._clear_llm_info_display()
+            self._load_llm_remote_nodes_for_page()
             self._llm_content.pack(fill=tk.BOTH, expand=True)
             return
         # 非 Matrix：标题行 + 加入/停止按钮，再内容区
@@ -4432,6 +4711,12 @@ class SmallScreenApp:
             command=self._on_llm_join_click, padx=12, pady=4
         )
         self._llm_join_btn.pack(side=tk.RIGHT)
+        self._llm_test_btn = tk.Button(
+            title_row, text=self._t("llm_test_join"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
+            command=self._on_llm_test_join_click, padx=10, pady=4
+        )
+        self._llm_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
         llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
         self._llm_info_frame = llm_info
         self._llm_info_pady = (0, 8)
@@ -4448,6 +4733,7 @@ class SmallScreenApp:
         )
         self._llm_pubkey_label.pack(fill=tk.X)
         self._clear_llm_info_display()
+        self._load_llm_remote_nodes_for_page()
         self._llm_content.pack(fill=tk.BOTH, expand=True)
 
     def _llm_start_matrix_rain(self):
@@ -4486,13 +4772,50 @@ class SmallScreenApp:
                 self._llm_join_btn.config(text=self._t("llm_join"))
             except tk.TclError:
                 pass
+            try:
+                self._llm_test_btn.config(state=tk.NORMAL)
+            except tk.TclError:
+                pass
+            return
+        if self._llm_remote_nodes_loading or not self._llm_remote_nodes:
+            self._llm_info_hidden = False
+            self._llm_join_status = (
+                self._t("llm_remote_nodes_loading")
+                if self._llm_remote_nodes_loading
+                else self._t("llm_remote_nodes_empty")
+            )
+            self._refresh_llm_join_button_state()
+            self._refresh_llm_pubkey_label()
             return
         for w in self._llm_content.winfo_children():
             w.destroy()
         self._llm_dot_labels.clear()
         self._llm_lobster_count = 0
         self._llm_join_btn.config(text=self._t("llm_stop"))
-        self._start_llm_pubkey_and_sign_flow()
+        try:
+            self._llm_test_btn.config(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+        self._start_llm_remote_join_flow()
+
+    def _on_llm_test_join_click(self):
+        if getattr(self, "_closing", False) or self._view_mode != "gallery":
+            return
+        if self._llm_join_in_progress:
+            return
+        if self._llm_lobster_job:
+            self._stop_llm_animation()
+            self._clear_llm_info_display()
+        for w in self._llm_content.winfo_children():
+            w.destroy()
+        self._llm_dot_labels.clear()
+        self._llm_lobster_count = 0
+        self._llm_join_btn.config(text=self._t("llm_stop"))
+        try:
+            self._llm_test_btn.config(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+        self._start_llm_test_join_flow()
 
     def _llm_load_lobster_icon(self):
         """从 scripts/assets 加载 lobster.png 或 lobster.gif，缩成小图标，透明处叠到深色底（无白底）。"""
