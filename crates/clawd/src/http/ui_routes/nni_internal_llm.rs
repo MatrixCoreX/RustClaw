@@ -6,6 +6,7 @@ fn nni_supported_actions() -> Vec<&'static str> {
         "tng_device_cert",
         "tng_signer_cert",
         "tng_root_cert",
+        "sign_challenge",
     ]
 }
 
@@ -269,6 +270,16 @@ async fn nni_device_action(
     let mut args = vec![action.clone()];
     if action == "sign_timestamp" {
         args.push(req.timestamp.unwrap_or_else(current_unix_ts).to_string());
+    } else if action == "sign_challenge" {
+        let challenge = req
+            .challenge
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(challenge) = challenge else {
+            return api_error_value(StatusCode::BAD_REQUEST, "nni_challenge_required");
+        };
+        args.push(challenge.to_string());
     }
 
     match run_nni_signature_helper(&state, &args).await {
