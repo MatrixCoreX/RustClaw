@@ -1,5 +1,17 @@
 const NNI_REMOTE_JOIN_TIMEOUT_SECONDS: u64 = 20;
 
+#[derive(Debug, Serialize)]
+struct NniConfigResponse {
+    remote_nodes: Vec<String>,
+    config_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NniConfigUpdateRequest {
+    #[serde(default)]
+    remote_nodes: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct NniLocalJoinRequest {
     #[serde(default)]
@@ -23,6 +35,91 @@ struct NniRemoteJoinRequest {
 struct NniRemoteJoinVerifyRequest {
     task_id: String,
     signature: String,
+}
+
+async fn get_nni_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<NniConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    match read_nni_config(&state) {
+        Ok(config) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(config),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("nni_config_read_failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn update_nni_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<NniConfigUpdateRequest>,
+) -> (StatusCode, Json<ApiResponse<NniConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    let remote_nodes = match normalize_nni_node_urls(&req.remote_nodes) {
+        Ok(urls) => urls,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(err.to_string()),
+                }),
+            );
+        }
+    };
+
+    match write_nni_config(&state, &remote_nodes) {
+        Ok(config) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(config),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("nni_config_write_failed: {err}")),
+            }),
+        ),
+    }
 }
 
 async fn nni_join_request(
@@ -269,6 +366,50 @@ fn normalize_nni_node_url(raw: &str) -> Result<String, &'static str> {
         .strip_suffix("/v1")
         .unwrap_or(trimmed)
         .to_string())
+}
+
+fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
+    let path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+    let parsed: toml::Value =
+        toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let remote_nodes = parsed
+        .get("nni")
+        .and_then(|value| value.get("remote_nodes"))
+        .and_then(toml_value_string_list)
+        .map(|values| normalize_nni_node_urls(&values).unwrap_or_default())
+        .unwrap_or_default();
+    Ok(NniConfigResponse {
+        remote_nodes,
+        config_path: path.display().to_string(),
+    })
+}
+
+fn write_nni_config(state: &AppState, remote_nodes: &[String]) -> anyhow::Result<NniConfigResponse> {
+    let path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+    let rendered_nodes = toml::Value::Array(
+        remote_nodes
+            .iter()
+            .map(|node| toml::Value::String(node.clone()))
+            .collect(),
+    )
+    .to_string();
+    let output = upsert_section_key_line(&raw, "nni", "remote_nodes", &rendered_nodes);
+    write_runtime_config_file(state, &output)?;
+    Ok(NniConfigResponse {
+        remote_nodes: remote_nodes.to_vec(),
+        config_path: path.display().to_string(),
+    })
+}
+
+fn toml_value_string_list(value: &toml::Value) -> Option<Vec<String>> {
+    value.as_array().map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
 }
 
 fn nni_join_error(
