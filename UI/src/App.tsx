@@ -403,6 +403,11 @@ interface NniJoinVerifyResponse {
   next_allowed_ts: number;
 }
 
+interface NniConfigResponse {
+  remote_nodes: string[];
+  config_path: string;
+}
+
 interface WechatConfigResponse {
   config_path: string;
   enabled: boolean;
@@ -652,7 +657,6 @@ const STORAGE_KEYS = {
   lang: "rustclaw.monitor.lang",
   currentPage: "rustclaw.monitor.currentPage",
   themeMode: "rustclaw.monitor.themeMode",
-  nniRemoteNodes: "rustclaw.monitor.nniRemoteNodes",
 } as const;
 
 /** 根据当前页面地址推断 clawd API 的默认 baseUrl；获取不到主机名时用 127.0.0.1 */
@@ -1061,7 +1065,11 @@ export default function App() {
   const [nniActionError, setNniActionError] = useState<string | null>(null);
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniJoined, setNniJoined] = useState(false);
-  const [nniRemoteNodes, setNniRemoteNodes] = useState(() => window.localStorage.getItem(STORAGE_KEYS.nniRemoteNodes)?.trim() ?? "");
+  const [nniRemoteNodes, setNniRemoteNodes] = useState("");
+  const [nniConfigLoading, setNniConfigLoading] = useState(false);
+  const [nniConfigSaving, setNniConfigSaving] = useState(false);
+  const [nniConfigError, setNniConfigError] = useState<string | null>(null);
+  const [nniConfigMessage, setNniConfigMessage] = useState<string | null>(null);
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -2635,6 +2643,49 @@ export default function App() {
       .map((value) => value.trim())
       .filter(Boolean);
 
+  const fetchNniConfig = async () => {
+    setNniConfigLoading(true);
+    setNniConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/nni/config`);
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI config load failed (${res.status})`);
+      }
+      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      setNniConfigMessage(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniConfigError(message);
+    } finally {
+      setNniConfigLoading(false);
+    }
+  };
+
+  const saveNniConfig = async () => {
+    setNniConfigSaving(true);
+    setNniConfigError(null);
+    setNniConfigMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ remote_nodes: nniRemoteNodeUrls() }),
+      });
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI config save failed (${res.status})`);
+      }
+      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      setNniConfigMessage(t("远程 NNI 节点已保存到配置文件。", "Remote NNI nodes were saved to the config file."));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniConfigError(message);
+    } finally {
+      setNniConfigSaving(false);
+    }
+  };
+
   const testJoinNni = async () => {
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
     if (!status?.signature_chip_present) {
@@ -3627,6 +3678,7 @@ export default function App() {
     void fetchSkillsConfig();
     void fetchLlmConfig();
     void fetchMultimodalConfig();
+    void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiAuthReady]);
@@ -3691,10 +3743,6 @@ export default function App() {
   }, [currentPage]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEYS.nniRemoteNodes, nniRemoteNodes);
-  }, [nniRemoteNodes]);
-
-  useEffect(() => {
     setLlmTestMessage(null);
     setLlmTestError(null);
   }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
@@ -3713,6 +3761,7 @@ export default function App() {
     void fetchFeishuConfig();
     void fetchTelegramConfig();
     void fetchLlmConfig();
+    void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady]);
@@ -5599,7 +5648,7 @@ export default function App() {
                     <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">Network Native Intelligence</p>
                     <h3 className="mt-2 flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
                       <Network className="h-6 w-6 theme-icon-accent" />
-                      <span>{t("NNI 分布式模型", "NNI Distributed Model")}</span>
+                      <span>{t("NNI 网络原生智能", "NNI Network-Native Intelligence")}</span>
                     </h3>
                     <p className="mt-3 text-sm leading-7 text-white/70">
                       {t(
@@ -5757,9 +5806,31 @@ export default function App() {
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
-                    <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
-                      {t("远程 NNI 节点", "Remote NNI nodes")}
-                    </label>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
+                        {t("远程 NNI 节点", "Remote NNI nodes")}
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void fetchNniConfig()}
+                          disabled={nniConfigLoading || nniConfigSaving}
+                          className="theme-secondary-btn px-3 py-1.5 text-xs"
+                        >
+                          {nniConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                          {t("重新载入", "Reload")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveNniConfig()}
+                          disabled={nniConfigLoading || nniConfigSaving}
+                          className="theme-accent-btn px-3 py-1.5 text-xs"
+                        >
+                          {nniConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                          {t("保存节点", "Save nodes")}
+                        </button>
+                      </div>
+                    </div>
                     <textarea
                       className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
                       placeholder={t(
@@ -5767,14 +5838,20 @@ export default function App() {
                         "Example: https://nni-node.example.com\nUse one node per line. The system will try them in order.",
                       )}
                       value={nniRemoteNodes}
-                      onChange={(event) => setNniRemoteNodes(event.target.value)}
+                      onChange={(event) => {
+                        setNniRemoteNodes(event.target.value);
+                        setNniConfigMessage(null);
+                        setNniConfigError(null);
+                      }}
                     />
                     <p className="mt-2 text-xs leading-5 text-white/50">
                       {t(
-                        "远程节点负责下发 challenge、验签并记录合规请求；本机只读取公钥和让安全芯片签名。",
-                        "Remote nodes issue challenges, verify signatures, and record compliant requests; this device only reads the public key and asks the secure chip to sign.",
+                        "远程节点会保存到 configs/config.toml；下次打开页面会自动载入。远程节点负责下发 challenge、验签并记录合规请求。",
+                        "Remote nodes are saved to configs/config.toml and loaded automatically next time. Remote nodes issue challenges, verify signatures, and record compliant requests.",
                       )}
                     </p>
+                    {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
+                    {nniConfigError ? <p className="mt-2 break-words text-xs text-red-200">{nniConfigError}</p> : null}
                   </div>
 
                   <div
