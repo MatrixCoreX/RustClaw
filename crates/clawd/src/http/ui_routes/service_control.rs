@@ -582,6 +582,145 @@ async fn restart_system(
     }
 }
 
+async fn pi_app_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let model = raspberry_pi_model();
+    let script_path = state.skill_rt.workspace_root.join("pi_app/run-small-screen.sh");
+    let script_exists = script_path.exists();
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "available": model.is_some() && script_exists,
+                "is_raspberry_pi": model.is_some(),
+                "model": model,
+                "script_exists": script_exists,
+            })),
+            error: None,
+        }),
+    )
+}
+
+async fn restart_pi_app(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can restart Pi App".to_string()),
+            }),
+        );
+    }
+
+    let Some(model) = raspberry_pi_model() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: Some(json!({
+                    "status": "unsupported_platform",
+                    "is_raspberry_pi": false,
+                })),
+                error: Some("pi_app_restart_unavailable".to_string()),
+            }),
+        );
+    };
+
+    match schedule_pi_app_restart(&state) {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "status": "restarting",
+                    "model": model,
+                    "log": "logs/pi-app-restart.log",
+                })),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(err),
+            }),
+        ),
+    }
+}
+
+fn raspberry_pi_model() -> Option<String> {
+    for path in [
+        "/proc/device-tree/model",
+        "/sys/firmware/devicetree/base/model",
+    ] {
+        if let Ok(raw) = fs::read_to_string(path) {
+            let model = raw.trim_matches(char::from(0)).trim().to_string();
+            if model.to_ascii_lowercase().contains("raspberry pi") {
+                return Some(model);
+            }
+        }
+    }
+    if let Ok(raw) = fs::read_to_string("/proc/cpuinfo") {
+        let lower = raw.to_ascii_lowercase();
+        if lower.contains("raspberry pi") {
+            let model = raw
+                .lines()
+                .find_map(|line| line.split_once(':').and_then(|(key, value)| {
+                    key.trim()
+                        .eq_ignore_ascii_case("model")
+                        .then(|| value.trim().to_string())
+                }))
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "Raspberry Pi".to_string());
+            return Some(model);
+        }
+    }
+    None
+}
+
+fn schedule_pi_app_restart(state: &AppState) -> Result<(), String> {
+    let pi_app_dir = state.skill_rt.workspace_root.join("pi_app");
+    let script_path = pi_app_dir.join("run-small-screen.sh");
+    if !script_path.exists() {
+        return Err("pi_app/run-small-screen.sh not found".to_string());
+    }
+    let workspace = state.skill_rt.workspace_root.to_string_lossy();
+    let pi_app = pi_app_dir.to_string_lossy();
+    let script = format!(
+        "cd {} && mkdir -p logs && (pkill -TERM -f '[r]ustclaw_small_screen.py|[r]ustclaw-small-screen' >/dev/null 2>&1 || true); sleep 1; cd {} && DISPLAY=${{DISPLAY:-:0}} nohup ./run-small-screen.sh > ../logs/pi-app-restart.log 2>&1 &",
+        shell_escape_arg(workspace.as_ref()),
+        shell_escape_arg(pi_app.as_ref())
+    );
+    let mut cmd = StdCommand::new("nohup");
+    cmd.arg("bash")
+        .arg("-c")
+        .arg(&script)
+        .current_dir(&state.skill_rt.workspace_root)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null());
+    if let Err(err) = cmd.spawn() {
+        return Err(format!("failed to schedule Pi App restart: {err}"));
+    }
+    Ok(())
+}
+
 fn schedule_binary_restart_with_start_all(state: &AppState) -> Result<(), String> {
     let script_path = state.skill_rt.workspace_root.join("start-all-bin.sh");
     if !script_path.exists() {
