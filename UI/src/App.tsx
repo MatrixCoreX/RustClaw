@@ -121,6 +121,13 @@ interface WorkspaceUpdateStatus {
   next_step?: string | null;
 }
 
+interface PiAppStatusResponse {
+  available: boolean;
+  is_raspberry_pi: boolean;
+  model?: string | null;
+  script_exists?: boolean;
+}
+
 interface LocalInteractionContextResponse {
   user_id: number;
   chat_id: number;
@@ -1079,6 +1086,9 @@ export default function App() {
   const [modelsAdvancedOpen, setModelsAdvancedOpen] = useState(false);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
+  const [piAppStatus, setPiAppStatus] = useState<PiAppStatusResponse | null>(null);
+  const [piAppRestarting, setPiAppRestarting] = useState(false);
+  const [piAppRestartMessage, setPiAppRestartMessage] = useState<string | null>(null);
   const [workspaceUpdateStatus, setWorkspaceUpdateStatus] = useState<WorkspaceUpdateStatus | null>(null);
   const [workspaceUpdateLoading, setWorkspaceUpdateLoading] = useState(false);
   const [workspaceUpdateMessage, setWorkspaceUpdateMessage] = useState<string | null>(null);
@@ -3356,6 +3366,38 @@ export default function App() {
     }
   };
 
+  const fetchPiAppStatus = async () => {
+    try {
+      const res = await apiFetch(`/v1/pi-app/status`);
+      const body = (await res.json()) as ApiResponse<PiAppStatusResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Pi App status failed (${res.status})`);
+      }
+      setPiAppStatus(body.data);
+    } catch {
+      setPiAppStatus(null);
+    }
+  };
+
+  const restartPiApp = async () => {
+    setPiAppRestarting(true);
+    setPiAppRestartMessage(null);
+    try {
+      const res = await apiFetch(`/v1/pi-app/restart`, { method: "POST" });
+      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `Pi App restart failed (${res.status})`);
+      }
+      setPiAppRestartMessage(t("已发起 Pi App 小程序重启。", "Pi App restart requested."));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setPiAppRestartMessage(`${t("Pi App 重启失败", "Pi App restart failed")}: ${message}`);
+    } finally {
+      setPiAppRestarting(false);
+      void fetchPiAppStatus();
+    }
+  };
+
   const fetchLatestLog = async () => {
     setLogLoading(true);
     setLogError(null);
@@ -3769,6 +3811,7 @@ export default function App() {
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity) return;
     void fetchWorkspaceUpdateStatus(true);
+    void fetchPiAppStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady, isAdminIdentity]);
 
@@ -5321,6 +5364,30 @@ export default function App() {
                         )}
                         {systemRestarting ? t("重启中", "Restarting") : t("重启 RustClaw", "Restart RustClaw")}
                       </button>
+                      {piAppStatus?.available ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const confirmed = window.confirm(
+                              t(
+                                "现在重启 Pi App 小程序？小屏界面会短暂关闭后重新打开。",
+                                "Restart the Pi App now? The small-screen app will close briefly and reopen.",
+                              ),
+                            );
+                            if (confirmed) void restartPiApp();
+                          }}
+                          disabled={piAppRestarting || systemRestarting}
+                          className="theme-secondary-btn px-3 py-2 text-sm"
+                          title={piAppStatus.model || undefined}
+                        >
+                          {piAppRestarting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          {piAppRestarting ? t("重启中", "Restarting") : t("重启 Pi App", "Restart Pi App")}
+                        </button>
+                      ) : null}
                     </div>
                   ) : (
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/55">
@@ -5337,6 +5404,11 @@ export default function App() {
                 {systemRestartMessage ? (
                   <p className="mt-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
                     {systemRestartMessage}
+                  </p>
+                ) : null}
+                {piAppRestartMessage ? (
+                  <p className="mt-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                    {piAppRestartMessage}
                   </p>
                 ) : null}
 

@@ -214,6 +214,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/:service/:action", post(control_service))
         .route("/system/restart", post(restart_system))
+        .route("/pi-app/status", get(pi_app_status))
+        .route("/pi-app/restart", post(restart_pi_app))
         .route(
             "/admin/workspace-update",
             get(get_workspace_update).post(start_workspace_update),
