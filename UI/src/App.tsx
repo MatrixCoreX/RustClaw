@@ -957,6 +957,22 @@ function nniPayloadHexField(payload?: NniDevicePayload | null): { label: string;
   return null;
 }
 
+function findNniJoinErrorCode(data?: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const record = data as Record<string, unknown>;
+  const directError = typeof record.error === "string" ? record.error : null;
+  if (directError) return directError;
+  const status = typeof record.status === "string" ? record.status : null;
+  if (status === "public_key_not_allowlisted" || status === "public_key_whitelist_empty") return status;
+  if (Array.isArray(record.attempts)) {
+    for (const attempt of record.attempts) {
+      const attemptCode = findNniJoinErrorCode(attempt);
+      if (attemptCode) return attemptCode;
+    }
+  }
+  return null;
+}
+
 const NNI_RUNTIME_TILES = Array.from({ length: 32 }, (_, index) => {
   const random = (salt: number) => {
     const value = Math.sin((index + 1) * (salt + 12.9898)) * 43758.5453;
@@ -2617,6 +2633,24 @@ export default function App() {
     }
   };
 
+  const nniJoinErrorMessage = (error: string | undefined, data: unknown, fallback: string) => {
+    const remoteCode = findNniJoinErrorCode(data);
+    const code = remoteCode || error;
+    if (code === "nni_pubkey_not_allowlisted" || code === "public_key_not_allowlisted") {
+      return t(
+        "本机公钥必须是白名单合规公钥。请读取并复制本机公钥，确认远程 NNI 服务端白名单已允许该公钥后再重试。",
+        "The local public key must be compliant with the whitelist. Read and copy this device public key, confirm the remote NNI server allows it, then retry.",
+      );
+    }
+    if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
+      return t(
+        "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请先配置白名单后再重试。",
+        "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; configure the whitelist, then retry.",
+      );
+    }
+    return error || fallback;
+  };
+
   const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
     const nodeUrls = nniRemoteNodeUrls();
     if (nodeUrls.length === 0) {
@@ -2629,7 +2663,7 @@ export default function App() {
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(body.error || `NNI join request failed (${res.status})`);
+      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join request failed (${res.status})`));
     }
     return body.data;
   };
@@ -2642,7 +2676,7 @@ export default function App() {
     });
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(body.error || `NNI join verify failed (${res.status})`);
+      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join verify failed (${res.status})`));
     }
     return body.data;
   };
@@ -5724,8 +5758,8 @@ export default function App() {
                     </h3>
                     <p className="mt-3 text-sm leading-7 text-white/70">
                       {t(
-                        "这里管理 Pi App 里的 NNI 入口和设备签名能力。普通设备可以只查看状态；带安全芯片的设备可以读取公钥、生成时间戳签名，并查看 TNG 证书链。",
-                        "This page manages the NNI entry from the Pi App and device signing. Regular devices can simply check status; devices with a secure chip can read the public key, create timestamp signatures, and inspect the TNG certificate chain.",
+                        "这里管理 Pi App 里的 NNI 入口和设备签名能力。普通设备可以只查看状态；带安全芯片的设备可以读取公钥、生成时间戳签名，并查看 TNG 证书链。加入时，本机公钥必须是白名单合规公钥。",
+                        "This page manages the NNI entry from the Pi App and device signing. Regular devices can simply check status; devices with a secure chip can read the public key, create timestamp signatures, and inspect the TNG certificate chain. To join, the local public key must be compliant with the whitelist.",
                       )}
                     </p>
                   </div>
@@ -5918,8 +5952,8 @@ export default function App() {
                     />
                     <p className="mt-2 text-xs leading-5 text-white/50">
                       {t(
-                        "远程节点会保存到 configs/config.toml；下次打开页面会自动载入。远程节点负责下发 challenge、验签并记录合规请求。",
-                        "Remote nodes are saved to configs/config.toml and loaded automatically next time. Remote nodes issue challenges, verify signatures, and record compliant requests.",
+                        "远程节点会保存到 configs/config.toml；下次打开页面会自动载入。远程节点负责下发 challenge、验签并记录合规请求。本机公钥必须是白名单合规公钥。",
+                        "Remote nodes are saved to configs/config.toml and loaded automatically next time. Remote nodes issue challenges, verify signatures, and record compliant requests. The local public key must be compliant with the whitelist.",
                       )}
                     </p>
                     {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
@@ -5957,8 +5991,8 @@ export default function App() {
                       : nniJoined
                         ? t("服务端已验证设备签名，NNI 运行入口已开启。", "The server verified the device signature, and the NNI runtime entry is active.")
                         : t(
-                            "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
-                            "Click Join to request a random challenge from the remote server and enable the runtime after verification. Test Join only signs a local timestamp and does not contact the remote server.",
+                            "点击加入会向远程服务端请求一次随机挑战。本机公钥必须是白名单合规公钥，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
+                            "Click Join to request a random challenge from the remote server. The local public key must be compliant with the whitelist, and the runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
                           )}
                   </p>
                 </div>
