@@ -44,6 +44,10 @@ import {
   type FeishuBindSessionResponse,
 } from "./lib/feishu-bind";
 import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
+import {
+  buildTaskLifecycleView,
+  type TaskLifecycleProjection,
+} from "./lib/task-lifecycle";
 
 interface ApiResponse<T> {
   ok: boolean;
@@ -100,6 +104,7 @@ interface TaskQueryResponse {
   status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "timeout";
   result_json?: unknown | null;
   error_text?: string | null;
+  lifecycle?: TaskLifecycleProjection | null;
 }
 
 interface SubmitTaskResponse {
@@ -4899,6 +4904,7 @@ export default function App() {
     return null;
   })();
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
+  const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const isDashboardPage = currentPage === "dashboard";
 
   if (!uiAuthReady) {
@@ -7969,6 +7975,32 @@ export default function App() {
                         <p className="text-red-200">{taskResult.error_text || "--"}</p>
                       </div>
                     </div>
+                    {taskLifecycleView ? (
+                      <div
+                        className={`mt-4 rounded-xl border px-3 py-3 ${
+                          taskLifecycleView.tone === "ok"
+                            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-50"
+                            : taskLifecycleView.tone === "running"
+                              ? "border-sky-400/25 bg-sky-500/10 text-sky-50"
+                              : taskLifecycleView.tone === "attention"
+                                ? "border-amber-400/25 bg-amber-500/10 text-amber-50"
+                                : "border-red-400/25 bg-red-500/10 text-red-50"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold">{t("执行状态", "Runtime lifecycle")}</p>
+                          <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{taskLifecycleView.stateLabel}</span>
+                        </div>
+                        <p className="mt-1 text-sm opacity-80">{taskLifecycleView.detail}</p>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {taskLifecycleView.meta.map((item) => (
+                            <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {taskOutcome ? (
                       <div
                         className={`mt-4 rounded-xl border px-3 py-3 ${
