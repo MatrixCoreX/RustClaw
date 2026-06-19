@@ -2649,8 +2649,8 @@ export default function App() {
     }
     if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
       return t(
-        "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请先配置白名单后再重试。",
-        "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; configure the whitelist, then retry.",
+        "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请确定你是合法设备以后再重试。",
+        "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; confirm this is an authorized device, then retry.",
       );
     }
     return error || fallback;
