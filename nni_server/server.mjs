@@ -10,6 +10,7 @@ const JOIN_TASK_TTL_SECONDS = 600;
 const HOST = process.env.NNI_SERVER_HOST || "0.0.0.0";
 const PORT = Number.parseInt(process.env.NNI_SERVER_PORT || "8797", 10);
 const STATE_PATH = process.env.NNI_SERVER_STATE_PATH || "data/nni-server-state.json";
+const PUBLIC_KEY_WHITELIST_ENV = "NNI_SERVER_PUBLIC_KEY_WHITELIST";
 
 function nowTs() {
   return Math.floor(Date.now() / 1000);
@@ -20,6 +21,7 @@ function emptyState() {
     tasks: {},
     devices: {},
     requests: [],
+    public_key_whitelist: configuredPublicKeyWhitelist(),
   };
 }
 
@@ -31,6 +33,7 @@ async function loadState() {
       tasks: parsed.tasks && typeof parsed.tasks === "object" ? parsed.tasks : {},
       devices: parsed.devices && typeof parsed.devices === "object" ? parsed.devices : {},
       requests: Array.isArray(parsed.requests) ? parsed.requests : [],
+      public_key_whitelist: loadPublicKeyWhitelist(parsed),
     };
   } catch (error) {
     if (error && error.code === "ENOENT") return emptyState();
@@ -81,6 +84,108 @@ function normalizeHex(value, expectedBytes, codePrefix) {
     throw new Error(`${codePrefix}_hex_invalid`);
   }
   return normalized;
+}
+
+function normalizePublicKeyHex(value) {
+  return normalizeHex(value, 64, "nni_pubkey");
+}
+
+function normalizePublicKeyWhitelist(values) {
+  const normalized = [];
+  const seen = new Set();
+  for (const value of values) {
+    const pubkey = normalizePublicKeyHex(value);
+    if (!seen.has(pubkey)) {
+      seen.add(pubkey);
+      normalized.push(pubkey);
+    }
+  }
+  return normalized;
+}
+
+function parsePublicKeyWhitelistEnv() {
+  const raw = process.env[PUBLIC_KEY_WHITELIST_ENV] || "";
+  if (!raw.trim()) return [];
+  return normalizePublicKeyWhitelist(raw.split(/[\s,;]+/).filter(Boolean));
+}
+
+function configuredPublicKeyWhitelist() {
+  return parsePublicKeyWhitelistEnv();
+}
+
+function loadPublicKeyWhitelist(parsed) {
+  let rawStateList = [];
+  if (Object.hasOwn(parsed, "public_key_whitelist")) {
+    if (!Array.isArray(parsed.public_key_whitelist)) {
+      throw new Error("nni_public_key_whitelist_invalid");
+    }
+    rawStateList = parsed.public_key_whitelist;
+  } else if (Object.hasOwn(parsed, "public_key_allowlist")) {
+    if (!Array.isArray(parsed.public_key_allowlist)) {
+      throw new Error("nni_public_key_whitelist_invalid");
+    }
+    rawStateList = parsed.public_key_allowlist;
+  }
+  return normalizePublicKeyWhitelist([
+    ...rawStateList,
+    ...configuredPublicKeyWhitelist(),
+  ]);
+}
+
+function publicKeyWhitelistDecision(state, devicePubkey) {
+  const whitelist = Array.isArray(state.public_key_whitelist) ? state.public_key_whitelist : [];
+  if (whitelist.length === 0) {
+    return {
+      allowed: false,
+      error_code: "nni_public_key_whitelist_empty",
+      status: "public_key_whitelist_empty",
+      message_key: "nni.join.public_key_whitelist_empty",
+    };
+  }
+  if (!whitelist.includes(devicePubkey)) {
+    return {
+      allowed: false,
+      error_code: "nni_pubkey_not_allowlisted",
+      status: "public_key_not_allowlisted",
+      message_key: "nni.join.public_key_not_allowlisted",
+    };
+  }
+  return {
+    allowed: true,
+    error_code: null,
+    status: "public_key_allowed",
+    message_key: "nni.join.public_key_allowed",
+  };
+}
+
+function recordWhitelistBlock(
+  state,
+  { task = null, userKey, devicePubkey, signature = null, ts, errorCode },
+) {
+  state.requests.push({
+    id: state.requests.length + 1,
+    task_id: task?.task_id || null,
+    user_key: userKey,
+    device_pubkey: devicePubkey,
+    challenge: task?.challenge || null,
+    signature,
+    compliant: false,
+    status: "blocked",
+    error_code: errorCode,
+    created_at_ts: ts,
+  });
+}
+
+function sendWhitelistBlock(res, decision, devicePubkey) {
+  sendJson(
+    res,
+    403,
+    fail(decision.error_code, {
+      status: decision.status,
+      message_key: decision.message_key,
+      device_pubkey: devicePubkey,
+    }),
+  );
 }
 
 function base64url(bytes) {
@@ -143,7 +248,7 @@ function deviceKey(userKey, devicePubkey) {
 async function handleJoinRequest(res, body) {
   let devicePubkey;
   try {
-    devicePubkey = normalizeHex(body.device_pubkey, 64, "nni_pubkey");
+    devicePubkey = normalizePublicKeyHex(body.device_pubkey);
   } catch (error) {
     sendJson(res, 400, fail(error.message, { status: "device_pubkey_invalid" }));
     return;
@@ -152,6 +257,19 @@ async function handleJoinRequest(res, body) {
   const userKey = String(body.client_user_key || "anonymous").trim() || "anonymous";
   const state = await loadState();
   const ts = nowTs();
+  const whitelistDecision = publicKeyWhitelistDecision(state, devicePubkey);
+  if (!whitelistDecision.allowed) {
+    recordWhitelistBlock(state, {
+      userKey,
+      devicePubkey,
+      ts,
+      errorCode: whitelistDecision.error_code,
+    });
+    await saveState(state);
+    sendWhitelistBlock(res, whitelistDecision, devicePubkey);
+    return;
+  }
+
   const lastTs = latestTaskTs(state, userKey, devicePubkey);
   if (lastTs != null && ts - lastTs < JOIN_REQUEST_INTERVAL_SECONDS) {
     const nextAllowedTs = lastTs + JOIN_REQUEST_INTERVAL_SECONDS;
@@ -226,6 +344,23 @@ async function handleJoinVerify(res, body) {
   }
 
   const ts = nowTs();
+  const whitelistDecision = publicKeyWhitelistDecision(state, task.device_pubkey);
+  if (!whitelistDecision.allowed) {
+    task.status = "rejected";
+    task.error_code = whitelistDecision.error_code;
+    recordWhitelistBlock(state, {
+      task,
+      userKey: task.user_key,
+      devicePubkey: task.device_pubkey,
+      signature,
+      ts,
+      errorCode: whitelistDecision.error_code,
+    });
+    await saveState(state);
+    sendWhitelistBlock(res, whitelistDecision, task.device_pubkey);
+    return;
+  }
+
   if (task.status === "verified") {
     sendJson(
       res,
