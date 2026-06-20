@@ -448,6 +448,26 @@ pub(crate) struct AuthKeyListRow {
     pub(crate) webd_username: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryResetDbResult {
+    pub(crate) admin_user_key: String,
+    pub(crate) auth_keys_deleted: usize,
+    pub(crate) webd_accounts_deleted: usize,
+    pub(crate) channel_bindings_deleted: usize,
+    pub(crate) exchange_credentials_deleted: usize,
+    pub(crate) pending_bind_sessions_deleted: usize,
+    pub(crate) recent_memories_deleted: usize,
+    pub(crate) preferences_deleted: usize,
+    pub(crate) long_term_memories_deleted: usize,
+    pub(crate) memory_facts_deleted: usize,
+    pub(crate) memory_retrieval_rows_deleted: usize,
+    pub(crate) followup_frames_deleted: usize,
+    pub(crate) clarify_states_deleted: usize,
+    pub(crate) observed_facts_states_deleted: usize,
+    pub(crate) conversation_states_deleted: usize,
+    pub(crate) audit_logs_deleted: usize,
+}
+
 pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<AuthKeyListRow>> {
     let db = state
         .core
@@ -497,6 +517,110 @@ pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<AuthKeyList
         });
     }
     Ok(out)
+}
+
+fn table_exists(db: &Connection, table_name: &str) -> anyhow::Result<bool> {
+    let exists: i64 = db.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name = ?1",
+        params![table_name],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn delete_all_rows_if_exists(
+    tx: &rusqlite::Transaction<'_>,
+    table_name: &str,
+) -> anyhow::Result<usize> {
+    if !table_name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        anyhow::bail!("invalid table name");
+    }
+    if !table_exists(tx, table_name)? {
+        return Ok(0);
+    }
+    let sql = format!("DELETE FROM {table_name}");
+    tx.execute(&sql, []).map_err(Into::into)
+}
+
+fn clear_audit_logs_if_exists(audit_db: &DbPool) -> anyhow::Result<usize> {
+    let conn = audit_db
+        .get()
+        .map_err(|e| anyhow::anyhow!("audit db pool: {e}"))?;
+    if !table_exists(&conn, "audit_logs")? {
+        return Ok(0);
+    }
+    conn.execute("DELETE FROM audit_logs", [])
+        .map_err(Into::into)
+}
+
+pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<FactoryResetDbResult> {
+    let admin_user_key = generate_user_key();
+    let password_hash = auth_webd::hash_password_for_webd_login("123456")?;
+    let now = now_ts();
+    let mut db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let tx = db.transaction()?;
+
+    let webd_accounts_deleted = delete_all_rows_if_exists(&tx, "webd_login_accounts")?;
+    let channel_bindings_deleted = delete_all_rows_if_exists(&tx, "channel_bindings")?;
+    let exchange_credentials_deleted = delete_all_rows_if_exists(&tx, "exchange_api_credentials")?;
+    let pending_bind_sessions_deleted =
+        delete_all_rows_if_exists(&tx, "pending_channel_bind_sessions")?;
+    let auth_keys_deleted = delete_all_rows_if_exists(&tx, "auth_keys")?;
+
+    let recent_memories_deleted = delete_all_rows_if_exists(&tx, "memories")?;
+    let preferences_deleted = delete_all_rows_if_exists(&tx, "user_preferences")?;
+    let long_term_memories_deleted = delete_all_rows_if_exists(&tx, "long_term_memories")?;
+    let memory_facts_deleted = delete_all_rows_if_exists(&tx, "memory_facts")?;
+    let memory_retrieval_rows_deleted =
+        delete_all_rows_if_exists(&tx, "memory_retrieval_index")?;
+    let _ = delete_all_rows_if_exists(&tx, "memory_retrieval_index_fts")?;
+
+    let followup_frames_deleted = delete_all_rows_if_exists(&tx, "followup_frames")?;
+    let clarify_states_deleted = delete_all_rows_if_exists(&tx, "clarify_states")?;
+    let observed_facts_states_deleted =
+        delete_all_rows_if_exists(&tx, "observed_facts_states")?;
+    let conversation_states_deleted = delete_all_rows_if_exists(&tx, "conversation_states")?;
+    let _ = delete_all_rows_if_exists(&tx, "audit_logs")?;
+
+    tx.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'admin', 1, ?2, NULL)",
+        params![admin_user_key, now],
+    )?;
+    tx.execute(
+        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
+         VALUES ('rustclaw', ?1, ?2, 1, ?3, ?3)",
+        params![password_hash, admin_user_key, now],
+    )?;
+
+    tx.commit()?;
+    let audit_logs_deleted = clear_audit_logs_if_exists(&state.core.audit_db)?;
+
+    Ok(FactoryResetDbResult {
+        admin_user_key,
+        auth_keys_deleted,
+        webd_accounts_deleted,
+        channel_bindings_deleted,
+        exchange_credentials_deleted,
+        pending_bind_sessions_deleted,
+        recent_memories_deleted,
+        preferences_deleted,
+        long_term_memories_deleted,
+        memory_facts_deleted,
+        memory_retrieval_rows_deleted,
+        followup_frames_deleted,
+        clarify_states_deleted,
+        observed_facts_states_deleted,
+        conversation_states_deleted,
+        audit_logs_deleted,
+    })
 }
 
 fn normalize_auth_key_role(raw: &str) -> anyhow::Result<String> {

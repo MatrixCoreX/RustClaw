@@ -22,7 +22,7 @@ use super::super::{
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, feishud_process_stats,
-    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    factory_reset_auth_state, finalize_pending_channel_bind_session, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
@@ -32,7 +32,7 @@ use super::super::{
     update_auth_key_by_id, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
     verify_webd_password_login, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
     whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LlmProviderRuntime,
-    LocalInteractionContext, PendingChannelBindSession,
+    FactoryResetDbResult, LocalInteractionContext, PendingChannelBindSession,
 };
 use crate::ClaimedTask;
 use claw_core::types::{
@@ -202,7 +202,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/config", get(get_nni_config).post(update_nni_config))
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
-        .route("/nni/heartbeat/records", get(nni_heartbeat_records))
+        .route("/nni/records", get(nni_request_records))
+        .route("/nni/heartbeat/records", get(nni_request_records))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
@@ -221,6 +222,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/admin/workspace-update",
             get(get_workspace_update).post(start_workspace_update),
         )
+        .route("/admin/factory-reset", post(factory_reset_handler))
         .route("/local/interaction-context", get(local_interaction_context))
         .route(
             "/admin/model-config",
@@ -309,6 +311,7 @@ include!("ui_routes/config_helpers.rs");
 include!("ui_routes/nni_internal_llm.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
+include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
 include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/service_control.rs");
