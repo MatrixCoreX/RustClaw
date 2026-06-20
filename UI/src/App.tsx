@@ -5116,6 +5116,8 @@ export default function App() {
     };
     return stepProgress[workspaceUpdateStatus.step] ?? (workspaceUpdateRunning ? 50 : 0);
   })();
+  const workspaceUpdateProgressActive =
+    workspaceUpdateRunning && workspaceUpdateProgressPercent > 0 && workspaceUpdateProgressPercent < 100;
   const workspaceUpdateProgressLabel =
     workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_workspace"
       ? t("编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.")
@@ -5950,7 +5952,9 @@ export default function App() {
                   </div>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${
+                      className={`workspace-build-progress-bar h-full rounded-full transition-all duration-500 ${
+                        workspaceUpdateProgressActive ? "workspace-build-progress-bar-active" : ""
+                      } ${
                         workspaceUpdateDisplayStatus === "failed"
                           ? "bg-red-300"
                           : workspaceUpdateDisplayStatus === "canceled"
