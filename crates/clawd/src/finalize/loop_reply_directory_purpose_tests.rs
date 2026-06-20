@@ -677,6 +677,58 @@ fn recent_artifacts_judgment_preserves_one_sentence_synthesis() {
 }
 
 #[test]
+fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
+    let task = claimed_task("task-recent-artifacts-count-only");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":2,"files":1,"hidden":0,"total":3},"entries":[{"hidden":false,"kind":"dir","modified_ts":1781635606,"name":"clarify_unpack_case","path":"scripts/nl_tests/fixtures/device_local/tmp/clarify_unpack_case","size_bytes":0},{"hidden":false,"kind":"file","modified_ts":1781480234,"name":"test_bundle.zip","path":"scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","size_bytes":272},{"hidden":false,"kind":"dir","modified_ts":1781137621,"name":"manual_dynamic_guard_unpack","path":"scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack","size_bytes":0}],"names":["clarify_unpack_case","test_bundle.zip","manual_dynamic_guard_unpack"],"path":"/repo/scripts/nl_tests/fixtures/device_local/tmp","resolved_path":"/repo/scripts/nl_tests/fixtures/device_local/tmp","sort_by":"mtime_desc"}}"#,
+    ));
+    let incomplete = "recent_entries.count=3";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", incomplete));
+    loop_state.last_publishable_synthesis_output = Some(incomplete.to_string());
+    loop_state.last_user_visible_respond = Some(incomplete.to_string());
+    loop_state.delivery_messages.push(incomplete.to_string());
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit = Some(3);
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_recent_artifacts_judgment_answer(
+            &task,
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    let answer = loop_state.delivery_messages.join("\n");
+    assert!(answer.contains("recent_entries.count=3"));
+    assert!(answer.contains("recent_entries[0].name=clarify_unpack_case"));
+    assert!(answer.contains("recent_entries[1].name=test_bundle.zip"));
+    assert!(answer.contains("recent_entries[2].name=manual_dynamic_guard_unpack"));
+    assert!(answer.contains("classification.output_format=per_entry"));
+    assert!(summary.is_some());
+}
+
+#[test]
 fn recent_artifacts_judgment_respects_file_selector_before_limit() {
     let task = claimed_task("task-recent-artifacts-file-selector");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
