@@ -136,6 +136,62 @@ fn active_clarify_locator_fast_path_preserves_structured_field_selector_token() 
 }
 
 #[test]
+fn active_clarify_package_json_locator_strips_package_selector_prefix() {
+    let root = TempDirGuard::new("clarify_package_json_selector");
+    fs::write(root.path.join("package.json"), r#"{"name":"rustclaw"}"#)
+        .expect("write package json");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let task = test_task();
+    let source_request = "Read the package name field only structured_field_selector=package.name";
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: Some(crate::clarify_state::ClarifyState {
+            missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+            pending_question: "Please provide the file path.".to_string(),
+            candidate_targets: Vec::new(),
+            delivery_required: false,
+            output_shape: Some(crate::OutputResponseShape::Scalar.as_str().to_string()),
+            semantic_kind: Some(
+                crate::OutputSemanticKind::StructuredKeys
+                    .as_str()
+                    .to_string(),
+            ),
+            source_request: source_request.to_string(),
+            source_task_id: "task-clarify".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+        }),
+        active_observed_facts: None,
+    };
+    let resolution = active_clarify_existing_workspace_locator_reply(
+        &root.path,
+        &root.path,
+        "package.json",
+        &snapshot,
+    )
+    .expect("existing package path should resolve");
+
+    let route = active_clarify_locator_reply_fast_path_route(&state, &task, &snapshot, &resolution)
+        .expect("active clarify scalar locator reply should use fast path");
+
+    assert!(route.is_execute_gate());
+    assert_eq!(
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        Some("name")
+    );
+    assert!(route
+        .route_reason
+        .contains("normalize_active_clarify_structured_field_selector"));
+}
+
+#[test]
 fn scalar_field_selector_repairs_document_heading_contract_to_field_value_contract() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
