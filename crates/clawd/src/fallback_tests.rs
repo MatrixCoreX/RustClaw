@@ -115,20 +115,28 @@ fn missing_file_delivery_default_payload_keeps_locator_hint_without_language_tem
 }
 
 #[test]
-fn missing_file_delivery_default_text_is_user_visible_not_machine_json() {
-    let state = test_state("en-US", "en-US");
-    let text = missing_file_delivery_default_text(
-        &state,
-        Some("definitely_missing_named_file.txt"),
-        "en-US",
+fn missing_file_delivery_default_payload_is_machine_json() {
+    let text = missing_file_delivery_default_payload(Some("definitely_missing_named_file.txt"));
+    let payload = serde_json::from_str::<serde_json::Value>(&text)
+        .expect("missing-file default should be machine JSON");
+    assert_eq!(
+        payload
+            .pointer("/missing_path")
+            .and_then(|value| value.as_str()),
+        Some("definitely_missing_named_file.txt")
     );
-    assert!(text.contains("definitely_missing_named_file.txt"));
-    assert!(
-        serde_json::from_str::<serde_json::Value>(&text).is_err(),
-        "visible missing-file text must not be machine JSON: {text}"
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(|value| value.as_str()),
+        Some("clawd.msg.delivery.file_not_found_path_next_step")
     );
-    assert!(!text.contains("message_key"));
-    assert!(!text.contains("reason_code"));
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(|value| value.as_str()),
+        Some("missing_file_delivery_not_found")
+    );
 }
 
 /// 7 source 的 metric label / i18n key 互不冲突。

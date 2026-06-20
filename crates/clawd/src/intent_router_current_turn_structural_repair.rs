@@ -32,14 +32,14 @@ use super::{
 pub(super) fn should_detach_bare_acknowledgement_from_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
 ) -> bool {
     matches!(turn_type, Some(TurnType::PreferenceOrMemory))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
-        && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
+        && matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
@@ -51,13 +51,13 @@ pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
     attachment_processing_required: bool,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::Clarify)
+    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(
             turn_type,
@@ -84,7 +84,7 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
@@ -92,7 +92,7 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::Clarify)
+    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(turn_type, None | Some(TurnType::TaskRequest))
         && matches!(
@@ -115,7 +115,7 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
 pub(super) fn infer_missing_target_policy_from_contract(
     target_task_policy: Option<TargetTaskPolicy>,
     turn_type: Option<TurnType>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -126,7 +126,7 @@ pub(super) fn infer_missing_target_policy_from_contract(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
     {
         return target_task_policy;
     }
@@ -182,7 +182,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -225,7 +225,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if planner_execute_inline_structured_payload_context(
         req,
         req_surface,
-        first_layer_decision,
+        legacy_normalizer_decision,
         output_contract,
     ) {
         output_contract.requires_content_evidence = true;
@@ -245,7 +245,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
 
     if planner_execute_inline_structured_transform_contract_context(
         req_surface,
-        first_layer_decision,
+        legacy_normalizer_decision,
         output_contract,
         answer_candidate,
     ) {
@@ -264,8 +264,10 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("inline_structured_transform_contract_repair");
     }
 
-    if matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        && output_contract.delivery_required
+    if matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && output_contract.delivery_required
         && matches!(
             output_contract.response_shape,
             OutputResponseShape::FileToken
@@ -359,7 +361,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract,
         req,
         req_surface,
-        first_layer_decision,
+        legacy_normalizer_decision,
     ) {
         output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
         output_contract.requires_content_evidence = true;
@@ -468,7 +470,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
 
     if current_workspace_generic_summary_needs_semantic_contract(
         output_contract,
-        first_layer_decision,
+        legacy_normalizer_decision,
     ) {
         if current_turn_extension_inventory_file_paths_repair_applies(
             output_contract,
@@ -536,9 +538,10 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("quoted_literal_content_presence_contract_repair");
     }
 
-    let scalar_direct_answer = matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
-        && !answer_candidate.trim().is_empty()
-        && !req_surface.has_structured_target_refinement();
+    let scalar_direct_answer =
+        matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
+            && !answer_candidate.trim().is_empty()
+            && !req_surface.has_structured_target_refinement();
 
     if matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
@@ -549,8 +552,10 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = reason.or(Some("scalar_locator_requires_evidence"));
     }
 
-    if matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        && !output_contract.requires_content_evidence
+    if matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -569,7 +574,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         && !planner_execute_inline_structured_payload_context(
             req,
             req_surface,
-            first_layer_decision,
+            legacy_normalizer_decision,
             output_contract,
         )
     {
@@ -643,11 +648,14 @@ pub(super) fn apply_unbound_workspace_generic_content_clarify_repair(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if *needs_clarify
-        || !matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
+        || !matches!(
+            *legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
         || !output_contract.requires_content_evidence
         || output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -669,7 +677,7 @@ pub(super) fn apply_unbound_workspace_generic_content_clarify_repair(
     output_contract.locator_hint.clear();
     *needs_clarify = true;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::Clarify;
+    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("unbound_workspace_generic_content_requires_clarify")
 }

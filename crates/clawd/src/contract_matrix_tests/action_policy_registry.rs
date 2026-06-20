@@ -229,6 +229,7 @@ fn workspace_project_summary_allows_structure_and_bounded_content_evidence() {
     assert!(tree_policy.is_allowed(), "{tree_policy:?}");
     assert_eq!(tree_policy.action_key, "system_basic.tree_summary");
     assert_eq!(tree_policy.contract_match, "workspace_project_summary");
+    assert_eq!(tree_policy.evidence_profile, "workspace_user_docs_first");
 
     let read_policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -244,6 +245,7 @@ fn workspace_project_summary_allows_structure_and_bounded_content_evidence() {
     assert!(read_policy.is_allowed(), "{read_policy:?}");
     assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
     assert_eq!(read_policy.contract_match, "workspace_project_summary");
+    assert_eq!(read_policy.evidence_profile, "workspace_user_docs_first");
 
     let list_policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -259,6 +261,7 @@ fn workspace_project_summary_allows_structure_and_bounded_content_evidence() {
     assert!(list_policy.is_allowed(), "{list_policy:?}");
     assert_eq!(list_policy.action_key, "fs_basic.list_dir");
     assert_eq!(list_policy.contract_match, "workspace_project_summary");
+    assert_eq!(list_policy.evidence_profile, "workspace_user_docs_first");
 }
 
 #[test]
@@ -411,6 +414,27 @@ fn command_output_summary_allows_log_analyze_evidence() {
         .evidence_expression
         .any_of
         .contains(&"field_value".to_string()));
+}
+
+#[test]
+fn command_output_summary_allows_git_basic_state_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::CommandOutputSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            ..IntentOutputContract::default()
+        }),
+        "git_basic",
+        &serde_json::json!({"action": "status"}),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "git_basic.status");
+    assert_eq!(policy.contract_match, "command_output_summary");
+    assert_eq!(policy.required_evidence, vec!["command_output"]);
+    assert!(policy.final_answer_shape_kind.allows_model_language());
 }
 
 #[test]
@@ -632,6 +656,85 @@ fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
 
         assert_eq!(policy.decision, ActionPolicyDecision::Allowed, "{action}");
         assert_eq!(policy.contract_match, "config_mutation");
+    }
+}
+
+#[test]
+fn stable_semantic_action_preferences_live_in_task_contract_matrix() {
+    let matrix = load_workspace_matrix();
+    let cases = [
+        (
+            "config_validation",
+            OutputSemanticKind::ConfigValidation,
+            "config_basic.validate",
+        ),
+        (
+            "config_mutation",
+            OutputSemanticKind::ConfigMutation,
+            "config_edit.plan_config_change",
+        ),
+        (
+            "config_risk_assessment",
+            OutputSemanticKind::ConfigRiskAssessment,
+            "config_basic.guard_rustclaw_config",
+        ),
+        (
+            "filesystem_mutation_result",
+            OutputSemanticKind::FilesystemMutationResult,
+            "fs_basic.write_text",
+        ),
+        (
+            "existence_with_path",
+            OutputSemanticKind::ExistenceWithPath,
+            "fs_basic.stat_paths",
+        ),
+        (
+            "document_heading",
+            OutputSemanticKind::DocumentHeading,
+            "fs_basic.read_text_range",
+        ),
+        (
+            "content_presence_check",
+            OutputSemanticKind::ContentPresenceCheck,
+            "fs_basic.grep_text",
+        ),
+        (
+            "package_manager_detection",
+            OutputSemanticKind::PackageManagerDetection,
+            "package_manager.detect",
+        ),
+        (
+            "archive_read",
+            OutputSemanticKind::ArchiveRead,
+            "archive_basic.read",
+        ),
+        (
+            "docker_container_lifecycle",
+            OutputSemanticKind::DockerContainerLifecycle,
+            "docker_basic",
+        ),
+    ];
+
+    for (contract_name, semantic_kind, preferred_action) in cases {
+        let contract = matrix
+            .semantic_contract(semantic_kind)
+            .unwrap_or_else(|| panic!("missing contract for {contract_name}"));
+        assert!(
+            contract
+                .preferred_actions
+                .iter()
+                .any(|action| action == preferred_action),
+            "contract `{contract_name}` should prefer `{preferred_action}`, got {:?}",
+            contract.preferred_actions
+        );
+        assert!(
+            contract
+                .allowed_actions
+                .iter()
+                .any(|action| action == preferred_action),
+            "contract `{contract_name}` should allow `{preferred_action}`, got {:?}",
+            contract.allowed_actions
+        );
     }
 }
 

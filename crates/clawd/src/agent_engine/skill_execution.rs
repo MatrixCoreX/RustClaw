@@ -729,6 +729,15 @@ async fn handle_skill_step_success(
     let mut mark_successful_fingerprint = true;
     match &validation_observation {
         crate::execution_recipe::ValidationObservation::Passed => {
+            record_latest_validation_result(
+                loop_state,
+                normalized_skill,
+                global_step,
+                step_in_round,
+                "passed",
+                "validation_passed",
+                action_effect,
+            );
             crate::execution_recipe::apply_action_effect_success(
                 &mut loop_state.execution_recipe,
                 action_effect,
@@ -736,6 +745,15 @@ async fn handle_skill_step_success(
             super::maybe_publish_execution_recipe_phase_hint(state, task, loop_state);
         }
         crate::execution_recipe::ValidationObservation::Failed(detail) => {
+            record_latest_validation_result(
+                loop_state,
+                normalized_skill,
+                global_step,
+                step_in_round,
+                "failed",
+                "validation_failed",
+                action_effect,
+            );
             crate::execution_recipe::apply_action_effect_failure(
                 &mut loop_state.execution_recipe,
                 action_effect,
@@ -767,6 +785,15 @@ async fn handle_skill_step_success(
             }
         }
         crate::execution_recipe::ValidationObservation::Inconclusive => {
+            record_latest_validation_result(
+                loop_state,
+                normalized_skill,
+                global_step,
+                step_in_round,
+                "inconclusive",
+                "validation_inconclusive",
+                action_effect,
+            );
             crate::execution_recipe::apply_action_effect_failure(
                 &mut loop_state.execution_recipe,
                 action_effect,
@@ -941,6 +968,29 @@ async fn handle_skill_step_success(
         stop_signal,
         continue_in_round: false,
     })
+}
+
+fn record_latest_validation_result(
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    global_step: usize,
+    step_in_round: usize,
+    status: &'static str,
+    status_code: &'static str,
+    action_effect: crate::execution_recipe::ActionEffect,
+) {
+    if !loop_state.execution_recipe.is_active() || !action_effect.validates {
+        return;
+    }
+    loop_state.latest_validation_result = Some(json!({
+        "schema_version": 1,
+        "source": "agent_loop_step_validation",
+        "status": status,
+        "status_code": status_code,
+        "skill": normalized_skill,
+        "global_step": global_step,
+        "step_in_round": step_in_round,
+    }));
 }
 
 async fn handle_skill_step_failure(
@@ -1161,9 +1211,12 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
-    if let Some(err) =
-        contract_matrix_action_policy_error(loop_state, normalized_skill, classification_args)
-    {
+    if let Some(err) = contract_matrix_action_policy_error(
+        state,
+        loop_state,
+        normalized_skill,
+        classification_args,
+    ) {
         return Ok(handle_preflight_argument_failure(
             state,
             task,

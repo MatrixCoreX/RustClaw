@@ -3,8 +3,9 @@
 use crate::FirstLayerDecision;
 
 use super::{
-    ClarifyQuestionPolicy, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    ActFinalizeStyle, ClarifyQuestionPolicy, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy,
+    TurnType,
 };
 
 #[test]
@@ -139,6 +140,77 @@ fn active_task_scope_update_is_routed_back_to_direct_answer() {
         &contract,
         None,
     ));
+}
+
+#[test]
+fn active_bound_path_answer_candidate_stays_direct_answer() {
+    let workspace = super::test_support::make_temp_workspace_with_child(
+        "active_bound_path_answer_candidate",
+        "docs",
+    );
+    let target = workspace.join("docs").join("service_notes.md");
+    std::fs::write(&target, "# Service Notes\n").expect("write target");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.clone();
+    state.skill_rt.default_locator_search_dir = workspace.clone();
+    let target_text = target.display().to_string();
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("send the selected file".to_string()),
+            last_primary_task_output: Some(format!("FILE:{target_text}")),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+            bound_target: Some(target_text.clone()),
+            ordered_entries: vec![target_text.clone()],
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
+            bound_target: Some(target_text.clone()),
+            delivery_targets: vec![target_text.clone()],
+            ordered_entries: vec![target_text.clone()],
+            ..crate::observed_facts::ObservedFacts::default()
+        }),
+        active_clarify_state: None,
+    };
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize = ActFinalizeStyle::ChatWrapped;
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: target_text.clone(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_active_bound_path_answer_candidate_direct_repair(
+        &state,
+        Some(&snapshot),
+        &target_text,
+        false,
+        ScheduleKind::None,
+        &mut decision,
+        &mut finalize,
+        &mut wants_file_delivery,
+        &mut contract,
+    );
+
+    assert_eq!(repair, Some("active_bound_path_answer_candidate_direct"));
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(finalize, ActFinalizeStyle::Plain);
+    assert!(!wants_file_delivery);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(contract.locator_hint.is_empty());
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[test]

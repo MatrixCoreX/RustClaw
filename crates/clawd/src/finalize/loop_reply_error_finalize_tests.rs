@@ -100,9 +100,9 @@ async fn finalize_loop_reply_treats_structured_run_cmd_failure_as_user_result() 
     .expect("finalize should return a user-visible command failure");
 
     assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("退出码为 7"), "text: {}", reply.text);
+    assert!(reply.text.contains("exit_code=7"), "text: {}", reply.text);
     assert!(
-        reply.text.contains("错误输出为：problem"),
+        reply.text.contains("stderr=problem"),
         "text: {}",
         reply.text
     );

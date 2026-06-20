@@ -22,8 +22,10 @@ fn deterministic_observed_execution_status_answer_reports_mixed_results() {
     )
     .expect("mixed observed results should produce deterministic answer");
 
-    assert!(answer.contains("第 1 步 `health_check` 成功"));
-    assert!(answer.contains("第 2 步 `run_cmd` 失败"));
+    assert!(answer.contains("step.1.skill=health_check"));
+    assert!(answer.contains("step.1.status=ok"));
+    assert!(answer.contains("step.2.skill=run_cmd"));
+    assert!(answer.contains("step.2.status=error"));
     assert!(answer.contains("exit code 127"));
 }
 
@@ -56,8 +58,9 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
     .expect("missing path observation should produce a handled user answer");
 
     assert!(answer.contains("configs/config_copy"));
-    assert!(answer.contains("不存在"));
-    assert!(answer.contains("无法统计"));
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("semantic_kind=scalar_count"));
+    assert!(answer.contains("count_available=false"));
 }
 
 #[test]
@@ -91,7 +94,7 @@ fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape(
 
     assert_eq!(
         answer,
-        "exists=false path=/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt kind=missing"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\nsemantic_kind=existence_with_path\nresponse_shape=existence_with_path"
     );
 }
 
@@ -129,7 +132,7 @@ fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bil
 
     assert_eq!(
         answer,
-        "exists=false path=/tmp/rustclaw-missing-ja.txt kind=missing"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\nsemantic_kind=existence_with_path\nresponse_shape=existence_with_path"
     );
 }
 
@@ -173,7 +176,8 @@ fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
     .expect("missing archive observation should produce a handled user answer");
 
     assert!(answer.contains("missing_bundle.zip"));
-    assert!(answer.contains("could not find") || answer.contains("cannot be completed"));
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("reason_code=missing_observed_target"));
 }
 
 #[test]
@@ -250,8 +254,12 @@ fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr
     )
     .expect("mixed observed results should produce deterministic answer");
 
-    assert!(answer.contains("exit code 7"), "answer: {answer}");
-    assert!(answer.contains("stderr: problem"), "answer: {answer}");
+    assert!(
+        answer.contains("step.2.error_summary=command failed with exit code 7; stderr: problem"),
+        "answer: {answer}"
+    );
+    assert!(answer.contains("step.2.exit_code=7"), "answer: {answer}");
+    assert!(answer.contains("step.2.stderr=problem"), "answer: {answer}");
 }
 
 #[test]
@@ -280,8 +288,10 @@ fn deterministic_observed_execution_status_answer_attaches_before_llm_fallback()
     ));
 
     assert_eq!(loop_state.delivery_messages.len(), 1);
-    assert!(loop_state.delivery_messages[0].contains("第 1 步 `health_check` 成功"));
-    assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+    assert!(loop_state.delivery_messages[0].contains("step.1.skill=health_check"));
+    assert!(loop_state.delivery_messages[0].contains("step.1.status=ok"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.skill=run_cmd"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.status=error"));
     let summary = finalizer_summary.expect("summary");
     assert_eq!(summary.completion_ok, Some(true));
     assert_eq!(
@@ -382,7 +392,8 @@ fn deterministic_observed_execution_status_answer_replaces_bad_synthesis() {
     );
 
     assert_eq!(loop_state.delivery_messages.len(), 1);
-    assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.skill=run_cmd"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.status=error"));
     assert!(!loop_state.delivery_messages[0].contains("无法确认成功或失败"));
     assert_eq!(
         finalizer_summary.and_then(|summary| summary.completion_ok),
@@ -817,8 +828,10 @@ fn deterministic_observed_execution_status_replaces_raw_success_output() {
     );
 
     assert_eq!(loop_state.delivery_messages.len(), 1);
-    assert!(loop_state.delivery_messages[0].contains("第 1 步 `run_cmd` 成功"));
-    assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+    assert!(loop_state.delivery_messages[0].contains("step.1.skill=run_cmd"));
+    assert!(loop_state.delivery_messages[0].contains("step.1.status=ok"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.skill=run_cmd"));
+    assert!(loop_state.delivery_messages[0].contains("step.2.status=error"));
     assert!(!loop_state.delivery_messages[0].trim().eq("THINK_BREAK_CN"));
     assert_eq!(
         finalizer_summary.and_then(|summary| summary.completion_ok),

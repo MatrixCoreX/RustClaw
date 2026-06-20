@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machine_summary() {
+async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-service-status-wrapped-health-check");
     let mut route = free_route_result();
@@ -26,7 +26,20 @@ async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machin
             },
             "clawd_process_count": 1,
             "system_health": {
+                "arch": "x86_64",
+                "cpu_count": 8,
+                "disk_root_available_bytes": 1000,
+                "disk_root_total_bytes": 2000,
+                "hostname": "rustclaw-host",
+                "kernel_release": "6.17.0-test",
+                "load_avg_15m": 1.3,
+                "load_avg_1m": 1.1,
+                "load_avg_5m": 1.2,
+                "memory_available_bytes": 3000,
+                "memory_total_bytes": 4000,
                 "os_family": "linux",
+                "service_manager": "systemd",
+                "uptime_seconds": 5000,
                 "warnings": ["disk_root_low"]
             },
             "telegramd_log": {
@@ -49,19 +62,23 @@ async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machin
         started_at: 0,
         finished_at: 0,
     });
-    let bad_synthesis = "clawd status is unclear: health_check did not provide complete clawd_process_count and clawd_health_port_open fields.";
+    let synthesis = concat!(
+        "Host rustclaw-host is running on Linux with comfortable memory. ",
+        "The main concern is low root disk space. ",
+        "clawd is running, while telegramd has no matching process."
+    );
     loop_state.executed_step_results.push(StepExecutionResult {
         step_id: "step_2".to_string(),
         skill: "synthesize_answer".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some(bad_synthesis.to_string()),
+        output: Some(synthesis.to_string()),
         error: None,
         started_at: 0,
         finished_at: 0,
     });
-    loop_state.last_publishable_synthesis_output = Some(bad_synthesis.to_string());
-    loop_state.last_user_visible_respond = Some(bad_synthesis.to_string());
-    loop_state.delivery_messages.push(bad_synthesis.to_string());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    loop_state.delivery_messages.push(synthesis.to_string());
     push_raw_plan_text(
         &mut loop_state,
         r#"{"steps":[{"action":"synthesize_answer"},{"action":"respond"}]}"#,
@@ -75,17 +92,18 @@ async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machin
         Some(&agent_run_context),
     )
     .await
-    .expect("finalize should return the available synthesized answer");
+    .expect("finalize should preserve publishable synthesis");
 
     assert!(!reply.should_fail_task, "reply: {}", reply.text);
-    assert_eq!(reply.text, bad_synthesis);
     assert!(
-        !reply.text.contains("health_check.summary"),
+        reply
+            .text
+            .contains("The main concern is low root disk space."),
         "reply: {}",
         reply.text
     );
     assert!(
-        !reply.text.contains("clawd_process_count=1"),
+        !reply.text.contains("system_health.os_family"),
         "reply: {}",
         reply.text
     );
@@ -97,7 +115,187 @@ async fn finalize_loop_reply_does_not_replace_health_check_synthesis_with_machin
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_replaces_process_basic_json_synthesis_for_service_status() {
+async fn finalize_loop_reply_honors_system_health_selector() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-system-health-selector");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent =
+        "Run a basic health check with system_health field selector".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("system_health.*".to_string());
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some("show host OS health fields only".to_string()),
+        ..Default::default()
+    };
+    let health_output = serde_json::json!({
+        "extra": {
+            "clawd_health_port_open": true,
+            "clawd_process_count": 1,
+            "system_health": {
+                "arch": "x86_64",
+                "cpu_count": 8,
+                "disk_root_available_bytes": 1000,
+                "disk_root_total_bytes": 2000,
+                "hostname": "rustclaw-host",
+                "kernel_release": "6.17.0-test",
+                "load_avg_15m": 1.3,
+                "load_avg_1m": 1.1,
+                "load_avg_5m": 1.2,
+                "memory_available_bytes": 3000,
+                "memory_total_bytes": 4000,
+                "os_family": "linux",
+                "service_manager": "systemd",
+                "uptime_seconds": 5000,
+                "warnings": ["disk_root_low"]
+            },
+            "telegramd_process_count": 0
+        }
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "health_check", &health_output));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "clawd_process_count=1\ntelegramd_process_count=0",
+    ));
+    loop_state
+        .delivery_messages
+        .push("clawd_process_count=1\ntelegramd_process_count=0".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "show host OS health fields only",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should honor system_health selector");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("system_health.os_family=linux"));
+    assert!(reply
+        .text
+        .contains("system_health.kernel_release=6.17.0-test"));
+    assert!(reply.text.contains("system_health.arch=x86_64"));
+    assert!(reply.text.contains("system_health.hostname=rustclaw-host"));
+    assert!(reply.text.contains("system_health.service_manager=systemd"));
+    assert!(reply.text.contains("system_health.cpu_count=8"));
+    assert!(reply.text.contains("system_health.memory_total_bytes=4000"));
+    assert!(reply
+        .text
+        .contains("system_health.memory_available_bytes=3000"));
+    assert!(reply
+        .text
+        .contains("system_health.disk_root_total_bytes=2000"));
+    assert!(reply
+        .text
+        .contains("system_health.disk_root_available_bytes=1000"));
+    assert!(reply.text.contains("system_health.load_avg_1m=1.1"));
+    assert!(reply.text.contains("system_health.load_avg_5m=1.2"));
+    assert!(reply.text.contains("system_health.load_avg_15m=1.3"));
+    assert!(reply.text.contains("system_health.uptime_seconds=5000"));
+    assert!(reply.text.contains("system_health.warnings=disk_root_low"));
+    assert!(
+        !reply.text.contains("clawd_process_count"),
+        "{}",
+        reply.text
+    );
+    assert!(
+        !reply.text.contains("clawd_health_port_open"),
+        "{}",
+        reply.text
+    );
+    assert!(
+        !reply.text.contains("telegramd_process_count"),
+        "{}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_uses_machine_closeout_when_recipe_done_and_synthesis_failed() {
+    let state = test_state();
+    let task = claimed_task("task-ops-validated-closeout");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent = "Start local service and validate it".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "document/nl_ops_http_demo".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some(
+            "When validation passes, explicitly output VALIDATION_PASSED and stop.".to_string(),
+        ),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::System,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Done,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        saw_mutation: true,
+        saw_validation: true,
+        ..Default::default()
+    };
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "HTTP_STATUS:200\nVALIDATION_PASSED\n",
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "synthesize_answer",
+        "synthesize_answer_failed",
+    ));
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "启动并验证服务，通过时输出 VALIDATION_PASSED",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should use recipe closeout");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply
+        .text
+        .contains("message_key=clawd.msg.execution_recipe_closeout_system"));
+    assert!(reply.text.contains("target_scope=system"));
+    assert!(reply.text.contains("profile=ops_service"));
+    assert!(reply.text.contains("validation_status=validated"));
+    assert!(
+        !reply.text.contains("VALIDATION_PASSED"),
+        "reply should not infer user-requested marker: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_preserves_process_basic_status_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-service-status-process-basic-json-synthesis");
     let mut route = free_route_result();
@@ -132,16 +330,8 @@ async fn finalize_loop_reply_replaces_process_basic_json_synthesis_for_service_s
         "text": "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd"
     })
     .to_string();
-    let json_synthesis = serde_json::json!({
-        "exit_code": 0,
-        "match_count": 0,
-        "process_filter": "telegramd",
-        "running": false,
-        "status": "not_running",
-        "status_source": "process_basic.ps",
-        "target": "telegramd"
-    })
-    .to_string();
+    let status_synthesis =
+        "telegramd is not running; the process check found zero matching processes.".to_string();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.executed_step_results.push(StepExecutionResult {
@@ -157,14 +347,14 @@ async fn finalize_loop_reply_replaces_process_basic_json_synthesis_for_service_s
         step_id: "step_2".to_string(),
         skill: "synthesize_answer".to_string(),
         status: StepExecutionStatus::Ok,
-        output: Some(json_synthesis.clone()),
+        output: Some(status_synthesis.clone()),
         error: None,
         started_at: 0,
         finished_at: 0,
     });
-    loop_state.last_publishable_synthesis_output = Some(json_synthesis.clone());
-    loop_state.last_user_visible_respond = Some(json_synthesis.clone());
-    loop_state.delivery_messages.push(json_synthesis);
+    loop_state.last_publishable_synthesis_output = Some(status_synthesis.clone());
+    loop_state.last_user_visible_respond = Some(status_synthesis.clone());
+    loop_state.delivery_messages.push(status_synthesis.clone());
 
     let reply = finalize_loop_reply(
         &state,
@@ -174,18 +364,120 @@ async fn finalize_loop_reply_replaces_process_basic_json_synthesis_for_service_s
         Some(&agent_run_context),
     )
     .await
-    .expect("finalize should replace machine JSON with a service status answer");
+    .expect("finalize should preserve a publishable process status synthesis");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(reply.text, status_synthesis);
+    assert!(
+        !reply.text.contains("process_basic"),
+        "reply: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_service_control_status_over_health_check_dump() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-service-control-priority");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent = "check ssh service active status in one sentence".to_string();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some("一句话告诉我 ssh 服务现在是不是 active".to_string()),
+        ..Default::default()
+    };
+    let health_output = serde_json::json!({
+        "extra": {
+            "clawd_health_port_open": true,
+            "clawd_process_count": 1,
+            "system_health": {
+                "arch": "x86_64",
+                "hostname": "rustclaw-host",
+                "kernel_release": "6.17.0-test",
+                "os_family": "linux",
+                "service_manager": "systemd"
+            },
+            "telegramd_process_count": 0
+        },
+        "text": "{\"clawd_health_port_open\":true,\"clawd_process_count\":1}"
+    })
+    .to_string();
+    let service_output = serde_json::json!({
+        "executed_actions": ["status"],
+        "manager_type": "systemd",
+        "post_state": "active",
+        "pre_state": "active",
+        "requested_action": "status",
+        "service_name": "sshd",
+        "status": "ok",
+        "summary": "Status: active",
+        "verified": true
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "health_check".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(health_output),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "service_control".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(service_output),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_3".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("ssh 服务当前是 active 状态。".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.last_user_visible_respond = Some("ssh 服务当前是 active 状态。".to_string());
+    loop_state
+        .delivery_messages
+        .push("ssh 服务当前是 active 状态。".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "一句话告诉我 ssh 服务现在是不是 active",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should use service_control evidence");
 
     assert!(!reply.should_fail_task, "reply: {}", reply.text);
     assert!(
-        serde_json::from_str::<serde_json::Value>(&reply.text).is_err(),
-        "service status reply should not expose machine JSON: {}",
+        reply.text.contains("ssh 服务当前是 active 状态。"),
+        "publishable synthesis should be preserved: {}",
         reply.text
     );
-    assert!(reply.text.contains("telegramd"), "reply: {}", reply.text);
     assert!(
-        reply.text.contains("process_basic"),
-        "reply should preserve the observation source: {}",
+        !reply.text.contains("system_health.hostname"),
+        "service_control evidence should not be replaced by health_check dump: {}",
+        reply.text
+    );
+    assert!(
+        !reply.text.contains("service_name=sshd"),
+        "one-sentence synthesis should not be replaced with key=value fields: {}",
         reply.text
     );
 }

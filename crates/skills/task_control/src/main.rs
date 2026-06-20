@@ -22,6 +22,8 @@ struct Resp {
     status: String,
     text: String,
     error_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +55,28 @@ struct SkillInput {
     index: Option<usize>,
 }
 
+#[derive(Debug)]
+struct SkillOutput {
+    text: String,
+    extra: Option<Value>,
+}
+
+impl SkillOutput {
+    fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            extra: None,
+        }
+    }
+
+    fn structured(text: impl Into<String>, extra: Value) -> Self {
+        Self {
+            text: text.into(),
+            extra: Some(extra),
+        }
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
@@ -63,17 +87,19 @@ async fn main() -> anyhow::Result<()> {
         let resp = match parsed {
             Ok(req) => match parse_input(&req.args).and_then(|input| execute(&req, input)) {
                 Ok(fut) => match fut.await {
-                    Ok(text) => Resp {
+                    Ok(output) => Resp {
                         request_id: req.request_id,
                         status: "ok".to_string(),
-                        text,
+                        text: output.text,
                         error_text: None,
+                        extra: output.extra,
                     },
                     Err(err) => Resp {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
                         error_text: Some(err),
+                        extra: None,
                     },
                 },
                 Err(err) => Resp {
@@ -81,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
                     status: "error".to_string(),
                     text: String::new(),
                     error_text: Some(err),
+                    extra: None,
                 },
             },
             Err(err) => Resp {
@@ -88,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 error_text: Some(format!("invalid input: {err}")),
+                extra: None,
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -128,7 +156,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
 fn execute(
     req: &Req,
     input: SkillInput,
-) -> Result<impl std::future::Future<Output = Result<String, String>>, String> {
+) -> Result<impl std::future::Future<Output = Result<SkillOutput, String>>, String> {
     let base_url = clawd_base_url();
     let timeout_secs = task_control_timeout_seconds();
     let request_id = req.request_id.clone();
@@ -151,7 +179,10 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(render_task_list(&tasks))
+                Ok(SkillOutput::structured(
+                    render_task_list(&tasks),
+                    task_list_extra(&tasks),
+                ))
             }
             "cancel_all" => {
                 let tasks = fetch_active_tasks(
@@ -164,7 +195,7 @@ fn execute(
                 )
                 .await?;
                 if tasks.is_empty() {
-                    return Ok("当前没有可结束的未完成任务。".to_string());
+                    return Ok(SkillOutput::text("当前没有可结束的未完成任务。"));
                 }
                 let canceled = cancel_all_tasks(
                     &client,
@@ -175,7 +206,7 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(render_cancel_all(tasks, canceled))
+                Ok(SkillOutput::text(render_cancel_all(tasks, canceled)))
             }
             "cancel_one" => {
                 let index = input.index.unwrap_or(0);
@@ -189,7 +220,7 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(render_cancel_one(&task))
+                Ok(SkillOutput::text(render_cancel_one(&task)))
             }
             _ => Err("unsupported action".to_string()),
         }
@@ -357,6 +388,40 @@ fn render_task_list(tasks: &[ActiveTaskItem]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
+    let items: Vec<Value> = tasks
+        .iter()
+        .map(|task| {
+            json!({
+                "index": task.index,
+                "task_id": task.task_id,
+                "kind": task.kind,
+                "status": task.status,
+                "summary": task.summary,
+                "age_seconds": task.age_seconds,
+            })
+        })
+        .collect();
+    let task_count = tasks.len();
+    let status = if task_count == 0 { "empty" } else { "ok" };
+    json!({
+        "schema_version": 1,
+        "action": "list",
+        "status": status,
+        "count": task_count,
+        "task_count": task_count,
+        "has_unfinished": task_count > 0,
+        "items": items,
+        "field_value": {
+            "action": "list",
+            "status": status,
+            "count": task_count,
+            "task_count": task_count,
+            "has_unfinished": task_count > 0,
+        },
+    })
 }
 
 fn render_cancel_all(tasks: Vec<ActiveTaskItem>, canceled: usize) -> String {

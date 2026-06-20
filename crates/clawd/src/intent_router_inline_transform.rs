@@ -15,7 +15,7 @@ pub(super) fn apply_self_contained_payload_direct_answer_contract_repair(
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     needs_clarify: bool,
     answer_candidate: &str,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if needs_clarify
@@ -53,7 +53,7 @@ pub(super) fn apply_self_contained_payload_direct_answer_contract_repair(
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
     output_contract.semantic_kind = OutputSemanticKind::None;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("self_contained_payload_direct_answer_contract")
 }
@@ -66,11 +66,14 @@ pub(super) fn apply_inline_structured_transform_direct_answer_repair(
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     needs_clarify: bool,
     answer_candidate: &str,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if needs_clarify
-        || !matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
+        || !matches!(
+            *legacy_normalizer_decision,
+            FirstLayerDecision::DirectAnswer
+        )
         || req_surface.inline_json_shape.is_none()
         || !answer_candidate_has_structured_transform_result(answer_candidate)
         || wants_file_delivery
@@ -107,7 +110,7 @@ pub(super) fn apply_inline_structured_transform_direct_answer_repair(
     output_contract.locator_hint.clear();
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.response_shape = OutputResponseShape::Strict;
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = ActFinalizeStyle::ChatWrapped;
     Some("inline_structured_transform_contract_repair")
 }
@@ -290,12 +293,12 @@ fn inline_transform_schema_tokens(text: &str) -> Vec<String> {
 pub(super) fn parsed_inline_json_transform_repair_decision(
     req: &str,
     needs_clarify: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !needs_clarify && !matches!(first_layer_decision, FirstLayerDecision::Clarify) {
+    if !needs_clarify && !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify) {
         return None;
     }
     if wants_file_delivery || !matches!(schedule_kind, ScheduleKind::None) {

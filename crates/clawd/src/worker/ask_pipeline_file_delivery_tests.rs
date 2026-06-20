@@ -540,7 +540,7 @@ fn file_delivery_missing_locator_prebinds_from_resolved_prompt_path() {
         "User requests to deliver the file at document/missing.txt.".to_string();
     route.wants_file_delivery = true;
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -568,6 +568,185 @@ fn file_delivery_missing_locator_prebinds_from_resolved_prompt_path() {
     assert!(route
         .route_reason
         .contains("file_delivery_missing_locator_prebound_from_resolved_prompt_path"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn explicit_missing_filename_delivery_contract_defers_not_found_to_execution() {
+    let root = make_temp_root("delivery_explicit_missing_filename_contract");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "delivery-explicit-missing-filename-contract".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.wants_file_delivery = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+    route.output_contract.locator_hint =
+        "definitely_missing_named_file_rustclaw_001.txt".to_string();
+    let resolved_intent = route.resolved_intent.clone();
+
+    let applied = apply_ask_post_route(
+        &state,
+        &task,
+        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        &resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert!(
+        !applied.execution_route_result.needs_clarify,
+        "{}",
+        applied.execution_route_result.route_reason
+    );
+    assert!(applied.execution_route_result.is_execute_gate());
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::Filename
+    );
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_hint,
+        "definitely_missing_named_file_rustclaw_001.txt"
+    );
+    assert!(!route_reason_has_marker(
+        &applied.execution_route_result,
+        "inferred_missing_workspace_locator_requires_clarify"
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn unresolved_file_delivery_current_request_filename_promotes_to_execute() {
+    let root = make_temp_root("delivery_missing_current_request_filename");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "delivery-missing-current-request-filename".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason =
+        "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"
+            .to_string();
+    let resolved_intent = route.resolved_intent.clone();
+
+    let applied = apply_ask_post_route(
+        &state,
+        &task,
+        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        &resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert!(!applied.execution_route_result.needs_clarify);
+    assert!(applied.execution_route_result.is_execute_gate());
+    assert!(applied.execution_route_result.wants_file_delivery);
+    assert_eq!(
+        applied
+            .execution_route_result
+            .output_contract
+            .response_shape,
+        crate::OutputResponseShape::FileToken
+    );
+    assert_eq!(
+        applied
+            .execution_route_result
+            .output_contract
+            .delivery_intent,
+        crate::OutputDeliveryIntent::FileSingle
+    );
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::Filename
+    );
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_hint,
+        "definitely_missing_named_file_rustclaw_001.txt"
+    );
+    assert_eq!(
+        applied.gate_record.reason_code,
+        "post_route_file_delivery_current_request_locator_deferred_to_execution"
+    );
+    assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "file_delivery_current_request_locator_deferred_to_execution"
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn unresolved_file_delivery_without_current_request_locator_stays_clarify() {
+    let root = make_temp_root("delivery_missing_current_request_no_locator");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "delivery-missing-current-request-no-locator".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason =
+        "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"
+            .to_string();
+    let resolved_intent = route.resolved_intent.clone();
+
+    let applied = apply_ask_post_route(
+        &state,
+        &task,
+        "send it",
+        &resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert!(applied.execution_route_result.needs_clarify);
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert!(!route_reason_has_marker(
+        &applied.execution_route_result,
+        "file_delivery_current_request_locator_deferred_to_execution"
+    ));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -828,8 +1007,8 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
         applied.execution_route_result.route_reason
     );
     assert_eq!(
-        applied.execution_route_result.first_layer_decision(),
-        crate::FirstLayerDecision::Clarify
+        applied.execution_route_result.gate_kind(),
+        crate::RouteGateKind::Clarify
     );
     assert!(route_reason_has_marker(
         &applied.execution_route_result,
@@ -843,6 +1022,87 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn directory_file_delivery_with_structured_file_selector_stays_executable() {
+    let root = make_temp_root("directory_delivery_selector_executable");
+    let device_dir = root.join("device_local");
+    std::fs::create_dir_all(&device_dir).expect("device dir");
+    std::fs::write(device_dir.join("alpha.txt"), "alpha\n").expect("alpha fixture");
+    std::fs::write(device_dir.join("beta.txt"), "beta\n").expect("beta fixture");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "directory-delivery-selector-executable".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.route_reason = "normalizer_emitted_directory_file_selector".to_string();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "device_local".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::File,
+        target_kind_specified: true,
+        limit: Some(1),
+        sort_by: Some("name_desc".to_string()),
+        include_metadata: Some(false),
+        include_hidden: Some(false),
+    };
+    let resolved_intent = route.resolved_intent.clone();
+
+    let applied = apply_ask_post_route(
+        &state,
+        &task,
+        "send the selected file from device_local",
+        &resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert!(
+        !applied.execution_route_result.needs_clarify,
+        "{}",
+        applied.execution_route_result.route_reason
+    );
+    assert!(applied.execution_route_result.is_execute_gate());
+    assert!(applied.execution_route_result.wants_file_delivery);
+    assert!(
+        applied
+            .execution_route_result
+            .output_contract
+            .delivery_required
+    );
+    assert_eq!(
+        applied
+            .execution_route_result
+            .output_contract
+            .self_extension
+            .list_selector
+            .sort_by
+            .as_deref(),
+        Some("name_desc")
+    );
+    assert!(!route_reason_has_marker(
+        &applied.execution_route_result,
+        "directory_file_delivery_requires_structured_selection"
+    ));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -901,7 +1161,7 @@ fn post_route_rebinds_clarified_file_delivery_to_active_read_target_after_guards
     let mut route = executable_filename_route();
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.resolved_intent =
         "deliver active bound target from the latest structured read frame".to_string();
     route.route_reason = concat!(

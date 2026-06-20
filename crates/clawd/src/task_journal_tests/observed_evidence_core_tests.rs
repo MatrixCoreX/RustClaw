@@ -108,6 +108,157 @@ fn trace_json_includes_redacted_observed_evidence_for_json_output() {
 }
 
 #[test]
+fn multiline_excerpt_sampling_keeps_diagnostic_severity_lines() {
+    let mut journal = TaskJournal::for_task("task-log-evidence", "ask", "分析日志");
+    let log_excerpt = [
+        "1|2026-04-01 10:00:01 INFO service boot completed",
+        "2|2026-04-01 10:00:04 INFO config loaded",
+        "3|2026-04-01 10:00:09 INFO sqlite connection opened",
+        "4|2026-04-01 10:01:11 INFO request queued",
+        "5|2026-04-01 10:01:12 INFO worker claimed task",
+        "6|2026-04-01 10:01:13 INFO read_file success",
+        "7|2026-04-01 10:02:20 WARN upstream latency increased",
+        "8|2026-04-01 10:02:22 INFO retry policy kept request safe",
+        "9|2026-04-01 10:03:40 INFO request queued",
+        "10|2026-04-01 10:03:41 INFO summary generated",
+        "11|2026-04-01 10:05:01 INFO health check ok",
+        "12|2026-04-01 10:05:33 WARN cache miss ratio above baseline",
+        "13|2026-04-01 10:06:02 INFO fallback path used",
+        "14|2026-04-01 10:06:08 INFO delivery token emitted",
+        "15|2026-04-01 10:07:15 INFO db query finished",
+        "16|2026-04-01 10:08:44 ERROR provider timeout",
+        "17|2026-04-01 10:08:46 INFO provider retry succeeded",
+        "18|2026-04-01 10:09:20 INFO answer published",
+        "19|2026-04-01 10:10:01 INFO maintenance sweep finished",
+        "20|2026-04-01 10:10:30 INFO service idle",
+    ]
+    .join("\n");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "excerpt": log_excerpt,
+                    "path": "logs/app.log"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    let items = trace
+        .pointer("/step_results/0/observed_evidence/items")
+        .and_then(Value::as_array)
+        .expect("observed evidence items should be present");
+    let content_excerpt = items
+        .iter()
+        .filter(|item| item.get("field").and_then(Value::as_str) == Some("content_excerpt"))
+        .filter_map(|item| item.get("excerpt").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(content_excerpt.contains("7|2026-04-01 10:02:20 WARN"));
+    assert!(content_excerpt.contains("12|2026-04-01 10:05:33 WARN"));
+    assert!(content_excerpt.contains("16|2026-04-01 10:08:44 ERROR"));
+}
+
+#[test]
+fn http_health_body_prioritizes_status_scalars_for_answer_verifier() {
+    let mut journal = TaskJournal::for_task("task-http-health-evidence", "ask", "health");
+    let body = json!({
+        "ok": true,
+        "data": {
+            "version": "0.1.8",
+            "queue_length": 0,
+            "worker_state": "running",
+            "uptime_seconds": 703,
+            "memory_rss_bytes": 101871616,
+            "running_length": 1,
+            "telegramd_healthy": false,
+            "telegramd_process_count": 0,
+            "channel_gateway_healthy": false,
+            "channel_gateway_process_count": 0,
+            "whatsappd_healthy": false,
+            "whatsappd_process_count": 0,
+            "webd_healthy": false,
+            "webd_process_count": 0,
+            "wechatd_healthy": false,
+            "wechatd_process_count": 0,
+            "feishud_healthy": false,
+            "feishud_process_count": 0,
+            "larkd_healthy": false,
+            "larkd_process_count": 0,
+            "user_count": 2,
+            "bound_channel_count": 3,
+            "gateway_instance_statuses": [
+                {"kind": "telegram", "name": "primary", "healthy": false, "status": "stale"},
+                {"kind": "feishu", "name": "primary", "healthy": false, "status": "stopped"}
+            ]
+        },
+        "error": null
+    });
+    let body_text = body.to_string();
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "http_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "get",
+                    "body_preview": body_text,
+                    "status_code": 200,
+                    "success_status": true,
+                    "url": "http://127.0.0.1:8787/v1/health"
+                },
+                "text": format!("status=200\n{}", body)
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    let items = trace
+        .pointer("/step_results/0/observed_evidence/items")
+        .and_then(Value::as_array)
+        .expect("observed evidence items");
+    let fields = items
+        .iter()
+        .filter_map(|item| item.get("field").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+
+    for expected in [
+        "body.ok",
+        "body.data.version",
+        "body.data.worker_state",
+        "body.data.uptime_seconds",
+        "body.data.queue_length",
+        "body.data.telegramd_healthy",
+        "body.data.telegramd_process_count",
+        "body.data.whatsappd_healthy",
+        "body.data.webd_healthy",
+        "body.data.wechatd_healthy",
+        "body.data.feishud_healthy",
+        "body.data.larkd_healthy",
+    ] {
+        assert!(
+            fields.contains(&expected),
+            "expected {expected} in evidence fields: {fields:?}"
+        );
+    }
+}
+
+#[test]
 fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
     let mut journal = TaskJournal::for_task("task-image-extra-evidence", "ask", "生成图片");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -909,6 +1060,49 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("path"));
+    assert!(coverage
+        .observed_extractors
+        .contains("fs_basic.grep_text.structured_json_v1"));
+}
+
+#[test]
+fn raw_command_output_grep_text_satisfies_command_output_evidence() {
+    let mut journal = TaskJournal::for_task(
+        "task-raw-grep-command-output",
+        "ask",
+        "search a bound file and return matching lines",
+    );
+    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
+    journal.record_route_result(&route);
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "fs_basic",
+        json!({
+            "action": "grep_text",
+            "query": "ERROR",
+            "count": 1,
+            "match_count": 1,
+            "matches": [
+                {
+                    "path": "scripts/nl_tests/fixtures/device_local/logs/app.log",
+                    "line": 16,
+                    "text": "2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"
+                }
+            ]
+        })
+        .to_string(),
+    ));
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("command_output"));
+    assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage
         .observed_extractors
         .contains("fs_basic.grep_text.structured_json_v1"));

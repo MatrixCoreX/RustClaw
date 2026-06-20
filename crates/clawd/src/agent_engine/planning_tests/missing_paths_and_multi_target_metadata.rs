@@ -1226,6 +1226,10 @@ reqwest = { version = "0.12" }
     .expect("plan round should use deterministic scalar compare plan");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert!(plan
+        .planner_notes
+        .split_whitespace()
+        .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"));
     assert!(matches!(
         plan.steps
             .first()

@@ -630,6 +630,53 @@ fn recent_artifacts_judgment_replaces_non_answer_with_structured_inventory_verdi
 }
 
 #[test]
+fn recent_artifacts_judgment_preserves_one_sentence_synthesis() {
+    let task = claimed_task("task-recent-artifacts-preserve-synthesis");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"entries":[{"hidden":false,"kind":"file","modified_ts":1781284893,"name":"model_io.log","path":"logs/model_io.log","size_bytes":2300},{"hidden":false,"kind":"file","modified_ts":1781137621,"name":"nl_delayed_minimax_retry.log","path":"logs/nl_delayed_minimax_retry.log","size_bytes":60}],"names":["model_io.log","nl_delayed_minimax_retry.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
+    ));
+    let synthesis = "最近最值得注意的是 MiniMax 延迟恢复日志，说明上游模型提供方曾触发等待重试。";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    loop_state.delivery_messages.push(synthesis.to_string());
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs".to_string();
+    route.route_reason = "selector_limit=2 selector_sort_by=mtime_desc".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_recent_artifacts_judgment_answer(
+            &task,
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    assert_eq!(loop_state.delivery_messages, vec![synthesis.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(synthesis)
+    );
+    assert!(summary.is_none());
+}
+
+#[test]
 fn recent_artifacts_judgment_respects_file_selector_before_limit() {
     let task = claimed_task("task-recent-artifacts-file-selector");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

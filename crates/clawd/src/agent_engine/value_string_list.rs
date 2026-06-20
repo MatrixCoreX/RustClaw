@@ -196,7 +196,7 @@ pub(super) fn normalize_inventory_dir_sort_by_value(
         .map(str::trim)
         .filter(|value| !value.is_empty())?
         .to_ascii_lowercase();
-    let descending = obj
+    let order_descending = obj
         .get("order")
         .or_else(|| obj.get("sort_order"))
         .or_else(|| obj.get("direction"))
@@ -204,16 +204,22 @@ pub(super) fn normalize_inventory_dir_sort_by_value(
         .map(|value| {
             let value = value.trim().to_ascii_lowercase();
             !matches!(value.as_str(), "asc" | "ascending")
-        })
-        .unwrap_or(true);
+        });
     match sort_by.as_str() {
-        "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc" | "name" => Some(sort_by),
-        "mtime" | "modified" | "modified_ts" | "modified_time" => Some(if descending {
-            "mtime_desc".to_string()
+        "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc" | "name_desc" => Some(sort_by),
+        "name" => Some(if order_descending == Some(true) {
+            "name_desc".to_string()
         } else {
-            "mtime_asc".to_string()
+            "name".to_string()
         }),
-        "size" | "size_bytes" | "bytes" => Some(if descending {
+        "mtime" | "modified" | "modified_ts" | "modified_time" => {
+            Some(if order_descending.unwrap_or(true) {
+                "mtime_desc".to_string()
+            } else {
+                "mtime_asc".to_string()
+            })
+        }
+        "size" | "size_bytes" | "bytes" => Some(if order_descending.unwrap_or(true) {
             "size_desc".to_string()
         } else {
             "size_asc".to_string()
@@ -757,7 +763,8 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
             .iter()
             .filter(|path| path_has_structured_document_extension(path))
         {
-            let selectors = structured_current_turn_field_selectors(route, user_text, Some(path));
+            let selectors =
+                structured_current_turn_field_selectors(route, user_text, true, Some(path));
             let Some(field_path) = selectors
                 .into_iter()
                 .find(|field| structured_field_selector_can_yield_scalar(state, path, field))
@@ -833,6 +840,141 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
         PlanKind::Single,
         &actions,
     ))
+}
+
+pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary
+    {
+        return None;
+    }
+
+    let action = structured_scalar_field_auto_locator_action(
+        state,
+        route,
+        user_text,
+        original_user_text,
+        auto_locator_path,
+    )?;
+    let Some((skill, args)) = planned_call_subject_and_args(&action) else {
+        return None;
+    };
+    if !crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        skill,
+        args,
+    )
+    .is_some_and(|policy| policy.is_allowed())
+    {
+        return None;
+    }
+
+    let mut actions = vec![action];
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+    ) {
+        actions.push(AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        });
+        actions.push(AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        });
+    }
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn structured_scalar_field_auto_locator_action(
+    state: &AppState,
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<AgentAction> {
+    let paths = structured_scalar_field_auto_locator_target_paths(state, route, auto_locator_path);
+    for path in paths {
+        for source in [Some(user_text), original_user_text].into_iter().flatten() {
+            if let Some(action) =
+                structured_scalar_read_action_for_target(state, route, source, path.as_str())
+            {
+                return Some(action);
+            }
+        }
+    }
+    None
+}
+
+fn structured_scalar_field_auto_locator_target_paths(
+    state: &AppState,
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    push_structured_scalar_path_candidate(&mut candidates, auto_locator_path);
+    let route_locator_path = route_locator_structured_config_path(route);
+    push_structured_scalar_path_candidate(&mut candidates, route_locator_path.as_deref());
+    push_structured_scalar_path_candidate(
+        &mut candidates,
+        Some(route.output_contract.locator_hint.as_str()),
+    );
+    for target in route_locator_targets(route) {
+        push_structured_scalar_path_candidate(&mut candidates, Some(target.as_str()));
+    }
+
+    let mut resolved = Vec::new();
+    for candidate in candidates {
+        let Some(path) =
+            resolve_existing_metadata_locator_path(&state.skill_rt.workspace_root, &candidate)
+        else {
+            continue;
+        };
+        if !path_has_structured_document_extension(&path) || !Path::new(&path).is_file() {
+            continue;
+        }
+        if !resolved
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&path))
+        {
+            resolved.push(path);
+        }
+    }
+    resolved
+}
+
+fn push_structured_scalar_path_candidate(out: &mut Vec<String>, candidate: Option<&str>) {
+    let Some(candidate) = candidate.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    if !path_has_structured_document_extension(candidate) {
+        return;
+    }
+    if !out
+        .iter()
+        .any(|existing: &String| existing.eq_ignore_ascii_case(candidate))
+    {
+        out.push(candidate.to_string());
+    }
 }
 
 pub(super) fn structured_scalar_read_action_for_target(
@@ -989,6 +1131,28 @@ pub(super) fn service_status_deterministic_plan_result(
             }
         }
     }
+    if task_control_available_for_plan(state) && route_mentions_task_control_list(route) {
+        let action = AgentAction::CallSkill {
+            skill: "task_control".to_string(),
+            args: serde_json::json!({"action": "list"}),
+        };
+        if let AgentAction::CallSkill { skill, args } = &action {
+            if crate::contract_matrix::action_policy_for_output_contract(
+                Some(&route.output_contract),
+                skill,
+                args,
+            )
+            .is_some_and(|policy| policy.is_allowed())
+            {
+                return Some(build_plan_result(
+                    goal,
+                    "deterministic:service_status_task_control_list",
+                    PlanKind::Single,
+                    &[action],
+                ));
+            }
+        }
+    }
     if process_basic_available_for_plan(state)
         && !request_mentions_workspace_product(state, user_text)
     {
@@ -1006,7 +1170,9 @@ pub(super) fn service_status_deterministic_plan_result(
                 }],
             ));
         }
-        if let Some(filter) = process_status_filter_token(user_text) {
+        if let Some(filter) = process_status_contract_filter_token(route)
+            .or_else(|| process_status_filter_token(user_text))
+        {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_process_list",
@@ -1079,33 +1245,6 @@ pub(super) fn service_status_deterministic_plan_result(
             }],
         ));
     }
-    if health_check_available_for_plan(state) {
-        let action = AgentAction::CallSkill {
-            skill: "health_check".to_string(),
-            args: serde_json::json!({}),
-        };
-        if let AgentAction::CallSkill { skill, args } = &action {
-            if crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
-                skill,
-                args,
-            )
-            .is_some_and(|policy| policy.is_allowed())
-            {
-                return Some(build_plan_result(
-                    goal,
-                    "deterministic:service_status_health_check",
-                    PlanKind::Single,
-                    &[action],
-                ));
-            }
-        }
-    }
-    if system_basic_available_for_plan(state) {
-        if let Some(plan) = service_status_system_basic_info_plan(goal, route) {
-            return Some(plan);
-        }
-    }
     if process_basic_available_for_plan(state) {
         if let Some(port) = first_port_filter_token(user_text) {
             return Some(build_plan_result(
@@ -1121,7 +1260,9 @@ pub(super) fn service_status_deterministic_plan_result(
                 }],
             ));
         }
-        if let Some(filter) = process_status_filter_token(user_text) {
+        if let Some(filter) = process_status_contract_filter_token(route)
+            .or_else(|| process_status_filter_token(user_text))
+        {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_process_list",
@@ -1138,6 +1279,97 @@ pub(super) fn service_status_deterministic_plan_result(
         }
     }
     None
+}
+
+pub(super) fn web_search_summary_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WebSearchSummary
+        || !web_search_extract_available_for_plan(state)
+    {
+        return None;
+    }
+
+    let query = web_search_query_from_route(route).unwrap_or_else(|| user_text.trim().to_string());
+    if query.is_empty() {
+        return None;
+    }
+
+    let mut args = serde_json::json!({
+        "action": "search_extract",
+        "backend": "bing_html",
+        "query": query,
+    });
+    if let Some(top_k) = route.output_contract.self_extension.list_selector.limit {
+        if (1..=20).contains(&top_k) {
+            args["top_k"] = serde_json::json!(top_k);
+        }
+    }
+    let action = AgentAction::CallSkill {
+        skill: "web_search_extract".to_string(),
+        args,
+    };
+    if let AgentAction::CallSkill { skill, args } = &action {
+        if !crate::contract_matrix::action_policy_for_output_contract(
+            Some(&route.output_contract),
+            skill,
+            args,
+        )
+        .is_some_and(|policy| policy.is_allowed())
+        {
+            return None;
+        }
+    }
+
+    let actions = vec![
+        action,
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    Some(build_plan_result(
+        goal,
+        "deterministic:web_search_summary_search_extract",
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn task_control_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("task_control")
+}
+
+fn web_search_extract_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("web_search_extract")
+}
+
+fn web_search_query_from_route(route: &RouteResult) -> Option<String> {
+    [
+        route.output_contract.locator_hint.as_str(),
+        route.resolved_intent.as_str(),
+    ]
+    .into_iter()
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+    .map(ToString::to_string)
+}
+
+fn route_mentions_task_control_list(route: &RouteResult) -> bool {
+    route_reason_has_marker(route, "capability_ref=task_control.list")
+        || route_reason_has_marker(route, "task_control.list")
 }
 
 pub(super) fn service_status_url_locator(route: &RouteResult, user_text: &str) -> Option<String> {

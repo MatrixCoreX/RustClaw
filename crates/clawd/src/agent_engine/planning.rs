@@ -1,6 +1,6 @@
 use super::planning_actions::{
-    build_plan_result, contains_unavailable_skill_action, has_executable_observation_or_action,
-    has_tool_or_skill_observation, planned_action_skill_name,
+    build_plan_result, build_plan_result_with_notes, contains_unavailable_skill_action,
+    has_executable_observation_or_action, has_tool_or_skill_observation, planned_action_skill_name,
 };
 use super::planning_followup::{
     has_authoritative_delivery, has_discussion_followup_action, is_delivery_failure_terminal_reply,
@@ -41,9 +41,9 @@ use super::{
     attempt_ledger::build_attempt_ledger_compact,
     build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text_scoped,
     build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block,
-    planning_numeric_limits::first_ascii_integer_limit,
     planning_route_markers::{
-        route_allows_structured_candidate_read_target_repair, route_reason_has_structural_marker,
+        route_allows_structured_candidate_read_target_repair,
+        route_has_unresolved_clarify_or_locator_marker, route_reason_has_structural_marker,
     },
     AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH,
     LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
@@ -141,6 +141,7 @@ pub(super) async fn plan_round_actions(
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
+    let agent_runtime_identity = state.agent_runtime_identity_label().to_string();
     let planning_class = classify_planning_prompt_class(route_result, user_text, loop_state);
     let original_user_text_for_policy = crate::language_policy::task_original_user_text(task)
         .unwrap_or_else(|| user_text.to_string());
@@ -149,477 +150,432 @@ pub(super) async fn plan_round_actions(
         &original_user_text_for_policy,
         route_result,
     );
+    let explicit_command_scalar_path_current_workspace =
+        explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
+            &state.policy.command_intent,
+            &original_user_text_for_policy,
+            route_result,
+        );
     let allow_structural_deterministic_plans = !explicit_command_request
-        || structural_contract_deterministic_plan_overrides_literal_command_guard(route_result);
-    if let Some(plan_result) = inline_json_transform_deterministic_plan_result(
-        goal,
-        state,
-        loop_state,
-        &original_user_text_for_policy,
-        route_result,
-    ) {
-        info!(
-            "plan_deterministic_inline_json_transform task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
+        || (structural_contract_deterministic_plan_overrides_literal_command_guard(route_result)
+            && !explicit_command_scalar_path_current_workspace);
+    macro_rules! return_deterministic_plan {
+        ($maybe_plan:expr, $reason_code:literal) => {
+            if let Some(plan_result) = $maybe_plan {
+                info!(
+                    concat!($reason_code, " task_id={} round={}"),
+                    task.task_id, loop_state.round_no
+                );
+                return Ok(plan_result_with_fallback_reason(plan_result, $reason_code));
+            }
+        };
     }
-    if explicit_command_request {
-        if let Some(plan_result) = explicit_command_deterministic_plan_result(
+
+    return_deterministic_plan!(
+        inline_json_transform_deterministic_plan_result(
+            goal,
             state,
+            loop_state,
+            &original_user_text_for_policy,
+            route_result,
+        ),
+        "plan_deterministic_inline_json_transform"
+    );
+    if explicit_command_request
+        && !allow_structural_deterministic_plans
+        && runtime_status_query_kind(turn_analysis_for_prompt).is_none()
+    {
+        return_deterministic_plan!(
+            explicit_command_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                &original_user_text_for_policy,
+                turn_analysis_for_prompt,
+            ),
+            "plan_deterministic_explicit_command_run_cmd"
+        );
+    }
+    return_deterministic_plan!(
+        active_task_append_current_locator_deterministic_plan_result(
             goal,
             route_result,
             loop_state,
-            &original_user_text_for_policy,
             turn_analysis_for_prompt,
-        ) {
-            info!(
-                "plan_deterministic_explicit_command_run_cmd task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-    }
-    if let Some(plan_result) = active_task_append_current_locator_deterministic_plan_result(
-        goal,
-        route_result,
-        loop_state,
-        turn_analysis_for_prompt,
-        auto_locator_path,
-    ) {
-        info!(
-            "plan_deterministic_active_task_append_current_locator task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = scalar_count_filter_deterministic_plan_result(
-        goal,
-        route_result,
-        loop_state,
-        turn_analysis_for_prompt,
-        auto_locator_path,
-    ) {
-        info!(
-            "plan_deterministic_scalar_count_filter task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = contract_hint_preferred_action_deterministic_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        &original_user_text_for_policy,
-        auto_locator_path,
-    ) {
-        info!(
-            "plan_deterministic_contract_hint_preferred_action task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = package_manager_detect_deterministic_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        auto_locator_path,
-    ) {
-        info!(
-            "plan_deterministic_package_manager_detect task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = package_manager_dry_run_deterministic_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        &original_user_text_for_policy,
-    ) {
-        info!(
-            "plan_deterministic_package_manager_dry_run task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = runtime_status_scalar_deterministic_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        turn_analysis_for_prompt,
-    ) {
-        info!(
-            "plan_deterministic_runtime_status_scalar task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = runtime_status_scalar_info_fallback_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        turn_analysis_for_prompt,
-    ) {
-        info!(
-            "plan_deterministic_runtime_status_scalar_info_fallback task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
-    if let Some(plan_result) = service_status_deterministic_plan_result(
-        state,
-        goal,
-        route_result,
-        loop_state,
-        &original_user_text_for_policy,
-    ) {
-        info!(
-            "plan_deterministic_service_status task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(plan_result);
-    }
+            auto_locator_path,
+        ),
+        "plan_deterministic_active_task_append_current_locator"
+    );
+    return_deterministic_plan!(
+        scalar_count_filter_deterministic_plan_result(
+            goal,
+            route_result,
+            loop_state,
+            turn_analysis_for_prompt,
+            auto_locator_path,
+        ),
+        "plan_deterministic_scalar_count_filter"
+    );
+    return_deterministic_plan!(
+        contract_hint_preferred_action_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+            auto_locator_path,
+        ),
+        "plan_deterministic_contract_hint_preferred_action"
+    );
+    return_deterministic_plan!(
+        package_manager_detect_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ),
+        "plan_deterministic_package_manager_detect"
+    );
+    return_deterministic_plan!(
+        package_manager_dry_run_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_package_manager_dry_run"
+    );
+    return_deterministic_plan!(
+        runtime_status_scalar_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            turn_analysis_for_prompt,
+        ),
+        "plan_deterministic_runtime_status_scalar"
+    );
+    return_deterministic_plan!(
+        runtime_status_scalar_info_fallback_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            turn_analysis_for_prompt,
+        ),
+        "plan_deterministic_runtime_status_scalar_info_fallback"
+    );
+    return_deterministic_plan!(
+        web_search_summary_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_web_search_summary"
+    );
+    return_deterministic_plan!(
+        service_status_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_service_status"
+    );
     if allow_structural_deterministic_plans {
-        if let Some(plan_result) = directory_purpose_representative_reads_after_find_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_directory_purpose_representative_reads task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = structured_keys_deterministic_plan_result(
-            state,
-            goal,
-            &original_user_text_for_policy,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_structured_keys task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = content_presence_quoted_literal_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_content_presence_quoted_literal task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = git_repository_state_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ) {
-            info!(
-                "plan_deterministic_git_repository_state task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = recent_scalar_file_pair_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_recent_scalar_file_pair task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = recent_scalar_current_workspace_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-        ) {
-            info!(
-                "plan_deterministic_recent_scalar_current_workspace task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = scalar_path_directory_locator_search_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-            &original_user_text_for_policy,
-        ) {
-            info!(
-                "plan_deterministic_scalar_path_directory_locator_search task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = scalar_content_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_scalar_content_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = scalar_path_auto_locator_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_scalar_path_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = quantity_compare_pair_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            Some(&original_user_text_for_policy),
-        ) {
-            info!(
-                "plan_deterministic_quantity_compare_pair_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = file_facts_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_file_facts_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = existence_with_path_locator_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-            &original_user_text_for_policy,
-        ) {
-            info!(
-                "plan_deterministic_existence_with_path_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = file_paths_locator_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_file_paths_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = file_names_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_file_names_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = directory_compare_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-        ) {
-            info!(
-                "plan_deterministic_directory_compare_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = directory_entry_groups_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_directory_entry_groups_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = directory_purpose_extension_inventory_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_directory_purpose_extension_inventory task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = directory_purpose_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_directory_purpose_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = generic_path_content_log_analyze_deterministic_plan_result(
-            goal,
-            state,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_generic_path_content_log_analyze task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = directory_tree_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            user_text,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_directory_tree_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = archive_read_deterministic_plan_result(
-            goal,
-            state,
-            route_result,
-            loop_state,
-            auto_locator_path,
-            &original_user_text_for_policy,
-        ) {
-            info!(
-                "plan_deterministic_archive_read task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = archive_pack_deterministic_plan_result(
-            goal,
-            state,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            Some(&original_user_text_for_policy),
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_archive_pack task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) =
-            archive_unpack_deterministic_plan_result(goal, state, route_result, loop_state)
-        {
-            info!(
-                "plan_deterministic_archive_unpack task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = archive_list_auto_locator_deterministic_plan_result(
-            goal,
-            state,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_archive_list_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
-        if let Some(plan_result) = content_excerpt_summary_auto_locator_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ) {
-            info!(
-                "plan_deterministic_content_excerpt_summary_auto_locator task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            return Ok(plan_result);
-        }
+        return_deterministic_plan!(
+            directory_purpose_representative_reads_after_find_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_directory_purpose_representative_reads"
+        );
+        return_deterministic_plan!(
+            structured_keys_deterministic_plan_result(
+                state,
+                goal,
+                &original_user_text_for_policy,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_structured_keys"
+        );
+        return_deterministic_plan!(
+            content_presence_quoted_literal_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_content_presence_quoted_literal"
+        );
+        return_deterministic_plan!(
+            git_repository_state_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                &original_user_text_for_policy,
+            ),
+            "plan_deterministic_git_repository_state"
+        );
+        return_deterministic_plan!(
+            recent_scalar_file_pair_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                &original_user_text_for_policy,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_recent_scalar_file_pair"
+        );
+        return_deterministic_plan!(
+            recent_scalar_current_workspace_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+            ),
+            "plan_deterministic_recent_scalar_current_workspace"
+        );
+        return_deterministic_plan!(
+            scalar_path_current_workspace_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+            ),
+            "plan_deterministic_scalar_path_current_workspace"
+        );
+        return_deterministic_plan!(
+            scalar_path_directory_locator_search_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+                &original_user_text_for_policy,
+            ),
+            "plan_deterministic_scalar_path_directory_locator_search"
+        );
+        return_deterministic_plan!(
+            scalar_content_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_scalar_content_auto_locator"
+        );
+        return_deterministic_plan!(
+            structured_scalar_field_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_structured_scalar_field_auto_locator"
+        );
+        return_deterministic_plan!(
+            scalar_path_auto_locator_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_scalar_path_auto_locator"
+        );
+        return_deterministic_plan!(
+            quantity_compare_pair_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                Some(&original_user_text_for_policy),
+            ),
+            "plan_deterministic_quantity_compare_pair_locator"
+        );
+        return_deterministic_plan!(
+            file_facts_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_file_facts_auto_locator"
+        );
+        return_deterministic_plan!(
+            existence_with_path_locator_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+                &original_user_text_for_policy,
+            ),
+            "plan_deterministic_existence_with_path_locator"
+        );
+        return_deterministic_plan!(
+            file_paths_locator_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_file_paths_locator"
+        );
+        return_deterministic_plan!(
+            file_names_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_file_names_auto_locator"
+        );
+        return_deterministic_plan!(
+            directory_compare_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+            ),
+            "plan_deterministic_directory_compare_locator"
+        );
+        return_deterministic_plan!(
+            directory_entry_groups_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_directory_entry_groups_auto_locator"
+        );
+        return_deterministic_plan!(
+            directory_purpose_extension_inventory_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_directory_purpose_extension_inventory"
+        );
+        return_deterministic_plan!(
+            directory_purpose_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_directory_purpose_auto_locator"
+        );
+        return_deterministic_plan!(
+            content_excerpt_summary_directory_log_slice_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_content_excerpt_summary_directory_log_slice"
+        );
+        return_deterministic_plan!(
+            generic_path_content_log_analyze_deterministic_plan_result(
+                goal,
+                state,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_generic_path_content_log_analyze"
+        );
+        return_deterministic_plan!(
+            directory_tree_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_directory_tree_auto_locator"
+        );
+        return_deterministic_plan!(
+            archive_read_deterministic_plan_result(
+                goal,
+                state,
+                route_result,
+                loop_state,
+                auto_locator_path,
+                &original_user_text_for_policy,
+            ),
+            "plan_deterministic_archive_read"
+        );
+        return_deterministic_plan!(
+            archive_pack_deterministic_plan_result(
+                goal,
+                state,
+                route_result,
+                loop_state,
+                &original_user_text_for_policy,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_archive_pack"
+        );
+        return_deterministic_plan!(
+            archive_unpack_deterministic_plan_result(goal, state, route_result, loop_state),
+            "plan_deterministic_archive_unpack"
+        );
+        return_deterministic_plan!(
+            archive_list_auto_locator_deterministic_plan_result(
+                goal,
+                state,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_archive_list_auto_locator"
+        );
+        return_deterministic_plan!(
+            content_excerpt_summary_auto_locator_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_content_excerpt_summary_auto_locator"
+        );
     }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
@@ -675,6 +631,7 @@ pub(super) async fn plan_round_actions(
                 &recent_assistant_replies,
                 &request_language_hint,
                 &state.policy.command_intent.default_locale,
+                &agent_runtime_identity,
                 &runtime_os,
                 &runtime_shell,
                 &workspace_root,
@@ -726,6 +683,7 @@ pub(super) async fn plan_round_actions(
                 &recent_assistant_replies,
                 &request_language_hint,
                 &state.policy.command_intent.default_locale,
+                &agent_runtime_identity,
                 loop_state.round_no,
                 &history_compact,
                 &attempt_ledger,
@@ -779,7 +737,20 @@ pub(super) async fn plan_round_actions(
         crate::truncate_for_log(&plan_raw)
     );
     let parsed_actions = parse_single_plan_actions(&plan_raw, state, task).await;
+    let mut initial_fallback_reason_code: Option<&'static str> = None;
     let initial_actions = parsed_actions
+        .or_else(|| {
+            let fallback = plain_text_terminal_respond_fallback_actions(route_result, &plan_raw);
+            if fallback.is_some() {
+                initial_fallback_reason_code =
+                    Some("plan_parse_failed_plain_text_terminal_respond");
+                warn!(
+                    "plan_parse_failed_using_plain_text_terminal_respond task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
         .or_else(|| {
             let fallback = scalar_path_directory_locator_search_observation_plan(
                 route_result,
@@ -787,6 +758,8 @@ pub(super) async fn plan_round_actions(
                 &original_user_text_for_policy,
             );
             if fallback.is_some() {
+                initial_fallback_reason_code =
+                    Some("plan_parse_failed_scalar_path_directory_locator_search");
                 warn!(
                     "plan_parse_failed_using_scalar_path_directory_locator_search_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
@@ -798,6 +771,8 @@ pub(super) async fn plan_round_actions(
             let fallback =
                 scalar_content_auto_locator_observation_plan(route_result, auto_locator_path);
             if fallback.is_some() {
+                initial_fallback_reason_code =
+                    Some("plan_parse_failed_scalar_content_auto_locator");
                 warn!(
                     "plan_parse_failed_using_scalar_content_auto_locator_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
@@ -809,6 +784,7 @@ pub(super) async fn plan_round_actions(
             let fallback =
                 scalar_path_auto_locator_observation_plan(route_result, auto_locator_path);
             if fallback.is_some() {
+                initial_fallback_reason_code = Some("plan_parse_failed_scalar_path_auto_locator");
                 warn!(
                     "plan_parse_failed_using_auto_locator_observation_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
@@ -820,6 +796,7 @@ pub(super) async fn plan_round_actions(
             let fallback =
                 file_facts_auto_locator_observation_plan(route_result, auto_locator_path);
             if fallback.is_some() {
+                initial_fallback_reason_code = Some("plan_parse_failed_file_facts_auto_locator");
                 warn!(
                     "plan_parse_failed_using_file_facts_auto_locator_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
@@ -831,6 +808,8 @@ pub(super) async fn plan_round_actions(
             let fallback =
                 generic_directory_auto_locator_observation_plan(route_result, auto_locator_path);
             if fallback.is_some() {
+                initial_fallback_reason_code =
+                    Some("plan_parse_failed_generic_directory_auto_locator");
                 warn!(
                     "plan_parse_failed_using_generic_directory_auto_locator_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
@@ -849,6 +828,7 @@ pub(super) async fn plan_round_actions(
                 "plan_parse_failed_using_workspace_default_evidence_plan task_id={} round={}",
                 task.task_id, loop_state.round_no
             );
+            initial_fallback_reason_code = Some("plan_parse_failed_workspace_default_evidence");
             Some(workspace_summary_default_evidence_actions())
         })
         .map(|actions| {
@@ -869,7 +849,7 @@ pub(super) async fn plan_round_actions(
         }
         None => true,
     };
-    let (plan_actions, plan_kind, raw_plan_text) = if needs_repair {
+    let (plan_actions, plan_kind, raw_plan_text, planner_notes) = if needs_repair {
         let repair_reason =
             plan_repair_reason(state, route_result, loop_state, initial_actions.as_deref());
         warn!(
@@ -919,7 +899,12 @@ pub(super) async fn plan_round_actions(
                             &actions,
                         ) =>
                     {
-                        (actions, PlanKind::Repair, repaired)
+                        (
+                            actions,
+                            PlanKind::Repair,
+                            repaired,
+                            planner_notes_for_repair_success(repair_reason, None),
+                        )
                     }
                     Some(actions) => {
                         let second_repair_reason =
@@ -966,7 +951,15 @@ pub(super) async fn plan_round_actions(
                                     &second_actions,
                                 ) =>
                             {
-                                (second_actions, PlanKind::Repair, second_repaired)
+                                (
+                                    second_actions,
+                                    PlanKind::Repair,
+                                    second_repaired,
+                                    planner_notes_for_repair_success(
+                                        repair_reason,
+                                        Some(second_repair_reason),
+                                    ),
+                                )
                             }
                             Some(_) => {
                                 let fallback_actions = initial_actions.as_ref().filter(|actions| {
@@ -990,6 +983,10 @@ pub(super) async fn plan_round_actions(
                                             PlanKind::Incremental
                                         },
                                         plan_raw.clone(),
+                                        planner_notes_for_repair_fallback(
+                                            "plan_second_repair_invalid_fallback_to_initial",
+                                            initial_fallback_reason_code,
+                                        ),
                                     )
                                 } else {
                                     return Err(
@@ -1020,6 +1017,10 @@ pub(super) async fn plan_round_actions(
                                             PlanKind::Incremental
                                         },
                                         plan_raw.clone(),
+                                        planner_notes_for_repair_fallback(
+                                            "plan_second_repair_parse_failed_fallback_to_initial",
+                                            initial_fallback_reason_code,
+                                        ),
                                     )
                                 } else {
                                     return Err(
@@ -1052,6 +1053,10 @@ pub(super) async fn plan_round_actions(
                                     PlanKind::Incremental
                                 },
                                 plan_raw.clone(),
+                                planner_notes_for_repair_fallback(
+                                    "plan_repair_parse_failed_fallback_to_initial",
+                                    initial_fallback_reason_code,
+                                ),
                             )
                         } else {
                             return Err(
@@ -1085,6 +1090,10 @@ pub(super) async fn plan_round_actions(
                             PlanKind::Incremental
                         },
                         plan_raw.clone(),
+                        planner_notes_for_repair_fallback(
+                            "plan_repair_llm_failed_fallback_to_initial",
+                            initial_fallback_reason_code,
+                        ),
                     )
                 } else {
                     return Err(err);
@@ -1100,9 +1109,16 @@ pub(super) async fn plan_round_actions(
                 PlanKind::Incremental
             },
             plan_raw.clone(),
+            planner_notes_for_initial_fallback(initial_fallback_reason_code),
         )
     };
-    let plan_result = build_plan_result(goal, &raw_plan_text, plan_kind, &plan_actions);
+    let plan_result = build_plan_result_with_notes(
+        goal,
+        &raw_plan_text,
+        plan_kind,
+        &plan_actions,
+        &planner_notes,
+    );
     let labels = plan_result.step_labels();
     info!(
         "act_split_trace task_id={} round={} split_steps={}",
@@ -1111,6 +1127,105 @@ pub(super) async fn plan_round_actions(
         serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     );
     Ok(plan_result)
+}
+
+fn explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
+    command_runtime: &crate::CommandIntentRuntime,
+    original_user_text: &str,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    explicit_command_request_present(command_runtime, original_user_text, route_result)
+        && route_result.is_some_and(|route| {
+            let scalar_path_contract =
+                route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly;
+            let route_preserves_explicit_command = route_reason_has_structural_marker(
+                route,
+                "explicit_command_preserves_structured_observation_contract",
+            );
+            let current_workspace_path =
+                route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
+            let auto_locator_path_conflict = route.output_contract.locator_kind
+                == crate::OutputLocatorKind::Path
+                && !route.output_contract.locator_hint.trim().is_empty()
+                && route_preserves_explicit_command;
+            scalar_path_contract
+                && (current_workspace_path || auto_locator_path_conflict)
+                && route_preserves_explicit_command
+        })
+}
+
+fn plan_result_with_fallback_reason(
+    mut plan_result: PlanResult,
+    reason_code: &'static str,
+) -> PlanResult {
+    let note = format!("fallback_reason_code={reason_code}");
+    let notes = plan_result.planner_notes.trim();
+    if notes.is_empty() {
+        plan_result.planner_notes = note;
+    } else if !notes.split_whitespace().any(|item| item == note) {
+        plan_result.planner_notes = format!("{notes} {note}");
+    }
+    plan_result
+}
+
+fn plain_text_terminal_respond_fallback_actions(
+    route_result: Option<&RouteResult>,
+    raw_plan_text: &str,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    let content = raw_plan_text.trim();
+    if content.is_empty() || raw_plan_text_looks_like_structured_plan_fragment(content) {
+        return None;
+    }
+    let chat_like_route = route.is_chat_gate()
+        || route_reason_has_structural_marker(route, "pure_chat_agent_loop_submode");
+    if !chat_like_route
+        || route.needs_clarify
+        || route.wants_file_delivery
+        || route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || !route_allows_model_language_terminal_respond(Some(route))
+    {
+        return None;
+    }
+    Some(vec![AgentAction::Respond {
+        content: content.to_string(),
+    }])
+}
+
+fn raw_plan_text_looks_like_structured_plan_fragment(content: &str) -> bool {
+    let content = content.trim_start_matches('\u{feff}').trim_start();
+    let lower = content.to_ascii_lowercase();
+    lower.starts_with('{')
+        || lower.starts_with('[')
+        || lower.starts_with("<tool_call")
+        || lower.starts_with("<tool>")
+}
+
+fn planner_notes_for_initial_fallback(reason_code: Option<&str>) -> String {
+    reason_code
+        .map(|reason| format!("fallback_reason_code={reason}"))
+        .unwrap_or_default()
+}
+
+fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&str>) -> String {
+    let mut notes = vec![format!("repair_reason_code={first_reason}")];
+    if let Some(second_reason) = second_reason {
+        notes.push(format!("second_repair_reason_code={second_reason}"));
+    }
+    notes.join(" ")
+}
+
+fn planner_notes_for_repair_fallback(reason_code: &str, initial_reason: Option<&str>) -> String {
+    let mut notes = vec![format!("fallback_reason_code={reason_code}")];
+    if let Some(initial_reason) = initial_reason {
+        notes.push(format!("initial_fallback_reason_code={initial_reason}"));
+    }
+    notes.join(" ")
 }
 
 #[cfg(test)]

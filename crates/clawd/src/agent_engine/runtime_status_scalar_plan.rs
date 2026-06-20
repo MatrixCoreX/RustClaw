@@ -19,7 +19,16 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
         return None;
     }
     let kind = runtime_status_query_kind(turn_analysis)?;
-    let action = if run_cmd_available_for_plan(state) {
+    let action = if system_basic_available_for_plan(state) {
+        let kind = runtime_status_query_system_basic_kind(kind)?;
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "runtime_status",
+                "kind": kind,
+            }),
+        }
+    } else {
         let command = runtime_status_query_run_cmd_command(kind)?;
         let mut args = serde_json::json!({
             "command": command,
@@ -29,15 +38,6 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
         AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
             args,
-        }
-    } else {
-        let kind = runtime_status_query_system_basic_kind(kind)?;
-        AgentAction::CallTool {
-            tool: "system_basic".to_string(),
-            args: serde_json::json!({
-                "action": "runtime_status",
-                "kind": kind,
-            }),
         }
     };
     if let AgentAction::CallTool { tool: skill, args } | AgentAction::CallSkill { skill, args } =
@@ -114,12 +114,6 @@ pub(super) fn process_status_filter_token(text: &str) -> Option<String> {
     if candidates.is_empty() {
         return None;
     }
-    if let Some(active) = candidates
-        .iter()
-        .find(|token| process_table_contains_filter_token(token))
-    {
-        return Some(active.clone());
-    }
     if let Some(structural) = candidates.iter().find(|token| {
         token.contains(['_', '-', '.'])
             || token.chars().any(|ch| ch.is_ascii_digit())
@@ -130,6 +124,14 @@ pub(super) fn process_status_filter_token(text: &str) -> Option<String> {
     }
     (candidates.len() == 1 && !token_is_ascii_uppercase_acronym(&candidates[0]))
         .then(|| candidates[0].clone())
+}
+
+pub(super) fn process_status_contract_filter_token(route: &RouteResult) -> Option<String> {
+    let hint = route.output_contract.locator_hint.trim();
+    if hint.is_empty() || !safe_process_status_filter_token(hint) {
+        return None;
+    }
+    Some(hint.to_string())
 }
 
 pub(super) fn token_is_ascii_uppercase_acronym(token: &str) -> bool {
@@ -173,53 +175,10 @@ pub(super) fn port_filter_from_structural_token(token: &str) -> Option<String> {
 pub(super) fn safe_process_status_filter_token(token: &str) -> bool {
     token.len() >= 3
         && !token.chars().all(|ch| ch.is_ascii_digit())
+        && token.chars().any(|ch| ch.is_ascii_alphabetic())
         && token
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-}
-
-#[cfg(target_os = "linux")]
-pub(super) fn process_table_contains_filter_token(token: &str) -> bool {
-    let token = token.trim();
-    if token.is_empty() {
-        return false;
-    }
-    let token_lower = token.to_ascii_lowercase();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if !name.to_string_lossy().chars().all(|ch| ch.is_ascii_digit()) {
-            continue;
-        }
-        let dir = entry.path();
-        if std::fs::read_to_string(dir.join("comm"))
-            .ok()
-            .map(|comm| comm.trim().to_ascii_lowercase())
-            .is_some_and(|comm| comm == token_lower)
-        {
-            return true;
-        }
-        if std::fs::read(dir.join("cmdline"))
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .is_some_and(|cmdline| {
-                cmdline.split('\0').any(|arg| {
-                    let base = command_basename(arg).to_ascii_lowercase();
-                    base == token_lower
-                })
-            })
-        {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(super) fn process_table_contains_filter_token(_token: &str) -> bool {
-    false
 }
 
 pub(super) fn route_locator_hint_for_read_range_fill(

@@ -505,6 +505,34 @@ fn compact_inventory_dir_kind_lines(entries: &[serde_json::Value]) -> Option<Vec
     (!lines.is_empty()).then_some(lines)
 }
 
+fn inventory_dir_size_summary_lines(value: &serde_json::Value) -> Vec<String> {
+    let Some(summary) = value.get("size_summary").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+
+    let mut lines = Vec::new();
+    for key in ["matched_file_count", "total_file_size_bytes"] {
+        if let Some(value) = summary.get(key).and_then(value_scalar_text) {
+            lines.push(format!("size_summary.{key}={value}"));
+        }
+    }
+    for key in ["largest_file", "smallest_file"] {
+        let Some(file) = summary.get(key).and_then(|v| v.as_object()) else {
+            continue;
+        };
+        let mut fields = Vec::new();
+        for field in ["name", "path", "kind", "size_bytes", "modified_ts"] {
+            if let Some(value) = file.get(field).and_then(value_scalar_text) {
+                fields.push(format!("{field}={value}"));
+            }
+        }
+        if !fields.is_empty() {
+            lines.push(format!("size_summary.{key} {}", fields.join(" ")));
+        }
+    }
+    lines
+}
+
 pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let path = value
         .get("resolved_path")
@@ -528,55 +556,58 @@ pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Opt
             }
         }
     }
+    let size_summary_lines = inventory_dir_size_summary_lines(value);
     if let Some(entries) = value.get("entries").and_then(|v| v.as_array()) {
         if entries.len() > 16 {
             if let Some(lines) = compact_inventory_dir_kind_lines(entries) {
+                let lines = size_summary_lines
+                    .into_iter()
+                    .chain(lines)
+                    .collect::<Vec<_>>();
                 return Some(format!("{header}\n{}", lines.join("\n")));
             }
         }
-        let lines = entries
-            .iter()
-            .filter_map(|entry| {
-                let entry = entry.as_object()?;
-                let name = entry
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())?;
-                let kind = entry
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .unwrap_or("-");
-                let size = entry
-                    .get("size_bytes")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                let modified = entry
-                    .get("modified_ts")
-                    .and_then(|v| v.as_i64())
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                Some(format!(
-                    "entry name={name} kind={kind} size_bytes={size} modified_ts={modified}"
-                ))
-            })
-            .collect::<Vec<_>>();
+        let mut lines = size_summary_lines.clone();
+        lines.extend(
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let entry = entry.as_object()?;
+                    let name = entry
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())?;
+                    let kind = entry
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or("-");
+                    let size = entry
+                        .get("size_bytes")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let modified = entry
+                        .get("modified_ts")
+                        .and_then(|v| v.as_i64())
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    Some(format!(
+                        "entry name={name} kind={kind} size_bytes={size} modified_ts={modified}"
+                    ))
+                })
+                .collect::<Vec<_>>(),
+        );
         if !lines.is_empty() {
             return Some(format!("{header}\n{}", lines.join("\n")));
         }
     }
     let names = inventory_dir_names(value)?;
-    Some(format!(
-        "{header}\n{}",
-        names
-            .into_iter()
-            .map(|name| format!("entry name={name}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    ))
+    let mut lines = size_summary_lines;
+    lines.extend(names.into_iter().map(|name| format!("entry name={name}")));
+    Some(format!("{header}\n{}", lines.join("\n")))
 }
 
 fn count_inventory_count_value(value: &serde_json::Value) -> Option<(String, &'static str)> {

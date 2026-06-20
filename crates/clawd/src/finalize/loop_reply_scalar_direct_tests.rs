@@ -119,6 +119,44 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
+    let state = test_state();
+    let task = claimed_task("task-file-basename-path-facts");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileBasename;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            .to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","size_bytes":120},"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"resolved_path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"size_bytes\":120},\"path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\"}],\"include_missing\":true}"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "system_basic", wrapped));
+    loop_state.delivery_messages.push(wrapped.to_string());
+    loop_state.last_user_visible_respond = Some(wrapped.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return only the selected file basename",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should unwrap file basename");
+
+    assert_eq!(reply.text, "release_checklist.md");
+    assert_eq!(reply.messages, vec!["release_checklist.md".to_string()]);
+    assert!(!reply.text.contains(r#""action":"#));
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
     let state = test_state_with_registry(
         r#"
@@ -507,8 +545,9 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
             .expect("missing path should produce a scalar-compatible failure explanation");
 
     assert!(answer.contains("configs/config_copy"));
-    assert!(answer.contains("不存在"));
-    assert!(answer.contains("无法统计"));
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("semantic_kind=scalar_count"));
+    assert!(answer.contains("count_available=false"));
     assert_ne!(answer.trim(), "configs/config_copy");
     assert_eq!(
         summary.disposition,

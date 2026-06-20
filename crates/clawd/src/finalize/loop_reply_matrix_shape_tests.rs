@@ -118,6 +118,130 @@ fn matrix_strict_list_shape_builds_list_from_observed_json() {
 }
 
 #[test]
+fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .include_metadata = Some(false);
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3","sort_by":"size_desc","entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","size_bytes":22},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log","size_bytes":21},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","size_bytes":20},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","size_bytes":20}],"names":["x_abcd_log.txt","zz_abcd_backup.log","abcd_report.md","my_abcd.txt"],"names_by_kind":{"dirs":[],"files":["x_abcd_log.txt","zz_abcd_backup.log","abcd_report.md","my_abcd.txt"],"other":[]}}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("file path inventory answer");
+
+    assert_eq!(
+        answer,
+        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"
+    );
+    assert!(!answer.contains(" 22"));
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-matrix-file-name-list-wrapped-names");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "document".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"entries":[],"files_only":true,"names":["full_suite_trace_note.txt","gen-1778122040.png","gen-1778122536.png","hello.sh","hello_from_manual_test.sh"],"names_by_kind":{"dirs":[],"files":["full_suite_trace_note.txt","gen-1778122040.png","gen-1778122536.png","hello.sh","hello_from_manual_test.sh"],"other":[]},"names_only":true,"path":"/home/guagua/rustclaw/document","resolved_path":"/home/guagua/rustclaw/document","size_summary":{"largest_file":{"kind":"file","name":"rust_icon_pixel.png","path":"document/rust_icon_pixel.png","size_bytes":2024},"smallest_file":{"kind":"file","name":"manual_fixture_note.txt","path":"document/manual_fixture_note.txt","size_bytes":32}},"sort_by":"name"},"text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":0,\"files\":5,\"hidden\":0,\"total\":5},\"entries\":[],\"files_only\":true,\"names\":[\"full_suite_trace_note.txt\",\"gen-1778122040.png\",\"gen-1778122536.png\",\"hello.sh\",\"hello_from_manual_test.sh\"],\"names_by_kind\":{\"dirs\":[],\"files\":[\"full_suite_trace_note.txt\",\"gen-1778122040.png\",\"gen-1778122536.png\",\"hello.sh\",\"hello_from_manual_test.sh\"],\"other\":[]},\"names_only\":true,\"path\":\"/home/guagua/rustclaw/document\",\"resolved_path\":\"/home/guagua/rustclaw/document\",\"size_summary\":{\"largest_file\":{\"kind\":\"file\",\"name\":\"rust_icon_pixel.png\",\"path\":\"document/rust_icon_pixel.png\",\"size_bytes\":2024},\"smallest_file\":{\"kind\":\"file\",\"name\":\"manual_fixture_note.txt\",\"path\":\"document/manual_fixture_note.txt\",\"size_bytes\":32}},\"sort_by\":\"name\"}"}"#,
+    ));
+    let mut delivery = vec![
+        "目录 /home/guagua/rustclaw/document 共 5 个文件（按名称排序），观察到的条目中只有以下 2 个文件名被显式给出：\nrust_icon_pixel.png\nmanual_fixture_note.txt"
+            .to_string(),
+    ];
+    let mut finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        ..Default::default()
+    });
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "list first file names",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(
+        delivery,
+        vec![
+            "full_suite_trace_note.txt\ngen-1778122040.png\ngen-1778122536.png\nhello.sh\nhello_from_manual_test.sh"
+        ]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(
+            "full_suite_trace_note.txt\ngen-1778122040.png\ngen-1778122536.png\nhello.sh\nhello_from_manual_test.sh"
+        )
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
+fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","dirs_only":true,"names":["configs","data","docs"],"names_by_kind":{"dirs":["configs","data","docs"],"files":["README.md"],"other":[]},"entries":[{"kind":"dir","name":"configs","path":"scripts/nl_tests/fixtures/device_local/configs"},{"kind":"file","name":"README.md","path":"scripts/nl_tests/fixtures/device_local/README.md"}],"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local"},"text":"{\"action\":\"inventory_dir\",\"dirs_only\":true,\"names\":[\"configs\",\"data\",\"docs\"],\"names_by_kind\":{\"dirs\":[\"configs\",\"data\",\"docs\"],\"files\":[\"README.md\"],\"other\":[]},\"path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local\"}"}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("directory names list answer");
+
+    assert_eq!(answer, "configs\ndata\ndocs");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
 fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -237,6 +361,29 @@ fn matrix_strict_list_shape_builds_hidden_entry_list_from_inventory() {
 }
 
 #[test]
+fn matrix_strict_list_shape_respects_hidden_entry_selector_limit() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.output_contract.self_extension.list_selector.limit = Some(3);
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":3,"files":2,"hidden":5,"total":5},"entries":[],"include_hidden":true,"names":[".agents",".codex",".git",".gitignore",".pids","README.md"],"path":"."}}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("matrix hidden entries answer");
+
+    assert_eq!(answer, ".agents\n.codex\n.git");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
 fn matrix_grouped_name_list_shape_builds_groups_from_names_by_kind() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -258,6 +405,34 @@ fn matrix_grouped_name_list_shape_builds_groups_from_names_by_kind() {
     assert_eq!(
         answer,
         "dirs:\n- configs\n- data\n- docs\n- logs\n- tmp\nfiles:\n- package.json\n- README.md"
+    );
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn matrix_grouped_name_list_shape_preserves_observed_sort_order() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.self_extension.list_selector.sort_by = Some("name_desc".to_string());
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","sort_by":"name_desc","counts":{"dirs":0,"files":5,"total":5},"names_by_kind":{"files":["version_info.sh","verify_task_termination.sh","test_qwen_api.sh","test_qwen_5_channels.py","test_minimax_curl.sh"],"dirs":[],"other":[]},"path":"scripts"}"#,
+    ));
+
+    let (answer, summary) =
+        super::super::matrix_grouped_name_list_observed_answer(&route, &loop_state)
+            .expect("matrix grouped name answer");
+
+    assert_eq!(
+        answer,
+        "files:\n- version_info.sh\n- verify_task_termination.sh\n- test_qwen_api.sh\n- test_qwen_5_channels.py\n- test_minimax_curl.sh"
     );
     assert_eq!(summary.format_ok, Some(true));
     assert_eq!(summary.grounded_ok, Some(true));

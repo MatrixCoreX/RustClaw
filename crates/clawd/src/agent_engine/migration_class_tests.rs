@@ -3,7 +3,8 @@ use super::{
 };
 use crate::{
     AskMode, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    OutputScalarCountTargetKind, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
+    ScheduleKind,
 };
 
 fn route_result(shape: OutputResponseShape, kind: OutputSemanticKind) -> RouteResult {
@@ -168,6 +169,25 @@ fn eligibility_maps_legacy_classes_to_general_buckets() {
 }
 
 #[test]
+fn unresolved_locator_marker_blocks_migration_class_even_when_gate_is_execute() {
+    let mut route = route_result(
+        OutputResponseShape::Scalar,
+        OutputSemanticKind::FileBasename,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "package.json".to_string();
+    route.route_reason =
+        "state_patch.deictic_reference=missing_locator; clarify_reason_code:missing_read_target"
+            .to_string();
+
+    let eligibility = agent_loop_eligibility(&route);
+
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.blocked_reason, "unresolved_clarify_or_locator");
+    assert_eq!(agent_decides_eligible_migration_class(&route), "none");
+}
+
+#[test]
 fn eligibility_adds_generic_low_risk_buckets() {
     for (shape, kind, expected_class, expected_bucket) in [
         (
@@ -229,6 +249,150 @@ fn eligibility_adds_generic_low_risk_buckets() {
     assert!(eligibility
         .boundary_requirements
         .contains(&"planner_context_available"));
+
+    let mut direct_response =
+        route_result(OutputResponseShape::OneSentence, OutputSemanticKind::None);
+    direct_response.output_contract.requires_content_evidence = false;
+    direct_response.output_contract.locator_kind = OutputLocatorKind::None;
+    direct_response.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&direct_response);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskDirectResponse)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "low_risk_direct_response"
+    );
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"no_external_evidence_required"));
+}
+
+#[test]
+fn low_risk_single_file_delivery_accepts_bound_file_token_contracts() {
+    let mut route = route_result(OutputResponseShape::FileToken, OutputSemanticKind::None);
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.requires_content_evidence = true;
+
+    let eligibility = agent_loop_eligibility(&route);
+
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskSingleFileDelivery)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "low_risk_single_file_delivery"
+    );
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"delivery_consistency_gate"));
+}
+
+#[test]
+fn low_risk_single_file_delivery_accepts_bounded_directory_selector() {
+    let mut route = route_result(OutputResponseShape::FileToken, OutputSemanticKind::None);
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "document".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: OutputScalarCountTargetKind::File,
+        target_kind_specified: true,
+        limit: Some(1),
+        sort_by: Some("name_desc".to_string()),
+        include_metadata: Some(false),
+        include_hidden: Some(false),
+    };
+
+    let eligibility = agent_loop_eligibility(&route);
+
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskSingleFileDelivery)
+    );
+}
+
+#[test]
+fn low_risk_single_file_delivery_rejects_unsafe_or_unbounded_delivery_contracts() {
+    let mut generated = route_result(
+        OutputResponseShape::FileToken,
+        OutputSemanticKind::GeneratedFileDelivery,
+    );
+    generated.wants_file_delivery = true;
+    generated.output_contract.delivery_required = true;
+    generated.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    generated.output_contract.locator_hint = "document/generated.md".to_string();
+    assert_eq!(agent_decides_eligible_migration_class(&generated), "none");
+
+    let mut batch = route_result(OutputResponseShape::FileToken, OutputSemanticKind::None);
+    batch.wants_file_delivery = true;
+    batch.output_contract.delivery_required = true;
+    batch.output_contract.delivery_intent = OutputDeliveryIntent::DirectoryBatchFiles;
+    batch.output_contract.locator_hint = "document".to_string();
+    assert_eq!(agent_decides_eligible_migration_class(&batch), "none");
+
+    let mut missing_locator =
+        route_result(OutputResponseShape::FileToken, OutputSemanticKind::None);
+    missing_locator.wants_file_delivery = true;
+    missing_locator.output_contract.delivery_required = true;
+    missing_locator.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    missing_locator.output_contract.locator_kind = OutputLocatorKind::None;
+    missing_locator.output_contract.locator_hint.clear();
+    assert_eq!(
+        agent_decides_eligible_migration_class(&missing_locator),
+        "none"
+    );
+
+    let mut non_file_token = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+    non_file_token.wants_file_delivery = true;
+    non_file_token.output_contract.delivery_required = true;
+    non_file_token.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    non_file_token.output_contract.locator_hint = "README.md".to_string();
+    assert_eq!(
+        agent_decides_eligible_migration_class(&non_file_token),
+        "none"
+    );
+}
+
+#[test]
+fn low_risk_direct_response_rejects_locator_delivery_and_evidence_contracts() {
+    let mut with_locator = route_result(OutputResponseShape::OneSentence, OutputSemanticKind::None);
+    with_locator.output_contract.requires_content_evidence = false;
+    assert_eq!(
+        agent_decides_eligible_migration_class(&with_locator),
+        "none"
+    );
+
+    let mut with_delivery =
+        route_result(OutputResponseShape::OneSentence, OutputSemanticKind::None);
+    with_delivery.output_contract.requires_content_evidence = false;
+    with_delivery.output_contract.locator_kind = OutputLocatorKind::None;
+    with_delivery.output_contract.locator_hint.clear();
+    with_delivery.output_contract.delivery_required = true;
+    assert_eq!(
+        agent_decides_eligible_migration_class(&with_delivery),
+        "none"
+    );
+
+    let mut with_evidence =
+        route_result(OutputResponseShape::OneSentence, OutputSemanticKind::None);
+    with_evidence.output_contract.locator_kind = OutputLocatorKind::None;
+    with_evidence.output_contract.locator_hint.clear();
+    assert_eq!(
+        agent_decides_eligible_migration_class(&with_evidence),
+        "none"
+    );
 }
 
 #[test]

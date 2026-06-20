@@ -114,10 +114,17 @@ pub(super) fn session_alias_target_direct_answer_candidate(
     }
     let current_request_declares_filename_only =
         request_uses_filename_only_schema_token(current_user_request);
+    let route_resolved_intent_declares_filename_only = route
+        .and_then(|route| {
+            let resolved = route.resolved_intent.trim();
+            (!resolved.is_empty()).then_some(resolved)
+        })
+        .is_some_and(request_uses_filename_only_schema_token);
     let turn_analysis_declares_filename_only =
         turn_analysis_requests_filename_only_output(ctx.turn_analysis.as_ref());
     let route_contract_declares_filename_only = route_contract_requests_filename_only_output(route);
     let wants_filename_only = current_request_declares_filename_only
+        || route_resolved_intent_declares_filename_only
         || turn_analysis_declares_filename_only
         || route_contract_declares_filename_only;
     if !wants_filename_only {
@@ -125,6 +132,7 @@ pub(super) fn session_alias_target_direct_answer_candidate(
     }
     if route.is_some_and(|route| route.output_contract.requires_content_evidence)
         && !current_request_declares_filename_only
+        && !route_resolved_intent_declares_filename_only
         && !turn_analysis_declares_filename_only
     {
         return None;

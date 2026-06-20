@@ -17,6 +17,7 @@ use super::{
     can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
     compact_skill_playbook_from_prompt,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
+    content_excerpt_summary_directory_log_slice_deterministic_plan_result,
     contract_hint_preferred_action_deterministic_plan_result, contract_scoped_planner_skill_scope,
     directory_compare_locator_deterministic_plan_result,
     directory_entry_groups_auto_locator_deterministic_plan_result,
@@ -31,17 +32,21 @@ use super::{
     file_paths_locator_deterministic_plan_result, fill_missing_read_range_path_from_route_locator,
     generic_directory_auto_locator_observation_plan,
     generic_path_content_log_analyze_deterministic_plan_result,
-    git_repository_state_deterministic_plan_result, has_pre_observation_structured_output_shape,
+    generic_path_content_log_analyze_target_path, git_repository_state_deterministic_plan_result,
+    has_pre_observation_structured_output_shape,
     inject_structural_extension_filter_for_directory_inventory,
     inject_synthesize_answer_for_bare_placeholder_respond,
     inline_json_transform_deterministic_plan_result, is_bare_last_output_placeholder,
-    normalize_archive_basic_schema_aliases, normalize_fs_basic_schema_aliases,
-    normalize_git_basic_schema_aliases, normalize_planned_actions,
-    normalize_planned_actions_with_original, normalize_planned_actions_with_original_and_context,
-    normalize_system_basic_schema_aliases, normalize_transform_schema_aliases,
-    observation_only_plan_can_finalize_from_direct_output,
+    normalize_action_schema_aliases, normalize_archive_basic_schema_aliases,
+    normalize_fs_basic_schema_aliases, normalize_git_basic_schema_aliases,
+    normalize_planned_actions, normalize_planned_actions_with_original,
+    normalize_planned_actions_with_original_and_context, normalize_system_basic_schema_aliases,
+    normalize_transform_schema_aliases, observation_only_plan_can_finalize_from_direct_output,
     package_manager_detect_deterministic_plan_result,
     package_manager_dry_run_deterministic_plan_result, plan_repair_reason,
+    plan_result_with_fallback_reason, planner_notes_for_initial_fallback,
+    planner_notes_for_repair_fallback, planner_notes_for_repair_success,
+    preferred_run_cmd_for_contract_hint, process_status_filter_token,
     quantity_compare_pair_locator_deterministic_plan_result,
     registry_preferred_skill_names_for_route, repair_guard_config_default_path_for_invalid_locator,
     replace_file_delivery_respond_only_with_path_observation,
@@ -51,6 +56,7 @@ use super::{
     rewrite_archive_basic_short_archive_to_active_bound_target,
     rewrite_archive_pack_plan_to_archive_basic, rewrite_archive_unpack_run_cmd_to_archive_basic,
     rewrite_config_change_preview_to_config_edit_plan,
+    rewrite_config_mutation_to_config_edit_closed_loop,
     rewrite_config_validation_read_plan_to_validate,
     rewrite_directory_entry_groups_tree_summary_to_list_dir,
     rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
@@ -68,7 +74,9 @@ use super::{
     scalar_content_auto_locator_deterministic_plan_result,
     scalar_content_auto_locator_observation_plan, scalar_count_filter_deterministic_plan_result,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
+    scalar_path_current_workspace_deterministic_plan_result,
     scalar_path_directory_locator_search_deterministic_plan_result,
+    scalar_path_directory_locator_search_observation_plan,
     service_status_deterministic_plan_result, should_force_actionable_plan_repair,
     strip_directory_read_range_after_inventory_dir, strip_file_lines_count_before_tail_read_range,
     strip_intermediate_synthesize_before_later_execution,
@@ -78,8 +86,9 @@ use super::{
     strip_terminal_placeholder_respond_for_exact_listing_contract,
     strip_unresolved_template_reads_after_inventory_dir,
     structural_contract_deterministic_plan_overrides_literal_command_guard,
-    structured_field_selectors, structured_keys_deterministic_plan_result, LoopState,
-    PlanningPromptClass,
+    structured_field_selectors, structured_keys_deterministic_plan_result,
+    structured_scalar_field_auto_locator_deterministic_plan_result,
+    web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,
 };
 use crate::agent_engine::{CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG};
 use crate::{
@@ -89,6 +98,61 @@ use crate::{
     DEFAULT_AGENT_ID,
 };
 use serde_json::{json, Value};
+
+#[test]
+fn planner_notes_record_initial_fallback_reason_code() {
+    assert_eq!(
+        planner_notes_for_initial_fallback(Some("plan_parse_failed_workspace_default_evidence")),
+        "fallback_reason_code=plan_parse_failed_workspace_default_evidence"
+    );
+    assert!(planner_notes_for_initial_fallback(None).is_empty());
+}
+
+#[test]
+fn planner_notes_record_repair_reason_codes() {
+    assert_eq!(
+        planner_notes_for_repair_success("plan_missing_terminal_user_answer", None),
+        "repair_reason_code=plan_missing_terminal_user_answer"
+    );
+    assert_eq!(
+        planner_notes_for_repair_success(
+            "plan_missing_terminal_user_answer",
+            Some("content_evidence_requires_content_observation")
+        ),
+        "repair_reason_code=plan_missing_terminal_user_answer second_repair_reason_code=content_evidence_requires_content_observation"
+    );
+}
+
+#[test]
+fn planner_notes_record_repair_fallback_reason_codes() {
+    assert_eq!(
+        planner_notes_for_repair_fallback(
+            "plan_repair_llm_failed_fallback_to_initial",
+            Some("plan_parse_failed_scalar_path_auto_locator")
+        ),
+        "fallback_reason_code=plan_repair_llm_failed_fallback_to_initial initial_fallback_reason_code=plan_parse_failed_scalar_path_auto_locator"
+    );
+}
+
+#[test]
+fn deterministic_plan_reason_code_appends_machine_note() {
+    let plan = crate::PlanResult {
+        goal: "g".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: Vec::new(),
+        planner_notes: "repair_reason_code=existing".to_string(),
+        plan_kind: PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let annotated =
+        plan_result_with_fallback_reason(plan, "plan_deterministic_scalar_path_auto_locator");
+
+    assert_eq!(
+        annotated.planner_notes,
+        "repair_reason_code=existing fallback_reason_code=plan_deterministic_scalar_path_auto_locator"
+    );
+}
 
 fn planned_call<'a>(action: &'a AgentAction) -> Option<(&'a str, &'a Value)> {
     match action {
@@ -248,6 +312,94 @@ fn base_route_result() -> RouteResult {
         agent_display_name_hint: String::new(),
         output_contract: IntentOutputContract::default(),
     }
+}
+
+#[test]
+fn backend_identity_metadata_respond_rewrites_to_runtime_identity() {
+    let mut state = test_state();
+    state.core.llm_providers = vec![Arc::new(crate::LlmProviderRuntime {
+        config: claw_core::config::LlmProviderConfig {
+            name: "vendor-mimo".to_string(),
+            provider_type: "openai_compat".to_string(),
+            base_url: "http://fixture.invalid".to_string(),
+            api_key: "fixture".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+            context_window_tokens: None,
+            priority: 1,
+            timeout_seconds: 5,
+            max_concurrency: 1,
+            params: claw_core::config::LlmProviderParams::default(),
+        },
+        client: reqwest::Client::new(),
+        semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+    })];
+    let loop_state = LoopState::new(1);
+    let mut route = base_route_result();
+    route.route_reason =
+        "agent_display_name_hint_backend_metadata_removed; pure_chat_agent_loop_submode"
+            .to_string();
+    let actions = vec![AgentAction::Respond {
+        content: "你好，我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。".to_string(),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route),
+        &loop_state,
+        "Briefly tell me 你是谁，回答用中文",
+        Some("Briefly tell me 你是谁，回答用中文"),
+        Some("Briefly tell me 你是谁，回答用中文"),
+        None,
+        actions,
+    );
+
+    assert!(matches!(
+        normalized.as_slice(),
+        [AgentAction::Respond { content }] if content == "RustClaw"
+    ));
+
+    let mut route_with_answer_candidate_marker = base_route_result();
+    route_with_answer_candidate_marker.route_reason =
+        "normalizer_answer_candidate_backend_metadata_removed; pure_chat_agent_loop_submode"
+            .to_string();
+    let actions = vec![AgentAction::Respond {
+        content: "你好，我是 MiMo-v2.5-pro。".to_string(),
+    }];
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route_with_answer_candidate_marker),
+        &loop_state,
+        "Briefly tell me 你是谁，回答用中文",
+        Some("Briefly tell me 你是谁，回答用中文"),
+        Some("Briefly tell me 你是谁，回答用中文"),
+        None,
+        actions,
+    );
+    assert!(matches!(
+        normalized.as_slice(),
+        [AgentAction::Respond { content }] if content == "RustClaw"
+    ));
+
+    let mut route_without_marker = base_route_result();
+    route_without_marker.route_reason = "pure_chat_agent_loop_submode".to_string();
+    let actions = vec![AgentAction::Respond {
+        content: "MiMo-v2.5-pro".to_string(),
+    }];
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route_without_marker),
+        &loop_state,
+        "Which backend model is selected?",
+        Some("Which backend model is selected?"),
+        Some("Which backend model is selected?"),
+        None,
+        actions,
+    );
+    assert!(matches!(
+        normalized.as_slice(),
+        [AgentAction::Respond { content }] if content == "MiMo-v2.5-pro"
+    ));
 }
 
 fn should_force_plan_repair(

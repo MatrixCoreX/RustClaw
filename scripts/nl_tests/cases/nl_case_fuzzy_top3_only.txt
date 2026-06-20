@@ -6,4 +6,4 @@
 #     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
 # This stub file may be removed in a future cleanup.
 #
-去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd
+去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd，最多输出前 3 个路径

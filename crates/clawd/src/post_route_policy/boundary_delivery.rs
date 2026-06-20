@@ -1,5 +1,26 @@
 use crate::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
 
+pub(super) fn existing_file_delivery_can_try_locator_hint(
+    route_result: &crate::RouteResult,
+) -> bool {
+    route_result.wants_file_delivery
+        && route_result.output_contract.delivery_required
+        && route_result.output_contract.response_shape == OutputResponseShape::FileToken
+        && route_result.output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
+        && route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.locator_kind,
+            OutputLocatorKind::Path | OutputLocatorKind::Filename
+        )
+        && !route_result.output_contract.locator_hint.trim().is_empty()
+        && !matches!(
+            route_result.output_contract.semantic_kind,
+            OutputSemanticKind::GeneratedFileDelivery
+                | OutputSemanticKind::GeneratedFilePathReport
+                | OutputSemanticKind::FilesystemMutationResult
+        )
+}
+
 pub(super) fn file_delivery_can_materialize_target_without_existing_locator(
     route_result: &crate::RouteResult,
 ) -> bool {

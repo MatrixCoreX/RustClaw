@@ -1,4 +1,5 @@
 use super::*;
+use crate::worker::ask_prepare::repair_structural_file_delivery_resolution_for_turn;
 
 #[test]
 fn file_delivery_with_structured_locator_is_preserved() {
@@ -402,6 +403,139 @@ fn clarified_structural_file_delivery_binds_recent_read_target_without_text_matc
     assert_eq!(route.output_contract.locator_hint, target);
     assert!(route.resolved_intent.contains(target));
     assert!(route
+        .route_reason
+        .contains("structural_file_delivery_bound_to_recent_read_target"));
+}
+
+#[test]
+fn ambiguous_deictic_file_delivery_does_not_bind_stale_read_target() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "deliver unresolved selected file".to_string(),
+        needs_clarify: true,
+        route_reason: "normalizer marked file delivery target as ambiguous".to_string(),
+        route_confidence: Some(0.82),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let stale_target = "/tmp/release_checklist.md";
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "read previous file".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some(stale_target.to_string()),
+            source_task_id: "task-read-previous".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+            ..Default::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "deictic_reference": {"target": "ambiguous_locator"}
+        })),
+        attachment_processing_required: false,
+    };
+
+    repair_structural_file_delivery_resolution_for_turn(
+        &mut route,
+        &snapshot,
+        Some(&turn_analysis),
+    );
+
+    assert!(route.needs_clarify);
+    assert!(route.is_clarify_gate());
+    assert!(!route.wants_file_delivery);
+    assert!(!route.output_contract.delivery_required);
+    assert_eq!(route.output_contract.locator_hint, "");
+    assert!(!route.resolved_intent.contains(stale_target));
+    assert!(!route
+        .route_reason
+        .contains("structural_file_delivery_bound_to_recent_read_target"));
+    assert!(route
+        .route_reason
+        .contains("unresolved_file_delivery_requires_clarify"));
+}
+
+#[test]
+fn directory_selection_clarify_marker_blocks_stale_read_target_rebind() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "deliver one selected file from a directory".to_string(),
+        needs_clarify: true,
+        route_reason: concat!(
+            "clarify_reason_code:missing_delivery_locator; ",
+            "directory_file_delivery_requires_structured_selection"
+        )
+        .to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "read README.md head".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some("/tmp/README.md".to_string()),
+            source_task_id: "task-readme".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+            ..Default::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+    assert!(route.needs_clarify);
+    assert!(route.is_clarify_gate());
+    assert_eq!(route.output_contract.locator_hint, "");
+    assert!(!route.resolved_intent.contains("/tmp/README.md"));
+    assert!(!route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));
 }

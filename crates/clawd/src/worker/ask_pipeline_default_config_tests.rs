@@ -172,7 +172,7 @@ fn config_risk_default_main_config_replaces_workspace_identity_locator_hint() {
         crate::OutputSemanticKind::ConfigRiskAssessment,
         "Assess the workspace main configuration and redact sensitive values.",
     );
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.route_reason =
         "semantic_contract_requires_evidence; clarify_reason_code:missing_read_target".to_string();

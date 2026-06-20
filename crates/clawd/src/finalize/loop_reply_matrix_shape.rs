@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use tracing::info;
 
@@ -133,6 +133,9 @@ pub(super) fn current_synthesis_satisfies_matrix_shape(
     if archive_member_list_prefers_observed_projection(route) {
         return false;
     }
+    if file_name_list_prefers_observed_projection(route, loop_state) {
+        return false;
+    }
     let task = synthetic_task_for_matrix_shape_check(task_id);
     matrix_candidate_satisfies_final_shape(
         &task,
@@ -149,6 +152,123 @@ pub(super) fn archive_member_list_prefers_observed_projection(route: &crate::Rou
     route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveList
         && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
             == Some(crate::contract_matrix::FinalAnswerShape::ArchiveMemberList)
+}
+
+pub(super) fn file_name_list_prefers_observed_projection(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
+        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+        || route
+            .output_contract
+            .self_extension
+            .list_selector
+            .sort_by
+            .as_deref()
+            .is_some_and(matrix_size_ranked_sort_token)
+    {
+        return false;
+    }
+
+    loop_state.executed_step_results.iter().any(|step| {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            return false;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            return false;
+        };
+        let output =
+            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+        serde_json::from_str::<serde_json::Value>(&output)
+            .ok()
+            .is_some_and(|value| value_contains_observed_file_name_list(&value))
+    })
+}
+
+fn value_contains_observed_file_name_list(value: &serde_json::Value) -> bool {
+    if value
+        .get("sort_by")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(matrix_size_ranked_sort_token)
+    {
+        return false;
+    }
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if value_contains_observed_file_name_list(extra) {
+            return true;
+        }
+    }
+    if let Some(text_value) = value
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+    {
+        if value_contains_observed_file_name_list(&text_value) {
+            return true;
+        }
+    }
+    value_string_array_has_items(value, &["names", "results", "files", "paths"])
+        || value
+            .pointer("/names_by_kind/files")
+            .is_some_and(json_array_has_string_item)
+        || value
+            .get("entries")
+            .is_some_and(value_entries_include_file_name)
+}
+
+fn value_string_array_has_items(value: &serde_json::Value, keys: &[&str]) -> bool {
+    keys.iter()
+        .filter_map(|key| value.get(*key))
+        .any(json_array_has_string_item)
+}
+
+fn value_entries_include_file_name(value: &serde_json::Value) -> bool {
+    let Some(entries) = value.as_array() else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        let Some(map) = entry.as_object() else {
+            return false;
+        };
+        if map
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kind| kind != "file")
+        {
+            return false;
+        }
+        ["name", "path", "resolved_path"].iter().any(|key| {
+            map.get(*key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .is_some_and(|text| !text.is_empty())
+        })
+    })
+}
+
+fn json_array_has_string_item(value: &serde_json::Value) -> bool {
+    value.as_array().is_some_and(|items| {
+        items.iter().any(|item| {
+            item.as_str()
+                .map(str::trim)
+                .is_some_and(|text| !text.is_empty())
+        })
+    })
+}
+
+fn matrix_size_ranked_sort_token(sort_by: &str) -> bool {
+    matches!(sort_by.trim(), "size_desc" | "size_asc")
 }
 
 fn matrix_observed_answer_candidate_for_shape(
@@ -226,6 +346,7 @@ pub(super) fn matrix_strict_list_observed_answer(
     if !matches!(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
             | crate::OutputSemanticKind::ArchiveList
             | crate::OutputSemanticKind::HiddenEntriesCheck
             | crate::OutputSemanticKind::FilePaths
@@ -235,6 +356,9 @@ pub(super) fn matrix_strict_list_observed_answer(
         return None;
     }
     if let Some(answer) = matrix_ranked_size_list_observed_answer(route, loop_state) {
+        return Some(answer);
+    }
+    if let Some(answer) = matrix_inventory_file_paths_observed_answer(route, loop_state) {
         return Some(answer);
     }
     let mut items = BTreeMap::<String, String>::new();
@@ -269,18 +393,122 @@ pub(super) fn matrix_strict_list_observed_answer(
     if items.is_empty() {
         return None;
     }
-    let answer = items.into_values().collect::<Vec<_>>().join("\n");
+    let mut values = items.into_values().collect::<Vec<_>>();
+    if let Some(limit) = matrix_list_selector_limit(route) {
+        values.truncate(limit.min(values.len()));
+    }
+    let answer = values.join("\n");
     Some((answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+}
+
+fn matrix_inventory_file_paths_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let output =
+            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
+            continue;
+        };
+        let Some(mut paths) = inventory_file_paths_from_value(&value) else {
+            continue;
+        };
+        if let Some(limit) = matrix_list_selector_limit(route) {
+            paths.truncate(limit.min(paths.len()));
+        }
+        if paths.is_empty() {
+            continue;
+        }
+        return Some((paths.join("\n"), matrix_observed_shape_summary(loop_state)));
+    }
+    None
+}
+
+fn inventory_file_paths_from_value(value: &serde_json::Value) -> Option<Vec<String>> {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if let Some(paths) = inventory_file_paths_from_value(extra) {
+            return Some(paths);
+        }
+    }
+    if let Some(text_value) = value
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+    {
+        if let Some(paths) = inventory_file_paths_from_value(&text_value) {
+            return Some(paths);
+        }
+    }
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return None;
+    }
+    let entries = value.get("entries").and_then(serde_json::Value::as_array)?;
+    let mut seen = HashSet::<String>::new();
+    let mut paths = Vec::<String>::new();
+    for entry in entries {
+        let Some(map) = entry.as_object() else {
+            continue;
+        };
+        let kind = map
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or("file");
+        if !matches!(kind, "file" | "") {
+            continue;
+        }
+        let Some(path) = map
+            .get("path")
+            .or_else(|| map.get("resolved_path"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            continue;
+        };
+        let key = path.replace('\\', "/").to_ascii_lowercase();
+        if seen.insert(key) {
+            paths.push(path.to_string());
+        }
+    }
+    (!paths.is_empty()).then_some(paths)
 }
 
 fn matrix_ranked_size_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::FilePaths
-    ) {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -405,6 +633,9 @@ pub(super) fn matrix_grouped_name_list_observed_answer(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
             continue;
         };
+        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, &value) {
+            return Some((answer, matrix_observed_shape_summary(loop_state)));
+        }
         collect_matrix_grouped_name_items(route, &value, &mut dirs, &mut files, &mut other);
     }
     if dirs.is_empty() && files.is_empty() && other.is_empty() {
@@ -415,6 +646,78 @@ pub(super) fn matrix_grouped_name_list_observed_answer(
     push_matrix_grouped_name_lines("files", files, &mut lines);
     push_matrix_grouped_name_lines("other", other, &mut lines);
     Some((lines.join("\n"), matrix_observed_shape_summary(loop_state)))
+}
+
+fn ordered_matrix_grouped_name_list_from_value(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+) -> Option<String> {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, extra) {
+            return Some(answer);
+        }
+    }
+    if let Some(text_value) = value
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+    {
+        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, &text_value) {
+            return Some(answer);
+        }
+    }
+    let sort_by = value
+        .get("sort_by")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|sort_by| !sort_by.is_empty())?;
+    if sort_by == "name"
+        && route
+            .output_contract
+            .self_extension
+            .list_selector
+            .sort_by
+            .is_none()
+    {
+        return None;
+    }
+    let names_by_kind = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)?;
+    let mut lines = Vec::new();
+    push_ordered_matrix_grouped_name_lines(route, "dirs", names_by_kind.get("dirs"), &mut lines);
+    push_ordered_matrix_grouped_name_lines(route, "files", names_by_kind.get("files"), &mut lines);
+    push_ordered_matrix_grouped_name_lines(route, "other", names_by_kind.get("other"), &mut lines);
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn push_ordered_matrix_grouped_name_lines(
+    route: &crate::RouteResult,
+    title: &str,
+    value: Option<&serde_json::Value>,
+    lines: &mut Vec<String>,
+) {
+    let Some(array) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    let mut seen = BTreeSet::new();
+    let mut items = Vec::new();
+    for item in array {
+        let Some(raw) = item.as_str() else {
+            continue;
+        };
+        let Some(display) = matrix_list_display_item(route, raw) else {
+            continue;
+        };
+        if seen.insert(display.to_ascii_lowercase()) {
+            items.push(display);
+        }
+    }
+    if items.is_empty() {
+        return;
+    }
+    lines.push(format!("{title}:"));
+    lines.extend(items.into_iter().map(|item| format!("- {item}")));
 }
 
 fn matrix_docker_text_list_observed_answer(
@@ -537,6 +840,10 @@ fn collect_matrix_strict_list_items(
         collect_matrix_archive_member_items(route, value, items);
         return;
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames {
+        collect_matrix_directory_name_items(route, value, items);
+        return;
+    }
     push_matrix_string_arrays(
         route,
         value,
@@ -566,6 +873,65 @@ fn collect_matrix_strict_list_items(
             for row in rows {
                 collect_matrix_list_object_fields(route, row, items);
             }
+        }
+    }
+}
+
+fn collect_matrix_directory_name_items(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    {
+        push_matrix_array_items(
+            route,
+            names_by_kind
+                .get("dirs")
+                .unwrap_or(&serde_json::Value::Null),
+            items,
+        );
+    }
+    push_matrix_string_arrays(route, value, items, &["dirs", "directories"]);
+    if value
+        .get("dirs_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        push_matrix_string_arrays(route, value, items, &["names"]);
+    }
+    for key in ["entries", "items", "rows"] {
+        let Some(rows) = value.get(key).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for row in rows {
+            collect_matrix_directory_name_object(route, row, items);
+        }
+    }
+}
+
+fn collect_matrix_directory_name_object(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(map) = value.as_object() else {
+        return;
+    };
+    let kind = map
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(kind, "dir" | "directory") {
+        return;
+    }
+    for key in ["name", "path", "resolved_path"] {
+        if let Some(text) = map.get(key).and_then(serde_json::Value::as_str) {
+            push_matrix_list_item(route, text, items);
+            return;
         }
     }
 }
@@ -741,7 +1107,10 @@ fn matrix_list_display_item(route: &crate::RouteResult, raw: &str) -> Option<Str
     if item.is_empty() {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames {
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
+    ) {
         return std::path::Path::new(item)
             .file_name()
             .and_then(|value| value.to_str())
@@ -947,6 +1316,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     if !current_answer.trim().is_empty()
         && !directory_entry_groups_prefers_observed_groups(route, loop_state)
         && !archive_member_list_prefers_observed_projection(route)
+        && !file_name_list_prefers_observed_projection(route, loop_state)
         && matrix_candidate_satisfies_final_shape(
             task,
             user_text,
@@ -979,6 +1349,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         return false;
     };
     if !archive_member_list_prefers_observed_projection(route)
+        && !file_name_list_prefers_observed_projection(route, loop_state)
         && !matrix_candidate_satisfies_final_shape(
             task,
             user_text,

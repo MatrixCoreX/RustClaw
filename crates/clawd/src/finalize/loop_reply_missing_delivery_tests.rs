@@ -127,6 +127,69 @@ async fn observed_execution_without_delivery_prefers_finalizer_clarify_question(
         Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
     );
 }
+
+#[test]
+fn language_rendered_failed_step_message_counts_as_publishable_completion() {
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "identify failed command step".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![
+                crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: serde_json::json!({"command": "echo RC_RENDER_ZH_OK"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                crate::PlanStep {
+                    step_id: "step_2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: serde_json::json!({
+                        "command": "definitely_missing_command_rustclaw_render_zh_0605"
+                    }),
+                    depends_on: vec!["step_1".to_string()],
+                    why: String::new(),
+                },
+            ])),
+            verify_result: None,
+        });
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", "RC_RENDER_ZH_OK\n"));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "run_cmd",
+        "__RC_SKILL_ERROR__:{\"error_kind\":\"nonzero_exit\",\"error_text\":\"Command failed with exit code 127\",\"extra\":{\"command\":\"definitely_missing_command_rustclaw_render_zh_0605\",\"exit_category\":\"command_not_found\",\"exit_code\":127},\"skill\":\"run_cmd\"}",
+    ));
+    let message =
+        "step_2: definitely_missing_command_rustclaw_render_zh_0605 failed with exit code 127";
+
+    let summary = language_rendered_failed_step_finalizer_summary(Some(&ctx), &loop_state, message)
+        .expect("language-rendered failed-step answer should be publishable");
+
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+    assert_eq!(summary.completion_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+    assert_eq!(summary.format_ok, Some(true));
+}
+
 #[tokio::test]
 async fn observed_execution_without_delivery_skips_summary_for_extract_field_result() {
     let state = test_state();

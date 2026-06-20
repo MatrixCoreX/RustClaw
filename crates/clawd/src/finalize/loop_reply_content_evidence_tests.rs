@@ -120,7 +120,7 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
 
     assert!(answer.contains("`/etc/shadow`"));
     assert!(answer.contains("permission denied"));
-    assert!(answer.contains("已尝试访问"));
+    assert!(answer.contains("locator=`/etc/shadow`"));
     assert!(!answer.contains("`fs_basic` 步骤执行失败"));
     assert_eq!(summary.grounded_ok, Some(true));
     assert_eq!(summary.completion_ok, Some(true));

@@ -74,76 +74,12 @@ pub(super) fn final_reply_language_hint(
     crate::language_policy::task_response_language_hint(state, task, user_text)
 }
 
-pub(super) fn prefer_english_for_final_reply(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    let normalized = final_reply_language_hint(state, task, user_text, agent_run_context)
-        .trim()
-        .to_ascii_lowercase()
-        .to_string();
-    !(normalized.starts_with("zh") || normalized == "mixed")
-}
-
-pub(super) fn deterministic_template_language_preference(
-    state: &AppState,
-    user_text: &str,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<bool> {
-    let hint = agent_run_context
-        .and_then(|ctx| ctx.original_user_request.as_deref())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(crate::language_policy::request_language_hint)
-        .filter(|hint| *hint != "config_default")
-        .unwrap_or_else(|| crate::language_policy::request_language_hint(user_text));
-    let normalized = hint.trim().to_ascii_lowercase();
-    if normalized.starts_with("zh") {
-        Some(false)
-    } else if normalized.starts_with("en") {
-        Some(true)
-    } else if normalized == "mixed" {
-        Some(!crate::language_policy::mixed_language_prefers_cjk_response(user_text))
-    } else if normalized == "config_default" || normalized.is_empty() {
-        Some(
-            state
-                .policy
-                .command_intent
-                .default_locale
-                .to_ascii_lowercase()
-                .starts_with("en"),
-        )
-    } else {
-        None
-    }
-}
-
 pub(super) fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(|route| route.resolved_intent.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_default()
-}
-
-fn execution_recipe_budget_exhausted_default_message(
-    state: &AppState,
-    user_text: &str,
-    loop_state: &crate::agent_engine::LoopState,
-) -> String {
-    let prefer_english = prefer_english_for_user_text(state, user_text);
-    let repair_count = loop_state.execution_recipe.repair_count.to_string();
-    let max_repairs = loop_state.execution_recipe.max_repairs.to_string();
-    crate::bilingual_t_with_default_vars(
-        state,
-        "clawd.msg.execution_recipe_repair_budget_exhausted",
-        "我已经按闭环流程继续检查、应用和验证，但修复次数已达到上限（{repair_count}/{max_repairs}），当前还没有验证通过。",
-        "I kept iterating through inspect, apply, and validation, but the repair budget is exhausted ({repair_count}/{max_repairs}) and the result is still not validated.",
-        prefer_english,
-        &[("repair_count", &repair_count), ("max_repairs", &max_repairs)],
-    )
 }
 
 pub(super) async fn execution_recipe_budget_exhausted_message(
@@ -153,8 +89,6 @@ pub(super) async fn execution_recipe_budget_exhausted_message(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> String {
-    let default_text =
-        execution_recipe_budget_exhausted_default_message(state, user_text, loop_state);
     let repair_count = loop_state.execution_recipe.repair_count.to_string();
     let max_repairs = loop_state.execution_recipe.max_repairs.to_string();
     let language_hint = final_reply_language_hint(state, task, user_text, agent_run_context);
@@ -177,30 +111,13 @@ pub(super) async fn execution_recipe_budget_exhausted_message(
         "brief_failure_with_next_step",
         &language_hint,
     );
-    crate::fallback::compose_user_response_from_contract_with_default(
+    crate::fallback::compose_user_response_from_contract(
         state,
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        &default_text,
     )
     .await
-}
-
-fn execution_recipe_missing_success_marker_default_message(
-    state: &AppState,
-    user_text: &str,
-    marker: &str,
-) -> String {
-    let prefer_english = prefer_english_for_user_text(state, user_text);
-    crate::bilingual_t_with_default_vars(
-        state,
-        "clawd.msg.execution_recipe_missing_success_marker",
-        "这次闭环执行还没有拿到你要求的验证标记 {marker}，所以我先不把结果标记为成功。",
-        "This closed-loop run did not produce the required verification marker {marker}, so I am not marking it as successful yet.",
-        prefer_english,
-        &[("marker", marker)],
-    )
 }
 
 pub(super) async fn execution_recipe_missing_success_marker_message(
@@ -210,8 +127,6 @@ pub(super) async fn execution_recipe_missing_success_marker_message(
     marker: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> String {
-    let default_text =
-        execution_recipe_missing_success_marker_default_message(state, user_text, marker);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
         "execution_recipe_missing_success_marker",
@@ -231,35 +146,27 @@ pub(super) async fn execution_recipe_missing_success_marker_message(
         "brief_failure_with_next_step",
         &language_hint,
     );
-    crate::fallback::compose_user_response_from_contract_with_default(
+    crate::fallback::compose_user_response_from_contract(
         state,
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        &default_text,
     )
     .await
 }
 
 fn execution_recipe_profile_closeout_label(
+    state: Option<&AppState>,
     profile: crate::execution_recipe::ExecutionRecipeProfile,
     prefer_english: bool,
-) -> &'static str {
-    match (profile, prefer_english) {
-        (crate::execution_recipe::ExecutionRecipeProfile::ConfigChange, false) => "配置变更",
-        (crate::execution_recipe::ExecutionRecipeProfile::ConfigChange, true) => {
-            "configuration change"
+) -> String {
+    let token = profile.as_str();
+    let key = format!("clawd.msg.execution_recipe_profile.{token}");
+    match state {
+        Some(state) => {
+            crate::bilingual_t_with_default_vars(state, &key, token, token, prefer_english, &[])
         }
-        (crate::execution_recipe::ExecutionRecipeProfile::CodeChange, false) => "代码修改",
-        (crate::execution_recipe::ExecutionRecipeProfile::CodeChange, true) => "code changes",
-        (crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring, false) => "技能开发",
-        (crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring, true) => {
-            "skill authoring"
-        }
-        (crate::execution_recipe::ExecutionRecipeProfile::OpsService, false) => "运维处理",
-        (crate::execution_recipe::ExecutionRecipeProfile::OpsService, true) => "ops work",
-        (crate::execution_recipe::ExecutionRecipeProfile::None, false) => "处理",
-        (crate::execution_recipe::ExecutionRecipeProfile::None, true) => "work",
+        None => token.to_string(),
     }
 }
 
@@ -351,74 +258,127 @@ pub(super) fn execution_recipe_closeout_note(
     let prefer_english = state
         .map(|state| prefer_english_for_user_text(state, user_text))
         .unwrap_or_else(|| prefer_english_for_user_text_without_state(user_text));
-    let profile = execution_recipe_profile_closeout_label(recipe.profile, prefer_english);
-    match recipe.target_scope {
+    let profile = execution_recipe_profile_closeout_label(state, recipe.profile, prefer_english);
+    let note = match recipe.target_scope {
         crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace
             if recipe.saw_external_target =>
         {
-            Some(match state {
-                Some(state) => crate::bilingual_t_with_default_vars(
-                    state,
-                    "clawd.msg.execution_recipe_closeout_external_workspace",
-                    "已在外部工作区完成{profile}，并已通过验证。",
-                    "Completed {profile} in the external workspace and validated it.",
-                    prefer_english,
-                    &[("profile", profile)],
-                ),
-                None if prefer_english => {
-                    format!("Completed {profile} in the external workspace and validated it.")
-                }
-                None => format!("已在外部工作区完成{profile}，并已通过验证。"),
-            })
+            Some(render_execution_recipe_closeout(
+                state,
+                "clawd.msg.execution_recipe_closeout_external_workspace",
+                "external_workspace",
+                recipe.profile,
+                profile.as_str(),
+                prefer_english,
+            ))
         }
-        crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo => Some(match state {
-            Some(state) => crate::bilingual_t_with_default_vars(
+        crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo => {
+            Some(render_execution_recipe_closeout(
                 state,
                 "clawd.msg.execution_recipe_closeout_current_repo",
-                "已在当前仓库完成{profile}，并已通过验证。",
-                "Completed {profile} in the current repository and validated it.",
+                "current_repo",
+                recipe.profile,
+                profile.as_str(),
                 prefer_english,
-                &[("profile", profile)],
-            ),
-            None if prefer_english => {
-                format!("Completed {profile} in the current repository and validated it.")
-            }
-            None => format!("已在当前仓库完成{profile}，并已通过验证。"),
-        }),
-        crate::execution_recipe::ExecutionRecipeTargetScope::System => Some(match state {
-            Some(state) => crate::bilingual_t_with_default_vars(
+            ))
+        }
+        crate::execution_recipe::ExecutionRecipeTargetScope::System => {
+            Some(render_execution_recipe_closeout(
                 state,
                 "clawd.msg.execution_recipe_closeout_system",
-                "已在系统范围完成{profile}，并已通过验证。",
-                "Completed {profile} at the system scope and validated it.",
+                "system",
+                recipe.profile,
+                profile.as_str(),
                 prefer_english,
-                &[("profile", profile)],
-            ),
-            None if prefer_english => {
-                format!("Completed {profile} at the system scope and validated it.")
-            }
-            None => format!("已在系统范围完成{profile}，并已通过验证。"),
-        }),
+            ))
+        }
         crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield
             if recipe.saw_greenfield_creation =>
         {
-            Some(match state {
-                Some(state) => crate::bilingual_t_with_default_vars(
-                    state,
-                    "clawd.msg.execution_recipe_closeout_greenfield",
-                    "已完成新产物创建，并已完成{profile}验证。",
-                    "Created the new artifact and completed {profile} validation.",
-                    prefer_english,
-                    &[("profile", profile)],
-                ),
-                None if prefer_english => {
-                    format!("Created the new artifact and completed {profile} validation.")
-                }
-                None => format!("已完成新产物创建，并已完成{profile}验证。"),
-            })
+            Some(render_execution_recipe_closeout(
+                state,
+                "clawd.msg.execution_recipe_closeout_greenfield",
+                "greenfield",
+                recipe.profile,
+                profile.as_str(),
+                prefer_english,
+            ))
         }
         _ => None,
+    };
+    note.map(|mut note| {
+        if let Some(validation_result) = validation_result_token_line(loop_state) {
+            note.push('\n');
+            note.push_str(&validation_result);
+        }
+        note
+    })
+}
+
+fn render_execution_recipe_closeout(
+    state: Option<&AppState>,
+    message_key: &str,
+    target_scope: &str,
+    profile: crate::execution_recipe::ExecutionRecipeProfile,
+    profile_label: &str,
+    prefer_english: bool,
+) -> String {
+    let fallback = execution_recipe_closeout_machine_payload(message_key, target_scope, profile);
+    match state {
+        Some(state) => crate::bilingual_t_with_default_vars(
+            state,
+            message_key,
+            &fallback,
+            &fallback,
+            prefer_english,
+            &[("profile", profile_label)],
+        ),
+        None => fallback,
     }
+}
+
+fn execution_recipe_closeout_machine_payload(
+    message_key: &str,
+    target_scope: &str,
+    profile: crate::execution_recipe::ExecutionRecipeProfile,
+) -> String {
+    format!(
+        "message_key={message_key} target_scope={target_scope} profile={} validation_status=validated",
+        profile.as_str()
+    )
+}
+
+fn validation_result_token_line(loop_state: &LoopState) -> Option<String> {
+    let result = loop_state.latest_validation_result.as_ref()?;
+    let status = result
+        .get("status_code")
+        .or_else(|| result.get("status"))
+        .and_then(serde_json::Value::as_str)
+        .map(machine_token)?;
+    let skill = result
+        .get("skill")
+        .and_then(serde_json::Value::as_str)
+        .map(machine_token)?;
+    let step = result
+        .get("global_step")
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            result
+                .get("step_in_round")
+                .and_then(serde_json::Value::as_u64)
+        })
+        .map(|value| value.to_string())?;
+    Some(format!(
+        "validation_status={status} validation_skill={skill} validation_step={step}"
+    ))
+}
+
+fn machine_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/'))
+        .take(80)
+        .collect()
 }
 
 fn can_attach_execution_recipe_closeout(

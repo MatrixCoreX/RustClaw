@@ -1,12 +1,12 @@
 use super::{
     ascii_token_present, execution_finalize_style_for_contract, ActFinalizeStyle,
     FirstLayerDecision, IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, SelfExtensionMode,
-    SelfExtensionTrigger,
+    OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind,
+    ScheduleKind, SelfExtensionMode, SelfExtensionTrigger,
 };
 
 pub(super) fn downgrade_executionless_route_to_direct_answer(
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
@@ -14,7 +14,12 @@ pub(super) fn downgrade_executionless_route_to_direct_answer(
     schedule_kind: ScheduleKind,
     _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<&'static str> {
-    if needs_clarify || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute) {
+    if needs_clarify
+        || !matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
+    {
         return None;
     }
     if !matches!(execution_finalize_style, ActFinalizeStyle::ChatWrapped) {
@@ -28,7 +33,7 @@ pub(super) fn downgrade_executionless_route_to_direct_answer(
     ) {
         return None;
     }
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("executionless_route_downgraded_to_direct_answer")
 }
@@ -40,19 +45,21 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     needs_clarify: &mut bool,
     clarify_question: &mut String,
     output_contract: &mut IntentOutputContract,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
-    if crate::agent_engine::explicit_execution_command_segment_for_policy(
-        command_runtime,
-        current_user_request,
-    )
-    .is_none()
-    {
+    let Some(explicit_command_segment) =
+        crate::agent_engine::explicit_execution_command_segment_for_policy(
+            command_runtime,
+            current_user_request,
+        )
+    else {
         return None;
-    }
-    if matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
-        && !output_contract.requires_content_evidence
+    };
+    if matches!(
+        *legacy_normalizer_decision,
+        FirstLayerDecision::DirectAnswer
+    ) && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -68,7 +75,7 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
         *needs_clarify = false;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
-        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_preserves_generated_file_delivery_execution");
     }
@@ -80,13 +87,32 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
         *needs_clarify = false;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
-        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_preserves_generated_file_path_report_execution");
     }
+    if explicit_command_structured_observation_contract_should_be_preserved(output_contract) {
+        *needs_clarify = false;
+        clarify_question.clear();
+        output_contract.requires_content_evidence = true;
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
+        *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+        return Some("explicit_command_preserves_structured_observation_contract");
+    }
+    if repair_explicit_directory_listing_selector_contract(
+        &explicit_command_segment,
+        route_reason,
+        output_contract,
+    ) {
+        *needs_clarify = false;
+        clarify_question.clear();
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
+        *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+        return Some("explicit_command_directory_listing_selector_contract_repair");
+    }
     let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
         output_contract,
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         *needs_clarify,
         ascii_token_present(route_reason, "command_result_synthesis"),
     );
@@ -104,7 +130,7 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
         };
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some(if preserve_command_summary_contract {
         "explicit_command_requires_command_output_summary_execution"
@@ -118,7 +144,7 @@ pub(super) fn apply_command_payload_contract_repair(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !command_payload_declared || output_contract.delivery_required {
@@ -126,7 +152,7 @@ pub(super) fn apply_command_payload_contract_repair(
     }
     let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
         output_contract,
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         *needs_clarify,
         false,
     );
@@ -150,7 +176,7 @@ pub(super) fn apply_command_payload_contract_repair(
     output_contract.locator_hint.clear();
     *needs_clarify = false;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some(if preserve_command_summary_contract {
         "command_payload_requires_command_output_summary_execution"
@@ -164,7 +190,7 @@ pub(super) fn apply_file_delivery_contract_repair(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !wants_file_delivery
@@ -198,7 +224,7 @@ pub(super) fn apply_file_delivery_contract_repair(
     output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
     output_contract.response_shape = OutputResponseShape::FileToken;
     output_contract.semantic_kind = OutputSemanticKind::None;
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some("file_delivery_request_preserves_delivery_contract")
 }
@@ -211,7 +237,7 @@ pub(super) fn restore_declared_publishing_preview_contract(
     needs_clarify: &mut bool,
     clarify_question: &mut String,
     wants_file_delivery: &mut bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if declared_semantic_kind != OutputSemanticKind::PublishingPreview
@@ -226,7 +252,10 @@ pub(super) fn restore_declared_publishing_preview_contract(
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && output_contract.locator_hint.trim().is_empty()
-        && matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && matches!(
+            *legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
     {
         return None;
     }
@@ -246,14 +275,14 @@ pub(super) fn restore_declared_publishing_preview_contract(
     ) {
         output_contract.response_shape = OutputResponseShape::Free;
     }
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some("declared_publishing_preview_contract_preserved")
 }
 
 fn command_output_summary_contract_from_structured_fields(
     output_contract: &IntentOutputContract,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     command_result_synthesis_marker: bool,
 ) -> bool {
@@ -265,7 +294,10 @@ fn command_output_summary_contract_from_structured_fields(
         OutputResponseShape::OneSentence
     ) || command_result_synthesis_marker);
     !needs_clarify
-        && matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
         && output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -315,9 +347,203 @@ pub(super) fn route_has_structured_execution_signal(
         })
 }
 
+fn explicit_command_structured_observation_contract_should_be_preserved(
+    output_contract: &IntentOutputContract,
+) -> bool {
+    if output_contract.delivery_required
+        || output_contract.delivery_intent != OutputDeliveryIntent::None
+        || output_contract.locator_kind == OutputLocatorKind::None
+    {
+        return false;
+    }
+    match output_contract.semantic_kind {
+        OutputSemanticKind::DirectoryEntryGroups
+        | OutputSemanticKind::FileNames
+        | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::FilePaths
+        | OutputSemanticKind::DirectoryPurposeSummary => true,
+        OutputSemanticKind::ScalarPathOnly => {
+            output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
+        }
+        _ => false,
+    }
+}
+
+fn repair_explicit_directory_listing_selector_contract(
+    explicit_command_segment: &str,
+    route_reason: &str,
+    output_contract: &mut IntentOutputContract,
+) -> bool {
+    if output_contract.delivery_required
+        || output_contract.delivery_intent != OutputDeliveryIntent::None
+        || !matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::RawCommandOutput
+                | OutputSemanticKind::CommandOutputSummary
+                | OutputSemanticKind::None
+        )
+    {
+        return false;
+    }
+    let Some(path) = safe_ls_directory_path_from_command_segment(explicit_command_segment) else {
+        return false;
+    };
+    let selector_limit = selector_limit_machine_token(route_reason);
+    let selector_sort_by = selector_sort_by_machine_token(route_reason);
+    if selector_limit.is_none() && selector_sort_by.is_none() {
+        return false;
+    }
+    let target_kind = selector_target_kind_machine_token(route_reason).unwrap_or_default();
+    output_contract.semantic_kind = match target_kind {
+        OutputScalarCountTargetKind::File => OutputSemanticKind::FileNames,
+        OutputScalarCountTargetKind::Dir => OutputSemanticKind::DirectoryNames,
+        OutputScalarCountTargetKind::Any => OutputSemanticKind::DirectoryEntryGroups,
+    };
+    output_contract.response_shape = OutputResponseShape::Strict;
+    output_contract.requires_content_evidence = true;
+    output_contract.locator_kind = OutputLocatorKind::Path;
+    output_contract.locator_hint = path;
+    output_contract.self_extension.list_selector.target_kind = target_kind;
+    output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = selector_target_kind_machine_token(route_reason).is_some();
+    output_contract.self_extension.list_selector.limit = selector_limit;
+    output_contract.self_extension.list_selector.sort_by = selector_sort_by.clone();
+    output_contract.self_extension.list_selector.include_hidden =
+        selector_bool_machine_token(route_reason, "selector_include_hidden");
+    output_contract
+        .self_extension
+        .list_selector
+        .include_metadata = selector_bool_machine_token(route_reason, "selector_include_metadata")
+        .or_else(|| {
+            selector_sort_by
+                .as_deref()
+                .is_some_and(|sort_by| {
+                    matches!(
+                        sort_by,
+                        "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+                    )
+                })
+                .then_some(true)
+        });
+    true
+}
+
+fn safe_ls_directory_path_from_command_segment(command: &str) -> Option<String> {
+    if command.chars().any(|ch| {
+        matches!(
+            ch,
+            '\n' | '\r' | '\0' | '$' | '`' | '|' | ';' | '<' | '>' | '&'
+        )
+    }) {
+        return None;
+    }
+    let words = command.split_whitespace().collect::<Vec<_>>();
+    let first = words
+        .first()?
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    let executable = first
+        .rsplit_once('/')
+        .map(|(_, basename)| basename)
+        .unwrap_or(first);
+    if !executable.eq_ignore_ascii_case("ls") {
+        return None;
+    }
+    let mut path: Option<&str> = None;
+    let mut after_double_dash = false;
+    for word in words.iter().skip(1).copied() {
+        let token = word.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+        if token.is_empty() {
+            continue;
+        }
+        if !after_double_dash && token == "--" {
+            after_double_dash = true;
+            continue;
+        }
+        if !after_double_dash && token.starts_with('-') {
+            if matches!(
+                token,
+                "-1" | "-a" | "-A" | "--all" | "--almost-all" | "--color=never"
+            ) {
+                continue;
+            }
+            return None;
+        }
+        if path.replace(token).is_some() {
+            return None;
+        }
+    }
+    let path = path.unwrap_or(".");
+    safe_shell_path_token(path).then(|| path.to_string())
+}
+
+fn safe_shell_path_token(path: &str) -> bool {
+    !path.trim().is_empty()
+        && path != "-"
+        && !path.starts_with('~')
+        && !path.contains('$')
+        && !path
+            .chars()
+            .any(|ch| matches!(ch, '\0' | '*' | '?' | '[' | ']' | '{' | '}'))
+}
+
+fn selector_value_machine_token(text: &str, key: &str) -> Option<String> {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';' | '，' | '；'))
+        .filter_map(|part| part.trim().strip_prefix(key))
+        .filter_map(|value| value.strip_prefix('='))
+        .map(|value| {
+            value
+                .trim_matches(|ch: char| matches!(ch, '.' | '。' | ',' | ';' | '，' | '；'))
+                .trim()
+                .to_string()
+        })
+        .find(|value| !value.is_empty())
+}
+
+fn selector_limit_machine_token(text: &str) -> Option<u64> {
+    selector_value_machine_token(text, "selector_limit")
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value.clamp(1, 1000))
+}
+
+fn selector_sort_by_machine_token(text: &str) -> Option<String> {
+    selector_value_machine_token(text, "selector_sort_by")
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| {
+            matches!(
+                value.as_str(),
+                "name" | "name_desc" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+            )
+        })
+}
+
+fn selector_target_kind_machine_token(text: &str) -> Option<OutputScalarCountTargetKind> {
+    selector_value_machine_token(text, "selector_target_kind")
+        .map(|value| value.to_ascii_lowercase())
+        .and_then(|value| match value.as_str() {
+            "file" | "files" => Some(OutputScalarCountTargetKind::File),
+            "dir" | "dirs" | "directory" | "directories" | "folder" | "folders" => {
+                Some(OutputScalarCountTargetKind::Dir)
+            }
+            "any" => Some(OutputScalarCountTargetKind::Any),
+            _ => None,
+        })
+}
+
+fn selector_bool_machine_token(text: &str, key: &str) -> Option<bool> {
+    selector_value_machine_token(text, key).and_then(|value| {
+        match value.to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => Some(true),
+            "false" | "0" | "no" => Some(false),
+            _ => None,
+        }
+    })
+}
+
 pub(super) fn direct_answer_decision_should_be_overridden_by_executable_contract(
     needs_clarify: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
@@ -325,7 +551,7 @@ pub(super) fn direct_answer_decision_should_be_overridden_by_executable_contract
     direct_answer_contract_repair: Option<&'static str>,
 ) -> bool {
     !needs_clarify
-        && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
+        && matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
         && structured_execution_signal_for_effective_route(
             output_contract,
             wants_file_delivery,

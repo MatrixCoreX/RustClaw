@@ -64,7 +64,9 @@ pub(super) fn strip_unrequested_workspace_artifact_mutations(
         return actions;
     };
     if !route_disallows_unrequested_workspace_artifact_mutation(route, loop_state)
-        || !actions.iter().any(action_is_likely_mutating)
+        || !actions
+            .iter()
+            .any(|action| action_is_likely_mutating(state, action))
     {
         return actions;
     }
@@ -75,7 +77,7 @@ pub(super) fn strip_unrequested_workspace_artifact_mutations(
     let stripped = actions
         .into_iter()
         .filter(|action| {
-            if action_is_likely_mutating(action) {
+            if action_is_likely_mutating(state, action) {
                 if action_targets_route_locator_artifact(state, route, action) {
                     return true;
                 }

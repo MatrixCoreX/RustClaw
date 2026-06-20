@@ -913,6 +913,87 @@ fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
         .unwrap_or(false)
 }
 
+fn route_requires_clarify_before_tools(
+    state: &AppState,
+    route_result: Option<&crate::RouteResult>,
+    plan_result: &PlanResult,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.needs_clarify {
+        return false;
+    }
+    let has_executable_step = plan_result.steps.iter().any(|step| {
+        matches!(
+            step.action_type.as_str(),
+            "call_skill" | "call_tool" | "call_capability"
+        )
+    });
+    if !has_executable_step {
+        return false;
+    }
+    !route_clarify_can_defer_to_runtime_status_plan(state, route, plan_result)
+}
+
+fn route_clarify_can_defer_to_runtime_status_plan(
+    state: &AppState,
+    route: &crate::RouteResult,
+    plan_result: &PlanResult,
+) -> bool {
+    if !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    {
+        return false;
+    }
+    let mut saw_runtime_status_observation = false;
+    for step in plan_result.steps.iter().filter(|step| {
+        matches!(
+            step.action_type.as_str(),
+            "call_skill" | "call_tool" | "call_capability"
+        )
+    }) {
+        match step.action_type.as_str() {
+            "call_skill" | "call_tool" => {
+                let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+                if normalized_skill != "system_basic"
+                    || step.args.get("action").and_then(serde_json::Value::as_str)
+                        != Some("runtime_status")
+                    || step
+                        .args
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .is_none_or(str::is_empty)
+                {
+                    return false;
+                }
+                saw_runtime_status_observation = true;
+            }
+            "call_capability" => {
+                if step.skill.trim() != "system.runtime_status"
+                    || step
+                        .args
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .is_none_or(str::is_empty)
+                {
+                    return false;
+                }
+                saw_runtime_status_observation = true;
+            }
+            _ => return false,
+        }
+    }
+    saw_runtime_status_observation
+}
+
 fn verify_execution_recipe(
     state: &AppState,
     plan_result: &PlanResult,
@@ -927,12 +1008,7 @@ fn verify_execution_recipe(
     let mut saw_mutation = recipe.saw_mutation;
     let mut saw_validation_after_mutation = recipe.saw_validation;
     let mut saw_profile_validation_after_mutation = recipe.saw_validation
-        && !matches!(
-            recipe.profile,
-            crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
-                | crate::execution_recipe::ExecutionRecipeProfile::CodeChange
-                | crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring
-        );
+        && !crate::execution_recipe::profile_requires_specific_validation(recipe.profile);
     let mut first_mutation_step_id: Option<String> = None;
     let mut saw_external_target = recipe.saw_external_target;
     let mut saw_greenfield_creation = recipe.saw_greenfield_creation;
@@ -996,6 +1072,17 @@ fn verify_execution_recipe(
             ) {
                 saw_profile_validation_after_mutation = true;
             }
+        } else if saw_mutation
+            && crate::execution_recipe::profile_requires_specific_validation(recipe.profile)
+            && crate::execution_recipe::validation_satisfies_recipe_profile(
+                recipe,
+                state,
+                &normalized_skill,
+                &step.args,
+            )
+        {
+            saw_validation_after_mutation = true;
+            saw_profile_validation_after_mutation = true;
         }
     }
 
@@ -1007,16 +1094,12 @@ fn verify_execution_recipe(
         });
     }
 
-    let validation_satisfied = if matches!(
-        recipe.profile,
-        crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
-            | crate::execution_recipe::ExecutionRecipeProfile::CodeChange
-            | crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring
-    ) {
-        saw_profile_validation_after_mutation
-    } else {
-        saw_validation_after_mutation
-    };
+    let validation_satisfied =
+        if crate::execution_recipe::profile_requires_specific_validation(recipe.profile) {
+            saw_profile_validation_after_mutation
+        } else {
+            saw_validation_after_mutation
+        };
 
     if recipe.validation_required && saw_mutation && !validation_satisfied {
         let step_id = plan_result
@@ -1244,16 +1327,8 @@ pub(crate) fn verify_plan(
         &mut issues,
     );
 
-    let route_requires_clarify_before_tools = input
-        .route_result
-        .map(|route| route.needs_clarify)
-        .unwrap_or(false)
-        && input.plan_result.steps.iter().any(|step| {
-            matches!(
-                step.action_type.as_str(),
-                "call_skill" | "call_tool" | "call_capability"
-            )
-        });
+    let route_requires_clarify_before_tools =
+        route_requires_clarify_before_tools(state, input.route_result, input.plan_result);
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)
         .into_iter()

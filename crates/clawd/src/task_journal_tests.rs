@@ -207,6 +207,28 @@ fn summary_json_includes_finalizer_and_task_metrics() {
     assert_eq!(
         summary
             .get("route_result")
+            .and_then(|v| v.get("legacy_first_layer_decision"))
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .get("route_result")
+            .and_then(|v| v.get("legacy_route_label"))
+            .and_then(Value::as_str),
+        Some("Act")
+    );
+    assert!(summary
+        .get("route_result")
+        .and_then(|v| v.get("first_layer_decision"))
+        .is_none());
+    assert!(summary
+        .get("route_result")
+        .and_then(|v| v.get("route_label"))
+        .is_none());
+    assert_eq!(
+        summary
+            .get("route_result")
             .and_then(|v| v.get("self_extension"))
             .and_then(|v| v.get("mode"))
             .and_then(Value::as_str),
@@ -227,6 +249,39 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .and_then(|v| v.get("execute_now"))
             .and_then(Value::as_bool),
         Some(true)
+    );
+}
+
+#[test]
+fn summary_json_preserves_task_lifecycle_checkpoint_machine_fields() {
+    let mut journal = TaskJournal::for_task("task-checkpoint", "ask", "long task");
+    journal.record_task_lifecycle(json!({
+        "schema_version": 1,
+        "state": "waiting",
+        "source": "agent_loop_soft_budget",
+        "resume_reason": "agent_loop_no_progress_limit",
+        "checkpoint_id": "ckpt-1"
+    }));
+    journal.record_task_checkpoint(json!({
+        "schema_version": 1,
+        "checkpoint_id": "ckpt-1",
+        "resume_entrypoint": "next_planner_round"
+    }));
+
+    let summary = journal.to_summary_json();
+    let trace = journal.to_trace_json();
+
+    assert_eq!(
+        summary
+            .pointer("/task_lifecycle/resume_reason")
+            .and_then(Value::as_str),
+        Some("agent_loop_no_progress_limit")
+    );
+    assert_eq!(
+        trace
+            .pointer("/task_checkpoint/checkpoint_id")
+            .and_then(Value::as_str),
+        Some("ckpt-1")
     );
 }
 
@@ -317,6 +372,76 @@ fn agent_decides_shadow_attribution_is_machine_readable() {
             .pointer("/rollout_attribution/0/boundary_context/owner_layer")
             .and_then(Value::as_str),
         Some("boundary_layer")
+    );
+}
+
+#[test]
+fn dispatch_boundary_attribution_records_owner_and_rollback_tokens() {
+    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    let attribution = TaskJournalRolloutAttribution::dispatch_boundary_attribution(
+        &route,
+        "clarify_boundary_shortcut",
+        "legacy_pre_agent_locator_clarify",
+        "boundary_clarify_gate",
+        "ask_pipeline_boundary_clarify_shortcut",
+        "semantic_route_authority:legacy_pre_agent",
+    );
+    let mut journal = TaskJournal::for_task("task-dispatch-boundary", "ask", "prompt");
+    journal.record_rollout_attribution(attribution);
+    let summary = journal.to_summary_json();
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/switch_name")
+            .and_then(Value::as_str),
+        Some("semantic_route_authority")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/event")
+            .and_then(Value::as_str),
+        Some("clarify_boundary_shortcut")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/outcome")
+            .and_then(Value::as_str),
+        Some("observed")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/route_gate_kind")
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/old_first_layer_decision")
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/old_owner")
+            .and_then(Value::as_str),
+        Some("legacy_pre_agent_locator_clarify")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/new_owner")
+            .and_then(Value::as_str),
+        Some("boundary_clarify_gate")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/chosen_path")
+            .and_then(Value::as_str),
+        Some("ask_pipeline_boundary_clarify_shortcut")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/rollback_token")
+            .and_then(Value::as_str),
+        Some("semantic_route_authority:legacy_pre_agent")
     );
 }
 
@@ -498,7 +623,7 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
 #[test]
 fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
     let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
         &route,
         "fast_read",
@@ -856,6 +981,249 @@ fn trace_json_includes_execution_recipe_summary() {
 }
 
 #[test]
+fn trace_json_includes_round_source_of_truth_machine_fields() {
+    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    let plan = crate::PlanResult {
+        goal: "inspect workspace".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "fs.read_text_range".to_string(),
+            args: json!({"path": "README.md"}),
+            depends_on: Vec::new(),
+            why: "read file".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let verify = TaskJournalVerifySummary {
+        mode: crate::verifier::VerifyMode::ObserveOnly,
+        approved: true,
+        blocked_reason: None,
+        shadow_blocked_reason: Some("missing argument".to_string()),
+        needs_confirmation: false,
+        issues: vec![TaskJournalVerifyIssue {
+            step_id: "step_1".to_string(),
+            kind: crate::verifier::VerifyIssueKind::MissingRequiredArg,
+            detail: "path".to_string(),
+        }],
+    };
+    let mut journal = TaskJournal::for_task("task-round-source", "ask", "inspect");
+    journal.record_route_result(&route);
+    journal.record_rollout_attribution(
+        TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
+            &route,
+            "fast_read",
+            Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
+        ),
+    );
+    journal.record_final_stop_signal("max_tool_calls");
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "inspect workspace".to_string(),
+        plan_result: Some(plan),
+        verify_result: Some(verify),
+        ..Default::default()
+    });
+
+    let trace = journal.to_trace_json();
+    let round = trace
+        .pointer("/rounds/0")
+        .expect("round trace should be present");
+    assert_eq!(
+        round.get("owner_layer").and_then(Value::as_str),
+        Some("agent_loop_round")
+    );
+    assert_eq!(
+        round
+            .pointer("/boundary_context_summary/owner_layer")
+            .and_then(Value::as_str),
+        Some("boundary_layer")
+    );
+    assert_eq!(
+        round.get("budget_profile").and_then(Value::as_str),
+        Some("fast_read")
+    );
+    assert_eq!(
+        round.get("stop_signal").and_then(Value::as_str),
+        Some("max_tool_calls")
+    );
+    assert_eq!(
+        round.get("first_action_decision").and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        round
+            .get("first_action_capability_ref")
+            .and_then(Value::as_str),
+        Some("fs.read_text_range")
+    );
+    assert_eq!(
+        round
+            .pointer("/capability_resolution_records/0/resolution_source")
+            .and_then(Value::as_str),
+        Some("capability_resolver")
+    );
+    assert_eq!(
+        round
+            .pointer("/repair_signals/0/status_code")
+            .and_then(Value::as_str),
+        Some("missing_required_arg")
+    );
+    assert_eq!(
+        round
+            .pointer("/repair_signals/0/message_key")
+            .and_then(Value::as_str),
+        Some("clawd.verify.missing_required_arg")
+    );
+    let forbidden_repeat = round
+        .pointer("/repair_signals/0/forbidden_repeat_fingerprint")
+        .and_then(Value::as_str)
+        .expect("round repair signal should include plan-step fingerprint");
+    assert!(
+        forbidden_repeat.contains("read_text_range"),
+        "fingerprint should include machine action ref, got {forbidden_repeat}"
+    );
+    assert!(
+        forbidden_repeat.rsplit(':').next().is_some_and(|hash| {
+            hash.len() == 16 && hash.chars().all(|ch| ch.is_ascii_hexdigit())
+        }),
+        "fingerprint should end with stable args hash, got {forbidden_repeat}"
+    );
+    assert_eq!(
+        round
+            .pointer("/verify_result/issues/0/forbidden_repeat_fingerprint")
+            .and_then(Value::as_str),
+        Some(forbidden_repeat)
+    );
+}
+
+fn test_plan_step(step_id: &str, action_type: &str, skill: &str, args: Value) -> crate::PlanStep {
+    crate::PlanStep {
+        step_id: step_id.to_string(),
+        action_type: action_type.to_string(),
+        skill: skill.to_string(),
+        args,
+        depends_on: Vec::new(),
+        why: String::new(),
+    }
+}
+
+fn test_plan(kind: crate::PlanKind, steps: Vec<crate::PlanStep>) -> crate::PlanResult {
+    crate::PlanResult {
+        goal: String::new(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps,
+        planner_notes: String::new(),
+        plan_kind: kind,
+        raw_plan_text: String::new(),
+    }
+}
+
+#[test]
+fn trace_json_matches_repeated_round_step_ids_by_execution_order_and_skill() {
+    let mut journal = TaskJournal::for_task("task-repeat-step-ids", "ask", "ops repair");
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "current_phase=inspect".to_string(),
+        execution_recipe_summary: None,
+        plan_result: Some(test_plan(
+            crate::PlanKind::Single,
+            vec![
+                test_plan_step(
+                    "step_1",
+                    "call_tool",
+                    "fs_basic",
+                    json!({"action": "read_text_range", "path": "index.html"}),
+                ),
+                test_plan_step(
+                    "step_2",
+                    "synthesize_answer",
+                    "synthesize_answer",
+                    json!({}),
+                ),
+                test_plan_step("step_3", "respond", "respond", json!({})),
+            ],
+        )),
+        verify_result: None,
+    });
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 2,
+        goal: "current_phase=apply".to_string(),
+        execution_recipe_summary: None,
+        plan_result: Some(test_plan(
+            crate::PlanKind::Repair,
+            vec![
+                test_plan_step(
+                    "step_1",
+                    "call_tool",
+                    "http_basic",
+                    json!({"action": "get", "url": "http://127.0.0.1:40459/"}),
+                ),
+                test_plan_step(
+                    "step_2",
+                    "call_tool",
+                    "fs_basic",
+                    json!({"action": "write_text", "path": "index.html", "content": "ok"}),
+                ),
+                test_plan_step(
+                    "step_3",
+                    "call_tool",
+                    "http_basic",
+                    json!({"action": "get", "url": "http://127.0.0.1:40459/"}),
+                ),
+                test_plan_step("step_4", "respond", "respond", json!({})),
+            ],
+        )),
+        verify_result: None,
+    });
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","excerpt":"bad"}"#,
+    ));
+    journal.step_results.push(TaskJournalStepTrace::new(
+        "step_2",
+        "synthesize_answer",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some("active_recipe_terminal_discussion_before_done".to_string()),
+    ));
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_3", "fs_basic", "write ok"));
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_4",
+        "http_basic",
+        r#"{"status_code":200}"#,
+    ));
+
+    let trace = journal.to_trace_json();
+    let steps = trace
+        .get("step_results")
+        .and_then(Value::as_array)
+        .expect("step_results");
+    assert_eq!(
+        steps[2].get("requested_action_ref").and_then(Value::as_str),
+        Some("fs_basic.write_text")
+    );
+    assert_eq!(
+        steps[2]
+            .get("requested_action_type")
+            .and_then(Value::as_str),
+        Some("call_tool")
+    );
+    assert_eq!(
+        steps[3].get("requested_action_ref").and_then(Value::as_str),
+        Some("http_basic.get")
+    );
+}
+
+#[test]
 fn trace_json_includes_memory_trace() {
     let mut journal = TaskJournal::for_task("task-memory", "ask", "根据记忆回复");
     journal.record_memory_trace(json!({
@@ -1098,7 +1466,9 @@ fn trace_json_distinguishes_requested_tool_from_executed_skill() {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("README.md\nCargo.toml".to_string()),
+        output: Some(
+            json!({"path": ".", "entries": ["README.md", "Cargo.toml"], "count": 2}).to_string(),
+        ),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -1133,6 +1503,86 @@ fn trace_json_distinguishes_requested_tool_from_executed_skill() {
     assert_eq!(
         step.get("skill").and_then(Value::as_str),
         Some("system_basic")
+    );
+    assert_eq!(
+        step.get("action_kind").and_then(Value::as_str),
+        Some("call_tool")
+    );
+    assert_eq!(
+        step.get("resolved_tool_or_skill").and_then(Value::as_str),
+        Some("system_basic")
+    );
+    assert_eq!(
+        step.get("resolution_source").and_then(Value::as_str),
+        Some("direct_tool_or_skill_compat")
+    );
+    assert_eq!(
+        step.get("sanitized_args_summary").and_then(Value::as_str),
+        Some("system_basic.inventory_dir")
+    );
+    assert_eq!(
+        step.get("sanitized_args_summary_status")
+            .and_then(Value::as_str),
+        Some("action_ref_only")
+    );
+    assert!(
+        step.get("output_evidence_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1
+    );
+    assert_eq!(
+        step.pointer("/artifact_refs/0/ref").and_then(Value::as_str),
+        Some(".")
+    );
+    assert_eq!(
+        step.get("retry_fingerprint_status").and_then(Value::as_str),
+        Some("not_recorded_in_step_trace")
+    );
+}
+
+#[test]
+fn summary_json_includes_validation_result_machine_shape() {
+    let mut journal = TaskJournal::for_task("task-validation", "ask", "validate");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "config_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "validation_result": {
+                    "status": "passed",
+                    "status_code": "config_valid",
+                    "message_key": "clawd.validation.config_valid"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let summary = journal.to_summary_json();
+    let trace = journal.to_trace_json();
+
+    assert_eq!(
+        summary
+            .pointer("/validation_result/validation_step_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/validation_result/latest_status")
+            .and_then(Value::as_str),
+        Some("passed")
+    );
+    assert_eq!(
+        trace
+            .pointer("/validation_result/signals/0/status_code")
+            .and_then(Value::as_str),
+        Some("config_valid")
     );
 }
 
@@ -1380,7 +1830,7 @@ fn rollout_attribution_serializes_machine_fields() {
     let item = &attribution[0];
     assert_eq!(
         item.get("switch_name").and_then(Value::as_str),
-        Some("answer_verifier_enforce_required")
+        Some("answer_verifier_enforce_required_scope")
     );
     assert_eq!(
         item.get("event").and_then(Value::as_str),

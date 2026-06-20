@@ -30,7 +30,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     confidence: f64,
     output_contract: IntentOutputContract,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     execution_finalize_style: ActFinalizeStyle,
     turn_analysis: Option<TurnAnalysis>,
     turn_type: Option<TurnType>,
@@ -46,7 +46,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
             session_snapshot,
             turn_type,
             target_task_policy,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
         );
     let (needs_clarify_eff, clarify_question_eff) = if bare_path_only
@@ -75,7 +75,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     let bare_path_promotes_to_execute = !needs_clarify_eff
         && bare_path_only
         && bare_path_fills_active_observable_task
-        && matches!(first_layer_decision, FirstLayerDecision::Clarify);
+        && matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify);
     let structured_execution_signal = structured_execution_signal_for_effective_route(
         &output_contract,
         wants_file_delivery,
@@ -83,32 +83,37 @@ pub(super) fn build_normalizer_output_with_final_gate(
         execution_recipe_hint,
         active_file_basename_answer_candidate_repair,
     );
-    let first_layer_decision_eff = if needs_clarify_eff {
+    let legacy_normalizer_decision_eff = if needs_clarify_eff {
         FirstLayerDecision::Clarify
     } else if bare_path_promotes_to_execute
         || structured_execution_signal
-        || matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        || matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
     {
         FirstLayerDecision::PlannerExecute
     } else {
         FirstLayerDecision::DirectAnswer
     };
-    let execution_finalize_style_eff =
-        if matches!(first_layer_decision_eff, FirstLayerDecision::PlannerExecute) {
-            if bare_path_promotes_to_execute {
-                crate::post_route_policy::content_evidence_execution_finalize_style(
-                    &output_contract,
-                    false,
-                )
-                .unwrap_or_else(|| execution_finalize_style_for_contract(&output_contract))
-            } else if structured_execution_signal {
-                execution_finalize_style_for_contract(&output_contract)
-            } else {
-                execution_finalize_style
-            }
+    let execution_finalize_style_eff = if matches!(
+        legacy_normalizer_decision_eff,
+        FirstLayerDecision::PlannerExecute
+    ) {
+        if bare_path_promotes_to_execute {
+            crate::post_route_policy::content_evidence_execution_finalize_style(
+                &output_contract,
+                false,
+            )
+            .unwrap_or_else(|| execution_finalize_style_for_contract(&output_contract))
+        } else if structured_execution_signal {
+            execution_finalize_style_for_contract(&output_contract)
         } else {
-            ActFinalizeStyle::Plain
-        };
+            execution_finalize_style
+        }
+    } else {
+        ActFinalizeStyle::Plain
+    };
     let mut first_layer_repair_codes = contract_repair_report
         .details
         .iter()
@@ -120,7 +125,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     }
     let first_layer_gate_record = first_layer_decision_gate_record(
         parsed_decision,
-        first_layer_decision_eff,
+        legacy_normalizer_decision_eff,
         needs_clarify_eff,
         &output_contract,
         first_layer_repair_codes,
@@ -156,7 +161,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         confidence,
         output_contract,
         execution_recipe_hint,
-        first_layer_decision: first_layer_decision_eff,
+        legacy_first_layer_decision: legacy_normalizer_decision_eff,
         execution_finalize_style: execution_finalize_style_eff,
         turn_analysis,
         fallback_source: None,

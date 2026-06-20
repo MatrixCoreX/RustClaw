@@ -269,6 +269,32 @@ fn fs_search_grep_text_direct_answer_returns_matching_lines_when_listing_allowed
 }
 
 #[test]
+fn raw_command_output_grep_text_direct_answer_returns_matching_lines() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"grep_text","query":"ERROR","count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/logs/app.log","line":16,"text":"2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"}],"results":["scripts/nl_tests/fixtures/device_local/logs/app.log"]}"#,
+    ));
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("16: 2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata")
+    );
+}
+
+#[test]
 fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
     let value = serde_json::json!({
         "action": "grep_text",
@@ -765,6 +791,41 @@ fn observed_entries_use_read_range_excerpt_body_instead_of_raw_json() {
     assert!(entries[0].contains("# RustClaw\n\nHello"));
     assert!(entries[0].contains("Hello"));
     assert!(!entries[0].contains(r#""action":"read_range""#));
+}
+
+#[test]
+fn observed_entries_keep_read_range_runtime_log_excerpt_for_synthesis() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","path":"/tmp/clawd.run.log","excerpt":"10|2026-06-19T12:39:31Z INFO task_call: verifier_result task_id=abc\n11|2026-06-19T12:39:32Z INFO task_call: executor_step_start step=read_range"}"#,
+    ));
+
+    let entries = observed_output_entries(&loop_state);
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].contains("read_range path=/tmp/clawd.run.log"));
+    assert!(entries[0].contains("task_call: verifier_result"));
+    assert!(entries[0].contains("executor_step_start"));
+}
+
+#[test]
+fn observed_entries_preserve_full_find_name_results_for_synthesis() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"find_name","pattern":"clawd","count":10,"root":"logs","results":["logs/clawd-codex-current.log","logs/clawd-dev.log","logs/clawd-runtime.log","logs/clawd.codex.minimax.log","logs/clawd.codex.nltest.log","logs/clawd.log","logs/clawd.nl-focus.log","logs/clawd.nl_missing_ja_20260526_221223.log","logs/clawd.nl_missing_ja_20260526_221700.log","logs/clawd.run.log"]}"#,
+    ));
+
+    let entries = observed_output_entries(&loop_state);
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].contains("find_name count=10"));
+    assert!(entries[0].contains("root=logs"));
+    assert!(entries[0].contains("pattern=clawd"));
+    assert!(entries[0].contains("result.10.path=logs/clawd.run.log"));
 }
 
 #[test]

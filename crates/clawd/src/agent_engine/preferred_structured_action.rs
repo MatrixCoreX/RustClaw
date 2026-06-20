@@ -69,7 +69,7 @@ pub(super) fn preferred_structured_action_for_contract_hint(
                 args: serde_json::json!({
                     "action": preferred.action.as_deref().unwrap_or("ps"),
                     "limit": 200,
-                    "filter": process_status_filter_token(&route.resolved_intent)
+                    "filter": process_status_contract_filter_token(route)
                         .unwrap_or_else(|| "clawd".to_string()),
                 }),
             })
@@ -78,7 +78,7 @@ pub(super) fn preferred_structured_action_for_contract_hint(
             skill: "service_control".to_string(),
             args: serde_json::json!({
                 "action": preferred.action.as_deref().unwrap_or("status"),
-                "target": process_status_filter_token(&route.resolved_intent)
+                "target": process_status_contract_filter_token(route)
                     .unwrap_or_else(|| "clawd".to_string()),
                 "manager_type": "rustclaw",
             }),
@@ -394,6 +394,7 @@ pub(super) fn readonly_find_candidate_for_rejected_run_cmd(
 pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     state: &AppState,
     route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
     original_user_text: Option<&str>,
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
@@ -418,6 +419,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     let quantity_compare_has_text_evidence = route.output_contract.semantic_kind
         == crate::OutputSemanticKind::QuantityComparison
         && actions.iter().any(action_reads_workspace_text_content);
+    let compound_plan_has_content_read =
+        actions.len() > 1 && actions.iter().any(action_reads_workspace_text_content);
     let quantity_compare_directory_name_pair = route.output_contract.semantic_kind
         == crate::OutputSemanticKind::QuantityComparison
         && actions
@@ -447,6 +450,22 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 return action;
             }
             let normalized_skill = state.resolve_canonical_skill_name(skill);
+            if active_ops_recipe_allows_mutation_despite_summary_contract(
+                state,
+                loop_state,
+                &normalized_skill,
+                args,
+                policy.decision,
+            ) {
+                info!(
+                    "plan_keep_active_ops_recipe_mutation_despite_contract_hint idx={} contract={} action={} phase={}",
+                    idx,
+                    policy.contract_match,
+                    policy.action_key,
+                    loop_state.execution_recipe.phase.as_str()
+                );
+                return action;
+            }
             if super::super::action_is_user_named_new_workspace_write(
                 &state.skill_rt.workspace_root,
                 original_user_text,
@@ -527,6 +546,15 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                     .and_then(Value::as_str)
                     .is_some_and(|action| action.trim().eq_ignore_ascii_case("stat_paths"))
             {
+                return action;
+            }
+            if compound_plan_has_content_read
+                && fs_basic_stat_paths_has_targets(&normalized_skill, args)
+            {
+                info!(
+                    "plan_keep_compound_stat_paths_supporting_content_read idx={} contract={} action={}",
+                    idx, policy.contract_match, policy.action_key
+                );
                 return action;
             }
             if file_paths_has_allowed_executable {
@@ -626,6 +654,38 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             action
         })
         .collect()
+}
+
+fn active_ops_recipe_allows_mutation_despite_summary_contract(
+    state: &AppState,
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    args: &Value,
+    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+) -> bool {
+    if policy_decision != crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed {
+        return false;
+    }
+    let recipe = loop_state.execution_recipe;
+    if !matches!(
+        recipe.kind,
+        crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+    ) || !matches!(
+        recipe.phase,
+        crate::execution_recipe::ExecutionRecipePhase::Apply
+            | crate::execution_recipe::ExecutionRecipePhase::Repair
+    ) {
+        return false;
+    }
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    effect.mutates
+        && !crate::execution_recipe::action_conflicts_with_recipe_target_scope(
+            recipe,
+            state,
+            normalized_skill,
+            args,
+        )
 }
 
 pub(super) fn inherit_preferred_action_filters_from_rejected_action(
@@ -1129,7 +1189,7 @@ pub(super) fn push_unique_search_name_candidate(values: &mut Vec<String>, candid
     }
 }
 
-pub(super) fn single_quoted_search_name_target(text: &str) -> Option<String> {
+fn quoted_search_name_targets(text: &str) -> Vec<String> {
     static QUOTED_RE: OnceLock<Regex> = OnceLock::new();
     let re = QUOTED_RE.get_or_init(|| {
         Regex::new(r#""([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`"#).expect("quoted search name regex")
@@ -1144,6 +1204,39 @@ pub(super) fn single_quoted_search_name_target(text: &str) -> Option<String> {
             .unwrap_or_default();
         push_unique_search_name_candidate(&mut candidates, candidate);
     }
+    candidates
+}
+
+fn fs_basic_stat_paths_has_targets(skill: &str, args: &Value) -> bool {
+    if !skill.eq_ignore_ascii_case("fs_basic") {
+        return false;
+    }
+    if args
+        .get("action")
+        .and_then(Value::as_str)
+        .is_none_or(|action| !action.trim().eq_ignore_ascii_case("stat_paths"))
+    {
+        return false;
+    }
+    args.get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
+        || args
+            .get("paths")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| {
+                paths
+                    .iter()
+                    .any(|path| path.as_str().is_some_and(|path| !path.trim().is_empty()))
+            })
+}
+
+pub(super) fn has_multiple_quoted_search_name_targets(text: &str) -> bool {
+    quoted_search_name_targets(text).len() > 1
+}
+
+pub(super) fn single_quoted_search_name_target(text: &str) -> Option<String> {
+    let mut candidates = quoted_search_name_targets(text);
     (candidates.len() == 1).then(|| candidates.remove(0))
 }
 

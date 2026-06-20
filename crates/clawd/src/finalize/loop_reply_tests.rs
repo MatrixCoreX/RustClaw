@@ -32,6 +32,7 @@ use super::{
     ensure_requested_success_marker_visible, execution_recipe_closeout_note,
     final_answer_text_from_delivery, finalize_loop_reply, finalizer_requires_clarify,
     generated_delivery_existing_file_content_synthesis_token, has_missing_file_search_evidence,
+    language_rendered_failed_step_finalizer_summary,
     latest_delivery_preserves_observed_quantity_size_facts,
     latest_file_delivery_observation_is_missing,
     latest_path_batch_facts_has_implicit_metadata_fields, looks_like_raw_command_snapshot,

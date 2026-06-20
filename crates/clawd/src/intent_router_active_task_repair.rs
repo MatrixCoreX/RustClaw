@@ -38,12 +38,12 @@ pub(super) fn should_resolve_task_scope_update_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
@@ -63,12 +63,12 @@ pub(super) fn should_resolve_task_append_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(
             turn_type,
@@ -91,12 +91,12 @@ pub(super) fn should_resolve_task_replace_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskReplace))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
@@ -116,12 +116,15 @@ pub(super) fn should_route_active_task_mutation_to_direct_answer(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        || !matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
         || active_primary_task_prompt(session_snapshot).is_none()
         || !output_contract_allows_chat_only_task_mutation(output_contract)
     {
@@ -171,7 +174,7 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
@@ -182,13 +185,13 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
     }
     if missing_active_reuse_has_standalone_execution_contract(
         turn_type,
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         output_contract,
     ) {
         return None;
     }
     if missing_active_reuse_has_standalone_direct_answer_candidate(
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         output_contract,
         answer_candidate,
     ) {
@@ -198,20 +201,20 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
         prompt,
         turn_type,
         target_task_policy,
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         output_contract,
         state_patch,
     ) {
         *needs_clarify = false;
         clarify_question.clear();
-        *first_layer_decision = FirstLayerDecision::DirectAnswer;
+        *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
         *execution_finalize_style = ActFinalizeStyle::Plain;
         clear_output_contract_for_active_text_followup(output_contract);
         return Some("missing_active_task_reuse_continues_as_chat");
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::Clarify;
+    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     clear_output_contract_for_active_text_followup(output_contract);
     Some("missing_active_task_reuse_requires_clarify")
@@ -221,11 +224,11 @@ fn missing_active_text_followup_can_continue_as_chat(
     prompt: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
-    if !matches!(first_layer_decision, FirstLayerDecision::Clarify)
+    if !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
         || !matches!(
             turn_type,
@@ -244,14 +247,16 @@ fn missing_active_text_followup_can_continue_as_chat(
 
 fn missing_active_reuse_has_standalone_execution_contract(
     turn_type: Option<TurnType>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
     if !matches!(
         turn_type,
         Some(TurnType::TaskRequest | TurnType::StatusQuery)
-    ) || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-    {
+    ) || !matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) {
         return false;
     }
     let requires_observation = output_contract.requires_content_evidence
@@ -272,11 +277,11 @@ fn missing_active_reuse_has_standalone_execution_contract(
 }
 
 fn missing_active_reuse_has_standalone_direct_answer_candidate(
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     answer_candidate: Option<&str>,
 ) -> bool {
-    if !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer) {
+    if !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer) {
         return false;
     }
     if answer_candidate
@@ -314,39 +319,152 @@ fn state_patch_selects_ordered_entry_or_execution_scope(state_patch: Option<&Val
         .is_some_and(|operation| !operation.is_empty())
 }
 
-fn collect_state_patch_replacement_from_values(value: Option<&Value>, out: &mut BTreeSet<String>) {
+fn normalized_replacement_literal_from_map(
+    map: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
+    let literal = keys
+        .iter()
+        .find_map(|key| map.get(*key))
+        .and_then(Value::as_str)?
+        .trim()
+        .trim_matches(|c: char| c.is_ascii_whitespace() || matches!(c, '"' | '\'' | '`'))
+        .trim();
+    if literal.is_empty()
+        || literal.contains('\n')
+        || literal.chars().count() > 80
+        || state_patch_replacement_placeholder_literal(literal)
+    {
+        return None;
+    }
+    Some(literal.to_string())
+}
+
+fn state_patch_replacement_placeholder_literal(value: &str) -> bool {
+    let Some(inner) = value
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return false;
+    };
+    inner.starts_with("pending_")
+        && inner
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+fn collect_state_patch_replacements_from_values(
+    value: Option<&Value>,
+    from_out: &mut BTreeSet<String>,
+    to_out: &mut BTreeSet<String>,
+) {
     match value {
         Some(Value::Array(items)) => {
             for item in items {
-                collect_state_patch_replacement_from_values(Some(item), out);
+                collect_state_patch_replacements_from_values(Some(item), from_out, to_out);
             }
         }
         Some(Value::Object(map)) => {
-            if let Some(from) = map
-                .get("from")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                out.insert(from.to_string());
+            let from = normalized_replacement_literal_from_map(map, &["from", "old", "source"]);
+            let to =
+                normalized_replacement_literal_from_map(map, &["to", "new", "target", "value"]);
+            if let (Some(from), Some(to)) = (from, to) {
+                if from != to {
+                    from_out.insert(from);
+                    to_out.insert(to);
+                }
             }
         }
         _ => {}
     }
 }
 
-fn state_patch_replacement_from_literals(map: &serde_json::Map<String, Value>) -> BTreeSet<String> {
-    let mut literals = BTreeSet::new();
-    for key in ["replacement_pairs", "active_task_replacement_pairs"] {
-        collect_state_patch_replacement_from_values(map.get(key), &mut literals);
-    }
-    if let Some(constraints) = map.get("visible_constraints").and_then(Value::as_object) {
-        collect_state_patch_replacement_from_values(
-            constraints.get("replacement_pairs"),
-            &mut literals,
+fn state_patch_replacement_literals(
+    map: &serde_json::Map<String, Value>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut from_literals = BTreeSet::new();
+    let mut to_literals = BTreeSet::new();
+    for key in [
+        "replacement_pairs",
+        "active_task_replacement_pairs",
+        "replacements",
+        "active_task_replacements",
+        "replace",
+    ] {
+        collect_state_patch_replacements_from_values(
+            map.get(key),
+            &mut from_literals,
+            &mut to_literals,
         );
     }
-    literals
+    if let Some(constraints) = map.get("visible_constraints").and_then(Value::as_object) {
+        for key in ["replacement_pairs", "replacements", "replace"] {
+            collect_state_patch_replacements_from_values(
+                constraints.get(key),
+                &mut from_literals,
+                &mut to_literals,
+            );
+        }
+    }
+    (from_literals, to_literals)
+}
+
+fn append_required_content_literals(
+    map: &mut serde_json::Map<String, Value>,
+    required: &BTreeSet<String>,
+) -> bool {
+    if required.is_empty() {
+        return false;
+    }
+    let entry = map
+        .entry("required_content_literals".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !entry.is_array() {
+        *entry = Value::Array(Vec::new());
+    }
+    let items = entry.as_array_mut().expect("array after repair");
+    let mut existing = items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .collect::<BTreeSet<_>>();
+    let mut changed = false;
+    for value in required {
+        if existing.insert(value.clone()) {
+            items.push(Value::String(value.clone()));
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn append_forbidden_visible_literals(
+    map: &mut serde_json::Map<String, Value>,
+    forbidden: &BTreeSet<String>,
+) -> bool {
+    if forbidden.is_empty() {
+        return false;
+    }
+    let entry = map
+        .entry("forbidden_visible_literals".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !entry.is_array() {
+        *entry = Value::Array(Vec::new());
+    }
+    let items = entry.as_array_mut().expect("array after repair");
+    let mut existing = items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .collect::<BTreeSet<_>>();
+    let mut changed = false;
+    for value in forbidden {
+        if existing.insert(value.clone()) {
+            items.push(Value::String(value.clone()));
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn remove_required_literals_that_match_replacements(
@@ -376,40 +494,15 @@ fn remove_required_literals_that_match_replacements(
     before != items.len()
 }
 
-fn append_forbidden_visible_literals(
-    map: &mut serde_json::Map<String, Value>,
-    removed: &BTreeSet<String>,
-) {
-    if removed.is_empty() {
-        return;
-    }
-    let entry = map
-        .entry("forbidden_visible_literals".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !entry.is_array() {
-        *entry = Value::Array(Vec::new());
-    }
-    let items = entry.as_array_mut().expect("array after repair");
-    let mut existing = items
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|value| value.trim().to_string())
-        .collect::<BTreeSet<_>>();
-    for value in removed {
-        if existing.insert(value.clone()) {
-            items.push(Value::String(value.clone()));
-        }
-    }
-}
-
 pub(super) fn repair_state_patch_replacement_literal_conflicts(
     state_patch: &mut Option<Value>,
 ) -> Option<&'static str> {
     let Some(Value::Object(map)) = state_patch.as_mut() else {
         return None;
     };
-    let replacement_from_literals = state_patch_replacement_from_literals(map);
-    if replacement_from_literals.is_empty() {
+    let (replacement_from_literals, replacement_to_literals) =
+        state_patch_replacement_literals(map);
+    if replacement_from_literals.is_empty() && replacement_to_literals.is_empty() {
         return None;
     }
 
@@ -440,11 +533,12 @@ pub(super) fn repair_state_patch_replacement_literal_conflicts(
             );
         }
     }
+    changed |= append_required_content_literals(map, &replacement_to_literals);
+    changed |= append_forbidden_visible_literals(map, &replacement_from_literals);
     if !changed {
         return None;
     }
 
-    append_forbidden_visible_literals(map, &removed);
     Some("state_patch_replacement_literal_conflict_repair")
 }
 
@@ -506,7 +600,7 @@ pub(super) fn apply_active_task_structured_patch_repair(
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
@@ -562,7 +656,7 @@ pub(super) fn apply_active_task_structured_patch_repair(
     *turn_type = Some(TurnType::TaskCorrect);
     *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
     *needs_clarify = false;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.requires_content_evidence = false;
     output_contract.delivery_required = false;
@@ -579,7 +673,7 @@ pub(super) fn apply_active_task_scope_refinement_repair(
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
@@ -642,7 +736,7 @@ pub(super) fn apply_active_task_scope_refinement_repair(
     }
 
     let model_lifted_prompt_into_execution_target = matches!(
-        first_layer_decision,
+        legacy_normalizer_decision,
         FirstLayerDecision::Clarify | FirstLayerDecision::PlannerExecute
     ) && (output_contract
         .requires_content_evidence
@@ -666,7 +760,7 @@ pub(super) fn apply_active_task_scope_refinement_repair(
         "active_task_scope_refinement_repair"
     };
     *needs_clarify = false;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.requires_content_evidence = false;
     output_contract.delivery_required = false;
@@ -832,7 +926,7 @@ pub(super) fn apply_active_text_followup_route_repair(
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
@@ -862,7 +956,7 @@ pub(super) fn apply_active_text_followup_route_repair(
         &surface,
         *turn_type,
         *target_task_policy,
-        *first_layer_decision,
+        *legacy_normalizer_decision,
         output_contract,
         state_patch,
     );
@@ -908,6 +1002,12 @@ pub(super) fn apply_active_text_followup_route_repair(
         && matches!(
             output_contract.locator_kind,
             OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
+        )
+        && !standalone_task_request_requires_fresh_planner_evidence(
+            *turn_type,
+            *target_task_policy,
+            *legacy_normalizer_decision,
+            output_contract,
         );
     let active_status_query = matches!(*turn_type, Some(TurnType::StatusQuery))
         && target_task_policy.is_none_or(|policy| policy == TargetTaskPolicy::ReuseActive)
@@ -972,10 +1072,26 @@ pub(super) fn apply_active_text_followup_route_repair(
         });
     }
     *needs_clarify = false;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     *wants_file_delivery = false;
     answer_candidate.clear();
     clear_output_contract_for_active_text_followup(output_contract);
     Some("active_text_followup_route_repair")
+}
+
+fn standalone_task_request_requires_fresh_planner_evidence(
+    turn_type: Option<TurnType>,
+    target_task_policy: Option<TargetTaskPolicy>,
+    legacy_normalizer_decision: FirstLayerDecision,
+    output_contract: &IntentOutputContract,
+) -> bool {
+    matches!(turn_type, Some(TurnType::TaskRequest))
+        && matches!(target_task_policy, Some(TargetTaskPolicy::Standalone))
+        && matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
+        && output_contract.requires_content_evidence
+        && output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
 }

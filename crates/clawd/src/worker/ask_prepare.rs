@@ -16,7 +16,9 @@ use field_contract::{
     repair_scalar_field_value_contract_for_locator_reply,
     repair_structured_field_target_from_prompt,
 };
+#[cfg(test)]
 pub(super) use file_delivery::repair_structural_file_delivery_resolution;
+pub(super) use file_delivery::repair_structural_file_delivery_resolution_for_turn;
 use file_delivery::{
     append_active_delivery_content_target_token, bind_content_read_to_active_delivery_target,
     clear_file_delivery_contract_for_filename_only, route_reason_has_structural_marker,
@@ -1125,10 +1127,7 @@ fn active_clarify_locator_reply_fast_path_route(
         return None;
     }
     let mut route_result = crate::RouteResult {
-        ask_mode: crate::AskMode::from_first_layer_decision_with_finalize(
-            crate::FirstLayerDecision::PlannerExecute,
-            crate::ActFinalizeStyle::Plain,
-        ),
+        ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: hit.resolved_intent.clone(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1173,7 +1172,7 @@ fn active_clarify_locator_reply_fast_path_route(
         route_result.output_contract.requires_content_evidence = true;
     }
     repair_scalar_field_value_contract_for_active_clarify_fast_path(&mut route_result);
-    repair_structural_file_delivery_resolution(&mut route_result, session_snapshot);
+    repair_structural_file_delivery_resolution_for_turn(&mut route_result, session_snapshot, None);
     Some(route_result)
 }
 
@@ -1282,13 +1281,20 @@ pub(super) async fn prepare_ask_routing(
     };
     let explicit_resume_binding =
         crate::intent::resume_policy::explicit_resume_context_binding(payload, is_resume_continue);
+    let active_checkpoint_resume_binding =
+        crate::intent::resume_policy::active_checkpoint_resume_candidate(
+            state,
+            task,
+            explicit_resume_binding.is_some(),
+        );
     let recent_failed_resume_binding = crate::intent::resume_policy::recent_failed_resume_candidate(
         state,
         task,
-        explicit_resume_binding.is_some(),
+        explicit_resume_binding.is_some() || active_checkpoint_resume_binding.is_some(),
     );
     let resume_binding = explicit_resume_binding
         .clone()
+        .or_else(|| active_checkpoint_resume_binding.clone())
         .or_else(|| recent_failed_resume_binding.clone());
     let binding_context_value = crate::intent::resume_policy::binding_context_json(
         source,
@@ -1373,7 +1379,11 @@ pub(super) async fn prepare_ask_routing(
         turn_analysis.as_ref(),
         prompt,
     );
-    repair_structural_file_delivery_resolution(&mut route_result, &session_snapshot);
+    repair_structural_file_delivery_resolution_for_turn(
+        &mut route_result,
+        &session_snapshot,
+        turn_analysis.as_ref(),
+    );
     let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
         &route_result,
         resume_binding.as_ref(),

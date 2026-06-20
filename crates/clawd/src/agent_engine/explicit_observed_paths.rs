@@ -145,7 +145,7 @@ pub(super) fn ensure_explicit_multi_file_targets_have_path_facts(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || loop_state.has_tool_or_skill_output
@@ -188,7 +188,7 @@ pub(super) fn ensure_existence_multi_file_targets_have_path_facts(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || loop_state.has_tool_or_skill_output
@@ -221,7 +221,7 @@ pub(super) fn rewrite_unresolved_template_arg_multi_file_read_plan(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.output_contract.requires_content_evidence
         || !actions.iter().any(action_args_contain_unresolved_template)
     {
@@ -517,7 +517,7 @@ pub(super) fn replace_content_evidence_synthesize_only_with_file_reads(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
@@ -594,7 +594,7 @@ pub(super) fn ensure_explicit_multi_file_targets_have_content_reads(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
@@ -1014,7 +1014,7 @@ pub(super) fn prune_unscoped_workspace_summary_evidence_for_scope(
         return actions;
     };
     let scope_hint = route.output_contract.locator_hint.trim();
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
         || scope_hint.is_empty()
@@ -1026,8 +1026,7 @@ pub(super) fn prune_unscoped_workspace_summary_evidence_for_scope(
     }
     let has_scoped_evidence = actions.iter().any(|action| {
         action_is_workspace_summary_evidence(action)
-            && action_workspace_summary_path(action)
-                .is_some_and(|path| path_matches_workspace_scope_hint(path, scope_hint))
+            && workspace_summary_evidence_matches_scope(action, scope_hint)
     });
     if !has_scoped_evidence {
         return actions;
@@ -1037,8 +1036,8 @@ pub(super) fn prune_unscoped_workspace_summary_evidence_for_scope(
         .into_iter()
         .filter(|action| {
             !action_is_workspace_summary_evidence(action)
-                || action_workspace_summary_path(action)
-                    .is_some_and(|path| path_matches_workspace_scope_hint(path, scope_hint))
+                || workspace_summary_explicit_path_facts(action)
+                || workspace_summary_evidence_matches_scope(action, scope_hint)
         })
         .collect::<Vec<_>>();
     if pruned.is_empty() {
@@ -1052,6 +1051,30 @@ pub(super) fn prune_unscoped_workspace_summary_evidence_for_scope(
         );
     }
     pruned
+}
+
+fn workspace_summary_evidence_matches_scope(action: &AgentAction, scope_hint: &str) -> bool {
+    action_workspace_summary_path(action)
+        .is_some_and(|path| path_matches_workspace_scope_hint(path, scope_hint))
+        || action_observed_paths_for_explicit_file_targets(action)
+            .iter()
+            .any(|path| path_matches_workspace_scope_hint(path, scope_hint))
+}
+
+fn workspace_summary_explicit_path_facts(action: &AgentAction) -> bool {
+    let Some(skill) = planned_action_skill_name(action).map(str::trim) else {
+        return false;
+    };
+    if !skill.eq_ignore_ascii_case("fs_basic") {
+        return false;
+    }
+    let Some(args) = action_args(action).and_then(Value::as_object) else {
+        return false;
+    };
+    args.get("action")
+        .and_then(Value::as_str)
+        .is_some_and(|action| action.trim().eq_ignore_ascii_case("stat_paths"))
+        && !action_observed_paths_for_explicit_file_targets(action).is_empty()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -97,6 +97,198 @@ fn content_excerpt_summary_auto_locator_abstains_without_slice_selector_for_repo
 }
 
 #[test]
+fn content_excerpt_summary_directory_log_slice_uses_exact_log_file_read() {
+    let root = TempDirGuard::new("content_excerpt_directory_log_slice");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("clawd.run.log");
+    fs::write(
+        &log,
+        "INFO boot start\nINFO worker ready\nERROR provider retry\nINFO task succeeded\n",
+    )
+    .expect("write clawd log");
+    fs::write(
+        logs_dir.join("model_io.log"),
+        "ERROR unrelated provider log\n",
+    )
+    .expect("write other log");
+    let logs_path = logs_dir.display().to_string();
+    let log_path = log.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "List clawd related log files, read clawd.run.log tail. slice_mode=tail slice_n=20"
+            .to_string();
+
+    let plan = content_excerpt_summary_directory_log_slice_deterministic_plan_result(
+        "read the selected log tail and synthesize a one-sentence status judgment",
+        Some(&route),
+        &LoopState::new(1),
+        Some(&logs_path),
+    )
+    .expect("directory log slice should use exact file read plan");
+
+    assert_eq!(plan.steps.len(), 4);
+    let find_action = plan.steps[0].to_agent_action().unwrap();
+    let find_args = expect_planned_call(&find_action, "fs_basic", "find_entries");
+    assert_eq!(
+        find_args.get("root").and_then(Value::as_str),
+        Some(logs_path.as_str())
+    );
+    assert_eq!(
+        find_args.get("pattern").and_then(Value::as_str),
+        Some("clawd")
+    );
+    assert_eq!(
+        find_args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
+    let read_action = plan.steps[1].to_agent_action().unwrap();
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(20));
+    assert_eq!(plan.steps[2].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[3].action_type, "respond");
+}
+
+#[test]
+fn content_excerpt_with_summary_directory_log_slice_uses_exact_log_file_read() {
+    let root = TempDirGuard::new("content_excerpt_with_summary_directory_log_slice");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("clawd.run.log");
+    fs::write(&log, "INFO boot start\nINFO worker ready\n").expect("write clawd log");
+    fs::write(logs_dir.join("model_io.log"), "ERROR unrelated\n").expect("write other log");
+    let logs_path = logs_dir.display().to_string();
+    let log_path = log.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "target_path=clawd.run.log slice_mode=tail slice_n=20".to_string();
+
+    let plan = content_excerpt_summary_directory_log_slice_deterministic_plan_result(
+        "read the selected log tail and synthesize status",
+        Some(&route),
+        &LoopState::new(1),
+        Some(&logs_path),
+    )
+    .expect("content-excerpt-with-summary should share exact directory log slice plan");
+
+    assert_eq!(plan.steps.len(), 4);
+    let find_action = plan.steps[0].to_agent_action().unwrap();
+    let find_args = expect_planned_call(&find_action, "fs_basic", "find_entries");
+    assert_eq!(
+        find_args.get("root").and_then(Value::as_str),
+        Some(logs_path.as_str())
+    );
+    assert_eq!(
+        find_args.get("pattern").and_then(Value::as_str),
+        Some("clawd")
+    );
+    let read_action = plan.steps[1].to_agent_action().unwrap();
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(20));
+    assert_eq!(plan.steps[2].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[3].action_type, "respond");
+}
+
+#[test]
+fn content_excerpt_summary_directory_log_slice_accepts_comma_machine_tokens() {
+    let root = TempDirGuard::new("content_excerpt_comma_machine_tokens");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("clawd.run.log");
+    fs::write(&log, "INFO boot start\nINFO worker ready\n").expect("write clawd log");
+    let logs_path = logs_dir.display().to_string();
+    let log_path = log.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "read logs/clawd.run.log last lines (slice_mode=tail, slice_n=20)".to_string();
+    route.route_reason =
+        "tail the last 20 lines of logs/clawd.run.log, then synthesize a one-sentence judgment"
+            .to_string();
+
+    let plan = content_excerpt_summary_directory_log_slice_deterministic_plan_result(
+        "read clawd log tail",
+        Some(&route),
+        &LoopState::new(1),
+        Some(&logs_path),
+    )
+    .expect("comma-delimited machine slice tokens should still produce deterministic plan");
+
+    let read_action = plan.steps[1].to_agent_action().unwrap();
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(20));
+}
+
+#[test]
+fn generic_log_analyze_does_not_steal_directory_with_explicit_log_file_target() {
+    let root = TempDirGuard::new("generic_log_analyze_skip_explicit_log_file");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("clawd.run.log");
+    fs::write(&log, "INFO boot start\nINFO worker ready\n").expect("write clawd log");
+    let logs_path = logs_dir.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "find clawd logs and read logs/clawd.run.log before judgment".to_string();
+
+    let target = generic_path_content_log_analyze_target_path(Some(&route), Some(&logs_path));
+
+    assert!(
+        target.is_none(),
+        "directory-level log_analyze must not steal a request that names an exact log file under that directory"
+    );
+}
+
+#[test]
 fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     let root = TempDirGuard::new("generic_doc_parse_synthesis");
     let readme = root.path.join("README.md");
@@ -425,6 +617,67 @@ fn generic_single_log_synthesis_rewrites_bounded_read_to_log_analyze() {
 }
 
 #[test]
+fn generic_single_log_synthesis_preserves_tail_read_range() {
+    let root = TempDirGuard::new("generic_log_tail_read_preserved");
+    let log = root.path.join("app.log");
+    fs::write(
+        &log,
+        "INFO boot ok\nWARN latency high\nERROR provider timeout\nINFO retry ok\n",
+    )
+    .expect("write log");
+    let log_path = log.display().to_string();
+    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.clone();
+    route.output_contract.delivery_required = false;
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": log_path.clone(),
+                "mode": "tail",
+                "n": 20
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = super::super::normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "summarize this log tail",
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(args.get("n").and_then(Value::as_u64), Some(20));
+    assert!(matches!(
+        normalized.get(1),
+        Some(AgentAction::SynthesizeAnswer { .. })
+    ));
+}
+
+#[test]
 fn generic_log_directory_auto_locator_uses_log_analyze_plan() {
     let root = TempDirGuard::new("generic_log_directory_auto_locator");
     let logs_dir = root.path.join("logs");
@@ -680,7 +933,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
     .expect("repo prompt artifact should use a bounded filesystem read");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps.len(), 3);
     match &plan.steps[0].to_agent_action() {
         Some(AgentAction::CallTool { tool, args }) => {
             assert_eq!(tool, "fs_basic");
@@ -695,6 +948,74 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
         }
         other => panic!("expected fs_basic read_text_range action, got {other:?}"),
     }
+    assert!(matches!(
+        plan.steps[1].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
+fn excerpt_kind_judgment_resolved_file_path_uses_bounded_read_and_synthesis() {
+    let root = TempDirGuard::new("excerpt_kind_judgment_resolved_path");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    let log_file = logs_dir.join("clawd.codex.minimax.log");
+    fs::write(
+        &log_file,
+        "2026-06-17T04:06:49Z INFO task_call phase=failure\n{\"kind\":\"ask\",\"summary\":{\"final_status\":\"failed\"}}\n",
+    )
+    .expect("write log");
+    let log_path = log_file.display().to_string();
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "clawd.codex.minimax.log".to_string();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = false;
+    route.resolved_intent =
+        "Classify the bound file from logs/clawd.codex.minimax.log using bounded content evidence."
+            .to_string();
+    route.route_reason = "existing_observed_context_synthesis".to_string();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+        &state,
+        "classify the bound file content",
+        Some(&route),
+        &loop_state,
+        None,
+    )
+    .expect("excerpt kind judgment should read the resolved file before synthesis");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 3);
+    let read_action = plan.steps[0].to_agent_action().expect("read action");
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("head"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(80));
+    assert!(matches!(
+        plan.steps[1].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
 }
 
 #[test]

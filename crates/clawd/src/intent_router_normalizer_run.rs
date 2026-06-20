@@ -130,7 +130,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
         let mut needs_clarify = out.needs_clarify;
         let mut attachment_processing_required = out.attachment_processing_required;
-        let mut first_layer_decision = parsed_decision.unwrap_or_else(|| {
+        let mut legacy_normalizer_decision = parsed_decision.unwrap_or_else(|| {
             if needs_clarify {
                 FirstLayerDecision::Clarify
             } else if route_has_structured_execution_signal(
@@ -150,7 +150,7 @@ pub(crate) async fn run_intent_normalizer(
             needs_clarify,
             &mut output_contract,
             &mut wants_file_delivery,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         let structured_contract_hint_repair = apply_structured_contract_hint_repair(
@@ -161,13 +161,13 @@ pub(crate) async fn run_intent_normalizer(
             &mut wants_file_delivery,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         if let Some(fallback) = parsed_inline_json_transform_repair_decision(
             req,
             needs_clarify,
-            first_layer_decision,
+            legacy_normalizer_decision,
             wants_file_delivery,
             schedule_kind,
             execution_recipe_hint,
@@ -191,7 +191,7 @@ pub(crate) async fn run_intent_normalizer(
             &req_surface,
             &state.skill_rt.workspace_root,
             needs_clarify,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             wants_file_delivery,
             schedule_kind,
@@ -216,7 +216,7 @@ pub(crate) async fn run_intent_normalizer(
             &req_surface,
             &state.skill_rt.workspace_root,
             needs_clarify,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             wants_file_delivery,
             schedule_kind,
@@ -236,14 +236,16 @@ pub(crate) async fn run_intent_normalizer(
                 None,
             );
         }
-        let mut synced_route_label =
-            route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
+        let mut synced_route_label = route_label_from_first_layer_decision(
+            legacy_normalizer_decision,
+            execution_finalize_style,
+        );
         let structural_contract_repair = apply_current_turn_structural_contract_repair(
             &mut output_contract,
             &surface_req,
             &req_surface,
             &state.skill_rt.workspace_root,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &out.answer_candidate,
             parsed_turn_type,
             parsed_target_task_policy,
@@ -258,7 +260,7 @@ pub(crate) async fn run_intent_normalizer(
                 execution_recipe_hint,
                 needs_clarify,
                 &out.answer_candidate,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
             );
         let inline_structured_transform_direct_answer_repair =
@@ -270,13 +272,16 @@ pub(crate) async fn run_intent_normalizer(
                 execution_recipe_hint,
                 needs_clarify,
                 &out.answer_candidate,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
             );
-        if matches!(first_layer_decision, FirstLayerDecision::PlannerExecute) {
+        if matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        ) {
             execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -285,12 +290,12 @@ pub(crate) async fn run_intent_normalizer(
             &mut output_contract,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         if command_payload_contract_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -299,12 +304,12 @@ pub(crate) async fn run_intent_normalizer(
             &mut output_contract,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         if file_delivery_contract_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -321,7 +326,7 @@ pub(crate) async fn run_intent_normalizer(
         );
         if raw_output_explicit_locator_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -334,13 +339,13 @@ pub(crate) async fn run_intent_normalizer(
             state_patch_for_decision,
             &out.answer_candidate,
             needs_clarify,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut output_contract,
         );
         if active_ordered_scalar_path_chat_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -356,13 +361,13 @@ pub(crate) async fn run_intent_normalizer(
             wants_file_delivery,
             &out.answer_candidate,
             needs_clarify,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut output_contract,
         );
         if active_observed_output_chat_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -372,31 +377,50 @@ pub(crate) async fn run_intent_normalizer(
                 session_snapshot,
                 &out.answer_candidate,
                 needs_clarify,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
                 &mut wants_file_delivery,
                 &mut output_contract,
             );
         if active_file_basename_answer_candidate_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
+                execution_finalize_style,
+            );
+        }
+        let active_bound_path_answer_candidate_repair =
+            apply_active_bound_path_answer_candidate_direct_repair(
+                state,
+                session_snapshot,
+                &out.answer_candidate,
+                needs_clarify,
+                schedule_kind,
+                &mut legacy_normalizer_decision,
+                &mut execution_finalize_style,
+                &mut wants_file_delivery,
+                &mut output_contract,
+            );
+        if active_bound_path_answer_candidate_repair.is_some() {
+            synced_route_label = route_label_from_first_layer_decision(
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
         let decision_contract_conflict_repair =
             if direct_answer_decision_should_be_overridden_by_executable_contract(
                 needs_clarify,
-                first_layer_decision,
+                legacy_normalizer_decision,
                 &output_contract,
                 wants_file_delivery,
                 schedule_kind,
                 execution_recipe_hint,
-                active_file_basename_answer_candidate_repair,
+                active_file_basename_answer_candidate_repair
+                    .or(active_bound_path_answer_candidate_repair),
             ) {
-                first_layer_decision = FirstLayerDecision::PlannerExecute;
+                legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
                 execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
                 synced_route_label = route_label_from_first_layer_decision(
-                    first_layer_decision,
+                    legacy_normalizer_decision,
                     execution_finalize_style,
                 );
                 Some("direct_answer_decision_overridden_by_executable_contract")
@@ -410,19 +434,19 @@ pub(crate) async fn run_intent_normalizer(
             &mut needs_clarify,
             &mut clarify_question,
             &mut output_contract,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         if explicit_command_execution_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
         let current_turn_anchor_repair_allowed =
             !current_request_mentions_session_alias(session_snapshot, req)
                 && current_turn_anchor_drift_repair_allowed(
-                    first_layer_decision,
+                    legacy_normalizer_decision,
                     needs_clarify,
                     &output_contract,
                     wants_file_delivery,
@@ -461,10 +485,10 @@ pub(crate) async fn run_intent_normalizer(
                 needs_clarify,
             )
         {
-            first_layer_decision = FirstLayerDecision::PlannerExecute;
+            legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
             execution_finalize_style = finalize_style;
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
@@ -477,7 +501,7 @@ pub(crate) async fn run_intent_normalizer(
             state_patch.as_ref(),
             &state.skill_rt.workspace_root,
             needs_clarify,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
         let archive_unpack_missing_archive_locator_clarify_repair =
@@ -487,7 +511,7 @@ pub(crate) async fn run_intent_normalizer(
                 session_snapshot,
                 &mut needs_clarify,
                 &mut clarify_question,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
             );
         let structured_clarify_repair =
@@ -500,7 +524,7 @@ pub(crate) async fn run_intent_normalizer(
                     state_patch.as_ref(),
                     &mut needs_clarify,
                     &mut clarify_question,
-                    &mut first_layer_decision,
+                    &mut legacy_normalizer_decision,
                     &mut execution_finalize_style,
                 )
             } else {
@@ -515,7 +539,7 @@ pub(crate) async fn run_intent_normalizer(
                     state_patch.as_ref(),
                     &mut needs_clarify,
                     &mut clarify_question,
-                    &mut first_layer_decision,
+                    &mut legacy_normalizer_decision,
                     &mut execution_finalize_style,
                 )
                 .or_else(|| {
@@ -525,7 +549,7 @@ pub(crate) async fn run_intent_normalizer(
                         state_patch.as_ref(),
                         &mut needs_clarify,
                         &mut clarify_question,
-                        &mut first_layer_decision,
+                        &mut legacy_normalizer_decision,
                         &mut execution_finalize_style,
                     )
                 })
@@ -545,7 +569,7 @@ pub(crate) async fn run_intent_normalizer(
                     state_patch.as_ref(),
                     &mut needs_clarify,
                     &mut clarify_question,
-                    &mut first_layer_decision,
+                    &mut legacy_normalizer_decision,
                     &mut execution_finalize_style,
                 )
             } else {
@@ -563,14 +587,14 @@ pub(crate) async fn run_intent_normalizer(
                 &req_surface,
                 &mut needs_clarify,
                 &mut clarify_question,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
             )
         } else {
             None
         };
         let executionless_route_repair = downgrade_executionless_route_to_direct_answer(
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             needs_clarify,
             &output_contract,
@@ -590,7 +614,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut target_task_policy = infer_missing_target_policy_from_contract(
             parsed_target_task_policy,
             parsed_turn_type,
-            first_layer_decision,
+            legacy_normalizer_decision,
             needs_clarify,
             schedule_kind,
             out.should_refresh_long_term_memory,
@@ -599,7 +623,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut turn_type = infer_missing_turn_type_from_policy(
             parsed_turn_type,
             target_task_policy,
-            first_layer_decision,
+            legacy_normalizer_decision,
             needs_clarify,
             schedule_kind,
             out.should_refresh_long_term_memory,
@@ -622,21 +646,21 @@ pub(crate) async fn run_intent_normalizer(
                 wants_file_delivery,
                 schedule_kind,
                 execution_recipe_hint,
-                &mut first_layer_decision,
+                &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
                 &mut turn_type,
                 &mut target_task_policy,
             );
         if unobserved_runtime_status_answer_candidate_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
         }
         if should_detach_bare_acknowledgement_from_active_task(
             turn_type,
             target_task_policy,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
             out.should_refresh_long_term_memory,
@@ -659,6 +683,7 @@ pub(crate) async fn run_intent_normalizer(
             inline_structured_transform_direct_answer_repair,
             active_ordered_scalar_path_chat_repair,
             active_observed_output_chat_repair,
+            active_bound_path_answer_candidate_repair,
             structured_contract_hint_repair,
         ]
         .into_iter()
@@ -744,7 +769,7 @@ pub(crate) async fn run_intent_normalizer(
             session_snapshot,
             turn_type,
             target_task_policy,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
             out.should_refresh_long_term_memory,
@@ -752,7 +777,7 @@ pub(crate) async fn run_intent_normalizer(
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             turn_type = None;
             target_task_policy = None;
@@ -769,7 +794,7 @@ pub(crate) async fn run_intent_normalizer(
             session_snapshot,
             turn_type,
             target_task_policy,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
             out.should_refresh_long_term_memory,
@@ -779,7 +804,7 @@ pub(crate) async fn run_intent_normalizer(
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             turn_type = Some(TurnType::TaskRequest);
             target_task_policy = Some(TargetTaskPolicy::Standalone);
@@ -798,7 +823,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut turn_type,
             &mut target_task_policy,
             attachment_processing_required,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut needs_clarify,
             schedule_kind,
@@ -830,11 +855,11 @@ pub(crate) async fn run_intent_normalizer(
             &mut needs_clarify,
             &mut clarify_question,
             &mut wants_file_delivery,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         ) {
             synced_route_label = route_label_from_first_layer_decision(
-                first_layer_decision,
+                legacy_normalizer_decision,
                 execution_finalize_style,
             );
             append_route_reason(&mut reason, repair_reason);
@@ -879,7 +904,7 @@ pub(crate) async fn run_intent_normalizer(
             state_patch.as_ref(),
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut output_contract,
         ) {
@@ -897,7 +922,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut turn_type,
             &mut target_task_policy,
             attachment_processing_required,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut needs_clarify,
             schedule_kind,
@@ -920,7 +945,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut turn_type,
             &mut target_task_policy,
             attachment_processing_required,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
             &mut needs_clarify,
             schedule_kind,
@@ -949,13 +974,13 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             attachment_processing_required,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             append_route_reason(&mut reason, "active_task_scope_update_resolves_clarify");
             info!(
@@ -971,11 +996,11 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             attachment_processing_required,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             needs_clarify = false;
             clarify_question.clear();
@@ -995,13 +1020,13 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             attachment_processing_required,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             append_route_reason(&mut reason, "active_task_replace_resolves_clarify");
             info!(
@@ -1017,13 +1042,13 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             attachment_processing_required,
-            first_layer_decision,
+            legacy_normalizer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
             execution_finalize_style = ActFinalizeStyle::Plain;
             append_route_reason(&mut reason, "active_task_append_resolves_clarify");
             info!(
@@ -1039,7 +1064,7 @@ pub(crate) async fn run_intent_normalizer(
             session_snapshot,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         ) {
             append_route_reason(&mut reason, repair_reason);
@@ -1055,7 +1080,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut output_contract,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut first_layer_decision,
+            &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         ) {
             append_route_reason(&mut reason, repair_reason);
@@ -1103,29 +1128,31 @@ pub(crate) async fn run_intent_normalizer(
                 )
             })
             .unwrap_or_else(|| "none".to_string());
-        let derived_route_label =
-            route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
-        if derived_route_label != synced_route_label {
+        let legacy_route_label = route_label_from_first_layer_decision(
+            legacy_normalizer_decision,
+            execution_finalize_style,
+        );
+        if legacy_route_label != synced_route_label {
             info!(
-                "{} intent_normalizer task_id={} derived_route_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
+                "{} intent_normalizer task_id={} legacy_route_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 synced_route_label,
-                derived_route_label,
+                legacy_route_label,
                 output_contract.locator_kind,
                 output_contract.response_shape
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} derived_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} legacy_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
             crate::truncate_for_log(&resolved_user_intent),
             resume_behavior,
             schedule_kind,
-            first_layer_decision,
-            derived_route_label,
+            legacy_normalizer_decision,
+            legacy_route_label,
             wants_file_delivery,
             needs_clarify,
             crate::truncate_for_log(&reason),
@@ -1165,7 +1192,7 @@ pub(crate) async fn run_intent_normalizer(
             confidence,
             output_contract,
             execution_recipe_hint,
-            first_layer_decision,
+            legacy_normalizer_decision,
             execution_finalize_style,
             turn_analysis,
             turn_type,

@@ -15,6 +15,7 @@ use boundary_contract::{
     should_force_content_evidence_for_path_bound_chat_wrapped_execution,
 };
 use boundary_delivery::{
+    existing_file_delivery_can_try_locator_hint,
     file_delivery_can_materialize_target_without_existing_locator,
     scalar_path_output_can_be_observed_without_input_locator,
 };
@@ -33,6 +34,50 @@ pub(crate) enum ClarifyReasonKind {
     RouteReasonText,
     MissingPathScopedLocator,
     FuzzyLocatorCandidates,
+}
+
+impl ClarifyReasonKind {
+    pub(crate) fn is_boundary_clarify(self) -> bool {
+        matches!(
+            self,
+            Self::MissingPathScopedLocator | Self::FuzzyLocatorCandidates
+        )
+    }
+
+    pub(crate) fn dispatch_event(self) -> &'static str {
+        match self {
+            Self::RouteReasonText => "legacy_semantic_clarify_compat",
+            Self::MissingPathScopedLocator | Self::FuzzyLocatorCandidates => {
+                "clarify_boundary_shortcut"
+            }
+        }
+    }
+
+    pub(crate) fn dispatch_old_owner(self) -> &'static str {
+        match self {
+            Self::RouteReasonText => "legacy_pre_agent_semantic_clarify",
+            Self::MissingPathScopedLocator => "legacy_pre_agent_locator_clarify",
+            Self::FuzzyLocatorCandidates => "legacy_pre_agent_fuzzy_locator_clarify",
+        }
+    }
+
+    pub(crate) fn dispatch_new_owner(self) -> &'static str {
+        match self {
+            Self::RouteReasonText => "agent_loop_terminal_clarify_pending",
+            Self::MissingPathScopedLocator | Self::FuzzyLocatorCandidates => {
+                "boundary_clarify_gate"
+            }
+        }
+    }
+
+    pub(crate) fn dispatch_chosen_path(self) -> &'static str {
+        match self {
+            Self::RouteReasonText => "ask_pipeline_legacy_semantic_clarify_compat",
+            Self::MissingPathScopedLocator | Self::FuzzyLocatorCandidates => {
+                "ask_pipeline_boundary_clarify_shortcut"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -205,6 +250,16 @@ pub(crate) fn apply_post_route_policy_with_options(
     {
         missing_locator_for_path_scoped_content = true;
     }
+    let existing_file_delivery_can_try_locator_hint =
+        existing_file_delivery_can_try_locator_hint(&execution_route_result)
+            && fuzzy_locator_suggestions.is_empty()
+            && !missing_locator_for_path_scoped_content;
+    if existing_file_delivery_can_try_locator_hint {
+        execution_route_result.needs_clarify = false;
+        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
+            execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
+        }
+    }
 
     let cleared_scalar_count_semantic =
         should_clear_scalar_count_for_non_scalar_contract(&execution_route_result);
@@ -272,6 +327,7 @@ pub(crate) fn apply_post_route_policy_with_options(
         || missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify
         || (background_locator_clarify && !direct_auto_locator_satisfies_background_clarify);
+    let force_clarify = force_clarify && !existing_file_delivery_can_try_locator_hint;
     let legacy_semantic_repair_requested = legacy_semantic_repair_requested(
         force_clarify,
         missing_locator_for_path_scoped_content,
@@ -336,6 +392,12 @@ pub(crate) fn apply_post_route_policy_with_options(
         PostRouteGateRecord::with_owner(
             "boundary_locator_gate",
             "post_route_auto_locator_satisfied_path_scoped_content",
+            PostRoutePolicyOutcome::Execute,
+        )
+    } else if existing_file_delivery_can_try_locator_hint {
+        PostRouteGateRecord::with_owner(
+            "boundary_delivery_gate",
+            "post_route_file_delivery_locator_hint_deferred_to_execution",
             PostRoutePolicyOutcome::Execute,
         )
     } else if force_clarify && !options.allow_legacy_semantic_repair {

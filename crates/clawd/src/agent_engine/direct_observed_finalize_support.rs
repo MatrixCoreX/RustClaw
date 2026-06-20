@@ -668,57 +668,12 @@ pub(super) fn observation_only_plan_missing_user_answer(
         && !has_authoritative_delivery(loop_state)
 }
 
-pub(super) fn run_cmd_likely_mutates(command: &str) -> bool {
-    let lower = format!(" {} ", command.to_ascii_lowercase());
-    // Plain stdout commands are observations; redirection/tee below covers output writes.
-    command.contains('>')
-        || lower.contains(" tee ")
-        || lower.contains(" sed -i")
-        || lower.contains(" perl -0pi")
-        || lower.contains(" perl -pi")
-        || lower.contains(" cat <<")
-        || lower.contains(" cp ")
-        || lower.contains(" mv ")
-        || lower.contains(" systemctl start")
-        || lower.contains(" systemctl stop")
-        || lower.contains(" systemctl restart")
-        || lower.contains(" systemctl reload")
-        || lower.contains(" systemctl enable")
-        || lower.contains(" systemctl disable")
-}
-
-pub(super) fn action_is_likely_mutating(action: &AgentAction) -> bool {
+pub(super) fn action_is_likely_mutating(state: &AppState, action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
-            match skill.trim().to_ascii_lowercase().as_str() {
-                "write_file" | "remove_file" | "make_dir" => true,
-                "fs_basic" => args
-                    .get("action")
-                    .and_then(|value| value.as_str())
-                    .map(|action| {
-                        matches!(
-                            action.trim().to_ascii_lowercase().as_str(),
-                            "write_text" | "append_text" | "make_dir" | "remove_path"
-                        )
-                    })
-                    .unwrap_or(false),
-                "service_control" => args
-                    .get("action")
-                    .and_then(|value| value.as_str())
-                    .map(|action| {
-                        matches!(
-                            action.trim().to_ascii_lowercase().as_str(),
-                            "start" | "stop" | "restart" | "reload" | "enable" | "disable"
-                        )
-                    })
-                    .unwrap_or(false),
-                "run_cmd" => args
-                    .get("command")
-                    .and_then(|value| value.as_str())
-                    .map(run_cmd_likely_mutates)
-                    .unwrap_or(false),
-                _ => false,
-            }
+            let normalized_skill = state.resolve_canonical_skill_name(skill);
+            crate::execution_recipe::classify_skill_action_effect(state, &normalized_skill, args)
+                .mutates
         }
         AgentAction::SynthesizeAnswer { .. } => false,
         AgentAction::CallCapability { .. } => false,
@@ -848,26 +803,26 @@ pub(super) fn actions_missing_recipe_profile_validation(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
+    if matches!(
+        loop_state.execution_recipe.phase,
+        crate::execution_recipe::ExecutionRecipePhase::Done
+    ) {
+        return false;
+    }
     if !loop_state.execution_recipe.validation_required
-        || !matches!(
+        || !crate::execution_recipe::profile_requires_specific_validation(
             loop_state.execution_recipe.profile,
-            crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
-                | crate::execution_recipe::ExecutionRecipeProfile::CodeChange
-                | crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring
         )
     {
         return false;
     }
     let mut saw_mutation = loop_state.execution_recipe.saw_mutation;
     let mut saw_profile_validation = loop_state.execution_recipe.saw_validation
-        && !matches!(
+        && !crate::execution_recipe::profile_requires_specific_validation(
             loop_state.execution_recipe.profile,
-            crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
-                | crate::execution_recipe::ExecutionRecipeProfile::CodeChange
-                | crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring
         );
     for action in actions {
-        if action_is_likely_mutating(action) {
+        if action_is_likely_mutating(state, action) {
             saw_mutation = true;
             saw_profile_validation = false;
             continue;
@@ -977,7 +932,9 @@ pub(super) fn should_force_actionable_plan_repair(
             loop_state.execution_recipe.phase,
             crate::execution_recipe::ExecutionRecipePhase::Apply
         )
-        && !actions.iter().any(action_is_likely_mutating)
+        && !actions
+            .iter()
+            .any(|action| action_is_likely_mutating(state, action))
     {
         return true;
     }
@@ -1059,6 +1016,9 @@ pub(super) fn should_force_actionable_plan_repair(
     if route_allows_context_only_terminal_respond(route_result, actions) {
         return false;
     }
+    if route_allows_existing_observed_context_terminal_respond(route_result, actions) {
+        return false;
+    }
     let requires_action_before_reply =
         !loop_state.has_tool_or_skill_output && route_result.is_execute_gate();
     route_result.output_contract.requires_content_evidence || requires_action_before_reply
@@ -1094,6 +1054,25 @@ fn route_allows_context_only_terminal_respond(
         || route_result.wants_file_delivery
         || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    is_plain_respond_only_plan(actions)
+        .map(str::trim)
+        .is_some_and(|content| !content.is_empty())
+}
+
+fn route_allows_existing_observed_context_terminal_respond(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !route_reason_has_structural_marker(route_result, "existing_observed_context_synthesis")
+        || route_result.needs_clarify
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !route_allows_model_language_terminal_respond(Some(route_result))
     {
         return false;
     }

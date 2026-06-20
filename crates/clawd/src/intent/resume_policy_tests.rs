@@ -19,6 +19,26 @@ fn test_task() -> crate::ClaimedTask {
     }
 }
 
+fn route_with_resume_behavior(resume_behavior: crate::ResumeBehavior) -> crate::RouteResult {
+    crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "continue".to_string(),
+        needs_clarify: false,
+        route_reason: String::new(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    }
+}
+
 #[test]
 fn binding_context_marks_recent_failed_candidate_without_mutating_source() {
     let binding = ResumeContextBinding {
@@ -43,6 +63,33 @@ fn binding_context_marks_recent_failed_candidate_without_mutating_source() {
             .get("has_newer_successful_ask_after_failed_task")
             .and_then(|v| v.as_bool()),
         Some(true)
+    );
+}
+
+#[test]
+fn binding_context_marks_active_checkpoint_candidate() {
+    let binding = ResumeContextBinding {
+        source: ResumeContextSource::ActiveCheckpointCandidate,
+        resume_context: json!({"source":"active_checkpoint_resume"}),
+        failed_ts: None,
+        has_newer_successful_ask_after_failed_task: false,
+    };
+    let value = binding_context_json("manual", false, Some(&binding));
+    assert_eq!(
+        value.get("resume_context_source").and_then(|v| v.as_str()),
+        Some("active_checkpoint_resume")
+    );
+    assert_eq!(
+        value
+            .get("failed_resume_context_ts")
+            .and_then(|v| v.as_i64()),
+        None
+    );
+    assert_eq!(
+        value
+            .get("has_newer_successful_ask_after_failed_task")
+            .and_then(|v| v.as_bool()),
+        Some(false)
     );
 }
 
@@ -152,4 +199,63 @@ fn explicit_continue_falls_back_to_resolved_intent_when_prompt_missing() {
         resolve_resume_runtime_prompt(&state, &task, &payload, "继续修复", &route, Some(&binding));
     assert!(out.should_apply_context);
     assert_eq!(out.runtime_prompt, "continue");
+}
+
+#[test]
+fn active_checkpoint_resume_prompts_render_machine_context_without_failure_framing() {
+    let state =
+        crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
+    let payload = json!({});
+    let binding = ResumeContextBinding {
+        source: ResumeContextSource::ActiveCheckpointCandidate,
+        resume_context: json!({
+            "source": "active_checkpoint_resume",
+            "task_id": "task-123",
+            "task_lifecycle": {
+                "state": "background",
+                "resume_executor": {
+                    "checkpoint_id": "checkpoint-1",
+                    "executor_state": "ready_for_planner_resume"
+                }
+            },
+            "task_checkpoint": {
+                "checkpoint_id": "checkpoint-1"
+            }
+        }),
+        failed_ts: None,
+        has_newer_successful_ask_after_failed_task: false,
+    };
+    let task = test_task();
+
+    let execute_route = route_with_resume_behavior(crate::ResumeBehavior::ResumeExecute);
+    let execute = resolve_resume_runtime_prompt(
+        &state,
+        &task,
+        &payload,
+        "继续",
+        &execute_route,
+        Some(&binding),
+    );
+    assert!(execute.should_apply_context);
+    assert!(!execute.should_discuss_context);
+    assert!(execute.runtime_prompt.contains("active_checkpoint_resume"));
+    assert!(execute.runtime_prompt.contains("checkpoint-1"));
+    assert!(execute.runtime_prompt.contains("ready_for_planner_resume"));
+    assert!(!execute.runtime_prompt.contains("prior failure"));
+
+    let discuss_route = route_with_resume_behavior(crate::ResumeBehavior::ResumeDiscuss);
+    let discuss = resolve_resume_runtime_prompt(
+        &state,
+        &task,
+        &payload,
+        "现在还剩什么",
+        &discuss_route,
+        Some(&binding),
+    );
+    assert!(!discuss.should_apply_context);
+    assert!(discuss.should_discuss_context);
+    assert!(discuss.runtime_prompt.contains("active_checkpoint_resume"));
+    assert!(discuss.runtime_prompt.contains("checkpoint-1"));
+    assert!(discuss.runtime_prompt.contains("ready_for_planner_resume"));
+    assert!(!discuss.runtime_prompt.contains("prior failure"));
 }

@@ -36,10 +36,11 @@ use output_listing::{
     hidden_entries_direct_answer, is_user_hidden_entry, latest_hidden_entries,
     latest_successful_list_dir_answer_candidate, looks_like_shell_long_listing_line,
     normalized_listing_text, recent_file_path_candidate_for_scalar_path,
-    resolve_listing_entry_full_path, route_allows_path_batch_scalar_path_observed_answer,
-    route_allows_raw_listing_direct_answer, route_allows_scalar_read_range_direct_answer,
+    resolve_listing_entry_full_path, route_allows_path_batch_file_basename_observed_answer,
+    route_allows_path_batch_scalar_path_observed_answer, route_allows_raw_listing_direct_answer,
+    route_allows_scalar_read_range_direct_answer,
     route_allows_strict_plain_observation_passthrough, route_prefers_plain_fs_search_paths,
-    route_requests_hidden_entries_check, route_requests_scalar_count,
+    route_requests_file_basename, route_requests_hidden_entries_check, route_requests_scalar_count,
     route_requests_scalar_existence, route_requests_scalar_path_only,
     route_scalar_has_plain_path_terminal_respond, strict_plain_observation_passthrough_candidate,
 };
@@ -60,7 +61,8 @@ use output_system_inventory::{
 mod output_fs_search;
 use output_fs_search::{
     absolutize_fs_search_answer_paths, fs_search_content_presence_direct_answer_candidate,
-    fs_search_direct_answer_candidate, fs_search_find_ext_results, fs_search_find_name_results,
+    fs_search_direct_answer_candidate, fs_search_find_ext_results,
+    fs_search_find_name_observed_candidate, fs_search_find_name_results,
     fs_search_grep_text_observed_candidate, fs_search_route_filtered_listing_candidate,
     fs_search_scalar_candidate, fs_search_semantic_listing_candidate, normalized_find_name_pattern,
     preferred_fs_search_exact_match,
@@ -595,6 +597,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
             });
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let value = structured_observed_body_value(&value);
     match skill {
         "system_basic" => {
             let action = value.get("action").and_then(|v| v.as_str())?;
@@ -623,9 +626,11 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                     _ => {}
                 }
             }
-            fs_search_grep_text_observed_candidate(&value).or_else(|| {
-                fs_search_direct_answer_candidate(None, &value, None, false, true, false)
-            })
+            fs_search_find_name_observed_candidate(&value)
+                .or_else(|| fs_search_grep_text_observed_candidate(&value))
+                .or_else(|| {
+                    fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                })
         }
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => package_manager_summary_candidate(
@@ -637,6 +642,19 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
         ),
         _ => None,
     }
+}
+
+fn structured_observed_body_value(value: &serde_json::Value) -> &serde_json::Value {
+    value
+        .get("extra")
+        .filter(|extra| {
+            extra.is_object()
+                && extra
+                    .get("action")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+        })
+        .unwrap_or(value)
 }
 
 fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
@@ -714,6 +732,9 @@ fn matrix_checked_direct_candidate(
     if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
         return None;
     }
+    if hidden_entries_direct_candidate_satisfies_contract(route, loop_state, &answer) {
+        return Some(answer);
+    }
     if route_requires_matrix_grounded_direct_candidate(route)
         && matrix_direct_candidate_satisfies_contract(route, loop_state, auto_locator_path, &answer)
     {
@@ -742,6 +763,46 @@ fn hidden_entries_empty_direct_candidate_satisfies_contract(
         return false;
     }
     latest_hidden_entries(loop_state).is_some_and(|hidden_entries| hidden_entries.is_empty())
+}
+
+fn hidden_entries_direct_candidate_satisfies_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::HiddenEntriesCheck
+        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+    {
+        return false;
+    }
+    let Some(hidden_entries) = latest_hidden_entries(loop_state) else {
+        return false;
+    };
+    let expected = hidden_entries
+        .into_iter()
+        .take(hidden_entries_contract_limit(route))
+        .collect::<Vec<_>>();
+    let actual = answer
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    actual == expected
+}
+
+fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
+        .min(8)
 }
 
 fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {

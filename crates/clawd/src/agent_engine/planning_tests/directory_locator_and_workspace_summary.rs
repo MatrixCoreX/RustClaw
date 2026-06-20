@@ -13,8 +13,16 @@ fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::File,
+        target_kind_specified: true,
+        limit: Some(3),
+        sort_by: Some("size_desc".to_string()),
+        include_metadata: Some(true),
+        include_hidden: None,
+    };
     route.resolved_intent =
-        "list the largest files selector_limit=3 selector_sort_by=size_desc".to_string();
+        "legacy first-layer summary selector_limit=9 selector_sort_by=mtime_desc".to_string();
     route.output_contract.delivery_required = false;
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
@@ -212,6 +220,60 @@ fn scalar_path_directory_locator_search_resolves_unique_entry_token_without_phra
 }
 
 #[test]
+fn scalar_path_directory_locator_search_rejects_ambiguous_current_quoted_targets() {
+    let root = TempDirGuard::new("scalar_auto_locator_search_ambiguous_quotes");
+    fs::write(root.path.join("ABCD.txt"), "hello").expect("write first target");
+    fs::write(root.path.join("WXYZ.txt"), "hello").expect("write second target");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = r#"find "ABCD""#.to_string();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    assert!(
+        scalar_path_directory_locator_search_deterministic_plan_result(
+            "find a named item inside the resolved directory",
+            Some(&route),
+            &loop_state,
+            Some(&root_path),
+            &format!(r#"Inside {root_path}, find "ABCD" or "WXYZ" and return only the path"#),
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
+    let root = TempDirGuard::new("scalar_auto_locator_search_requires_contract");
+    fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.delivery_required = false;
+
+    assert!(scalar_path_directory_locator_search_observation_plan(
+        Some(&route),
+        Some(&root_path),
+        &format!("Inside {root_path}, find abcd and return only the path"),
+    )
+    .is_none());
+}
+
+#[test]
 fn scalar_path_auto_locator_directory_builds_observation_plan() {
     let root = TempDirGuard::new("scalar_auto_locator_dir");
     let root_path = root.path.display().to_string();
@@ -335,7 +397,16 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
-    route.resolved_intent = "list entries selector_limit=4".to_string();
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::Any,
+        target_kind_specified: false,
+        limit: Some(4),
+        sort_by: Some("name".to_string()),
+        include_metadata: Some(false),
+        include_hidden: None,
+    };
+    route.resolved_intent =
+        "legacy first-layer summary selector_limit=9 selector_sort_by=mtime_desc".to_string();
 
     let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
         &test_state(),
@@ -353,6 +424,51 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(4));
     assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
+}
+
+#[test]
+fn directory_entry_groups_auto_locator_preserves_name_desc_selector() {
+    let root = TempDirGuard::new("directory_entry_groups_auto_locator_name_desc");
+    fs::create_dir_all(root.path.join("docs")).expect("create docs");
+    fs::write(root.path.join("README.md"), "hello").expect("write readme");
+    fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::Any,
+        target_kind_specified: false,
+        limit: Some(5),
+        sort_by: Some("name_desc".to_string()),
+        include_metadata: Some(false),
+        include_hidden: None,
+    };
+
+    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "list bounded entry names",
+        Some(&route),
+        &LoopState::new(1),
+        "list bounded entry names",
+        Some("list bounded entry names"),
+        Some(root_path.as_str()),
+    )
+    .expect("directory entry groups plan should be available");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(5));
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("name_desc")
+    );
 }
 
 #[test]
@@ -717,9 +833,11 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
 }
 
 #[test]
-fn directory_purpose_extension_locator_uses_size_inventory_not_tree_summary() {
+fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summary() {
     let root = TempDirGuard::new("directory_purpose_extension_locator");
     fs::write(root.path.join("Cargo.toml"), "[workspace]\n").expect("write cargo");
+    fs::create_dir_all(root.path.join("configs")).expect("create configs");
+    fs::write(root.path.join("configs/config.toml"), "[skills]\n").expect("write config");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),
@@ -750,15 +868,19 @@ fn directory_purpose_extension_locator_uses_size_inventory_not_tree_summary() {
     .expect("directory purpose extension inventory plan");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
+    assert_eq!(plan.steps.len(), 5);
     let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    let args = expect_planned_call(&action, "fs_basic", "find_entries");
     assert_eq!(
-        args.get("path").and_then(Value::as_str),
+        args.get("root").and_then(Value::as_str),
         Some(root_path.as_str())
     );
-    assert_eq!(args.get("ext_filter"), Some(&json!(["toml"])));
-    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
+    assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
     assert_eq!(
         args.get("sort_by").and_then(Value::as_str),
         Some("size_desc")
@@ -770,20 +892,26 @@ fn directory_purpose_extension_locator_uses_size_inventory_not_tree_summary() {
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("Cargo.toml")));
     assert!(matches!(
-        plan.steps.get(2).and_then(|step| step.to_agent_action()),
+        plan.steps.get(3).and_then(|step| step.to_agent_action()),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+            if evidence_refs == vec![
+                "step_1".to_string(),
+                "step_2".to_string(),
+                "step_3".to_string()
+            ]
     ));
     assert!(matches!(
-        plan.steps.get(3).and_then(|step| step.to_agent_action()),
+        plan.steps.get(4).and_then(|step| step.to_agent_action()),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 }
 
 #[test]
-fn directory_purpose_extension_from_resolved_intent_uses_size_inventory() {
+fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries() {
     let root = TempDirGuard::new("directory_purpose_resolved_intent_extension");
     fs::write(root.path.join("intent_normalizer.schema.json"), "{}").expect("write schema");
+    fs::create_dir_all(root.path.join("nested")).expect("create nested");
+    fs::write(root.path.join("nested/contract_repair.schema.json"), "{}").expect("write nested");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),
@@ -805,25 +933,43 @@ fn directory_purpose_extension_from_resolved_intent_uses_size_inventory() {
     .expect("directory purpose extension inventory plan");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
+    assert_eq!(plan.steps.len(), 5);
     let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    let args = expect_planned_call(&action, "fs_basic", "find_entries");
     assert_eq!(
-        args.get("path").and_then(Value::as_str),
+        args.get("root").and_then(Value::as_str),
         Some(root_path.as_str())
     );
-    assert_eq!(args.get("ext_filter"), Some(&json!(["json"])));
-    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("json"));
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
+    assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
     assert_eq!(
         args.get("sort_by").and_then(Value::as_str),
         Some("size_desc")
     );
-    let read_action = plan.steps[1].to_agent_action().expect("read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
-    assert!(read_args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("intent_normalizer.schema.json")));
+    let read_paths = plan
+        .steps
+        .iter()
+        .filter_map(|step| step.to_agent_action())
+        .filter_map(|action| match action {
+            AgentAction::CallTool { tool, args } if tool == "fs_basic" => {
+                let action_name = args.get("action").and_then(Value::as_str)?;
+                (action_name == "read_text_range")
+                    .then(|| args.get("path").and_then(Value::as_str).map(str::to_string))
+                    .flatten()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(read_paths
+        .iter()
+        .any(|path| path.ends_with("intent_normalizer.schema.json")));
+    assert!(read_paths
+        .iter()
+        .any(|path| path.ends_with("nested/contract_repair.schema.json")));
 }
 
 #[test]
@@ -1198,15 +1344,36 @@ fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence(
                 && args.get("action").and_then(Value::as_str) == Some("read_text_range")
     ));
     assert!(matches!(
-        &normalized[4],
-        AgentAction::SynthesizeAnswer { evidence_refs }
-            if evidence_refs == &vec![
-                "step_1".to_string(),
-                "step_2".to_string(),
-                "step_3".to_string(),
-                "step_4".to_string(),
-            ]
+    &normalized[4],
+    AgentAction::SynthesizeAnswer { evidence_refs }
+        if evidence_refs == &vec![
+            "step_1".to_string(),
+            "step_2".to_string(),
+            "step_3".to_string(),
+            "step_4".to_string(),
+        ]
     ));
+}
+
+#[test]
+fn workspace_default_evidence_requires_content_evidence_contract() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.delivery_required = false;
+    let actions = vec![AgentAction::Respond {
+        content: "plain chat answer".to_string(),
+    }];
+
+    let normalized =
+        replace_workspace_synthesis_respond_only_plan(Some(&route), &LoopState::new(1), actions);
+
+    assert_eq!(normalized.len(), 1);
+    assert!(matches!(&normalized[0], AgentAction::Respond { .. }));
 }
 
 #[test]
@@ -1238,7 +1405,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     .expect("content excerpt summary should parse the resolved document directly");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps.len(), 3);
     match &plan.steps[0].to_agent_action() {
         Some(AgentAction::CallSkill { skill, args }) => {
             assert_eq!(skill, "doc_parse");
@@ -1253,10 +1420,18 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
         }
         other => panic!("expected doc_parse parse_doc action, got {other:?}"),
     }
+    assert!(matches!(
+        plan.steps[1].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
 }
 
 #[test]
-fn content_excerpt_summary_auto_locator_adds_workspace_root_context_for_nested_file() {
+fn content_excerpt_summary_auto_locator_reads_nested_file_without_workspace_inventory() {
     let root = TempDirGuard::new("content_excerpt_workspace_context");
     let ui_dir = root.path.join("UI");
     fs::create_dir_all(&ui_dir).expect("create UI dir");
@@ -1264,7 +1439,6 @@ fn content_excerpt_summary_auto_locator_adds_workspace_root_context_for_nested_f
     fs::write(&package_json, r#"{"name":"react-example","private":true}"#).expect("write package");
     fs::create_dir_all(root.path.join("crates")).expect("create crates dir");
     let package_path = package_json.display().to_string();
-    let root_path = root.path.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
@@ -1290,20 +1464,8 @@ fn content_excerpt_summary_auto_locator_adds_workspace_root_context_for_nested_f
     .expect("workspace file summary should include root context and file evidence");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 2);
+    assert_eq!(plan.steps.len(), 3);
     match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-            assert_eq!(
-                args.get("path").and_then(Value::as_str),
-                Some(root_path.as_str())
-            );
-            assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-        }
-        other => panic!("expected fs_basic list_dir action, got {other:?}"),
-    }
-    match &plan.steps[1].to_agent_action() {
         Some(AgentAction::CallTool { tool, args }) => {
             assert_eq!(tool, "fs_basic");
             assert_eq!(
@@ -1319,4 +1481,13 @@ fn content_excerpt_summary_auto_locator_adds_workspace_root_context_for_nested_f
         }
         other => panic!("expected fs_basic read_text_range action, got {other:?}"),
     }
+    assert!(matches!(
+        plan.steps[1].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
 }

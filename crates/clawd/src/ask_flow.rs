@@ -116,6 +116,7 @@ use gate_contract::*;
 
 #[path = "ask_flow_gate_policy.rs"]
 mod gate_policy;
+pub(crate) use gate_policy::route_allows_agent_loop_pure_chat_submode;
 use gate_policy::*;
 
 #[path = "ask_flow_gate_execution.rs"]
@@ -194,9 +195,9 @@ pub(crate) async fn execute_ask_routed(
             Some("route_ask_mode=None and agent_mode=false"),
         )
     };
-    let route_label = ask_mode.route_label();
+    let legacy_route_label = ask_mode.legacy_route_label_for_trace();
     tracing::info!(
-        "{} worker_once: ask task_id={} route_gate_kind={} ask_mode={} derived_route_label={} agent_mode={} override={}",
+        "{} worker_once: ask task_id={} route_gate_kind={} ask_mode={} legacy_route_label={} agent_mode={} override={}",
         crate::highlight_tag("routing"),
         task.task_id,
         ask_mode.gate_kind().as_str(),
@@ -204,7 +205,7 @@ pub(crate) async fn execute_ask_routed(
             .as_ref()
             .map(crate::AskMode::as_str)
             .unwrap_or("none"),
-        route_label,
+        legacy_route_label,
         agent_mode,
         override_reason.unwrap_or("")
     );
@@ -383,22 +384,30 @@ pub(crate) async fn execute_ask_routed(
             agent_run_context.as_ref(),
         ));
     }
-    if let Some(candidate) =
-        active_file_basename_direct_answer_candidate(state, agent_run_context.as_ref())
-    {
+    if let Some(candidate) = active_file_basename_direct_answer(state, agent_run_context.as_ref()) {
         tracing::info!(
             "{} worker_once: ask active_file_basename_direct_answer task_id={} answer={}",
             crate::highlight_tag("routing"),
             task.task_id,
-            candidate
+            candidate.answer
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        let mut reply = with_agent_decides_shadow_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
-            ask_reply_with_chat_process(candidate, &process_language_hint),
+            ask_reply_with_chat_process(candidate.answer.clone(), &process_language_hint),
             agent_run_context.as_ref(),
-        ));
+        );
+        let journal = reply.task_journal.get_or_insert_with(|| {
+            crate::task_journal::TaskJournal::for_task(
+                &task.task_id,
+                "ask",
+                &current_turn_user_request_for_process,
+            )
+        });
+        journal.push_task_observation(candidate.observed_evidence());
+        journal.record_used_evidence_ids_count(1);
+        return Ok(reply);
     }
     if let Some(candidate) =
         runtime_scalar_path_direct_answer_candidate(state, agent_run_context.as_ref())
@@ -754,6 +763,10 @@ pub(crate) async fn execute_ask_routed(
                 &chat_prompt_template,
                 &[
                     ("__PERSONA_PROMPT__", &task_persona_prompt),
+                    (
+                        "__AGENT_RUNTIME_IDENTITY__",
+                        state.agent_runtime_identity_label(),
+                    ),
                     ("__CONTEXT__", &chat_prompt_context),
                     (
                         "__CONFIG_RESPONSE_LANGUAGE__",

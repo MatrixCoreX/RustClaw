@@ -128,6 +128,94 @@ fn structural_alias_binding_fallback_supports_multiple_aliases_without_llm() {
 }
 
 #[test]
+fn route_result_drops_backend_model_display_name_hint() {
+    use std::sync::Arc;
+
+    fn identity_decision(
+        agent_display_name_hint: &str,
+        should_refresh_long_term_memory: bool,
+    ) -> super::RouteDecision {
+        super::RouteDecision {
+            resolved_user_intent: "User asks for assistant identity.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: "identity direct response".to_string(),
+            confidence: Some(0.95),
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory,
+            agent_display_name_hint: agent_display_name_hint.to_string(),
+            output_contract: IntentOutputContract::default(),
+        }
+    }
+
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.llm_providers = vec![Arc::new(crate::LlmProviderRuntime {
+        config: claw_core::config::LlmProviderConfig {
+            name: "vendor-mimo".to_string(),
+            provider_type: "openai_compat".to_string(),
+            base_url: "http://fixture.invalid".to_string(),
+            api_key: "fixture".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+            context_window_tokens: None,
+            priority: 1,
+            timeout_seconds: 5,
+            max_concurrency: 1,
+            params: claw_core::config::LlmProviderParams::default(),
+        },
+        client: reqwest::Client::new(),
+        semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+    })];
+    let task = crate::ClaimedTask {
+        task_id: "task-display-name-backend-sanitize".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"who are you"}).to_string(),
+    };
+
+    let out = super::normalizer_output_from_fallback(
+        "who are you",
+        "test_fallback",
+        identity_decision("MiMo-v2.5-pro", false),
+        None,
+    );
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert_eq!(route.agent_display_name_hint, "");
+    assert!(route
+        .route_reason
+        .contains("agent_display_name_hint_backend_metadata_removed"));
+
+    let mut out = super::normalizer_output_from_fallback(
+        "who are you",
+        "test_fallback",
+        identity_decision("", false),
+        None,
+    );
+    out.resolved_user_intent = "User asks for assistant identity.\nanswer_candidate: 我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。".to_string();
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+    assert!(route
+        .route_reason
+        .contains("normalizer_answer_candidate_backend_metadata_removed"));
+
+    let out = super::normalizer_output_from_fallback(
+        "remember this display name",
+        "test_fallback",
+        identity_decision("MiMo-v2.5-pro", true),
+        None,
+    );
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+    assert_eq!(route.agent_display_name_hint, "MiMo-v2.5-pro");
+}
+
+#[test]
 fn inline_json_answer_candidate_can_repair_to_direct_answer_contract() {
     let request =
         r#"解释这个 JSON 代表什么：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;

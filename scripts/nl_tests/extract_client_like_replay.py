@@ -31,6 +31,16 @@ def sort_key(path: Path) -> tuple[int, int, str]:
     return (int(match.group("case")), int(match.group("turn")), path.name)
 
 
+def route_legacy_first_layer(route: Any) -> str:
+    if not isinstance(route, dict):
+        return ""
+    return str(
+        route.get("legacy_first_layer_decision")
+        or route.get("first_layer_decision")
+        or ""
+    )
+
+
 def compact_tag(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip().lower()).strip("-")
     return value or "unknown"
@@ -225,7 +235,7 @@ def extract_file(path: Path) -> ExtractedCase | None:
         task_id=str(get_path(obj, "data", "task_id") or summary.get("task_id") or ""),
         prompt=prompt,
         status=str(get_path(obj, "data", "status") or ""),
-        first_layer=str(route.get("first_layer_decision") or "") if isinstance(route, dict) else "",
+        first_layer=route_legacy_first_layer(route),
         route_gate=str(route.get("route_gate_kind") or "") if isinstance(route, dict) else "",
         routed_mode=str(route.get("routed_mode") or "") if isinstance(route, dict) else "",
         contract_match=str(contract_matrix.get("contract_match") or "") if isinstance(contract_matrix, dict) else "",

@@ -79,11 +79,11 @@ pub(super) fn chat_only_active_text_missing_locator_followup(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::Clarify)
+    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
         && active_primary_text_context(session_snapshot).is_some()
         && !active_session_has_structured_execution_target(session_snapshot)
         && state_patch_deictic_reference_target(state_patch) == Some("missing_locator")
@@ -248,21 +248,88 @@ fn active_session_bound_file_basename_candidate(
     })
 }
 
+fn existing_path_for_answer_candidate(state: &AppState, answer_candidate: &str) -> Option<String> {
+    let candidate = answer_candidate.trim();
+    if candidate.is_empty()
+        || candidate.contains('\n')
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+    {
+        return None;
+    }
+    let path = Path::new(candidate);
+    if path.is_absolute() && path.exists() {
+        return Some(path.display().to_string());
+    }
+    let workspace_path = state.skill_rt.workspace_root.join(path);
+    workspace_path
+        .exists()
+        .then(|| workspace_path.display().to_string())
+}
+
+fn paths_match_existing_location(left: &str, right: &str) -> bool {
+    let left = Path::new(left.trim());
+    let right = Path::new(right.trim());
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn active_session_bound_targets(
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+) -> Vec<&str> {
+    let Some(snapshot) = session_snapshot else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    if let Some(frame) = snapshot.active_followup_frame.as_ref() {
+        if let Some(target) = frame.bound_target.as_deref() {
+            targets.push(target);
+        }
+        targets.extend(frame.ordered_entries.iter().map(String::as_str));
+    }
+    if let Some(facts) = snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts.bound_target.as_deref() {
+            targets.push(target);
+        }
+        targets.extend(facts.ordered_entries.iter().map(String::as_str));
+        targets.extend(facts.delivery_targets.iter().map(String::as_str));
+    }
+    targets
+}
+
+fn active_session_bound_path_answer_candidate(
+    state: &AppState,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    answer_candidate: &str,
+) -> Option<String> {
+    let candidate_path = existing_path_for_answer_candidate(state, answer_candidate)?;
+    active_session_bound_targets(session_snapshot)
+        .into_iter()
+        .filter(|target| !target.trim().is_empty())
+        .any(|target| paths_match_existing_location(&candidate_path, target))
+        .then_some(candidate_path)
+}
+
 pub(super) fn apply_active_file_basename_answer_candidate_direct_repair(
     state: &AppState,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     answer_candidate: &str,
     needs_clarify: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     wants_file_delivery: &mut bool,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
-    if needs_clarify || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer) {
+    if needs_clarify || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer) {
         return None;
     }
     active_session_bound_file_basename_candidate(state, session_snapshot, answer_candidate)?;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     *wants_file_delivery = false;
     output_contract.response_shape = OutputResponseShape::Scalar;
@@ -273,6 +340,40 @@ pub(super) fn apply_active_file_basename_answer_candidate_direct_repair(
     output_contract.semantic_kind = OutputSemanticKind::FileBasename;
     output_contract.locator_hint.clear();
     Some("active_file_basename_answer_candidate_direct")
+}
+
+pub(super) fn apply_active_bound_path_answer_candidate_direct_repair(
+    state: &AppState,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    answer_candidate: &str,
+    needs_clarify: bool,
+    schedule_kind: ScheduleKind,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+    wants_file_delivery: &mut bool,
+    output_contract: &mut IntentOutputContract,
+) -> Option<&'static str> {
+    if needs_clarify
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || *wants_file_delivery
+        || output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+    {
+        return None;
+    }
+    active_session_bound_path_answer_candidate(state, session_snapshot, answer_candidate)?;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    *wants_file_delivery = false;
+    output_contract.response_shape = OutputResponseShape::Scalar;
+    output_contract.requires_content_evidence = false;
+    output_contract.delivery_required = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.locator_hint.clear();
+    Some("active_bound_path_answer_candidate_direct")
 }
 
 pub(super) fn active_session_has_ordered_entries(
@@ -399,13 +500,13 @@ pub(super) fn apply_active_ordered_scalar_path_chat_repair(
     state_patch: Option<&Value>,
     answer_candidate: &str,
     needs_clarify: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
     if needs_clarify
         || !matches!(
-            first_layer_decision,
+            legacy_normalizer_decision,
             FirstLayerDecision::DirectAnswer | FirstLayerDecision::PlannerExecute
         )
         || !answer_candidate.trim().is_empty()
@@ -425,7 +526,7 @@ pub(super) fn apply_active_ordered_scalar_path_chat_repair(
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
 }
@@ -442,7 +543,7 @@ pub(super) fn apply_active_observed_output_chat_repair(
     wants_file_delivery: bool,
     answer_candidate: &str,
     needs_clarify: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
@@ -469,7 +570,7 @@ pub(super) fn apply_active_observed_output_chat_repair(
         || wants_file_delivery
         || needs_clarify
         || !matches!(
-            first_layer_decision,
+            legacy_normalizer_decision,
             FirstLayerDecision::DirectAnswer | FirstLayerDecision::PlannerExecute
         )
         || !matches!(
@@ -512,7 +613,7 @@ pub(super) fn apply_active_observed_output_chat_repair(
     output_contract.locator_hint.clear();
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.semantic_kind = OutputSemanticKind::None;
-    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("active_observed_output_chat_repair")
 }

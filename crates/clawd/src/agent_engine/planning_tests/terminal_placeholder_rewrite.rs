@@ -1298,6 +1298,21 @@ fn shell_sequence_splitter_ignores_quoted_semicolons_and_stateful_prefixes() {
 }
 
 #[test]
+fn shell_sequence_splitter_preserves_assignment_state() {
+    let command = concat!(
+        "F='document/nl_ops_http_repair_demo/index.html'; ",
+        "sed -i 's/ops-repair-[a-zA-Z0-9_-]*/ops-repair-ok/g' \"$F\" && ",
+        "echo '--- after replace ---' && ",
+        "cat \"$F\""
+    );
+
+    assert_eq!(
+        super::super::split_shell_sequence_command_with_policy(command, true),
+        None
+    );
+}
+
+#[test]
 fn rewrite_terminal_expression_placeholder_respond_inserts_synthesize_answer() {
     let loop_state = LoopState::new(2);
     let actions = vec![

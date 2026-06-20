@@ -2,11 +2,13 @@ use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
 };
-use crate::agent_engine::support::SemanticRouteAuthority;
+use crate::agent_engine::support::{
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+};
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
 
-fn test_policy(registry_idempotency_guard: bool) -> super::AgentLoopGuardPolicy {
+fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuardPolicy {
     super::AgentLoopGuardPolicy {
         max_steps: 8,
         max_rounds: 2,
@@ -16,10 +18,14 @@ fn test_policy(registry_idempotency_guard: bool) -> super::AgentLoopGuardPolicy 
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 1,
-        answer_verifier_enforce_required: false,
+        answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
         agent_loop_canary_bucket: "none".to_string(),
-        registry_idempotency_guard,
+        registry_idempotency_guard_scope: if registry_idempotency_guard_enabled {
+            RegistryIdempotencyGuardScope::All
+        } else {
+            RegistryIdempotencyGuardScope::Off
+        },
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
@@ -182,6 +188,7 @@ fn repeat_guard_allows_repeated_respond_delivery() {
             &mut loop_state,
             &policy,
             &action,
+            None,
             &fingerprint,
             1,
         ),
@@ -208,6 +215,7 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
             &mut loop_state,
             &policy,
             &action,
+            None,
             &fingerprint,
             1,
         ),
@@ -220,6 +228,7 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
             &mut loop_state,
             &policy,
             &action,
+            None,
             &fingerprint,
             2,
         )
@@ -254,6 +263,7 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
             &mut loop_state,
             &policy,
             &action,
+            None,
             &fingerprint,
             1,
         )
@@ -265,7 +275,7 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
         .rollout_attribution
         .first()
         .expect("registry attribution");
-    assert_eq!(attribution.switch_name, "registry_idempotency_guard");
+    assert_eq!(attribution.switch_name, "registry_idempotency_guard_scope");
     assert_eq!(attribution.event, "registry_idempotency_guard_block");
     assert_eq!(
         attribution.reason_code.as_deref(),

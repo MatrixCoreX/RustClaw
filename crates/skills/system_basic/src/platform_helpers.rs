@@ -248,6 +248,7 @@ pub(super) fn walk_inventory_inner(
 
 pub(super) fn sort_inventory_entries(entries: &mut [Value], sort_by: &str) {
     entries.sort_by(|a, b| match sort_by {
+        "name_desc" => cmp_name(b, a),
         "mtime_desc" => cmp_u64_field(b, a, "modified_ts").then_with(|| cmp_name(a, b)),
         "mtime_asc" => cmp_u64_field(a, b, "modified_ts").then_with(|| cmp_name(a, b)),
         "size_desc" => cmp_u64_field(b, a, "size_bytes").then_with(|| cmp_name(a, b)),

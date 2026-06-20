@@ -51,13 +51,13 @@ pub(super) fn explicit_surface_path_metadata_clarify_repair_decision(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
     needs_clarify: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !(needs_clarify || matches!(first_layer_decision, FirstLayerDecision::Clarify)) {
+    if !(needs_clarify || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)) {
         return None;
     }
     let targets = explicit_surface_path_fact_targets(req_surface);
@@ -121,13 +121,13 @@ pub(super) fn explicit_surface_path_facts_clarify_repair_decision(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
     needs_clarify: bool,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !(needs_clarify || matches!(first_layer_decision, FirstLayerDecision::Clarify)) {
+    if !(needs_clarify || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)) {
         return None;
     }
     if route_has_structured_execution_signal(

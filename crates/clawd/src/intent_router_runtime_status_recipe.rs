@@ -126,22 +126,26 @@ pub(super) fn apply_unobserved_runtime_status_answer_candidate_repair(
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
 ) -> Option<&'static str> {
     let execution_recipe_hint_is_neutral = execution_recipe_hint
         .is_none_or(|spec| spec.kind.as_str() == "none" && spec.profile.as_str() == "none");
-    let direct_unobserved_scalar =
-        matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
-            && !output_contract.requires_content_evidence;
-    let planner_unobserved_scalar =
-        matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
-            && !output_contract.requires_content_evidence;
+    let direct_unobserved_scalar = matches!(
+        *legacy_normalizer_decision,
+        FirstLayerDecision::DirectAnswer
+    ) && !output_contract.requires_content_evidence;
+    let planner_unobserved_scalar = matches!(
+        *legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && !output_contract.requires_content_evidence;
     let planner_status_scalar_needs_evidence =
-        matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
-            && matches!(*turn_type, Some(TurnType::StatusQuery))
+        matches!(
+            *legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        ) && matches!(*turn_type, Some(TurnType::StatusQuery))
             && output_contract.requires_content_evidence;
     if needs_clarify
         || wants_file_delivery
@@ -170,7 +174,7 @@ pub(super) fn apply_unobserved_runtime_status_answer_candidate_repair(
     output_contract.locator_hint.clear();
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.delivery_required = false;
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     *turn_type = Some(TurnType::StatusQuery);
     *target_task_policy = Some(TargetTaskPolicy::Standalone);
