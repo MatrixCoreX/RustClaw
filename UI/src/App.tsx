@@ -417,6 +417,10 @@ interface NniJoinVerifyResponse {
 
 interface NniConfigResponse {
   remote_nodes: string[];
+  joined: boolean;
+  heartbeat_interval_seconds: number;
+  last_heartbeat_at_ts?: number | null;
+  last_heartbeat_error?: string | null;
   config_path: string;
 }
 
@@ -2565,7 +2569,7 @@ export default function App() {
       setNniStatus(body.data);
       setNniStatusError(null);
       if (!body.data.signature_chip_present) {
-        setNniJoined(false);
+        await setNniJoinedPersisted(false);
       }
       return body.data;
     } catch (err) {
@@ -2579,7 +2583,7 @@ export default function App() {
     }
   };
 
-  const runNniDeviceAction = async (action: string, options?: { joinAfterSign?: boolean; challenge?: string }) => {
+  const runNniDeviceAction = async (action: string, options?: { challenge?: string }) => {
     setNniActionLoading(action);
     setNniActionError(null);
     setNniActionMessage(null);
@@ -2611,9 +2615,6 @@ export default function App() {
       }
       setNniActionResult(body.data);
       setNniActionMessage(body.data.message || t("NNI 操作已完成。", "NNI action completed."));
-      if (options?.joinAfterSign) {
-        setNniJoined(true);
-      }
       if (body.data.payload?.pubkey) {
         setNniStatus((prev) =>
           prev
@@ -2631,7 +2632,7 @@ export default function App() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniActionError(message);
-      setNniJoined(false);
+      await setNniJoinedPersisted(false);
       return null;
     } finally {
       setNniActionLoading(null);
@@ -2692,6 +2693,27 @@ export default function App() {
       .map((value) => value.trim())
       .filter(Boolean);
 
+  const setNniJoinedPersisted = async (joined: boolean) => {
+    setNniJoined(joined);
+    try {
+      const res = await apiFetch(`/v1/nni/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ joined }),
+      });
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI config update failed (${res.status})`);
+      }
+      setNniJoined(body.data.joined);
+      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      setNniConfigError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniConfigError(message);
+    }
+  };
+
   const fetchNniConfig = async () => {
     setNniConfigLoading(true);
     setNniConfigError(null);
@@ -2702,6 +2724,7 @@ export default function App() {
         throw new Error(body.error || `NNI config load failed (${res.status})`);
       }
       setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      setNniJoined(body.data.joined);
       setNniConfigMessage(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -2726,6 +2749,7 @@ export default function App() {
         throw new Error(body.error || `NNI config save failed (${res.status})`);
       }
       setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      setNniJoined(body.data.joined);
       setNniConfigMessage(t("远程 NNI 节点已保存到配置文件。", "Remote NNI nodes were saved to the config file."));
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -2745,15 +2769,15 @@ export default function App() {
             "No device signature chip was detected, so this device cannot run the NNI test join yet.",
           ),
       );
-      setNniJoined(false);
+      await setNniJoinedPersisted(false);
       return;
     }
-    const result = await runNniDeviceAction("sign_timestamp", { joinAfterSign: true });
+    const result = await runNniDeviceAction("sign_timestamp");
     if (result?.payload?.signature) {
       setNniActionMessage(
         t(
-          "测试加入已完成：本机已生成时间戳签名，并在本页临时标记为已加入。",
-          "Test join completed: this device generated a timestamp signature and is temporarily marked as joined on this page.",
+          "测试签名已完成：本机已生成时间戳签名。只有点击加入并通过服务端验签后，才会开启运行状态。",
+          "Test signature completed: this device generated a timestamp signature. The runtime starts only after Join passes server verification.",
         ),
       );
     }
@@ -2772,7 +2796,7 @@ export default function App() {
             "No device signature chip was detected, so this device cannot join signed NNI yet.",
           ),
       );
-      setNniJoined(false);
+      await setNniJoinedPersisted(false);
       setNniActionLoading(null);
       return;
     }
@@ -2791,7 +2815,7 @@ export default function App() {
       if (!verified?.joined || !verified.compliant) {
         throw new Error("nni_join_verify_rejected");
       }
-      setNniJoined(true);
+      await setNniJoinedPersisted(true);
       setNniActionMessage(
         t(
           "设备签名已通过服务端验证，NNI 已开始运行。",
@@ -2801,7 +2825,7 @@ export default function App() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniActionError(message);
-      setNniJoined(false);
+      await setNniJoinedPersisted(false);
     } finally {
       setNniActionLoading(null);
     }
@@ -5782,7 +5806,7 @@ export default function App() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => (nniJoined ? setNniJoined(false) : void joinNni())}
+                      onClick={() => (nniJoined ? void setNniJoinedPersisted(false) : void joinNni())}
                       disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing || (!nniJoined && nniRemoteNodeCount === 0)}
                       className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
                       title={
@@ -5995,7 +6019,10 @@ export default function App() {
                           "This device has no signature chip, so it will not be marked as joined. Other RustClaw features remain available.",
                         )
                       : nniJoined
-                        ? t("服务端已验证设备签名，NNI 运行入口已开启。", "The server verified the device signature, and the NNI runtime entry is active.")
+                        ? t(
+                            "服务端已验证设备签名，NNI 运行入口已开启。clawd 会每 15 分钟向服务器发送一次硬件签名心跳。",
+                            "The server verified the device signature, and the NNI runtime entry is active. clawd will send a hardware-signed heartbeat to the server every 15 minutes.",
+                          )
                         : t(
                             "点击加入会向远程服务端请求一次随机挑战。本机公钥必须是白名单合规公钥，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
                             "Click Join to request a random challenge from the remote server. The local public key must be compliant with the whitelist, and the runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
