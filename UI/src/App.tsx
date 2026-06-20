@@ -419,8 +419,11 @@ interface NniConfigResponse {
   remote_nodes: string[];
   joined: boolean;
   heartbeat_interval_seconds: number;
+  heartbeat_network_retry_limit: number;
+  heartbeat_request_count: number;
   last_heartbeat_at_ts?: number | null;
   last_heartbeat_error?: string | null;
+  last_heartbeat_network_failures: number;
   config_path: string;
 }
 
@@ -1098,6 +1101,11 @@ export default function App() {
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniJoined, setNniJoined] = useState(false);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
+  const [nniHeartbeatRequestCount, setNniHeartbeatRequestCount] = useState(0);
+  const [nniHeartbeatRetryLimit, setNniHeartbeatRetryLimit] = useState(3);
+  const [nniLastHeartbeatAtTs, setNniLastHeartbeatAtTs] = useState<number | null>(null);
+  const [nniLastHeartbeatError, setNniLastHeartbeatError] = useState<string | null>(null);
+  const [nniLastHeartbeatNetworkFailures, setNniLastHeartbeatNetworkFailures] = useState(0);
   const [nniConfigLoading, setNniConfigLoading] = useState(false);
   const [nniConfigSaving, setNniConfigSaving] = useState(false);
   const [nniConfigError, setNniConfigError] = useState<string | null>(null);
@@ -2693,6 +2701,16 @@ export default function App() {
       .map((value) => value.trim())
       .filter(Boolean);
 
+  const applyNniConfigResponse = (config: NniConfigResponse) => {
+    setNniJoined(config.joined);
+    setNniRemoteNodes(config.remote_nodes.join("\n"));
+    setNniHeartbeatRequestCount(config.heartbeat_request_count ?? 0);
+    setNniHeartbeatRetryLimit(config.heartbeat_network_retry_limit ?? 3);
+    setNniLastHeartbeatAtTs(config.last_heartbeat_at_ts ?? null);
+    setNniLastHeartbeatError(config.last_heartbeat_error || null);
+    setNniLastHeartbeatNetworkFailures(config.last_heartbeat_network_failures ?? 0);
+  };
+
   const setNniJoinedPersisted = async (joined: boolean) => {
     setNniJoined(joined);
     try {
@@ -2705,8 +2723,7 @@ export default function App() {
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI config update failed (${res.status})`);
       }
-      setNniJoined(body.data.joined);
-      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
+      applyNniConfigResponse(body.data);
       setNniConfigError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -2714,8 +2731,8 @@ export default function App() {
     }
   };
 
-  const fetchNniConfig = async () => {
-    setNniConfigLoading(true);
+  const fetchNniConfig = async (silent = false) => {
+    if (!silent) setNniConfigLoading(true);
     setNniConfigError(null);
     try {
       const res = await apiFetch(`/v1/nni/config`);
@@ -2723,14 +2740,13 @@ export default function App() {
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI config load failed (${res.status})`);
       }
-      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
-      setNniJoined(body.data.joined);
-      setNniConfigMessage(null);
+      applyNniConfigResponse(body.data);
+      if (!silent) setNniConfigMessage(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniConfigError(message);
     } finally {
-      setNniConfigLoading(false);
+      if (!silent) setNniConfigLoading(false);
     }
   };
 
@@ -2748,8 +2764,7 @@ export default function App() {
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI config save failed (${res.status})`);
       }
-      setNniRemoteNodes(body.data.remote_nodes.join("\n"));
-      setNniJoined(body.data.joined);
+      applyNniConfigResponse(body.data);
       setNniConfigMessage(t("远程 NNI 节点已保存到配置文件。", "Remote NNI nodes were saved to the config file."));
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -3934,6 +3949,11 @@ export default function App() {
     if (!uiAuthReady) return;
     if (currentPage !== "nni") return;
     void fetchNniDeviceStatus();
+    void fetchNniConfig(true);
+    const timer = window.setInterval(() => {
+      void fetchNniConfig(true);
+    }, 60_000);
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady]);
 
@@ -6011,6 +6031,38 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+
+                  <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-3">
+                    <div>
+                      <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
+                        {t("心跳请求次数", "Heartbeat requests")}
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-white/90">{nniHeartbeatRequestCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
+                        {t("最近请求", "Latest request")}
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-white/75">{formatUnixDateTime(nniLastHeartbeatAtTs)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold tracking-[0.16em] text-white/45">
+                        {t("最近网络重试", "Latest network retries")}
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-white/75">
+                        {nniLastHeartbeatNetworkFailures > 0
+                          ? `${nniLastHeartbeatNetworkFailures} / ${nniHeartbeatRetryLimit}`
+                          : `0 / ${nniHeartbeatRetryLimit}`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {nniLastHeartbeatError ? (
+                    <p className="mt-3 break-words text-xs leading-5 text-amber-100/80">
+                      {t("最近心跳错误：", "Latest heartbeat error: ")}
+                      {nniLastHeartbeatError}
+                    </p>
+                  ) : null}
 
                   <p className="mt-4 text-sm leading-7 text-white/65">
                     {nniChipMissing
