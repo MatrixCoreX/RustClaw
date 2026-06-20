@@ -1126,6 +1126,11 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         actions,
     );
     let actions =
+        super::super::planning_recent_artifacts::normalize_recent_artifacts_listing_selectors(
+            route_result,
+            actions,
+        );
+    let actions =
         super::super::planning_recent_artifacts::rewrite_recent_artifacts_field_extraction_to_selected_file_reads(
             route_result,
             loop_state,
