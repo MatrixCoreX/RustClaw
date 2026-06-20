@@ -1221,7 +1221,7 @@ fn active_clarify_scalar_field_followup_rewrites_text_read_to_read_field() {
         OutputResponseShape::Scalar,
     );
     route.resolved_intent =
-        "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\n[RESOLVED_INTENT]\n读取指定文件中的名字字段（name），仅输出该字段的值\nUser now provides the missing target/content: package.json"
+        "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\n[RESOLVED_INTENT]\n读取指定文件中的名字字段（name），仅输出该字段的值\nUser now provides the missing target or content: package.json"
             .to_string();
     route.route_reason =
         "active_clarify_locator_reply_fast_path; preserve_active_clarify_output_contract"
