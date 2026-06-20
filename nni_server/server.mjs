@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash, createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
+import { createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -224,9 +224,8 @@ function verifyJoinSignature(pubkeyHex, challenge, signatureHex) {
     },
     format: "jwk",
   });
-  const digest = createHash("sha256").update(challenge, "utf8").digest();
   const derSignature = rawEcdsaSignatureToDer(signature);
-  if (!verifySignature(null, digest, publicKey, derSignature)) {
+  if (!verifySignature("sha256", Buffer.from(challenge, "utf8"), publicKey, derSignature)) {
     throw new Error("nni_signature_verify_failed");
   }
 }
