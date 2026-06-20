@@ -134,6 +134,7 @@ async fn start_workspace_update(
     }
 
     let shared = workspace_update_state();
+    let control = workspace_update_control();
     let status = {
         let mut guard = shared.lock().unwrap();
         if matches!(guard.status.as_str(), "running" | "restarting") {
@@ -154,10 +155,79 @@ async fn start_workspace_update(
         };
         guard.clone()
     };
+    {
+        let mut guard = control.lock().unwrap();
+        guard.cancel_requested = false;
+        guard.active_child_pid = None;
+    }
 
     let workspace_root = state.skill_rt.workspace_root.clone();
-    tokio::spawn(run_workspace_update_job(workspace_root, shared));
+    tokio::spawn(run_workspace_update_job(workspace_root, shared, control));
 
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(status),
+            error: None,
+        }),
+    )
+}
+
+async fn cancel_workspace_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can cancel workspace update".to_string()),
+            }),
+        );
+    }
+
+    let shared = workspace_update_state();
+    let control = workspace_update_control();
+    let pid = {
+        let mut control_guard = control.lock().unwrap();
+        let mut status_guard = shared.lock().unwrap();
+        if status_guard.status != "running" {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: Some(status_guard.clone()),
+                    error: Some("workspace update is not running".to_string()),
+                }),
+            );
+        }
+        control_guard.cancel_requested = true;
+        status_guard.step = "cancel_requested".to_string();
+        status_guard.next_step = Some("正在停止当前编译进程。".to_string());
+        control_guard.active_child_pid
+    };
+
+    if let Some(pid) = pid {
+        terminate_workspace_update_process_tree(pid);
+    }
+
+    let status = shared.lock().unwrap().clone();
     (
         StatusCode::ACCEPTED,
         Json(ApiResponse {
@@ -171,6 +241,7 @@ async fn start_workspace_update(
 async fn run_workspace_update_job(
     workspace_root: PathBuf,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
 ) {
     set_workspace_update_step(&shared, "checking_current_version");
     let old_commit = match run_workspace_update_command(
@@ -200,6 +271,9 @@ async fn run_workspace_update_job(
             return;
         }
     };
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
     {
         let mut guard = shared.lock().unwrap();
         guard.old_commit = old_commit.clone();
@@ -230,6 +304,9 @@ async fn run_workspace_update_job(
             );
             return;
         }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
     }
 
     let remote_commit = match run_workspace_update_command(
@@ -264,6 +341,9 @@ async fn run_workspace_update_job(
         if let Some(remote_commit) = remote_commit.clone() {
             guard.remote_commit = Some(remote_commit);
         }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
     }
 
     let should_pull =
@@ -365,6 +445,9 @@ async fn run_workspace_update_job(
                 return;
             }
         }
+        if finish_workspace_update_if_canceled(&shared, &control) {
+            return;
+        }
     } else {
         let mut guard = shared.lock().unwrap();
         guard.step = "skipping_pull_latest_code".to_string();
@@ -388,6 +471,9 @@ async fn run_workspace_update_job(
             guard.new_commit = first_output_line(&out.stdout_tail);
         }
     }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
 
     set_workspace_update_step(&shared, "building_workspace");
     {
@@ -403,6 +489,7 @@ async fn run_workspace_update_job(
         &workspace_root,
         WORKSPACE_UPDATE_TIMEOUT_SECONDS,
         shared.clone(),
+        control.clone(),
     )
     .await
     {
@@ -422,6 +509,11 @@ async fn run_workspace_update_job(
             return;
         }
         Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
             fail_workspace_update_with_error(
                 &shared,
                 err,
@@ -429,6 +521,9 @@ async fn run_workspace_update_job(
             );
             return;
         }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
     }
 
     set_workspace_update_step(&shared, "restarting_clawd");
@@ -470,6 +565,40 @@ fn set_workspace_update_step(shared: &Arc<Mutex<WorkspaceUpdateStatus>>, step: &
     let mut guard = shared.lock().unwrap();
     guard.status = "running".to_string();
     guard.step = step.to_string();
+}
+
+const WORKSPACE_UPDATE_CANCELED_ERROR: &str = "workspace_update_canceled";
+
+fn workspace_update_cancel_requested(control: &Arc<Mutex<WorkspaceUpdateControl>>) -> bool {
+    control.lock().unwrap().cancel_requested
+}
+
+fn finish_workspace_update_if_canceled(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: &Arc<Mutex<WorkspaceUpdateControl>>,
+) -> bool {
+    if !workspace_update_cancel_requested(control) {
+        return false;
+    }
+    finish_workspace_update_canceled(shared, control);
+    true
+}
+
+fn finish_workspace_update_canceled(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: &Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    {
+        let mut guard = control.lock().unwrap();
+        guard.active_child_pid = None;
+    }
+    let mut guard = shared.lock().unwrap();
+    guard.status = "canceled".to_string();
+    guard.step = "canceled".to_string();
+    guard.finished_ts = Some(current_unix_ts());
+    guard.exit_code = None;
+    guard.error = Some("workspace update canceled by user".to_string());
+    guard.next_step = Some("编译已停止；可以修复问题后重新编译。".to_string());
 }
 
 fn fail_workspace_update(
@@ -655,6 +784,7 @@ async fn run_workspace_update_command_streaming(
     cwd: &Path,
     timeout_seconds: u64,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
 ) -> Result<WorkspaceUpdateCommandOutput, String> {
     let mut cmd = Command::new(program);
     cmd.args(args)
@@ -666,6 +796,10 @@ async fn run_workspace_update_command_streaming(
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("failed to run {program}: {err}"))?;
+    if let Some(pid) = child.id() {
+        let mut guard = control.lock().unwrap();
+        guard.active_child_pid = Some(pid);
+    }
     let stdout = child
         .stdout
         .take()
@@ -678,24 +812,44 @@ async fn run_workspace_update_command_streaming(
     let stdout_task = tokio::spawn(read_workspace_update_stream(stdout, shared.clone(), true));
     let stderr_task = tokio::spawn(read_workspace_update_stream(stderr, shared.clone(), false));
 
-    let status = match tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_seconds),
-        child.wait(),
-    )
-    .await
-    {
-        Ok(Ok(status)) => status,
-        Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
-        Err(_) => {
+    let started = std::time::Instant::now();
+    let status = loop {
+        if workspace_update_cancel_requested(&control) {
+            if let Some(pid) = child.id() {
+                terminate_workspace_update_process_tree(pid);
+            }
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            finish_workspace_update_canceled(&shared, &control);
+            return Err(WORKSPACE_UPDATE_CANCELED_ERROR.to_string());
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
+            if let Some(pid) = child.id() {
+                terminate_workspace_update_process_tree(pid);
+            }
             let _ = child.kill().await;
             let _ = stdout_task.await;
             let _ = stderr_task.await;
+            let mut guard = control.lock().unwrap();
+            guard.active_child_pid = None;
             return Err(format!("{program} timed out after {timeout_seconds}s"));
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
+            Ok(Ok(status)) => break status,
+            Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
+            Err(_) => continue,
         }
     };
 
     let _ = stdout_task.await;
     let _ = stderr_task.await;
+    {
+        let mut guard = control.lock().unwrap();
+        guard.active_child_pid = None;
+    }
 
     let guard = shared.lock().unwrap();
     Ok(WorkspaceUpdateCommandOutput {
@@ -703,6 +857,22 @@ async fn run_workspace_update_command_streaming(
         stdout_tail: guard.stdout_tail.clone(),
         stderr_tail: guard.stderr_tail.clone(),
     })
+}
+
+fn terminate_workspace_update_process_tree(pid: u32) {
+    let pid_text = pid.to_string();
+    for _ in 0..3 {
+        let _ = StdCommand::new("pkill")
+            .args(["-TERM", "-P", pid_text.as_str()])
+            .stdout(StdProcessStdio::null())
+            .stderr(StdProcessStdio::null())
+            .status();
+    }
+    let _ = StdCommand::new("kill")
+        .args(["-TERM", pid_text.as_str()])
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .status();
 }
 
 async fn read_workspace_update_stream<R>(
