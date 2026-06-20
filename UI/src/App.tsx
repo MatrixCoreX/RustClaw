@@ -113,9 +113,12 @@ interface SubmitTaskResponse {
   task_id: string;
 }
 
+type WorkspaceUpdateMode = "full" | "ui_only" | "clawd_only";
+
 interface WorkspaceUpdateStatus {
   status: "idle" | "running" | "succeeded" | "failed" | "canceled" | "restarting" | "up_to_date" | string;
   step: string;
+  mode?: WorkspaceUpdateMode | string;
   started_ts?: number | null;
   finished_ts?: number | null;
   old_commit?: string | null;
@@ -2850,13 +2853,17 @@ export default function App() {
     setNniLastHeartbeatNetworkFailures(config.last_heartbeat_network_failures ?? 0);
   };
 
-  const setNniJoinedPersisted = async (joined: boolean) => {
+  const setNniJoinedPersisted = async (joined: boolean, options?: { persistRemoteNodes?: boolean }) => {
     setNniJoined(joined);
     try {
+      const payload: { joined: boolean; remote_nodes?: string[] } = { joined };
+      if (options?.persistRemoteNodes) {
+        payload.remote_nodes = nniRemoteNodeUrls();
+      }
       const res = await apiFetch(`/v1/nni/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ joined }),
+        body: JSON.stringify(payload),
       });
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
@@ -2999,7 +3006,7 @@ export default function App() {
       if (!verified?.joined || !verified.compliant) {
         throw new Error("nni_join_verify_rejected");
       }
-      await setNniJoinedPersisted(true);
+      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
       setNniActionMessage(
         t(
           "设备签名已通过服务端验证，NNI 已开始运行。",
@@ -3513,18 +3520,40 @@ export default function App() {
     }
   };
 
-  const startWorkspaceUpdate = async () => {
-    const confirmed = window.confirm(
-      t(
-        "系统会先正常拉取远端版本；如果拉取被本地冲突文件阻挡，只覆盖这些冲突文件，其他本地改动和额外文件保持不动。随后会完整编译并重启 clawd。确认现在开始吗？",
-        "The system will pull the remote version first. If local conflicting files block the pull, only those conflict files will be overwritten; other local changes and extra files are left untouched. It will then run a full build and restart clawd. Start now?",
-      ),
-    );
+  const startWorkspaceUpdate = async (mode: WorkspaceUpdateMode = "full") => {
+    const modeConfig: Record<WorkspaceUpdateMode, { confirm: string; endpoint: string; started: string }> = {
+      full: {
+        confirm: t(
+          "系统会先正常拉取远端版本；如果拉取被本地冲突文件阻挡，只覆盖这些冲突文件，其他本地改动和额外文件保持不动。随后会完整编译并重启 clawd。确认现在开始吗？",
+          "The system will pull the remote version first. If local conflicting files block the pull, only those conflict files will be overwritten; other local changes and extra files are left untouched. It will then run a full build and restart clawd. Start now?",
+        ),
+        endpoint: "/v1/admin/workspace-update",
+        started: t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."),
+      },
+      ui_only: {
+        confirm: t(
+          "只编译并部署 UI，不拉取远端版本，也不重启 clawd。确认现在开始吗？",
+          "Build and deploy the UI only. This will not pull the remote version or restart clawd. Start now?",
+        ),
+        endpoint: "/v1/admin/workspace-update/build-ui",
+        started: t("UI 编译已开始，下面会自动刷新进度。", "UI build started. Progress will refresh automatically."),
+      },
+      clawd_only: {
+        confirm: t(
+          "只编译 clawd，完成后只重启 clawd；不拉取远端版本，也不编译 UI。确认现在开始吗？",
+          "Build clawd only, then restart clawd only. This will not pull the remote version or build the UI. Start now?",
+        ),
+        endpoint: "/v1/admin/workspace-update/build-clawd",
+        started: t("clawd 编译已开始，下面会自动刷新进度。", "clawd build started. Progress will refresh automatically."),
+      },
+    };
+    const selectedMode = modeConfig[mode];
+    const confirmed = window.confirm(selectedMode.confirm);
     if (!confirmed) return;
     setWorkspaceUpdateLoading(true);
     setWorkspaceUpdateMessage(null);
     try {
-      const res = await apiFetch("/v1/admin/workspace-update", { method: "POST" });
+      const res = await apiFetch(selectedMode.endpoint, { method: "POST" });
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
         if (res.status === 409 && body.data) {
@@ -3537,7 +3566,7 @@ export default function App() {
         throw new Error(body.error || `更新启动失败 (${res.status})`);
       }
       setWorkspaceUpdateStatus(body.data);
-      setWorkspaceUpdateMessage(t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."));
+      setWorkspaceUpdateMessage(selectedMode.started);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setWorkspaceUpdateMessage(`${t("启动更新失败", "Failed to start update")}: ${message}`);
@@ -5083,15 +5112,23 @@ export default function App() {
       skipping_pull_latest_code: t("远端无新版本，继续编译", "No remote changes, building"),
       checking_new_version: t("确认新版本", "Checking new version"),
       building_workspace: t("正在完整编译", "Running full build"),
+      building_ui: t("正在编译 UI", "Building UI"),
+      ui_build_succeeded: t("UI 编译完成", "UI build completed"),
+      building_clawd: t("正在编译 clawd", "Building clawd"),
       cancel_requested: t("正在停止编译", "Stopping build"),
       canceled: t("已停止", "Stopped"),
       restarting_clawd: t("正在安排重启", "Scheduling restart"),
       restart_scheduled: t("已安排重启", "Restart scheduled"),
+      clawd_restart_scheduled: t("clawd 已安排重启", "clawd restart scheduled"),
     };
     return labels[step || ""] || step || "--";
   };
   const workspaceUpdateStatusLabel = (status?: string) => {
-    if (status === "running") return t("更新中", "Updating");
+    if (status === "running") {
+      return workspaceUpdateStatus?.mode === "ui_only" || workspaceUpdateStatus?.mode === "clawd_only"
+        ? t("编译中", "Building")
+        : t("更新中", "Updating");
+    }
     if (status === "restarting") return t("重启中", "Restarting");
     if (status === "up_to_date") return t("已是最新", "Up to date");
     if (status === "succeeded") return t("已完成", "Completed");
@@ -5102,6 +5139,7 @@ export default function App() {
   const workspaceUpdateProgressPercent = (() => {
     if (!workspaceUpdateStatus) return 0;
     if (workspaceUpdateStatus.status === "up_to_date") return 100;
+    if (workspaceUpdateStatus.status === "succeeded") return 100;
     if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.status === "canceled") return 100;
     if (workspaceUpdateStatus.status === "restarting" || workspaceUpdateStatus.step === "restart_scheduled") return 100;
     const stepProgress: Record<string, number> = {
@@ -5114,6 +5152,8 @@ export default function App() {
       skipping_pull_latest_code: 52,
       checking_new_version: 58,
       building_workspace: 82,
+      building_ui: 82,
+      building_clawd: 82,
       cancel_requested: 92,
       restarting_clawd: 96,
     };
@@ -5121,10 +5161,18 @@ export default function App() {
   })();
   const workspaceUpdateProgressActive =
     workspaceUpdateRunning && workspaceUpdateProgressPercent > 0 && workspaceUpdateProgressPercent < 100;
-  const workspaceUpdateProgressLabel =
-    workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_workspace"
-      ? t("编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.")
-      : workspaceUpdateStepLabel(workspaceUpdateStatus?.step);
+  const workspaceUpdateProgressLabel = (() => {
+    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_workspace") {
+      return t("编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.");
+    }
+    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_ui") {
+      return t("UI 编译中，完成后会部署到 nginx。", "Building the UI; it will deploy to nginx when finished.");
+    }
+    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_clawd") {
+      return t("clawd 编译中，完成后会安排 clawd 重启。", "Building clawd; clawd will restart when finished.");
+    }
+    return workspaceUpdateStepLabel(workspaceUpdateStatus?.step);
+  })();
   const workspaceUpdateTimeLabel = (ts?: number | null) => {
     if (!ts) return "--";
     return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
@@ -5823,12 +5871,12 @@ export default function App() {
                       {t("系统更新", "System Update")}
                     </p>
                     <h3 className="mt-2 text-base font-semibold text-white">
-                      {t("拉取远端版本并完整编译", "Pull remote version and run a full build")}
+                      {t("拉取更新或分项编译", "Pull updates or build parts")}
                     </h3>
                     <p className="mt-2 text-sm leading-7 text-white/65">
                       {t(
-                        "管理员可以在这里更新或重编 RustClaw。系统会先尝试正常拉取远端版本；只有当本地文件与远端变更冲突并阻止拉取时，才覆盖这些冲突文件。其他本地改动和额外文件不会被清理。",
-                        "Admins can update or rebuild RustClaw here. The system first tries a normal remote pull; only local files that conflict with remote changes and block the pull are overwritten. Other local changes and extra files are not cleaned.",
+                        "完整编译会先尝试正常拉取远端版本，再编译并重启 clawd；只编译 UI 和只编译 clawd 不会拉取远端版本，适合只改了对应部分时使用。",
+                        "A full build pulls the remote version first, then builds and restarts clawd. Build UI and Build clawd do not pull the remote version, so they are useful when only that part changed.",
                       )}
                     </p>
                   </div>
@@ -5849,7 +5897,7 @@ export default function App() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => void startWorkspaceUpdate()}
+                        onClick={() => void startWorkspaceUpdate("full")}
                         disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
                         className="theme-accent-btn"
                       >
@@ -5863,6 +5911,24 @@ export default function App() {
                           : workspaceUpdateHasRemoteDiff
                             ? t("拉取并编译", "Pull and Build")
                             : t("完整编译", "Build All")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void startWorkspaceUpdate("ui_only")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <LayoutDashboard className="h-4 w-4" />
+                        {t("只编译 UI", "Build UI")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void startWorkspaceUpdate("clawd_only")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <Cpu className="h-4 w-4" />
+                        {t("只编译 clawd", "Build clawd")}
                       </button>
                       {workspaceUpdateStatus?.status === "running" ? (
                         <button
@@ -6433,7 +6499,7 @@ export default function App() {
                       <h4 className="mt-2 text-lg font-semibold">{t("NNI 运行入口", "NNI runtime entry")}</h4>
                     </div>
                     <span className={nniJoined ? "setup-status setup-status-done" : "setup-status setup-status-todo"}>
-                      {nniJoined ? t("已加入", "Joined") : t("未加入", "Not joined")}
+                      {nniJoined ? t("心跳挑战中", "Heartbeat active") : t("未加入", "Not joined")}
                     </span>
                   </div>
 
@@ -6478,8 +6544,8 @@ export default function App() {
                     />
                     <p className="mt-2 text-xs leading-5 text-white/50">
                       {t(
-                        "远程节点会保存到 configs/config.toml；下次打开页面会自动载入。远程节点负责下发 challenge、验签并记录合规请求。本机公钥必须是白名单合规公钥。",
-                        "Remote nodes are saved to configs/config.toml and loaded automatically next time. Remote nodes issue challenges, verify signatures, and record compliant requests. The local public key must be compliant with the whitelist.",
+                        "远程节点会保存到 configs/config.toml；加入成功后运行状态也会保存，clawd 重启或页面重开后会自动载入。远程节点负责下发 challenge、验签并记录合规请求。本机公钥必须是白名单合规公钥。",
+                        "Remote nodes are saved to configs/config.toml. After Join succeeds, the runtime state is saved too and loads automatically after clawd restarts or the page reopens. Remote nodes issue challenges, verify signatures, and record compliant requests. The local public key must be compliant with the whitelist.",
                       )}
                     </p>
                     {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
