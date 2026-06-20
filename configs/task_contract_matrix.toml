@@ -26,6 +26,29 @@ max_items = 24
 max_excerpt_chars = 240
 
 [[generic_profiles]]
+name = "generic_inline_transform"
+semantic_kind = "none"
+requires_content_evidence = true
+delivery_required = false
+response_shapes = ["strict"]
+locator_kinds = ["none"]
+policy_mode = "enforce"
+evidence_scope = "current_task"
+freshness = "current_task"
+artifact_kind = "text"
+channel_visibility = "user_visible"
+evidence_profile = "generic"
+allowed_actions = ["transform"]
+preferred_actions = ["transform"]
+forbidden_actions = ["run_cmd"]
+required_evidence = ["field_value"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[generic_profiles.evidence_expression]
+any_of = ["field_value", "content_excerpt"]
+
+[[generic_profiles]]
 name = "generic_path_content"
 semantic_kind = "none"
 requires_content_evidence = true
