@@ -22,6 +22,32 @@ fn publishing_preview_allows_x_preview_without_locator() {
 }
 
 #[test]
+fn generic_inline_transform_allows_transform_without_locator() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Strict,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "transform",
+        &serde_json::json!({
+            "action": "transform_data",
+            "data": [{"name":"alpha","score":7},{"name":"beta","score":12}],
+            "ops": [{"op":"sort","by":"score","order":"desc"}],
+            "output_format": "md_table"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "transform.transform_data");
+    assert_eq!(policy.contract_match, "generic_inline_transform");
+    assert_eq!(policy.required_evidence, vec!["field_value"]);
+}
+
+#[test]
 fn content_excerpt_with_summary_contract_has_parsed_final_shape() {
     let output_contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,

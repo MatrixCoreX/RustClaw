@@ -208,7 +208,7 @@ fn does_not_infer_slice_spec_from_request_text_when_journal_has_no_range_step() 
     let journal = crate::task_journal::TaskJournal::new("clarify_rewrite");
     let mut route = dummy_route_result();
     route.resolved_intent =
-        "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: /tmp/model_io.log"
+        "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: /tmp/model_io.log"
             .to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;

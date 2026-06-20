@@ -822,7 +822,7 @@ fn locator_reply_runtime_intent_preserves_prior_operation_for_executable_route()
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous resolved request by applying the same operation to the provided target/content.\nPrevious user request: 去那个配置里找 app.name，只把值给我\nProvided target/content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                    "Continue the previous resolved request by applying the same operation to the provided target or content.\nPrevious user request: 去那个配置里找 app.name，只把值给我\nProvided target or content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
                         .to_string(),
                 prior_user_text: "去那个配置里找 app.name，只把值给我".to_string(),
                 current_user_text:
@@ -976,7 +976,7 @@ fn clarify_locator_reply_keeps_current_file_delivery_over_weak_prior_shape() {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous request that was waiting for clarification: Send that local config without pasting the body\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                    "Continue the previous request that was waiting for clarification: Send that local config without pasting the body\nUser now provides the missing target or content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
                         .to_string(),
                 prior_user_text: "Send that local config without pasting the body".to_string(),
                 current_user_text:
@@ -1058,7 +1058,7 @@ fn clarify_locator_reply_promotes_bare_path_back_to_execution() {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+                    "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: scripts/nl_tests/fixtures/device_local/logs/model_io.log"
                         .to_string(),
                 prior_user_text: "看看那个模型日志最后 5 行".to_string(),
                 current_user_text: "scripts/nl_tests/fixtures/device_local/logs/model_io.log"
@@ -1318,7 +1318,7 @@ fn clarify_structured_payload_reply_promotes_direct_route_to_execute() {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous request that was waiting for clarification: 把那个 JSON 数组按 score 排一下并转成表格\nUser now provides the missing target/content: [{\"name\":\"alpha\",\"score\":7},{\"name\":\"beta\",\"score\":12}]"
+                    "Continue the previous request that was waiting for clarification: 把那个 JSON 数组按 score 排一下并转成表格\nUser now provides the missing target or content: [{\"name\":\"alpha\",\"score\":7},{\"name\":\"beta\",\"score\":12}]"
                         .to_string(),
                 prior_user_text: "把那个 JSON 数组按 score 排一下并转成表格".to_string(),
                 current_user_text: r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]"#
@@ -1536,7 +1536,7 @@ fn clarify_locator_reply_preserves_prior_file_delivery_contract() {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous request that was waiting for clarification: Send me the file\nUser now provides the missing target/content: README.md"
+                    "Continue the previous request that was waiting for clarification: Send me the file\nUser now provides the missing target or content: README.md"
                         .to_string(),
                 prior_user_text: "Send me the file".to_string(),
                 current_user_text: "README.md".to_string(),
@@ -1615,7 +1615,7 @@ fn clarify_locator_reply_injects_locator_into_existing_execute_route() {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent:
-                    "Continue the previous request that was waiting for clarification: Send that config file\nUser now provides the missing target/content: /tmp/app_config.toml"
+                    "Continue the previous request that was waiting for clarification: Send that config file\nUser now provides the missing target or content: /tmp/app_config.toml"
                         .to_string(),
                 prior_user_text: "Send that config file".to_string(),
                 current_user_text: "/tmp/app_config.toml".to_string(),

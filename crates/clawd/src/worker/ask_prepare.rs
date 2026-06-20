@@ -947,7 +947,7 @@ fn active_clarify_existing_workspace_locator_reply(
         crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
             crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent: format!(
-                    "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+                    "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
                     clarify_state.source_request.trim(),
                     resolved_locator
                 ),

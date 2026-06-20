@@ -880,7 +880,7 @@ fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
         true,
         OutputResponseShape::Free,
     );
-    route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
+    route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
     let actions = vec![
         AgentAction::CallSkill {
             skill: "read_file".to_string(),

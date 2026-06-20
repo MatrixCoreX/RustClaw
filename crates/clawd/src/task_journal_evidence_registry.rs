@@ -418,7 +418,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "service_control.structured_json_v1",
         &["field_value", "status"],
     ),
-    step_json_extractor("transform", "transform.structured_json_v1", &["path"]),
+    step_json_extractor(
+        "transform",
+        "transform.structured_json_v1",
+        &["field_value", "content_excerpt"],
+    ),
     step_json_extractor(
         "audio_synthesize",
         "audio_synthesize.structured_json_v1",

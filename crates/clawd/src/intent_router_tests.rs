@@ -290,6 +290,43 @@ fn inline_json_transform_repair_keeps_planner_contract() {
 }
 
 #[test]
+fn clarify_inline_payload_wrapper_keeps_locatorless_transform_contract() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let request = r#"Continue the previous resolved request by applying the same operation to the provided target or content.
+Previous user request: sort the JSON array by score and render a markdown table
+Provided target or content: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        &state.skill_rt.workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        Some(TurnType::TaskRequest),
+        Some(TargetTaskPolicy::Standalone),
+    );
+
+    assert_eq!(repair, Some("inline_structured_payload_context_execute"));
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summary() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let request = "Produce the requested workspace-grounded summary.";

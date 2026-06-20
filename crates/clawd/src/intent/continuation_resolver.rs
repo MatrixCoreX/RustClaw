@@ -72,7 +72,7 @@ pub(crate) fn resolve_clarify_followup_with_surface(
         return ClarifyFollowupResolution::None;
     };
     let rewritten_prompt = format!(
-        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
         prior_user_text.trim(),
         prompt.trim()
     );
@@ -163,7 +163,7 @@ fn synthesize_clarify_state_reply_resolution_with_surface(
                 return Some(ClarifyFollowupResolution::LocatorReplyRewrite(
                     crate::clarify_followup::ClarifyLocatorReplyRewrite {
                         resolved_intent: format!(
-                            "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+                            "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
                             clarify_state.source_request.trim(),
                             prompt.trim()
                         ),
@@ -176,7 +176,7 @@ fn synthesize_clarify_state_reply_resolution_with_surface(
             if surface_has_structural_clarify_target_fill(surface) {
                 return Some(ClarifyFollowupResolution::NormalizerRewrite {
                     rewritten_prompt: format!(
-                        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+                        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
                         clarify_state.source_request.trim(),
                         prompt.trim()
                     ),
