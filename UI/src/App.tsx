@@ -114,7 +114,7 @@ interface SubmitTaskResponse {
 }
 
 interface WorkspaceUpdateStatus {
-  status: "idle" | "running" | "succeeded" | "failed" | "restarting" | "up_to_date" | string;
+  status: "idle" | "running" | "succeeded" | "failed" | "canceled" | "restarting" | "up_to_date" | string;
   step: string;
   started_ts?: number | null;
   finished_ts?: number | null;
@@ -1188,6 +1188,7 @@ export default function App() {
   const [piAppRestartMessage, setPiAppRestartMessage] = useState<string | null>(null);
   const [workspaceUpdateStatus, setWorkspaceUpdateStatus] = useState<WorkspaceUpdateStatus | null>(null);
   const [workspaceUpdateLoading, setWorkspaceUpdateLoading] = useState(false);
+  const [workspaceUpdateCanceling, setWorkspaceUpdateCanceling] = useState(false);
   const [workspaceUpdateMessage, setWorkspaceUpdateMessage] = useState<string | null>(null);
 
   const [taskId, setTaskId] = useState("");
@@ -3543,6 +3544,33 @@ export default function App() {
     }
   };
 
+  const cancelWorkspaceUpdate = async () => {
+    const confirmed = window.confirm(
+      t(
+        "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
+        "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
+      ),
+    );
+    if (!confirmed) return;
+    setWorkspaceUpdateCanceling(true);
+    setWorkspaceUpdateMessage(null);
+    try {
+      const res = await apiFetch("/v1/admin/workspace-update/cancel", { method: "POST" });
+      const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!res.ok || !body.ok || !body.data) {
+        if (body.data) setWorkspaceUpdateStatus(body.data);
+        throw new Error(body.error || `停止编译失败 (${res.status})`);
+      }
+      setWorkspaceUpdateStatus(body.data);
+      setWorkspaceUpdateMessage(t("已请求停止编译，正在结束当前进程。", "Stop requested. Ending the current build process."));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setWorkspaceUpdateMessage(`${t("停止编译失败", "Failed to stop build")}: ${message}`);
+    } finally {
+      setWorkspaceUpdateCanceling(false);
+    }
+  };
+
   const restartSystem = async () => {
     setSystemRestarting(true);
     setSystemRestartMessage(null);
@@ -5045,6 +5073,8 @@ export default function App() {
       skipping_pull_latest_code: t("远端无新版本，继续编译", "No remote changes, building"),
       checking_new_version: t("确认新版本", "Checking new version"),
       building_workspace: t("正在完整编译", "Running full build"),
+      cancel_requested: t("正在停止编译", "Stopping build"),
+      canceled: t("已停止", "Stopped"),
       restarting_clawd: t("正在安排重启", "Scheduling restart"),
       restart_scheduled: t("已安排重启", "Restart scheduled"),
     };
@@ -5056,8 +5086,33 @@ export default function App() {
     if (status === "up_to_date") return t("已是最新", "Up to date");
     if (status === "succeeded") return t("已完成", "Completed");
     if (status === "failed") return t("失败", "Failed");
+    if (status === "canceled") return t("已停止", "Stopped");
     return t("未运行", "Idle");
   };
+  const workspaceUpdateProgressPercent = (() => {
+    if (!workspaceUpdateStatus) return 0;
+    if (workspaceUpdateStatus.status === "up_to_date") return 100;
+    if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.status === "canceled") return 100;
+    if (workspaceUpdateStatus.status === "restarting" || workspaceUpdateStatus.step === "restart_scheduled") return 100;
+    const stepProgress: Record<string, number> = {
+      idle: 0,
+      starting: 5,
+      checking_current_version: 12,
+      checking_remote_version: 22,
+      pulling_latest_code: 38,
+      resolving_conflicting_files: 48,
+      skipping_pull_latest_code: 52,
+      checking_new_version: 58,
+      building_workspace: 82,
+      cancel_requested: 92,
+      restarting_clawd: 96,
+    };
+    return stepProgress[workspaceUpdateStatus.step] ?? (workspaceUpdateRunning ? 50 : 0);
+  })();
+  const workspaceUpdateProgressLabel =
+    workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_workspace"
+      ? t("编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.")
+      : workspaceUpdateStepLabel(workspaceUpdateStatus?.step);
   const workspaceUpdateTimeLabel = (ts?: number | null) => {
     if (!ts) return "--";
     return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
@@ -5076,6 +5131,16 @@ export default function App() {
     .join("\n\n");
   const workspaceUpdateNotice = (() => {
     if (!workspaceUpdateStatus) return null;
+    if (workspaceUpdateStatus.status === "canceled") {
+      return {
+        tone: "info" as const,
+        title: t("编译已停止。", "Build stopped."),
+        detail: t(
+          "当前编译进程已结束；如果需要继续，请修复问题后重新点击完整编译。",
+          "The current build process has ended. Fix any issues and run Build All again when ready.",
+        ),
+      };
+    }
     if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.error) {
       return {
         tone: "error" as const,
@@ -5784,6 +5849,21 @@ export default function App() {
                             ? t("拉取并编译", "Pull and Build")
                             : t("完整编译", "Build All")}
                       </button>
+                      {workspaceUpdateStatus?.status === "running" ? (
+                        <button
+                          type="button"
+                          onClick={() => void cancelWorkspaceUpdate()}
+                          disabled={workspaceUpdateCanceling || systemRestarting}
+                          className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
+                        >
+                          {workspaceUpdateCanceling ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <X className="h-4 w-4" />
+                          )}
+                          {workspaceUpdateCanceling ? t("停止中", "Stopping") : t("停止编译", "Stop Build")}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => {
@@ -5852,6 +5932,28 @@ export default function App() {
                     {piAppRestartMessage}
                   </p>
                 ) : null}
+
+                <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-white/85">{t("编译进度", "Build Progress")}</p>
+                    <span className="font-mono text-xs text-white/55">{workspaceUpdateProgressPercent}%</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        workspaceUpdateDisplayStatus === "failed"
+                          ? "bg-red-300"
+                          : workspaceUpdateDisplayStatus === "canceled"
+                            ? "bg-amber-300"
+                            : workspaceUpdateDisplayStatus === "up_to_date" || workspaceUpdateRestarting
+                              ? "bg-emerald-300"
+                              : "bg-sky-300"
+                      }`}
+                      style={{ width: `${workspaceUpdateProgressPercent}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-white/50">{workspaceUpdateProgressLabel}</p>
+                </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-4">
                   <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">

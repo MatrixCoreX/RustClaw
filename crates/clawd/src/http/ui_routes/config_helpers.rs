@@ -4,6 +4,12 @@ fn workspace_update_state() -> Arc<Mutex<WorkspaceUpdateStatus>> {
         .clone()
 }
 
+fn workspace_update_control() -> Arc<Mutex<WorkspaceUpdateControl>> {
+    WORKSPACE_UPDATE_CONTROL
+        .get_or_init(|| Arc::new(Mutex::new(WorkspaceUpdateControl::default())))
+        .clone()
+}
+
 fn hide_skill_in_ui(_state: &AppState, _name: &str) -> bool {
     false
 }
