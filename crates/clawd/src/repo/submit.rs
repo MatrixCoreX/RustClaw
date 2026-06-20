@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use claw_core::types::{AuthIdentity, ChannelKind, SubmitTaskRequest};
 use rusqlite::{params, OptionalExtension};
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
@@ -47,6 +47,11 @@ pub(crate) struct RecentFailedResumeContext {
     pub(crate) resume_context: Value,
     pub(crate) failed_ts: i64,
     pub(crate) has_newer_successful_ask_after_failed_task: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveCheckpointResumeContext {
+    pub(crate) resume_context: Value,
 }
 
 pub(crate) fn maybe_find_submit_task_dedup(
@@ -436,6 +441,79 @@ pub(crate) fn find_recent_failed_resume_context(
                 has_newer_successful_ask_after_failed_task,
             });
         }
+    }
+    None
+}
+
+pub(crate) fn find_active_checkpoint_resume_context(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+) -> Option<ActiveCheckpointResumeContext> {
+    let db = state.core.db.get().ok()?;
+    let mut stmt = db
+        .prepare(
+            "SELECT task_id,
+                    result_json,
+                    CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER)
+             FROM tasks
+             WHERE user_id = ?1
+               AND chat_id = ?2
+               AND kind = 'ask'
+               AND status = 'running'
+               AND result_json IS NOT NULL
+             ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
+             LIMIT 24",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![user_id, chat_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+            ))
+        })
+        .ok()?;
+    for row in rows.flatten() {
+        let (task_id, result_json, updated_ts) = row;
+        let Some(result_json) = result_json else {
+            continue;
+        };
+        let Ok(result) = serde_json::from_str::<Value>(&result_json) else {
+            continue;
+        };
+        let lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
+            "running",
+            Some(&result),
+            (updated_ts > 0).then_some(updated_ts),
+        );
+        let state = lifecycle
+            .get("state")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if !matches!(state, "waiting" | "background" | "needs_user") {
+            continue;
+        }
+        let checkpoint_id = lifecycle
+            .get("checkpoint_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if checkpoint_id.is_empty() {
+            continue;
+        }
+        let mut resume_context = json!({
+            "source": "active_checkpoint_resume",
+            "task_id": task_id,
+            "updated_ts": updated_ts,
+            "task_lifecycle": lifecycle,
+        });
+        if let Some(checkpoint) = crate::task_lifecycle::task_checkpoint_from_result_json(&result) {
+            resume_context["task_checkpoint"] = checkpoint.to_machine_json();
+        }
+        return Some(ActiveCheckpointResumeContext { resume_context });
     }
     None
 }

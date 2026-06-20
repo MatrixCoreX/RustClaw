@@ -21,8 +21,8 @@ use super::super::{
     attach_pending_channel_bind_session_install_flow, bind_channel_identity,
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, feishud_process_stats,
-    factory_reset_auth_state, finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    exchange_credential_status_for_user_key, factory_reset_auth_state, feishud_process_stats,
+    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
@@ -31,8 +31,8 @@ use super::super::{
     resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
     update_auth_key_by_id, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
     verify_webd_password_login, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
-    whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LlmProviderRuntime,
-    FactoryResetDbResult, LocalInteractionContext, PendingChannelBindSession,
+    whatsappd_process_stats, ApiResponse, AppState, FactoryResetDbResult, HealthResponse,
+    LlmProviderRuntime, LocalInteractionContext, PendingChannelBindSession,
 };
 use crate::ClaimedTask;
 use claw_core::types::{
@@ -157,7 +157,14 @@ impl WorkspaceUpdateConflictPaths {
     }
 }
 
+#[derive(Debug, Default)]
+struct WorkspaceUpdateControl {
+    cancel_requested: bool,
+    active_child_pid: Option<u32>,
+}
+
 static WORKSPACE_UPDATE_STATE: OnceLock<Arc<Mutex<WorkspaceUpdateStatus>>> = OnceLock::new();
+static WORKSPACE_UPDATE_CONTROL: OnceLock<Arc<Mutex<WorkspaceUpdateControl>>> = OnceLock::new();
 
 pub(crate) fn build_ui_router() -> Router<AppState> {
     Router::new()
@@ -221,6 +228,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route(
             "/admin/workspace-update",
             get(get_workspace_update).post(start_workspace_update),
+        )
+        .route(
+            "/admin/workspace-update/cancel",
+            post(cancel_workspace_update),
         )
         .route("/admin/factory-reset", post(factory_reset_handler))
         .route("/local/interaction-context", get(local_interaction_context))
