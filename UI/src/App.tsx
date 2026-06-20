@@ -292,6 +292,27 @@ interface MemorySettingsResult {
   restart_required: boolean;
 }
 
+interface FactoryResetResponse {
+  status: string;
+  admin_user_key: string;
+  webd_username: string;
+  webd_password: string;
+  database?: Record<string, number>;
+  config?: {
+    files_scanned: number;
+    files_updated: number;
+    fields_cleared: number;
+    errors?: string[];
+  };
+  logs?: {
+    files_deleted: number;
+    directories_deleted: number;
+    bytes_deleted: number;
+    errors?: string[];
+  };
+  warnings?: string[];
+}
+
 interface ImportedSkillResponse {
   skill_name: string;
   display_name: string;
@@ -1030,6 +1051,8 @@ const NNI_RUNTIME_TILES = Array.from({ length: 32 }, (_, index) => {
   };
 });
 const NNI_HEARTBEAT_RECORDS_PAGE_SIZE = 10;
+const FACTORY_RESET_CONFIRM_WORD = "RESET";
+const FACTORY_RESET_COUNTDOWN_SECONDS = 10;
 
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
@@ -1244,6 +1267,12 @@ export default function App() {
   const [webdLoginEditorKeyId, setWebdLoginEditorKeyId] = useState<number | null>(null);
   const [webdLoginUsernameDraft, setWebdLoginUsernameDraft] = useState("");
   const [webdLoginPasswordDraft, setWebdLoginPasswordDraft] = useState("");
+  const [factoryResetDialogOpen, setFactoryResetDialogOpen] = useState(false);
+  const [factoryResetCountdown, setFactoryResetCountdown] = useState(FACTORY_RESET_COUNTDOWN_SECONDS);
+  const [factoryResetConfirmText, setFactoryResetConfirmText] = useState("");
+  const [factoryResetLoading, setFactoryResetLoading] = useState(false);
+  const [factoryResetError, setFactoryResetError] = useState<string | null>(null);
+  const [factoryResetResult, setFactoryResetResult] = useState<FactoryResetResponse | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
   const [logTailLines, setLogTailLines] = useState(200);
@@ -1280,6 +1309,14 @@ export default function App() {
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [navDropdownOpen]);
+
+  useEffect(() => {
+    if (!factoryResetDialogOpen || factoryResetResult || factoryResetCountdown <= 0) return;
+    const timer = window.setTimeout(() => {
+      setFactoryResetCountdown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [factoryResetCountdown, factoryResetDialogOpen, factoryResetResult]);
 
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
@@ -2450,6 +2487,67 @@ export default function App() {
       setAuthKeyActionLoading(null);
     }
   };
+
+  const openFactoryResetDialog = () => {
+    setFactoryResetDialogOpen(true);
+    setFactoryResetCountdown(FACTORY_RESET_COUNTDOWN_SECONDS);
+    setFactoryResetConfirmText("");
+    setFactoryResetError(null);
+    setFactoryResetResult(null);
+  };
+
+  const clearLocalAuthAfterFactoryReset = (result: FactoryResetResponse) => {
+    authFlowEpochRef.current += 1;
+    window.localStorage.removeItem(STORAGE_KEYS.userKey);
+    window.localStorage.removeItem(STORAGE_KEYS.authMode);
+    setAuthMode(null);
+    setUiKey("");
+    setUiKeyDraft(result.admin_user_key);
+    setUiAuthReady(false);
+    setUiAuthLoading(false);
+    setAuthIdentity(null);
+    setAuthMeError(null);
+    setInteractionUserId(null);
+    setInteractionChatId(null);
+    setInteractionRole("-");
+    setLoginTab("webd");
+    setWebdUsername(result.webd_username || "rustclaw");
+    setWebdPassword("");
+    setAuthKeysList([]);
+  };
+
+  const closeFactoryResetDialog = () => {
+    if (factoryResetLoading) return;
+    setFactoryResetDialogOpen(false);
+    setFactoryResetConfirmText("");
+    setFactoryResetError(null);
+    setFactoryResetCountdown(FACTORY_RESET_COUNTDOWN_SECONDS);
+  };
+
+  const runFactoryReset = async () => {
+    if (factoryResetCountdown > 0 || factoryResetConfirmText.trim() !== FACTORY_RESET_CONFIRM_WORD) {
+      setFactoryResetError(
+        t(
+          `请等待倒计时结束，并输入 ${FACTORY_RESET_CONFIRM_WORD} 后再继续。`,
+          `Wait for the countdown to finish and type ${FACTORY_RESET_CONFIRM_WORD} before continuing.`,
+        ),
+      );
+      return;
+    }
+    setFactoryResetLoading(true);
+    setFactoryResetError(null);
+    try {
+      const res = await apiFetch("/v1/admin/factory-reset", { method: "POST" });
+      const data = await readApiBody<FactoryResetResponse>(res, "factory reset");
+      setFactoryResetResult(data);
+      clearLocalAuthAfterFactoryReset(data);
+    } catch (err) {
+      setFactoryResetError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+    } finally {
+      setFactoryResetLoading(false);
+    }
+  };
+
   const promptCreateCustomAuthKey = async () => {
     const role = window.prompt(
       t("请输入自定义角色名称，例如 operator / reviewer / finance", "Enter a custom role, such as operator / reviewer / finance"),
@@ -2800,10 +2898,10 @@ export default function App() {
         page: String(safePage),
         per_page: String(NNI_HEARTBEAT_RECORDS_PAGE_SIZE),
       });
-      const res = await apiFetch(`/v1/nni/heartbeat/records?${params.toString()}`);
+      const res = await apiFetch(`/v1/nni/records?${params.toString()}`);
       const body = (await res.json()) as ApiResponse<NniHeartbeatRecordsResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `NNI heartbeat records load failed (${res.status})`);
+        throw new Error(body.error || `NNI request records load failed (${res.status})`);
       }
       setNniHeartbeatRecords(body.data.records ?? []);
       setNniHeartbeatRecordsPage(body.data.page || safePage);
@@ -2812,7 +2910,7 @@ export default function App() {
       setNniHeartbeatRecordsNode(body.data.node_url || "");
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
-      setNniHeartbeatRecordsError(message);
+      if (!silent) setNniHeartbeatRecordsError(message);
     } finally {
       if (!silent) setNniHeartbeatRecordsLoading(false);
     }
@@ -2905,6 +3003,7 @@ export default function App() {
           "The device signature was verified by the server, and NNI is now running.",
         ),
       );
+      await fetchNniHeartbeatRecords(1, true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniActionError(message);
@@ -5022,35 +5121,192 @@ export default function App() {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const isDashboardPage = currentPage === "dashboard";
+  const factoryResetCanConfirm =
+    factoryResetCountdown <= 0 &&
+    factoryResetConfirmText.trim() === FACTORY_RESET_CONFIRM_WORD &&
+    !factoryResetLoading &&
+    !factoryResetResult;
+  const factoryResetDeletedTotal = factoryResetResult?.database
+    ? Object.values(factoryResetResult.database).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0)
+    : 0;
+  const factoryResetModal = factoryResetDialogOpen ? (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-3 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-2xl border border-red-400/30 bg-[#151923] p-5 text-white shadow-2xl sm:p-6">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl border border-red-400/35 bg-red-500/15 p-3 text-red-100">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-red-200/80">
+              {t("危险操作", "Danger Zone")}
+            </p>
+            <h3 className="mt-2 text-lg font-semibold tracking-tight sm:text-2xl">
+              {factoryResetResult ? t("恢复出厂设置已完成", "Factory Reset Complete") : t("恢复出厂设置", "Factory Reset")}
+            </h3>
+            <p className="mt-2 text-sm leading-7 text-white/70">
+              {factoryResetResult
+                ? t(
+                    "旧登录凭据已经失效。请使用下面的新凭据重新进入控制台。",
+                    "The old credentials are no longer valid. Use the credentials below to sign in again.",
+                  )
+                : t(
+                    "这会删除所有记忆、所有日志、配置文件里的密钥字段、其它用户 key 与通道绑定，并重置管理员登录。",
+                    "This deletes all memories, all logs, secret fields in config files, other user keys, and channel bindings, then resets the admin login.",
+                  )}
+            </p>
+          </div>
+        </div>
+
+        {factoryResetResult ? (
+          <div className="mt-5 space-y-4">
+            <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+              {t("新的管理员凭据已生成。", "New admin credentials have been generated.")}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-widest text-white/45">Admin Key</p>
+                <p className="mt-2 break-all font-mono text-sm text-white/90">{factoryResetResult.admin_user_key}</p>
+                <button
+                  type="button"
+                  onClick={() => void writeTextToClipboard(factoryResetResult.admin_user_key)}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {t("复制", "Copy")}
+                </button>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-widest text-white/45">{t("Web 登录", "Web Login")}</p>
+                <p className="mt-2 text-sm text-white/75">
+                  {t("用户名", "Username")}: <span className="font-mono text-white">{factoryResetResult.webd_username}</span>
+                </p>
+                <p className="mt-1 text-sm text-white/75">
+                  {t("密码", "Password")}: <span className="font-mono text-white">{factoryResetResult.webd_password}</span>
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 text-xs text-white/55 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                {t("数据库删除记录", "Database rows deleted")}: <span className="text-white/85">{factoryResetDeletedTotal}</span>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                {t("配置字段清空", "Config fields cleared")}: <span className="text-white/85">{factoryResetResult.config?.fields_cleared ?? 0}</span>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                {t("日志文件删除", "Log files deleted")}: <span className="text-white/85">{factoryResetResult.logs?.files_deleted ?? 0}</span>
+              </div>
+            </div>
+            {(factoryResetResult.warnings?.length ?? 0) > 0 ? (
+              <div className="max-h-28 overflow-auto rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                {factoryResetResult.warnings?.map((warning) => <p key={warning}>{warning}</p>)}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-5 space-y-4">
+            <div className="grid gap-2 text-sm text-white/72 sm:grid-cols-2">
+              {[
+                t("删除所有记忆和长期事实", "Delete all memories and long-term facts"),
+                t("删除 logs 文件夹下所有日志", "Delete every log under the logs folder"),
+                t("清空配置里的 key/token/secret/password", "Clear key/token/secret/password fields in configs"),
+                t("删除其它用户 key 与绑定", "Delete other user keys and bindings"),
+                t("重置 admin key", "Reset the admin key"),
+                t("用户名重置为 rustclaw，密码重置为 123456", "Reset username to rustclaw and password to 123456"),
+              ].map((item) => (
+                <div key={item} className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-200" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-medium text-red-100">
+                  {factoryResetCountdown > 0
+                    ? t(`请等待 ${factoryResetCountdown} 秒`, `Wait ${factoryResetCountdown}s`)
+                    : t("倒计时结束，可以继续确认。", "Countdown complete. You can continue.")}
+                </p>
+                <span className="rounded-full border border-red-300/25 bg-black/20 px-3 py-1 font-mono text-sm text-red-100">
+                  {factoryResetCountdown}s
+                </span>
+              </div>
+              <label className="mt-3 block space-y-2">
+                <span className="text-xs text-red-100/75">
+                  {t(`输入 ${FACTORY_RESET_CONFIRM_WORD} 确认执行`, `Type ${FACTORY_RESET_CONFIRM_WORD} to confirm`)}
+                </span>
+                <input
+                  className="theme-input"
+                  value={factoryResetConfirmText}
+                  onChange={(e) => setFactoryResetConfirmText(e.target.value)}
+                  disabled={factoryResetLoading}
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {factoryResetError ? (
+          <p className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+            {factoryResetError}
+          </p>
+        ) : null}
+
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={closeFactoryResetDialog}
+            disabled={factoryResetLoading}
+            className="theme-secondary-btn px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {factoryResetResult ? t("返回登录", "Back to Sign In") : t("取消", "Cancel")}
+          </button>
+          {!factoryResetResult ? (
+            <button
+              type="button"
+              onClick={() => void runFactoryReset()}
+              disabled={!factoryResetCanConfirm}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-400/35 bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-50 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {factoryResetLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {factoryResetLoading ? t("正在恢复", "Resetting") : t("确认恢复出厂设置", "Confirm Factory Reset")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (!uiAuthReady) {
     return (
-      <div className="theme-shell min-h-screen px-4 py-8">
-        <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="theme-panel p-6 sm:p-8">
-            <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("欢迎", "Welcome")}</p>
-            <h1 className="mt-4 flex items-center gap-2 text-2xl font-bold sm:text-3xl">
-              <img className="rustclaw-logo rustclaw-logo-hero" src="/rustclaw-logo.svg" alt="" />
-              <span>{t("进入 RustClaw 控制台", "Enter RustClaw Console")}</span>
-            </h1>
-            <p className="mt-4 max-w-xl text-sm leading-7 text-white/70 sm:text-base">
-              {t(
-                "这是给普通用户准备的可视化面板。你不需要先懂命令行，只要填好服务地址和访问 key，就能查看状态、绑定账号、测试消息。",
-                "This is a visual panel designed for everyday users. You do not need the command line first; enter the service address and access key to check status, bind accounts, and test messages.",
-              )}
-            </p>
+      <Fragment>
+        <div className="theme-shell min-h-screen px-4 py-8">
+          <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="theme-panel p-6 sm:p-8">
+              <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("欢迎", "Welcome")}</p>
+              <h1 className="mt-4 flex items-center gap-2 text-2xl font-bold sm:text-3xl">
+                <img className="rustclaw-logo rustclaw-logo-hero" src="/rustclaw-logo.svg" alt="" />
+                <span>{t("进入 RustClaw 控制台", "Enter RustClaw Console")}</span>
+              </h1>
+              <p className="mt-4 max-w-xl text-sm leading-7 text-white/70 sm:text-base">
+                {t(
+                  "这是给普通用户准备的可视化面板。你不需要先懂命令行，只要填好服务地址和访问 key，就能查看状态、绑定账号、测试消息。",
+                  "This is a visual panel designed for everyday users. You do not need the command line first; enter the service address and access key to check status, bind accounts, and test messages.",
+                )}
+              </p>
 
-            <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-sm font-semibold text-white">{t("登录前你需要什么？", "What do you need before signing in?")}</p>
-              <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-white/65">
-                <li>{t("一个已经启动的 RustClaw 服务地址。", "A running RustClaw service address.")}</li>
-                <li>{t("一个有效的 user_key。", "A valid user_key.")}</li>
-                <li>{t("如果不知道接下来该做什么，登录后先看首页。", "If you are not sure what to do next, start with Home after signing in.")}</li>
-              </ol>
+              <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-sm font-semibold text-white">{t("登录前你需要什么？", "What do you need before signing in?")}</p>
+                <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-white/65">
+                  <li>{t("一个已经启动的 RustClaw 服务地址。", "A running RustClaw service address.")}</li>
+                  <li>{t("一个有效的 user_key。", "A valid user_key.")}</li>
+                  <li>{t("如果不知道接下来该做什么，登录后先看首页。", "If you are not sure what to do next, start with Home after signing in.")}</li>
+                </ol>
+              </div>
             </div>
-          </div>
 
-          <div className="theme-panel p-6">
+            <div className="theme-panel p-6">
             <div className="mb-6">
               <h2 className="text-xl font-bold">{t("登录", "Sign in")}</h2>
               <p className="mt-2 text-sm text-white/60">
@@ -5237,13 +5493,16 @@ export default function App() {
               </div>
             </div>
           </div>
+          </div>
         </div>
-      </div>
+        {factoryResetModal}
+      </Fragment>
     );
   }
 
   return (
     <div className="theme-shell min-h-screen">
+      {factoryResetModal}
       <header className="theme-header sticky top-0 z-40 border-b border-white/10 px-3 sm:px-6">
         <div className="theme-header-inner mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 py-2">
           <div className="min-w-0">
@@ -5272,9 +5531,9 @@ export default function App() {
               </button>
               {navDropdownOpen && (
                 <div className="absolute right-0 top-full z-50 mt-1 min-w-[200px] rounded-xl border border-white/10 bg-[var(--theme-header-bg)] py-1 shadow-lg backdrop-blur-sm">
-                  {navItems.map((item) => {
-                    const active = currentPage === item.id;
-                    return (
+	                  {navItems.map((item) => {
+	                    const active = currentPage === item.id;
+	                    return (
                       <button
                         key={item.id}
                         type="button"
@@ -5289,10 +5548,25 @@ export default function App() {
                         <span className={active ? "theme-icon-soft" : "text-white/70"}>{item.icon}</span>
                         <span>{item.label}</span>
                       </button>
-                    );
-                  })}
-                </div>
-              )}
+	                    );
+	                  })}
+                  {isAdminIdentity ? (
+                    <div className="mt-1 border-t border-white/10 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNavDropdownOpen(false);
+                          openFactoryResetDialog();
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-100 transition hover:bg-red-500/10"
+                      >
+                        <ShieldAlert className="h-4 w-4" />
+                        <span>{t("恢复出厂设置", "Factory Reset")}</span>
+                      </button>
+                    </div>
+                  ) : null}
+	                </div>
+	              )}
             </div>
             <div className="theme-toolbar-shell">
               <button
@@ -5328,9 +5602,9 @@ export default function App() {
               <p className="theme-kicker text-[10px] uppercase tracking-[0.3em]">{t("导航", "Navigation")}</p>
             </div>
             <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible">
-              {navItems.map((item) => {
-                const active = currentPage === item.id;
-                return (
+	              {navItems.map((item) => {
+	                const active = currentPage === item.id;
+	                return (
                   <button
                     key={item.id}
                     type="button"
@@ -5350,11 +5624,22 @@ export default function App() {
                       <span className="text-sm font-medium leading-5">{item.label}</span>
                     </div>
                   </button>
-                );
-              })}
-            </nav>
+	                );
+	              })}
+	            </nav>
 
-            <div className="theme-panel-soft mt-3 p-3.5 text-sm text-white/70">
+            {isAdminIdentity ? (
+              <button
+                type="button"
+                onClick={openFactoryResetDialog}
+                className="mt-3 flex w-full items-center gap-2 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2.5 text-left text-sm font-medium text-red-100 transition hover:bg-red-500/15"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                <span>{t("恢复出厂设置", "Factory Reset")}</span>
+              </button>
+            ) : null}
+
+	            <div className="theme-panel-soft mt-3 p-3.5 text-sm text-white/70">
               <p className="font-medium text-white">{t("当前登录身份", "Current identity")}</p>
               {authMode === "webd" ? (
                 <div className="mt-2 space-y-1 text-xs text-white/55">
@@ -6159,9 +6444,9 @@ export default function App() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
-                      {t("心跳记录", "Heartbeat records")}
+                      {t("NNI 请求记录", "NNI request records")}
                     </p>
-                    <h4 className="mt-2 text-lg font-semibold">{t("远程服务端记录", "Remote server records")}</h4>
+                    <h4 className="mt-2 text-lg font-semibold">{t("远程服务端请求记录", "Remote server request records")}</h4>
                     <p className="mt-2 text-sm leading-6 text-white/60">
                       {t(
                         `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${NNI_HEARTBEAT_RECORDS_PAGE_SIZE} 条。`,
@@ -6185,7 +6470,7 @@ export default function App() {
 
                 {nniHeartbeatRecordsError ? (
                   <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-                    {t("心跳记录暂时无法载入：", "Heartbeat records could not be loaded: ")}
+                    {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
                     {nniHeartbeatRecordsError}
                   </p>
                 ) : null}
@@ -6194,8 +6479,11 @@ export default function App() {
                   {nniHeartbeatRecords.length === 0 ? (
                     <p className="px-4 py-5 text-sm text-white/55">
                       {nniHeartbeatRecordsLoading
-                        ? t("正在载入心跳记录...", "Loading heartbeat records...")
-                        : t("远程服务端还没有心跳记录。", "The remote server has no heartbeat records yet.")}
+                        ? t("正在载入 NNI 请求记录...", "Loading NNI request records...")
+                        : t(
+                            "远程服务端还没有 NNI 请求记录。首次加入成功后会显示在这里。",
+                            "The remote server has no NNI request records yet. The first successful Join will appear here.",
+                          )}
                     </p>
                   ) : (
                     nniHeartbeatRecords.map((record) => {
@@ -6216,6 +6504,12 @@ export default function App() {
                               : record.status === "expired"
                                 ? t("已过期", "Expired")
                                 : record.status || t("未知", "Unknown");
+                      const kindLabel =
+                        record.request_kind === "nni_join"
+                          ? t("加入", "Join")
+                          : record.request_kind === "nni_heartbeat"
+                            ? t("心跳", "Heartbeat")
+                            : record.request_kind || t("请求", "Request");
                       return (
                         <div
                           key={`${record.id ?? record.task_id ?? "heartbeat"}-${record.created_at_ts ?? 0}`}
@@ -6224,6 +6518,9 @@ export default function App() {
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className={statusClass}>{statusLabel}</span>
+                              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] font-semibold text-white/55">
+                                {kindLabel}
+                              </span>
                               <span className="font-mono text-xs text-white/45">#{record.id ?? "--"}</span>
                             </div>
                             <span className="text-xs text-white/50">{formatUnixDateTime(record.created_at_ts)}</span>

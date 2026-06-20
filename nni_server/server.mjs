@@ -268,12 +268,17 @@ function publicRequestRecord(record) {
   };
 }
 
-async function handleHeartbeatRecords(res, url) {
+function isNniRequestRecord(record) {
+  const kind = record.request_kind || "nni_join";
+  return kind === "nni_join" || kind === "nni_heartbeat";
+}
+
+async function handleNniRequestRecords(res, url) {
   const page = parsePositiveInt(url.searchParams.get("page"), 1, 1000000);
   const perPage = parsePositiveInt(url.searchParams.get("per_page"), 10, 100);
   const state = await loadState();
   const records = state.requests
-    .filter((record) => (record.request_kind || "nni_join") === "nni_heartbeat")
+    .filter(isNniRequestRecord)
     .sort((left, right) => {
       const tsDelta = (right.created_at_ts || 0) - (left.created_at_ts || 0);
       if (tsDelta !== 0) return tsDelta;
@@ -287,7 +292,7 @@ async function handleHeartbeatRecords(res, url) {
     res,
     200,
     ok({
-      status: "heartbeat_records",
+      status: "nni_request_records",
       page,
       per_page: perPage,
       total,
@@ -706,8 +711,11 @@ const server = createServer(async (req, res) => {
       sendJson(res, 200, ok({ service: "nni-server", status: "ok" }));
       return;
     }
-    if (req.method === "GET" && url.pathname === "/v1/nni/server/heartbeat/records") {
-      await handleHeartbeatRecords(res, url);
+    if (
+      req.method === "GET" &&
+      (url.pathname === "/v1/nni/server/records" || url.pathname === "/v1/nni/server/heartbeat/records")
+    ) {
+      await handleNniRequestRecords(res, url);
       return;
     }
     if (req.method !== "POST") {
