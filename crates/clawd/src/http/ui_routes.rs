@@ -103,6 +103,7 @@ const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 struct WorkspaceUpdateStatus {
     status: String,
     step: String,
+    mode: String,
     started_ts: Option<i64>,
     finished_ts: Option<i64>,
     old_commit: Option<String>,
@@ -120,6 +121,7 @@ impl Default for WorkspaceUpdateStatus {
         Self {
             status: "idle".to_string(),
             step: "idle".to_string(),
+            mode: "full".to_string(),
             started_ts: None,
             finished_ts: None,
             old_commit: None,
@@ -228,6 +230,14 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route(
             "/admin/workspace-update",
             get(get_workspace_update).post(start_workspace_update),
+        )
+        .route(
+            "/admin/workspace-update/build-ui",
+            post(start_workspace_update_ui_only),
+        )
+        .route(
+            "/admin/workspace-update/build-clawd",
+            post(start_workspace_update_clawd_only),
         )
         .route(
             "/admin/workspace-update/cancel",
