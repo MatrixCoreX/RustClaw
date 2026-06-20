@@ -85,6 +85,24 @@ nginx_main_conf_path() {
   printf '%s\n' "/etc/nginx/nginx.conf"
 }
 
+nginx_main_conf_includes_dir() {
+  local main_conf="$1"
+  local include_dir="$2"
+  local include_conf="include ${include_dir}/*.conf;"
+  local include_any="include ${include_dir}/*;"
+  [[ -f "$main_conf" ]] || return 1
+  awk -v include_conf="$include_conf" -v include_any="$include_any" '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line ~ /^#/) next
+      if (line == include_conf || line == include_any) found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$main_conf"
+}
+
 nginx_site_link_path() {
   local conf_path="$1"
   if [[ "$HOST_OS" == "macos" ]]; then
@@ -595,7 +613,7 @@ ensure_nginx_site_include() {
   local include_dir="$2"
   local include_line="    include ${include_dir}/*.conf;"
   [[ -f "$main_conf" ]] || return 0
-  if grep -Fq "$include_line" "$main_conf"; then
+  if nginx_main_conf_includes_dir "$main_conf" "$include_dir"; then
     return 0
   fi
   if [[ -w "$main_conf" ]]; then
@@ -606,8 +624,6 @@ import sys
 conf_path = Path(sys.argv[1])
 include_line = sys.argv[2]
 text = conf_path.read_text(encoding="utf-8")
-if include_line in text:
-    raise SystemExit(0)
 needle = "http {"
 idx = text.find(needle)
 if idx < 0:
@@ -629,9 +645,6 @@ conf_path = Path(sys.argv[1])
 include_line = sys.argv[2]
 tmp_path = Path(sys.argv[3])
 text = conf_path.read_text(encoding="utf-8")
-if include_line in text:
-    tmp_path.write_text(text, encoding="utf-8")
-    raise SystemExit(0)
 needle = "http {"
 idx = text.find(needle)
 if idx < 0:
