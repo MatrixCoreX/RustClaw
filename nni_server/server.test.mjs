@@ -127,6 +127,26 @@ test("join request accepts public keys injected through the whitelist env", asyn
   assert.deepEqual(state.public_key_whitelist, [VALID_PUBKEY]);
 });
 
+test("join request retry interval is one minute", async (t) => {
+  const server = await startServer({ publicKeyWhitelist: VALID_PUBKEY });
+  t.after(() => server.stop());
+
+  const request = {
+    device_pubkey: VALID_PUBKEY,
+    client_user_key: "ui-user",
+  };
+  const first = await postJson(server.baseUrl, "/v1/nni/server/join/request", request);
+  assert.equal(first.status, 200);
+
+  const second = await postJson(server.baseUrl, "/v1/nni/server/join/request", request);
+  assert.equal(second.status, 429);
+  assert.equal(second.body.ok, false);
+  assert.equal(second.body.error, "nni_join_request_interval_active");
+  assert.equal(second.body.data.request_interval_seconds, 60);
+  assert.equal(second.body.data.retry_after_seconds <= 60, true);
+  assert.equal(second.body.data.status, "request_interval_active");
+});
+
 test("join verify rejects tasks whose public key is no longer whitelisted", async (t) => {
   const now = Math.floor(Date.now() / 1000);
   const taskId = "nni-join-test";
