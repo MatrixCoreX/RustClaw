@@ -621,7 +621,11 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
 fn recent_artifacts_delivery_is_machine_field_dump(delivery: &str) -> bool {
     let mut nonempty_lines = 0usize;
     let mut machine_field_lines = 0usize;
-    for line in delivery.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         nonempty_lines += 1;
         if line
             .split_once('=')
