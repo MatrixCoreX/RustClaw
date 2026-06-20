@@ -702,6 +702,7 @@ async fn main() -> anyhow::Result<()> {
     );
     spawn_cleanup_worker(state.clone());
     spawn_schedule_worker(state.clone());
+    http::ui_routes::spawn_nni_heartbeat_worker(state.clone());
 
     let ui_index_path = ui_dist_dir.join("index.html");
     if ui_index_path.exists() {
