@@ -1,10 +1,11 @@
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
 use crate::{
     executor::{StepExecutionResult, StepExecutionStatus},
-    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-    ResumeBehavior, RiskCeiling, ScheduleKind,
+    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind,
+    OutputSemanticKind, ResumeBehavior, RiskCeiling, ScheduleKind,
 };
 
 fn route_with_contract(output_contract: IntentOutputContract) -> RouteResult {
@@ -46,6 +47,33 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         error: None,
         started_at: 1,
         finished_at: 2,
+    }
+}
+
+struct TempDirGuard {
+    path: std::path::PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(prefix: &str) -> Self {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time before unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "clawd_recent_artifacts_{prefix}_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -115,14 +143,19 @@ fn recent_artifacts_judgment_expands_listing_only_to_selected_content_reads() {
         .and_then(|path| path.parent())
         .expect("repo root")
         .to_path_buf();
-    let route = route_with_contract(IntentOutputContract {
+    let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::Free,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::Path,
         semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
         locator_hint: "configs".to_string(),
         ..IntentOutputContract::default()
-    });
+    };
+    contract.self_extension.list_selector.target_kind = OutputScalarCountTargetKind::File;
+    contract.self_extension.list_selector.target_kind_specified = true;
+    contract.self_extension.list_selector.limit = Some(3);
+    contract.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
+    let route = route_with_contract(contract);
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({
@@ -162,6 +195,82 @@ fn recent_artifacts_judgment_expands_listing_only_to_selected_content_reads() {
     assert!(
         matches!(normalized.last(), Some(AgentAction::Respond { content }) if content == "{{last_output}}"),
         "{normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_judgment_any_selector_keeps_mixed_inventory() {
+    let temp = TempDirGuard::new("mixed_inventory");
+    std::fs::create_dir_all(temp.path.join("bundle_src")).expect("create bundle dir");
+    std::fs::create_dir_all(temp.path.join("manual_unpack")).expect("create unpack dir");
+    std::fs::write(temp.path.join("test_bundle.zip"), b"zip bytes").expect("write test bundle");
+
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = temp.path.clone();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: ".".to_string(),
+        ..IntentOutputContract::default()
+    };
+    contract.self_extension.list_selector.limit = Some(3);
+    contract.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
+    let route = route_with_contract(contract);
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "list_dir",
+            "path": ".",
+            "sort_by": "mtime_desc",
+            "max_entries": 3,
+            "files_only": true,
+            "names_only": true,
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        &route.resolved_intent,
+        None,
+        actions,
+    );
+
+    let listing_args =
+        planned_call(&normalized[0], "fs_basic", "list_dir").expect("normalized listing");
+    assert_eq!(
+        listing_args.get("files_only").and_then(Value::as_bool),
+        Some(false),
+        "{normalized:?}"
+    );
+    assert_eq!(
+        listing_args.get("dirs_only").and_then(Value::as_bool),
+        Some(false),
+        "{normalized:?}"
+    );
+    assert_eq!(
+        listing_args.get("names_only").and_then(Value::as_bool),
+        Some(false),
+        "{normalized:?}"
+    );
+    assert_eq!(
+        listing_args.get("max_entries").and_then(Value::as_u64),
+        Some(3),
+        "{normalized:?}"
+    );
+    assert_eq!(
+        listing_args.get("sort_by").and_then(Value::as_str),
+        Some("mtime_desc"),
+        "{normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .all(|action| planned_call(action, "fs_basic", "read_text_range").is_none()),
+        "mixed selectors should not force binary file reads: {normalized:?}"
     );
 }
 

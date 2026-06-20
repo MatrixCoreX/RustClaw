@@ -3,7 +3,94 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use super::LoopState;
-use crate::{AgentAction, OutputSemanticKind, RouteResult};
+use crate::{AgentAction, OutputScalarCountTargetKind, OutputSemanticKind, RouteResult};
+
+pub(super) fn normalize_recent_artifacts_listing_selectors(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.output_contract.semantic_kind != OutputSemanticKind::RecentArtifactsJudgment {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| normalize_recent_artifacts_listing_action(route, action))
+        .collect()
+}
+
+fn normalize_recent_artifacts_listing_action(
+    route: &RouteResult,
+    action: AgentAction,
+) -> AgentAction {
+    match action {
+        AgentAction::CallTool { tool, mut args } => {
+            apply_recent_artifact_listing_selector(route, tool.as_str(), &mut args);
+            AgentAction::CallTool { tool, args }
+        }
+        AgentAction::CallSkill { skill, mut args } => {
+            apply_recent_artifact_listing_selector(route, skill.as_str(), &mut args);
+            AgentAction::CallSkill { skill, args }
+        }
+        AgentAction::CallCapability {
+            capability,
+            mut args,
+        } => {
+            apply_recent_artifact_listing_selector(route, capability.as_str(), &mut args);
+            AgentAction::CallCapability { capability, args }
+        }
+        other => other,
+    }
+}
+
+fn apply_recent_artifact_listing_selector(route: &RouteResult, skill: &str, args: &mut Value) {
+    if !action_is_recent_artifacts_listing_parts(skill, args) {
+        return;
+    }
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+    match recent_artifact_selector_target_kind(route) {
+        OutputScalarCountTargetKind::File => {
+            obj.insert("files_only".to_string(), Value::Bool(true));
+            obj.insert("dirs_only".to_string(), Value::Bool(false));
+        }
+        OutputScalarCountTargetKind::Dir => {
+            obj.insert("dirs_only".to_string(), Value::Bool(true));
+            obj.insert("files_only".to_string(), Value::Bool(false));
+        }
+        OutputScalarCountTargetKind::Any => {
+            obj.insert("files_only".to_string(), Value::Bool(false));
+            obj.insert("dirs_only".to_string(), Value::Bool(false));
+        }
+    }
+    obj.insert("names_only".to_string(), Value::Bool(false));
+    if let Some(limit) = recent_artifact_selector_limit(route) {
+        obj.insert(
+            "max_entries".to_string(),
+            Value::Number(serde_json::Number::from(limit)),
+        );
+    }
+    if let Some(sort_by) = recent_artifact_selector_sort_by(route) {
+        obj.insert("sort_by".to_string(), Value::String(sort_by));
+    }
+    if let Some(include_hidden) = route
+        .output_contract
+        .self_extension
+        .list_selector
+        .include_hidden
+        .or_else(|| {
+            selector_bool_machine_token(route.resolved_intent.as_str(), "selector_include_hidden")
+        })
+        .or_else(|| {
+            selector_bool_machine_token(route.route_reason.as_str(), "selector_include_hidden")
+        })
+    {
+        obj.insert("include_hidden".to_string(), Value::Bool(include_hidden));
+    }
+}
 
 pub(super) fn rewrite_recent_artifacts_field_extraction_to_selected_file_reads(
     route_result: Option<&RouteResult>,
@@ -32,13 +119,15 @@ pub(super) fn rewrite_recent_artifacts_field_extraction_to_selected_file_reads(
         return actions;
     }
 
+    let selector_target_kind = recent_artifact_selector_target_kind(route);
     let mut include_planned_listing = false;
-    let mut paths = latest_selected_file_paths(loop_state, 4);
+    let mut paths = latest_selected_file_paths_for_selector(route, loop_state, 4);
     if paths.is_empty() {
-        paths = planned_recent_artifacts_file_paths(workspace_root, &actions, 4);
+        paths =
+            planned_recent_artifacts_file_paths_for_selector(route, workspace_root, &actions, 4);
         include_planned_listing = !paths.is_empty();
     }
-    if paths.is_empty() {
+    if paths.is_empty() || selector_target_kind == OutputScalarCountTargetKind::Dir {
         return actions;
     }
 
@@ -83,16 +172,27 @@ pub(super) fn rewrite_recent_artifacts_field_extraction_to_selected_file_reads(
     rewritten
 }
 
-fn planned_recent_artifacts_file_paths(
+fn planned_recent_artifacts_file_paths_for_selector(
+    route: &RouteResult,
     workspace_root: &Path,
     actions: &[AgentAction],
     fallback_limit: usize,
 ) -> Vec<String> {
-    actions
+    if recent_artifact_selector_target_kind(route) == OutputScalarCountTargetKind::Dir {
+        return Vec::new();
+    }
+    let Some(request) = actions
         .iter()
         .find_map(|action| planned_listing_request(action, fallback_limit))
-        .map(|request| newest_files_for_listing_request(workspace_root, &request))
-        .unwrap_or_default()
+    else {
+        return Vec::new();
+    };
+    if recent_artifact_selector_target_kind(route) == OutputScalarCountTargetKind::Any
+        && planned_listing_request_may_select_dirs(workspace_root, &request)
+    {
+        return Vec::new();
+    }
+    newest_files_for_listing_request(workspace_root, &request)
 }
 
 #[derive(Debug)]
@@ -181,6 +281,22 @@ fn resolve_planned_dir(workspace_root: &Path, path: &str) -> PathBuf {
     }
 }
 
+fn planned_listing_request_may_select_dirs(
+    workspace_root: &Path,
+    request: &PlannedListingRequest,
+) -> bool {
+    let dir = resolve_planned_dir(workspace_root, &request.path);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        entry
+            .file_type()
+            .ok()
+            .is_some_and(|file_type| file_type.is_dir())
+    })
+}
+
 fn display_planned_child_path(
     workspace_root: &Path,
     requested_dir: &str,
@@ -211,6 +327,10 @@ fn action_is_recent_artifacts_listing(action: &AgentAction) -> bool {
         AgentAction::CallCapability { capability, args } => (capability.as_str(), args),
         _ => return false,
     };
+    action_is_recent_artifacts_listing_parts(skill, args)
+}
+
+fn action_is_recent_artifacts_listing_parts(skill: &str, args: &Value) -> bool {
     let action_name = args
         .get("action")
         .and_then(Value::as_str)
@@ -298,6 +418,48 @@ fn latest_selected_file_paths(loop_state: &LoopState, limit: usize) -> Vec<Strin
         .unwrap_or_default()
 }
 
+fn latest_selected_file_paths_for_selector(
+    route: &RouteResult,
+    loop_state: &LoopState,
+    limit: usize,
+) -> Vec<String> {
+    match recent_artifact_selector_target_kind(route) {
+        OutputScalarCountTargetKind::Dir => Vec::new(),
+        OutputScalarCountTargetKind::File => latest_selected_file_paths(loop_state, limit),
+        OutputScalarCountTargetKind::Any => {
+            latest_selected_file_paths_if_entries_are_files(loop_state, limit)
+        }
+    }
+}
+
+fn latest_selected_file_paths_if_entries_are_files(
+    loop_state: &LoopState,
+    limit: usize,
+) -> Vec<String> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() {
+            continue;
+        }
+        let Some(output) = step.output.as_deref() else {
+            continue;
+        };
+        if selected_output_contains_non_file_entry(output) {
+            return Vec::new();
+        }
+        let paths = selected_file_paths_from_output(output, limit);
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+    let Some(output) = loop_state.last_output.as_deref() else {
+        return Vec::new();
+    };
+    if selected_output_contains_non_file_entry(output) {
+        return Vec::new();
+    }
+    selected_file_paths_from_output(output, limit)
+}
+
 fn selected_file_paths_from_output(output: &str, limit: usize) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
         return Vec::new();
@@ -337,4 +499,93 @@ fn selected_file_paths_from_value(value: &Value, limit: usize) -> Vec<String> {
         paths.push(path.to_string());
     }
     paths
+}
+
+fn selected_output_contains_non_file_entry(output: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
+        return false;
+    };
+    selected_value_contains_non_file_entry(&value)
+        || value
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(selected_output_contains_non_file_entry)
+}
+
+fn selected_value_contains_non_file_entry(value: &Value) -> bool {
+    let source = value.get("extra").unwrap_or(value);
+    let Some(entries) = source.get("entries").and_then(Value::as_array) else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        entry
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| !kind.eq_ignore_ascii_case("file"))
+    })
+}
+
+fn recent_artifact_selector_target_kind(route: &RouteResult) -> OutputScalarCountTargetKind {
+    let selector = &route.output_contract.self_extension.list_selector;
+    if selector.target_kind_specified {
+        return selector.target_kind;
+    }
+    selector_target_kind_machine_token(route.resolved_intent.as_str())
+        .or_else(|| selector_target_kind_machine_token(route.route_reason.as_str()))
+        .unwrap_or_default()
+}
+
+fn selector_target_kind_machine_token(text: &str) -> Option<OutputScalarCountTargetKind> {
+    selector_value_machine_token(text, "selector_target_kind").and_then(|raw| match raw.as_str() {
+        "file" => Some(OutputScalarCountTargetKind::File),
+        "dir" => Some(OutputScalarCountTargetKind::Dir),
+        "any" => Some(OutputScalarCountTargetKind::Any),
+        _ => None,
+    })
+}
+
+fn recent_artifact_selector_limit(route: &RouteResult) -> Option<u64> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .or_else(|| selector_u64_machine_token(route.resolved_intent.as_str(), "selector_limit"))
+        .or_else(|| selector_u64_machine_token(route.route_reason.as_str(), "selector_limit"))
+        .filter(|limit| *limit > 0)
+}
+
+fn recent_artifact_selector_sort_by(route: &RouteResult) -> Option<String> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .sort_by
+        .clone()
+        .or_else(|| {
+            selector_value_machine_token(route.resolved_intent.as_str(), "selector_sort_by")
+        })
+        .or_else(|| selector_value_machine_token(route.route_reason.as_str(), "selector_sort_by"))
+}
+
+fn selector_u64_machine_token(text: &str, key: &str) -> Option<u64> {
+    selector_value_machine_token(text, key).and_then(|raw| raw.parse::<u64>().ok())
+}
+
+fn selector_bool_machine_token(text: &str, key: &str) -> Option<bool> {
+    selector_value_machine_token(text, key).and_then(|raw| match raw.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    })
+}
+
+fn selector_value_machine_token(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | ')' | '('))
+        .filter_map(|part| part.trim().strip_prefix(&prefix))
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .map(ToOwned::to_owned)
+        .next()
 }

@@ -687,9 +687,11 @@ fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":2,"files":1,"hidden":0,"total":3},"entries":[{"hidden":false,"kind":"dir","modified_ts":1781635606,"name":"clarify_unpack_case","path":"scripts/nl_tests/fixtures/device_local/tmp/clarify_unpack_case","size_bytes":0},{"hidden":false,"kind":"file","modified_ts":1781480234,"name":"test_bundle.zip","path":"scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","size_bytes":272},{"hidden":false,"kind":"dir","modified_ts":1781137621,"name":"manual_dynamic_guard_unpack","path":"scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack","size_bytes":0}],"names":["clarify_unpack_case","test_bundle.zip","manual_dynamic_guard_unpack"],"path":"/repo/scripts/nl_tests/fixtures/device_local/tmp","resolved_path":"/repo/scripts/nl_tests/fixtures/device_local/tmp","sort_by":"mtime_desc"}}"#,
     ));
     let incomplete = "recent_entries.count=3";
-    loop_state
-        .executed_step_results
-        .push(ok_step_result("step_2", "synthesize_answer", incomplete));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        incomplete,
+    ));
     loop_state.last_publishable_synthesis_output = Some(incomplete.to_string());
     loop_state.last_user_visible_respond = Some(incomplete.to_string());
     loop_state.delivery_messages.push(incomplete.to_string());
@@ -699,11 +701,7 @@ fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .limit = Some(3);
+    route.output_contract.self_extension.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
