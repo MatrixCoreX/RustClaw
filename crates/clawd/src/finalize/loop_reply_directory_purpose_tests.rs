@@ -727,6 +727,30 @@ fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
 }
 
 #[test]
+fn recent_artifacts_judgment_detects_full_machine_field_delivery() {
+    let delivery = [
+        "recent_entries.count=3",
+        "recent_entries.root=/repo/configs",
+        "recent_entries.sort_by=mtime_desc",
+        "recent_entries[0].name=rss.toml",
+        "recent_entries[0].kind=file",
+        "recent_entries[0].path=configs/rss.toml",
+        "recent_entries[0].classification=formal_config",
+        "classification.output_format=per_entry",
+        "classification=formal_config",
+        "classification.formal_config=true",
+    ]
+    .join("\n");
+
+    assert!(directory_purpose::recent_artifacts_delivery_is_machine_field_dump(&delivery));
+    assert!(
+        !directory_purpose::recent_artifacts_delivery_is_machine_field_dump(
+            "rss.toml, task_contract_matrix.toml, config.toml look like runtime config."
+        )
+    );
+}
+
+#[test]
 fn recent_artifacts_judgment_respects_file_selector_before_limit() {
     let task = claimed_task("task-recent-artifacts-file-selector");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

@@ -39,6 +39,7 @@ mod directory_purpose;
 #[cfg(test)]
 use directory_purpose::direct_directory_purpose_summary_from_size_facts;
 use directory_purpose::{
+    compose_recent_artifacts_machine_field_delivery,
     direct_current_workspace_top_level_dirs_overview_answer,
     replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
@@ -1371,6 +1372,18 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
+    if let Some(rendered) = compose_recent_artifacts_machine_field_delivery(
+        state,
+        task,
+        user_text,
+        agent_run_context,
+        &final_answer_text_from_delivery(&delivery_deduped),
+    )
+    .await
+    {
+        delivery_deduped = vec![rendered.clone()];
+        loop_state.last_user_visible_respond = Some(rendered);
+    }
     let exact_delivery_requested = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(output_contract_requests_exact_delivery)
