@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const JOIN_REQUEST_INTERVAL_SECONDS = 3600;
+const JOIN_REQUEST_INTERVAL_SECONDS = 60;
 const JOIN_TASK_TTL_SECONDS = 600;
 
 const HOST = process.env.NNI_SERVER_HOST || "0.0.0.0";
