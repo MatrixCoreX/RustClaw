@@ -2960,7 +2960,22 @@ export default function App() {
         per_page: String(NNI_HEARTBEAT_ERRORS_PAGE_SIZE),
       });
       const res = await apiFetch(`/v1/nni/heartbeat/errors?${params.toString()}`);
-      const body = (await res.json()) as ApiResponse<NniHeartbeatErrorsResponse>;
+      const rawText = await res.text();
+      let body: ApiResponse<NniHeartbeatErrorsResponse>;
+      try {
+        body = JSON.parse(rawText) as ApiResponse<NniHeartbeatErrorsResponse>;
+      } catch {
+        const trimmed = rawText.trim().toLowerCase();
+        if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+          throw new Error(
+            t(
+              "后端心跳错误接口还不可用，通常是 clawd 还没更新或正在重启。请等待编译重启完成后再刷新。",
+              "The backend heartbeat error endpoint is not available yet. clawd is usually still updating or restarting; refresh after the build restart completes.",
+            ),
+          );
+        }
+        throw new Error(t("NNI 心跳错误接口返回了非 JSON 内容。", "The NNI heartbeat error endpoint returned non-JSON content."));
+      }
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI heartbeat errors load failed (${res.status})`);
       }
