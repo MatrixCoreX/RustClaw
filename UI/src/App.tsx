@@ -456,7 +456,7 @@ interface NniHeartbeatRecord {
   task_id?: string | null;
   user_key?: string | null;
   device_pubkey?: string | null;
-  compliant: boolean;
+  compliant?: boolean | null;
   status: string;
   error_code?: string | null;
   created_at_ts?: number | null;
@@ -2891,8 +2891,10 @@ export default function App() {
 
   const fetchNniHeartbeatRecords = async (page = nniHeartbeatRecordsPage, silent = false) => {
     const safePage = Math.max(1, page);
-    if (!silent) setNniHeartbeatRecordsLoading(true);
-    setNniHeartbeatRecordsError(null);
+    if (!silent) {
+      setNniHeartbeatRecordsLoading(true);
+      setNniHeartbeatRecordsError(null);
+    }
     try {
       const params = new URLSearchParams({
         page: String(safePage),
@@ -2908,6 +2910,7 @@ export default function App() {
       setNniHeartbeatRecordsTotal(body.data.total ?? 0);
       setNniHeartbeatRecordsTotalPages(Math.max(1, body.data.total_pages ?? 1));
       setNniHeartbeatRecordsNode(body.data.node_url || "");
+      setNniHeartbeatRecordsError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       if (!silent) setNniHeartbeatRecordsError(message);
@@ -4152,7 +4155,7 @@ export default function App() {
     if (currentPage !== "nni") return;
     void fetchNniDeviceStatus();
     void fetchNniConfig(true);
-    void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage, true);
+    void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage);
     const timer = window.setInterval(() => {
       void fetchNniConfig(true);
       void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage, true);
@@ -6572,6 +6575,12 @@ export default function App() {
                         <span className="ml-1 break-all font-mono text-white/50">{nniHeartbeatRecordsNode}</span>
                       ) : null}
                     </p>
+                    <p className="mt-1 text-xs leading-5 text-white/45">
+                      {t(
+                        "这里同时显示手动加入验证和后续自动心跳；列表里的标签会区分“加入”和“心跳”。",
+                        "This includes manual Join verification and later automatic heartbeats; each row is labeled as Join or Heartbeat.",
+                      )}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -6597,14 +6606,15 @@ export default function App() {
                       {nniHeartbeatRecordsLoading
                         ? t("正在载入 NNI 请求记录...", "Loading NNI request records...")
                         : t(
-                            "远程服务端还没有 NNI 请求记录。首次加入成功后会显示在这里。",
-                            "The remote server has no NNI request records yet. The first successful Join will appear here.",
+                            "远程服务端还没有 NNI 请求记录。手动加入成功后会先出现一条加入记录，后续自动心跳也会继续追加。",
+                            "The remote server has no NNI request records yet. A successful manual Join appears first, and later automatic heartbeats are added here too.",
                           )}
                     </p>
                   ) : (
                     nniHeartbeatRecords.map((record) => {
-                      const accepted = record.status === "accepted" && record.compliant;
-                      const attention = ["blocked", "rejected", "expired"].includes(record.status) || !record.compliant;
+                      const complianceKnown = typeof record.compliant === "boolean";
+                      const accepted = record.status === "accepted" && record.compliant !== false;
+                      const attention = ["blocked", "rejected", "expired"].includes(record.status) || record.compliant === false;
                       const statusClass = accepted
                         ? "setup-status setup-status-done"
                         : attention
@@ -6626,6 +6636,15 @@ export default function App() {
                           : record.request_kind === "nni_heartbeat"
                             ? t("心跳", "Heartbeat")
                             : record.request_kind || t("请求", "Request");
+                      const resultLabel =
+                        record.error_code ||
+                        (record.compliant === true
+                          ? t("合规", "Compliant")
+                          : record.compliant === false
+                            ? t("未合规", "Not compliant")
+                            : record.status === "accepted"
+                              ? t("已通过", "Accepted")
+                              : t("未返回", "Not reported"));
                       return (
                         <div
                           key={`${record.id ?? record.task_id ?? "heartbeat"}-${record.created_at_ts ?? 0}`}
@@ -6657,10 +6676,18 @@ export default function App() {
                             <div>
                               <p className="font-semibold tracking-[0.12em] text-white/35">{t("结果", "Result")}</p>
                               <p className="mt-1 break-words text-white/75">
-                                {record.error_code || (record.compliant ? t("合规", "Compliant") : t("未合规", "Not compliant"))}
+                                {resultLabel}
                               </p>
                             </div>
                           </div>
+                          {!complianceKnown && record.status !== "accepted" && !record.error_code ? (
+                            <p className="mt-2 text-xs leading-5 text-white/40">
+                              {t(
+                                "远程服务端没有返回合规状态；请以状态标签和错误码为准。",
+                                "The remote server did not report compliance; use the status label and error code.",
+                              )}
+                            </p>
+                          ) : null}
                           <p className="mt-2 text-xs leading-5 text-white/40">
                             {t("签名", "Signature")}: {record.signature_present ? t("已记录", "Recorded") : t("无", "None")} ·{" "}
                             {t("挑战", "Challenge")}: {record.challenge_present ? t("已记录", "Recorded") : t("无", "None")} ·{" "}
