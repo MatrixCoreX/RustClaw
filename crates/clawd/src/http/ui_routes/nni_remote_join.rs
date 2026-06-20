@@ -40,7 +40,7 @@ struct NniLocalJoinVerifyRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct NniHeartbeatRecordsQuery {
+struct NniRequestRecordsQuery {
     page: Option<usize>,
     per_page: Option<usize>,
 }
@@ -355,10 +355,10 @@ async fn nni_join_verify(
     }
 }
 
-async fn nni_heartbeat_records(
+async fn nni_request_records(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<NniHeartbeatRecordsQuery>,
+    Query(query): Query<NniRequestRecordsQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
         return (
@@ -393,52 +393,60 @@ async fn nni_heartbeat_records(
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
     let mut attempts = Vec::new();
     for node_url in config.remote_nodes {
-        let endpoint =
-            format!("{node_url}/v1/nni/server/heartbeat/records?page={page}&per_page={per_page}");
-        let response = state
-            .core
-            .http_client
-            .get(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
-            .send()
-            .await;
+        for endpoint_path in ["/v1/nni/server/records", "/v1/nni/server/heartbeat/records"] {
+            let endpoint = format!("{node_url}{endpoint_path}?page={page}&per_page={per_page}");
+            let response = state
+                .core
+                .http_client
+                .get(&endpoint)
+                .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+                .send()
+                .await;
 
-        match response {
-            Ok(resp) => {
-                let status = resp.status();
-                match resp.json::<ApiResponse<Value>>().await {
-                    Ok(mut body) if status.is_success() && body.ok => {
-                        let data = body.data.get_or_insert_with(|| json!({}));
-                        if let Some(obj) = data.as_object_mut() {
-                            obj.insert("node_url".to_string(), Value::String(node_url));
+            match response {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<ApiResponse<Value>>().await {
+                        Ok(mut body) if status.is_success() && body.ok => {
+                            let data = body.data.get_or_insert_with(|| json!({}));
+                            if let Some(obj) = data.as_object_mut() {
+                                obj.insert("node_url".to_string(), Value::String(node_url));
+                                obj.insert(
+                                    "records_endpoint".to_string(),
+                                    Value::String(endpoint_path.to_string()),
+                                );
+                            }
+                            return (StatusCode::OK, Json(body));
                         }
-                        return (StatusCode::OK, Json(body));
+                        Ok(body) => attempts.push(json!({
+                            "node_url": node_url,
+                            "endpoint": endpoint_path,
+                            "http_status": status.as_u16(),
+                            "error": body.error,
+                            "data": body.data,
+                        })),
+                        Err(err) => attempts.push(json!({
+                            "node_url": node_url,
+                            "endpoint": endpoint_path,
+                            "http_status": status.as_u16(),
+                            "error": format!("nni_remote_bad_response: {err}"),
+                        })),
                     }
-                    Ok(body) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error": body.error,
-                        "data": body.data,
-                    })),
-                    Err(err) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error": format!("nni_remote_bad_response: {err}"),
-                    })),
                 }
+                Err(err) => attempts.push(json!({
+                    "node_url": node_url,
+                    "endpoint": endpoint_path,
+                    "error": format!("nni_remote_request_failed: {err}"),
+                })),
             }
-            Err(err) => attempts.push(json!({
-                "node_url": node_url,
-                "error": format!("nni_remote_request_failed: {err}"),
-            })),
         }
     }
 
     nni_join_error(
         StatusCode::BAD_GATEWAY,
-        "nni_heartbeat_records_unavailable",
+        "nni_request_records_unavailable",
         json!({
-            "status": "heartbeat_records_unavailable",
+            "status": "request_records_unavailable",
             "attempts": attempts,
         }),
     )
