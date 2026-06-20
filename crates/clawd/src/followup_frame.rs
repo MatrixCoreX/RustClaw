@@ -208,7 +208,7 @@ pub(crate) fn synthesize_locator_reply_resolved_intent(
     if frame.can_accept_locator_reply() {
         return Some((
             format!(
-            "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+            "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
             frame.source_request.trim(),
             locator_reply
         ),
@@ -218,7 +218,7 @@ pub(crate) fn synthesize_locator_reply_resolved_intent(
     if frame.can_reuse_operation_for_locator_reply() {
         return Some((
             format!(
-                "Continue the previous resolved request by applying the same operation to the provided target/content.\nPrevious user request: {}\nProvided target/content: {}",
+                "Continue the previous resolved request by applying the same operation to the provided target or content.\nPrevious user request: {}\nProvided target or content: {}",
                 frame.source_request.trim(),
                 locator_reply
             ),

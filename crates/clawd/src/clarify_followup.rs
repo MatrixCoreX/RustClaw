@@ -217,7 +217,7 @@ pub(crate) fn try_clarify_reply_rewrite(
     let prior_user_text = extract_prior_user_text(last_turn_full)?;
     let current_user_text = prompt.trim().to_string();
     let resolved_intent = format!(
-        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
         prior_user_text.trim(),
         current_user_text
     );

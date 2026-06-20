@@ -1121,7 +1121,7 @@ fn light_execution_budget_skips_workspace_project_summary() {
 #[test]
 fn light_execution_budget_detects_clarify_rewrite_bound_reads() {
     let mut route = base_route_result();
-    route.resolved_intent = "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\nUser now provides the missing target/content: package.json".to_string();
+    route.resolved_intent = "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\nUser now provides the missing target or content: package.json".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
