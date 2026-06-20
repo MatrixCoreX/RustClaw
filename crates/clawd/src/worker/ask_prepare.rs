@@ -1361,11 +1361,11 @@ pub(super) async fn prepare_ask_routing(
     );
     repair_structured_field_target_from_prompt(
         &mut route_result,
-        &normalizer_prompt,
+        prompt,
         &state.skill_rt.workspace_root,
         &state.skill_rt.default_locator_search_dir,
     );
-    repair_scalar_field_value_contract_for_locator_reply(&mut route_result, &normalizer_prompt);
+    repair_scalar_field_value_contract_for_locator_reply(&mut route_result, prompt);
     clear_file_delivery_contract_for_filename_only(&mut route_result, turn_analysis.as_ref());
     bind_ordered_entry_reference_from_active_frame(
         &mut route_result,
