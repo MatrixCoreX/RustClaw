@@ -236,6 +236,61 @@ fn single_locator_field_selector_does_not_promote_to_scalar_pair_contract() {
 }
 
 #[test]
+fn single_path_field_selector_repairs_misclassified_equality_contract_to_scalar_value() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Read the selected TOML field value only".to_string(),
+        needs_clarify: false,
+        route_reason: "structured_field_selector_requires_scalar_value".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                .to_string(),
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("paths.db_path".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+        },
+    };
+
+    repair_scalar_field_value_contract_for_locator_reply(
+        &mut route,
+        "Output only paths.db_path from scripts/nl_tests/fixtures/device_local/configs/app_config.toml.",
+    );
+
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    );
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert!(route
+        .route_reason
+        .contains("scalar_field_value_contract_repair"));
+    assert!(!route
+        .route_reason
+        .contains("scalar_field_pair_contract_repair"));
+}
+
+#[test]
 fn scalar_field_selector_repairs_parent_selector_to_existing_leaf_value() {
     let target = TempFileGuard::new(
         "workspace_dependencies",

@@ -88,8 +88,8 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     }
     repair_structured_field_selector_from_target(route_result, prompt);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    let target_count = filename_target_count_excluding_structured_selector(
-        &surface,
+    let target_count = explicit_locator_target_count_excluding_structured_selector(
+        prompt,
         route_result
             .output_contract
             .self_extension
@@ -112,12 +112,15 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
             .push_str("; scalar_field_pair_contract_repair");
         return;
     }
-    if !matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::StructuredKeys
-            | crate::OutputSemanticKind::ExistenceWithPath
-            | crate::OutputSemanticKind::DocumentHeading
-    ) {
+    if !(selector_declares_field_value_request
+        || matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::StructuredKeys
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::DocumentHeading
+                | crate::OutputSemanticKind::RecentScalarEqualityCheck
+        ))
+    {
         return;
     }
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -127,18 +130,23 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         .push_str("; scalar_field_value_contract_repair");
 }
 
-fn filename_target_count_excluding_structured_selector(
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+fn explicit_locator_target_count_excluding_structured_selector(
+    prompt: &str,
     selector: Option<&str>,
 ) -> usize {
-    surface
-        .filename_candidates_excluding_field_selectors()
-        .into_iter()
-        .filter(|candidate| {
-            selector
-                .is_none_or(|selector| !candidate_matches_structured_selector(candidate, selector))
-        })
-        .count()
+    let mut candidates = Vec::new();
+    for locator in
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(prompt)
+    {
+        let candidate = locator.locator_hint.trim();
+        if selector
+            .is_some_and(|selector| candidate_matches_structured_selector(candidate, selector))
+        {
+            continue;
+        }
+        push_unique_raw_candidate(&mut candidates, candidate.to_string());
+    }
+    candidates.len()
 }
 
 fn candidate_matches_structured_selector(candidate: &str, selector: &str) -> bool {
