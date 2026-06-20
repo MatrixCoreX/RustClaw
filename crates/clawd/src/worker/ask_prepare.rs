@@ -686,10 +686,20 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
             .structured_field_selector
             .is_none()
         {
+            let normalized_selector =
+                normalize_active_clarify_structured_field_selector_for_locator_reply(
+                    &selector,
+                    &hit.current_user_text,
+                );
+            if normalized_selector != selector {
+                route_result
+                    .route_reason
+                    .push_str("; normalize_active_clarify_structured_field_selector");
+            }
             route_result
                 .output_contract
                 .self_extension
-                .structured_field_selector = Some(selector);
+                .structured_field_selector = Some(normalized_selector);
             route_result
                 .route_reason
                 .push_str("; preserve_active_clarify_structured_field_selector");
@@ -698,6 +708,33 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     route_result
         .route_reason
         .push_str("; preserve_active_clarify_output_contract");
+}
+
+fn normalize_active_clarify_structured_field_selector_for_locator_reply(
+    selector: &str,
+    locator_reply: &str,
+) -> String {
+    let trimmed_selector = selector.trim();
+    if trimmed_selector.is_empty() {
+        return String::new();
+    }
+
+    let locator_file_name = locator_reply
+        .trim()
+        .rsplit(|ch| ch == '/' || ch == '\\')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if locator_file_name == "package.json" {
+        if let Some(rest) = trimmed_selector.strip_prefix("package.") {
+            let rest = rest.trim();
+            if !rest.is_empty() {
+                return rest.to_string();
+            }
+        }
+    }
+
+    trimmed_selector.to_string()
 }
 
 fn promote_active_clarify_structured_payload_reply_to_execute(
