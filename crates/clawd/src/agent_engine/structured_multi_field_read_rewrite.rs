@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn rewrite_structured_multi_field_read_plan_to_read_fields(
     route_result: Option<&RouteResult>,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     _plan_context: Option<&str>,
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
@@ -33,7 +34,12 @@ pub(super) fn rewrite_structured_multi_field_read_plan_to_read_fields(
     else {
         return actions;
     };
-    let field_paths = structured_current_turn_field_selectors(route, user_text, Some(&path));
+    let field_paths = structured_current_turn_field_selectors(
+        route,
+        user_text,
+        allow_route_resolved_intent_selector,
+        Some(&path),
+    );
     if field_paths.len() < 2 {
         return actions;
     }
@@ -113,6 +119,7 @@ pub(super) fn structured_scalar_field_read_target_path(
 pub(super) fn structured_scalar_field_selector(
     route: &RouteResult,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     plan_context: Option<&str>,
     target_path: Option<&str>,
 ) -> Option<String> {
@@ -125,9 +132,15 @@ pub(super) fn structured_scalar_field_selector(
     {
         return Some(selector);
     }
-    structured_field_selectors(route, user_text, plan_context, target_path)
-        .into_iter()
-        .next()
+    structured_field_selectors(
+        route,
+        user_text,
+        allow_route_resolved_intent_selector,
+        plan_context,
+        target_path,
+    )
+    .into_iter()
+    .next()
 }
 
 pub(super) fn normalize_contract_structured_field_selector(raw: &str) -> Option<String> {
@@ -155,19 +168,28 @@ pub(super) fn normalize_contract_structured_field_selector(raw: &str) -> Option<
 pub(super) fn structured_current_turn_field_selectors(
     route: &RouteResult,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     target_path: Option<&str>,
 ) -> Vec<String> {
-    let current_turn_sources = [Some(user_text), Some(route.resolved_intent.as_str())];
+    let route_resolved_intent_source =
+        allow_route_resolved_intent_selector.then_some(route.resolved_intent.as_str());
+    let current_turn_sources = [Some(user_text), route_resolved_intent_source];
     structured_field_selectors_from_sources(&current_turn_sources, target_path)
 }
 
 pub(super) fn structured_field_selectors(
     route: &RouteResult,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     plan_context: Option<&str>,
     target_path: Option<&str>,
 ) -> Vec<String> {
-    let selectors = structured_current_turn_field_selectors(route, user_text, target_path);
+    let selectors = structured_current_turn_field_selectors(
+        route,
+        user_text,
+        allow_route_resolved_intent_selector,
+        target_path,
+    );
     if !selectors.is_empty() {
         return selectors;
     }
@@ -307,6 +329,7 @@ pub(super) fn structured_scalar_field_selector_from_structural_candidates(
     state: &AppState,
     route: &RouteResult,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     plan_context: Option<&str>,
     target_path: &str,
 ) -> Option<String> {
@@ -315,7 +338,9 @@ pub(super) fn structured_scalar_field_selector_from_structural_candidates(
     {
         return None;
     }
-    let current_turn_sources = [Some(user_text), Some(route.resolved_intent.as_str())];
+    let route_resolved_intent_source =
+        allow_route_resolved_intent_selector.then_some(route.resolved_intent.as_str());
+    let current_turn_sources = [Some(user_text), route_resolved_intent_source];
     structured_scalar_field_selector_from_candidate_sources(
         state,
         &current_turn_sources,

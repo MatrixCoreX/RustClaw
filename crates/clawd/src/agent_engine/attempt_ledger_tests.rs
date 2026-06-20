@@ -24,6 +24,29 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
     assert!(ledger.contains("\"error_kind\": \"not_found\""));
     assert!(ledger.contains("\"retryable\": true"));
     assert!(ledger.contains("do_not_retry_same_target"));
+    let value = ledger_value(&ledger);
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/source")
+            .and_then(serde_json::Value::as_str),
+        Some("executor")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("execution_loop")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
+    );
+    assert!(value
+        .pointer("/0/repair_signal/forbidden_repeat_fingerprint")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
 }
 
 #[test]
@@ -96,6 +119,30 @@ fn attempt_ledger_records_verifier_retry_instruction() {
         .pointer("/0/forbidden_repeat_signature")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|value| value.starts_with("answer_verifier:")));
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/source")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/missing_fields/0")
+            .and_then(serde_json::Value::as_str),
+        Some("content_excerpt")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/retryable")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -197,6 +244,18 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
             .pointer("/0/retry_allowed")
             .and_then(serde_json::Value::as_bool),
         Some(false)
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/failure_attribution")
+            .and_then(serde_json::Value::as_str),
+        Some("contract_gap")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/missing_fields/0")
+            .and_then(serde_json::Value::as_str),
+        Some("candidates")
     );
 }
 

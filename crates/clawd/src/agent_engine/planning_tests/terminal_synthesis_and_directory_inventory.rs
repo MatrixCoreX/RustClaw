@@ -277,6 +277,50 @@ fn terminal_synthesize_answer_appends_delivery_respond() {
 }
 
 #[test]
+fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "existing_observed_context_synthesis".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    let actions = vec![AgentAction::Respond {
+        content: "status=ok".to_string(),
+    }];
+
+    assert!(!should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        &actions
+    ));
+}
+
+#[test]
+fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "existing_observed_context_synthesis".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    let actions = vec![AgentAction::Respond {
+        content: "status=ok".to_string(),
+    }];
+
+    assert!(should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        &actions
+    ));
+}
+
+#[test]
 fn observed_terminal_synthesis_replaces_concrete_respond_with_placeholder() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
@@ -723,6 +767,44 @@ fn file_names_auto_locator_does_not_inherit_extension_from_history_text() {
 }
 
 #[test]
+fn file_names_auto_locator_does_not_use_stale_resolved_intent_selector() {
+    let root = TempDirGuard::new("file_names_auto_locator_no_stale_selector");
+    fs::write(root.path.join("alpha.log"), "alpha").expect("write alpha");
+    fs::write(root.path.join("beta.log"), "beta").expect("write beta");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.resolved_intent =
+        "legacy first-layer summary selector_limit=2 selector_sort_by=mtime_desc".to_string();
+    let user_text = "return selected file names";
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+
+    let plan = file_names_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "return selected file names",
+        Some(&route),
+        &loop_state,
+        user_text,
+        Some(user_text),
+        Some(root_path.as_str()),
+    )
+    .expect("file_names directory locator should build deterministic list_dir plan");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(1000));
+    assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
 fn file_names_auto_locator_preserves_size_ranked_metadata() {
     let root = TempDirGuard::new("file_names_auto_locator_size_ranked");
     fs::write(root.path.join("large.log"), "large").expect("write large");
@@ -763,6 +845,86 @@ fn file_names_auto_locator_preserves_size_ranked_metadata() {
         args.get("sort_by").and_then(Value::as_str),
         Some("size_desc")
     );
+}
+
+#[test]
+fn file_names_auto_locator_does_not_promote_negated_size_marker_over_name_sort() {
+    let root = TempDirGuard::new("file_names_auto_locator_negated_size_marker");
+    fs::write(root.path.join("zeta.sh"), "z").expect("write zeta");
+    fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.route_reason =
+        "selector_target_kind=file selector_limit=5 selector_sort_by=name_desc include_metadata=false file_names_contract_preserves_bounded_ordered_files_only_listing_with_size_format not_required"
+            .to_string();
+    let user_text = "return selected file names";
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+
+    let plan = file_names_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "return selected file names by descending name",
+        Some(&route),
+        &loop_state,
+        user_text,
+        Some(user_text),
+        Some(root_path.as_str()),
+    )
+    .expect("file_names directory locator should build deterministic list_dir plan");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("name_desc")
+    );
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(5));
+}
+
+#[test]
+fn file_names_auto_locator_does_not_promote_size_marker_when_name_sort_is_explicit() {
+    let root = TempDirGuard::new("file_names_auto_locator_explicit_name_sort");
+    fs::write(root.path.join("zeta.sh"), "z").expect("write zeta");
+    fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.route_reason = "selector_target_kind=file selector_limit=5 selector_sort_by=name file_names_contract_preserves_bounded_ordered_files_only_listing_with_size_format is not required"
+        .to_string();
+    let user_text = "return selected file names";
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+
+    let plan = file_names_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "return selected file names by name",
+        Some(&route),
+        &loop_state,
+        user_text,
+        Some(user_text),
+        Some(root_path.as_str()),
+    )
+    .expect("file_names directory locator should build deterministic list_dir plan");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(5));
 }
 
 #[test]

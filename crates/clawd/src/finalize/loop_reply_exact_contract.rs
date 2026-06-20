@@ -585,7 +585,7 @@ fn exact_contract_fallback_observed_answer(
         .ok()
         .and_then(|value| exact_contract_answer_from_json(route, &value))
         .or_else(|| {
-            (route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+            (raw_command_exact_observation_fallback_allowed(route)
                 || command_output_summary_allows_exact_observed_output(route))
             .then(|| body.to_string())
         })
@@ -621,6 +621,11 @@ fn exact_contract_fallback_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn raw_command_exact_observation_fallback_allowed(route: &crate::RouteResult) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && !route_expects_synthesis_over_raw_observation(route)
 }
 
 fn command_output_summary_allows_exact_observed_output(route: &crate::RouteResult) -> bool {

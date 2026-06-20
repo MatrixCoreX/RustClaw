@@ -219,7 +219,7 @@ fn clarify_recent_execution_judgment_context_promotes_to_chat() {
     state.skill_rt.workspace_root = root.path.clone();
 
     let mut route = chat_route_for_gate();
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.route_reason =
         "semantic_contract_requires_evidence; clarify_reason_code:missing_read_target".to_string();
@@ -266,7 +266,7 @@ fn config_risk_assessment_default_main_config_promotes_clarify_to_planner() {
     state.skill_rt.workspace_root = root.path.clone();
 
     let mut route = chat_route_for_gate();
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.clarify_question = "missing locator".to_string();
     route.route_reason =
@@ -315,7 +315,7 @@ fn config_risk_assessment_default_main_config_keeps_explicit_locator_clarify() {
     state.skill_rt.workspace_root = root.path.clone();
 
     let mut route = chat_route_for_gate();
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.route_reason = "clarify_reason_code:missing_read_target".to_string();
     route.output_contract.requires_content_evidence = true;

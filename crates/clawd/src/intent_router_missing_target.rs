@@ -17,7 +17,7 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if *needs_clarify
@@ -34,7 +34,7 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::Clarify;
+    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();

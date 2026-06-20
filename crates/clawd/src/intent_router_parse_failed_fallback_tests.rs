@@ -350,7 +350,10 @@ fn fallback_normalizer_output_still_enforces_content_evidence_planner_execute() 
         },
         None,
     );
-    assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(
+        out.legacy_first_layer_decision,
+        FirstLayerDecision::PlannerExecute
+    );
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.locator_kind,
@@ -529,7 +532,10 @@ fn inline_json_transform_fallback_builds_planner_execute_contract() {
         None,
     );
 
-    assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(
+        out.legacy_first_layer_decision,
+        FirstLayerDecision::PlannerExecute
+    );
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.response_shape,
@@ -636,7 +642,10 @@ fn directory_pair_fallback_builds_planner_execute_locator_contract() {
     let out =
         normalizer_output_from_fallback(req, "llm_failed_directory_pair_fallback", fallback, None);
 
-    assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(
+        out.legacy_first_layer_decision,
+        FirstLayerDecision::PlannerExecute
+    );
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.response_shape,
@@ -860,7 +869,7 @@ fn fallback_normalizer_keeps_llm_failure_on_safe_clarify() {
         },
         Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
     );
-    assert_eq!(out.first_layer_decision, FirstLayerDecision::Clarify);
+    assert_eq!(out.legacy_first_layer_decision, FirstLayerDecision::Clarify);
     assert!(out.needs_clarify);
     assert!(matches!(
         out.output_contract.response_shape,

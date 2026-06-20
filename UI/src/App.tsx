@@ -1069,10 +1069,9 @@ export default function App() {
   const [authMode, setAuthMode] = useState<"key" | "webd" | null>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.authMode);
     if (saved === "webd" || saved === "key") return saved;
-    if (window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim()) return "key";
     return null;
   });
-  const [loginTab, setLoginTab] = useState<"key" | "webd">("key");
+  const [loginTab, setLoginTab] = useState<"key" | "webd">("webd");
   const [webdBaseUrlDraft, setWebdBaseUrlDraft] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.webdBaseUrl);
     if (saved != null && saved.trim() !== "") return saved.trim();
@@ -3971,6 +3970,14 @@ export default function App() {
       })();
       return;
     }
+    if (authMode !== "key") {
+      setUiAuthReady(false);
+      setAuthIdentity(null);
+      setInteractionUserId(null);
+      setInteractionChatId(null);
+      setInteractionRole("-");
+      return;
+    }
     if (uiAuthLoading) return;
     if (uiAuthReady && authIdentity) return;
     if (!uiKey) {
@@ -5356,8 +5363,8 @@ export default function App() {
               </h1>
               <p className="mt-4 max-w-xl text-sm leading-7 text-white/70 sm:text-base">
                 {t(
-                  "这是给普通用户准备的可视化面板。你不需要先懂命令行，只要填好服务地址和访问 key，就能查看状态、绑定账号、测试消息。",
-                  "This is a visual panel designed for everyday users. You do not need the command line first; enter the service address and access key to check status, bind accounts, and test messages.",
+                  "这是给普通用户准备的可视化面板。你不需要先懂命令行，只要填好服务地址、用户名和密码，就能查看状态、绑定账号、测试消息。",
+                  "This is a visual panel designed for everyday users. You do not need the command line first; enter the service address, username, and password to check status, bind accounts, and test messages.",
                 )}
               </p>
 
@@ -5365,7 +5372,7 @@ export default function App() {
                 <p className="text-sm font-semibold text-white">{t("登录前你需要什么？", "What do you need before signing in?")}</p>
                 <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-white/65">
                   <li>{t("一个已经启动的 RustClaw 服务地址。", "A running RustClaw service address.")}</li>
-                  <li>{t("一个有效的 user_key。", "A valid user_key.")}</li>
+                  <li>{t("你的网页登录用户名和密码。", "Your web login username and password.")}</li>
                   <li>{t("如果不知道接下来该做什么，登录后先看首页。", "If you are not sure what to do next, start with Home after signing in.")}</li>
                 </ol>
               </div>
@@ -5377,41 +5384,19 @@ export default function App() {
               <p className="mt-2 text-sm text-white/60">
                 {loginTab === "key"
                   ? t("使用 Access Key 验证后进入控制台。", "Verify with an access key to enter the console.")
-                  : t("通过 webd 使用用户名与密码（需同源 Cookie）。", "Sign in with username and password via webd (same-origin cookies required).")}
+                  : t("默认使用用户名和密码登录。", "Username and password sign-in is the default.")}
               </p>
-            </div>
-
-            <div
-              className="mb-4 flex rounded-xl border border-white/10 bg-black/20 p-1"
-              role="tablist"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={loginTab === "key"}
-                onClick={() => setLoginTab("key")}
-                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  loginTab === "key" ? "bg-white/12 text-white" : "text-white/55 hover:text-white/80"
-                }`}
-              >
-                {t("Key 登录", "Access key")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={loginTab === "webd"}
-                onClick={() => setLoginTab("webd")}
-                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  loginTab === "webd" ? "bg-white/12 text-white" : "text-white/55 hover:text-white/80"
-                }`}
-              >
-                {t("用户名密码", "Username & password")}
-              </button>
             </div>
 
             <div className="space-y-4">
               {loginTab === "key" ? (
                 <>
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs leading-relaxed text-white/55">
+                    {t(
+                      "Key 登录适合管理员或已经拿到 user_key 的用户。普通用户建议返回用户名密码登录。",
+                      "Access key sign-in is for admins or users who already have a user_key. Most users should use username and password sign-in.",
+                    )}
+                  </div>
                   <label className="block space-y-2">
                     <span className="text-xs uppercase tracking-widest text-white/50">
                       {t("RustClaw 服务地址", "RustClaw service URL")}
@@ -5536,17 +5521,42 @@ export default function App() {
                         {t("使用已保存 Key", "Use saved key")}
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginTab("webd");
+                        setUiAuthError(null);
+                      }}
+                      disabled={uiAuthLoading}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {t("返回用户名密码登录", "Back to username sign-in")}
+                    </button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => void loginWebd()}
-                    disabled={uiAuthLoading}
-                    className="theme-accent-btn"
-                  >
-                    {uiAuthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    {t("进入控制台", "Enter Console")}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void loginWebd()}
+                      disabled={uiAuthLoading}
+                      className="theme-accent-btn"
+                    >
+                      {uiAuthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {t("进入控制台", "Enter Console")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginTab("key");
+                        setUiAuthError(null);
+                      }}
+                      disabled={uiAuthLoading}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      {t("使用 Key 登录", "Use access key")}
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"

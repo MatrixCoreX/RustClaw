@@ -24,6 +24,7 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) freshness: String,
     pub(crate) artifact_kind: String,
     pub(crate) channel_visibility: String,
+    pub(crate) evidence_profile: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub(crate) struct ContractArgPolicy {
     pub(crate) freshness: String,
     pub(crate) artifact_kind: String,
     pub(crate) channel_visibility: String,
+    pub(crate) evidence_profile: String,
 }
 
 impl ContractArgPolicy {
@@ -114,10 +116,11 @@ pub(crate) fn compact_prompt_line_for_output_contract(
     };
 
     Some(format!(
-        "- contract_matrix version={} hash={} match={} required_evidence={} final_answer_shape={} allowed_actions={} forbidden_actions={}",
+        "- contract_matrix version={} hash={} match={} evidence_profile={} required_evidence={} final_answer_shape={} allowed_actions={} forbidden_actions={}",
         matrix.matrix_version,
         matrix.matrix_version_hash(),
         matched.match_name(),
+        matched.evidence_profile(),
         required_evidence,
         matched
             .final_answer_shape_kind()
@@ -257,6 +260,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "freshness": matched.freshness(),
         "artifact_kind": matched.artifact_kind(),
         "channel_visibility": matched.channel_visibility(),
+        "evidence_profile": matched.evidence_profile(),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
         "evidence_expression": matched
@@ -294,6 +298,7 @@ pub(crate) fn action_trace_for_output_contract(
         "contract_match": matched.match_name(),
         "decision": matched.action_policy(&action).as_str(),
         "policy_mode": matched.policy_mode(),
+        "evidence_profile": matched.evidence_profile(),
         "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
@@ -433,6 +438,7 @@ pub(crate) fn action_policy_for_output_contract(
         freshness: matched.freshness(),
         artifact_kind: matched.artifact_kind(),
         channel_visibility: matched.channel_visibility(),
+        evidence_profile: matched.evidence_profile(),
     })
 }
 
@@ -494,6 +500,7 @@ pub(crate) fn arg_policy_decision(
         freshness: matched.freshness(),
         artifact_kind: matched.artifact_kind(),
         channel_visibility: matched.channel_visibility(),
+        evidence_profile: matched.evidence_profile(),
     })
 }
 
@@ -819,6 +826,7 @@ pub(super) fn validate_contract_runtime_fields(
     freshness: &str,
     artifact_kind: &str,
     channel_visibility: &str,
+    evidence_profile: &str,
 ) {
     validate_contract_field(
         errors,
@@ -872,6 +880,15 @@ pub(super) fn validate_contract_runtime_fields(
         "user_visible",
         &["user_visible", "trace_only"],
     );
+    let evidence_profile = normalize_action_token(evidence_profile);
+    if !evidence_profile.is_empty()
+        && evidence_profile != "generic"
+        && evidence_profile != "workspace_user_docs_first"
+    {
+        errors.push(format!(
+            "{context} has invalid evidence_profile `{evidence_profile}`"
+        ));
+    }
 }
 
 pub(super) fn validate_artifact_shape_contract(

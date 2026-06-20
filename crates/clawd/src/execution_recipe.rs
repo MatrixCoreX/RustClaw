@@ -10,9 +10,10 @@ mod execution_recipe_types;
 
 pub(crate) use execution_recipe_types::{
     explicit_execution_recipe_spec, parse_execution_recipe_kind_text,
-    parse_execution_recipe_profile_text, parse_execution_recipe_target_scope_text, ActionEffect,
-    ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
-    ExecutionRecipeSpec, ExecutionRecipeTargetScope,
+    parse_execution_recipe_profile_text, parse_execution_recipe_target_scope_text,
+    profile_requires_specific_validation, ActionEffect, ExecutionRecipeKind, ExecutionRecipePhase,
+    ExecutionRecipeProfile, ExecutionRecipeRuntimeState, ExecutionRecipeSpec,
+    ExecutionRecipeTargetScope,
 };
 
 fn planner_capability_effect_to_action_effect(effect: PlannerCapabilityEffect) -> ActionEffect {
@@ -196,7 +197,10 @@ fn merge_structured_validation_effect(
     args: &Value,
     effect: ActionEffect,
 ) -> ActionEffect {
-    if !structured_validation_declared(args) {
+    let has_validation_expectation = structured_validation_declared(args)
+        || structured_validation_success_marker(args).is_some()
+        || (normalized_skill == "http_basic" && http_basic_has_validation_expectation(args));
+    if !has_validation_expectation {
         return effect;
     }
     if effect.mutates && !effect.validates && normalized_skill != "run_cmd" {
@@ -251,30 +255,70 @@ pub(crate) fn validation_satisfies_recipe_profile(
             classify_skill_action_effect(state, &normalized_skill, args).validates
         }
         ExecutionRecipeProfile::ConfigChange => match normalized_skill.as_str() {
-            "config_guard" => {
-                let action = args
-                    .get("action")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default()
-                    .trim()
-                    .to_ascii_lowercase();
+            "config_basic" | "config_guard" => {
+                let action = normalized_action_arg(args);
                 args.get("path").is_some()
-                    && (action.is_empty() || contains_any(&action, &["validate", "check", "read"]))
+                    && (action.is_empty()
+                        || contains_any(&action, &["validate", "check", "read", "guard"]))
+            }
+            "config_edit" => {
+                let action = normalized_action_arg(args);
+                contains_any(&action, &["validate_config", "guard_config", "read_back"])
             }
             "service_control" | "health_check" | "http_basic" => true,
-            "run_cmd" => false,
+            "run_cmd" => run_cmd_validation_command(args),
             _ => false,
         },
         ExecutionRecipeProfile::CodeChange => match normalized_skill.as_str() {
             "service_control" | "health_check" | "http_basic" => true,
-            "run_cmd" => false,
+            "run_cmd" => run_cmd_validation_command(args),
             _ => false,
         },
         ExecutionRecipeProfile::SkillAuthoring => match normalized_skill.as_str() {
-            "run_cmd" => false,
+            "run_cmd" => run_cmd_validation_command(args),
+            "extension_manager" => contains_any(
+                &normalized_action_arg(args),
+                &["validate_external_skill", "register_external_skill"],
+            ),
+            _ => false,
+        },
+        ExecutionRecipeProfile::PackageChange => match normalized_skill.as_str() {
+            "run_cmd" => run_cmd_validation_command(args),
+            "package_manager" => contains_any(&normalized_action_arg(args), &["detect"]),
+            _ => false,
+        },
+        ExecutionRecipeProfile::DatabaseChange => match normalized_skill.as_str() {
+            "db_basic" => contains_any(
+                &normalized_action_arg(args),
+                &["sqlite_query", "schema_version", "list_tables"],
+            ),
+            "run_cmd" => run_cmd_validation_command(args),
             _ => false,
         },
     }
+}
+
+fn normalized_action_arg(args: &Value) -> String {
+    args.get("action")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn run_cmd_validation_command(args: &Value) -> bool {
+    args.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(run_cmd_looks_validation)
 }
 
 pub(crate) fn validation_detail_for_recipe(recipe: ExecutionRecipeRuntimeState) -> &'static str {
@@ -287,6 +331,12 @@ pub(crate) fn validation_detail_for_recipe(recipe: ExecutionRecipeRuntimeState) 
         }
         ExecutionRecipeProfile::SkillAuthoring => {
             "skill_authoring requires integration validation after mutation through build/test checks or extension registration verification"
+        }
+        ExecutionRecipeProfile::PackageChange => {
+            "package_change requires package state, build/test, or runtime command validation after mutation"
+        }
+        ExecutionRecipeProfile::DatabaseChange => {
+            "database_change requires schema, table, version, or query validation after mutation"
         }
         _ => "ops_closed_loop requires a machine-verifiable validation step after mutation",
     }
@@ -725,16 +775,25 @@ pub(crate) fn classify_skill_action_effect(
         })
         .map(planner_capability_effect_to_action_effect)
     {
-        return effect;
+        return merge_structured_validation_effect(&normalized_skill, args, effect);
     }
     if let Some(effect) = registry_side_effect_fallback_action_effect(state, &normalized_skill) {
         return merge_structured_validation_effect(&normalized_skill, args, effect);
     }
     let effect = match normalized_skill.as_str() {
-        "read_file" | "list_dir" | "fs_search" | "git_basic" | "db_basic" | "process_basic"
-        | "log_analyze" => ActionEffect::observe(),
-        "write_file" | "remove_file" | "make_dir" | "package_manager" | "install_module" => {
-            ActionEffect::mutate()
+        "read_file" | "list_dir" | "fs_search" | "git_basic" | "process_basic" | "log_analyze" => {
+            ActionEffect::observe()
+        }
+        "write_file" | "remove_file" | "make_dir" | "install_module" => ActionEffect::mutate(),
+        "package_manager" => {
+            let action = normalized_action_arg(args);
+            if contains_any(&action, &["install", "uninstall", "smart_install"]) {
+                ActionEffect::mutate()
+            } else if contains_any(&action, &["detect"]) {
+                ActionEffect::observe()
+            } else {
+                ActionEffect::default()
+            }
         }
         "health_check" => ActionEffect::validate(),
         "http_basic" => http_basic_action_effect(args),
@@ -796,6 +855,16 @@ pub(crate) fn classify_skill_action_effect(
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
             run_cmd_action_effect(command)
+        }
+        "db_basic" => {
+            let action = normalized_action_arg(args);
+            if contains_any(&action, &["sqlite_execute"]) {
+                ActionEffect::mutate()
+            } else if contains_any(&action, &["sqlite_query", "schema_version", "list_tables"]) {
+                ActionEffect::observe()
+            } else {
+                ActionEffect::default()
+            }
         }
         _ => ActionEffect::default(),
     };

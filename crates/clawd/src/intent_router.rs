@@ -292,12 +292,12 @@ mod active_observation;
 #[cfg(test)]
 use active_observation::active_ordered_scalar_path_missing_state_patch_context;
 #[cfg(test)]
-#[allow(unused_imports)]
 use active_observation::prompt_has_concrete_fileish_cue;
 use active_observation::{
     active_clarify_locator_task_prompt, active_observable_task_prompt, active_primary_task_prompt,
     active_session_has_structured_execution_target, active_task_turn_can_reuse_semantic_patch,
     active_text_followup_surface_is_chat_only,
+    apply_active_bound_path_answer_candidate_direct_repair,
     apply_active_file_basename_answer_candidate_direct_repair,
     apply_active_observed_output_chat_repair, apply_active_ordered_scalar_path_chat_repair,
     chat_only_active_text_missing_locator_followup,
@@ -306,7 +306,6 @@ use active_observation::{
 #[path = "intent_router_active_task_repair.rs"]
 mod active_task_repair;
 #[cfg(test)]
-#[allow(unused_imports)]
 use active_task_repair::unresolved_deictic_observable_target_should_clarify;
 use active_task_repair::{
     active_context_has_structured_observation_anchor, active_primary_text_context,
@@ -348,7 +347,6 @@ use structural_schedule::{
 mod answer_candidate_binding;
 use answer_candidate_binding::AnswerCandidateBindingReport;
 #[cfg(test)]
-#[allow(unused_imports)]
 use answer_candidate_binding::{
     active_task_invalid_turn_binding_context, analyze_answer_candidate_binding,
     answer_candidate_binding_repair_context, clear_internal_context_answer_candidate,

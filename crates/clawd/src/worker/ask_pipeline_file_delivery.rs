@@ -201,6 +201,85 @@ pub(super) fn prebind_file_delivery_missing_locator_from_resolved_prompt_path(
     true
 }
 
+pub(super) fn promote_unresolved_file_delivery_with_current_request_locator(
+    prompt: &str,
+    post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
+) -> bool {
+    if !post_route.execution_route_result.needs_clarify
+        || !super::route_reason_has_marker(
+            &post_route.execution_route_result,
+            "unresolved_file_delivery_requires_clarify",
+        )
+        || !post_route
+            .execution_route_result
+            .output_contract
+            .locator_hint
+            .trim()
+            .is_empty()
+    {
+        return false;
+    }
+    let Some(locator) = crate::intent::locator_extractor::extract_explicit_locator_for_fallback(
+        prompt,
+    )
+    .filter(|locator| {
+        matches!(
+            locator.locator_kind,
+            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+        )
+    }) else {
+        return false;
+    };
+
+    post_route.execution_route_result.wants_file_delivery = true;
+    post_route
+        .execution_route_result
+        .output_contract
+        .delivery_required = true;
+    post_route
+        .execution_route_result
+        .output_contract
+        .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    post_route
+        .execution_route_result
+        .output_contract
+        .response_shape = crate::OutputResponseShape::FileToken;
+    post_route
+        .execution_route_result
+        .output_contract
+        .requires_content_evidence = true;
+    post_route
+        .execution_route_result
+        .output_contract
+        .locator_kind = locator.locator_kind;
+    post_route
+        .execution_route_result
+        .output_contract
+        .locator_hint = locator.locator_hint;
+    post_route.execution_route_result.needs_clarify = false;
+    post_route.execution_route_result.clarify_question.clear();
+    if post_route.execution_route_result.is_clarify_gate()
+        || post_route.execution_route_result.is_chat_gate()
+    {
+        post_route
+            .execution_route_result
+            .set_planner_execute_finalize(crate::ActFinalizeStyle::Plain);
+    }
+    post_route.missing_locator_for_path_scoped_content = false;
+    post_route.clarify_reason.clear();
+    post_route.clarify_reason_kind = crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
+    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
+        "boundary_delivery_gate",
+        "post_route_file_delivery_current_request_locator_deferred_to_execution",
+        crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+    );
+    super::append_route_reason(
+        &mut post_route.execution_route_result,
+        "file_delivery_current_request_locator_deferred_to_execution",
+    );
+    true
+}
+
 fn explicit_workspace_path_from_text_allow_missing(
     state: &crate::AppState,
     text: &str,
@@ -318,6 +397,7 @@ pub(super) fn directory_file_delivery_without_structured_selection_should_force_
         || super::current_request_has_self_contained_structured_payload(prompt)
         || super::state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || state_patch_has_ordered_entry_reference(turn_analysis)
+        || route_has_structured_list_selector(route_result)
         || turn_analysis_reuses_active_target(turn_analysis)
         || route_repaired_active_task_binding(route_result)
         || session_alias_binding_matches_prompt(prompt, session_snapshot)
@@ -326,6 +406,18 @@ pub(super) fn directory_file_delivery_without_structured_selection_should_force_
         return false;
     }
     true
+}
+
+fn route_has_structured_list_selector(route_result: &crate::RouteResult) -> bool {
+    let selector = &route_result.output_contract.self_extension.list_selector;
+    selector.target_kind_specified
+        || selector.limit.is_some()
+        || selector
+            .sort_by
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || selector.include_metadata.is_some()
+        || selector.include_hidden.is_some()
 }
 
 fn state_patch_has_ordered_entry_reference(

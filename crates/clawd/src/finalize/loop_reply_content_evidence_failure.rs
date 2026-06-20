@@ -6,8 +6,8 @@ use super::{
     build_execution_summary_messages, direct_scalar_observed_answer,
     execution_summary_arg_is_sensitive, latest_tail_read_range_observed_answer,
     plan_step_for_execution, prefer_english_for_agent_contextual_user_text,
-    prefer_english_for_final_reply, prefer_english_for_user_text, route_prefers_observed_answer,
-    route_requires_content_evidence, route_resolved_intent, truncate_with_ellipsis,
+    route_prefers_observed_answer, route_requires_content_evidence, route_resolved_intent,
+    truncate_with_ellipsis,
 };
 
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
@@ -147,41 +147,16 @@ fn crypto_recoverable_i18n_failure_answer(
     ))
 }
 
-fn content_evidence_step_failure_default_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    failed_step: &crate::executor::StepExecutionResult,
-    error: &str,
-    permission_denied: bool,
-) -> String {
-    let target =
-        content_evidence_failed_step_target_label(loop_state, agent_run_context, failed_step);
-    let prefer_english = prefer_english_for_final_reply(state, task, user_text, agent_run_context);
-    let answer = match (prefer_english, target.as_deref()) {
-        (true, Some(target)) => {
-            format!("Tried to access `{target}`, but execution failed: {error}.")
-        }
-        (true, None) => format!("The `{}` step failed: {error}.", failed_step.skill.trim()),
-        (false, Some(target)) => {
-            format!("已尝试访问 `{target}`，但执行失败：{error}。")
-        }
-        (false, None) => format!("`{}` 步骤执行失败：{error}。", failed_step.skill.trim()),
-    };
-    if permission_denied {
-        if prefer_english {
-            format!("{answer} The `clawd` process does not have sudo/root permission to access it.")
-        } else {
-            format!("{answer}`clawd` 进程当前没有 sudo/root 权限，所以无法访问。")
-        }
-    } else {
-        answer
-    }
+pub(super) fn structured_extra_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| crate::truncate_for_agent_trace(&compact_observed_stream(value)))
 }
 
-fn content_evidence_failed_step_target_label(
+fn content_evidence_failed_step_locator(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     failed_step: &crate::executor::StepExecutionResult,
@@ -258,24 +233,79 @@ fn structured_target_label_from_value(value: &serde_json::Value) -> Option<Strin
     }
 }
 
-pub(super) fn structured_extra_string(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| crate::truncate_for_agent_trace(&compact_observed_stream(value)))
+fn structured_failure_is_publishable_user_result(
+    failed_step: &crate::executor::StepExecutionResult,
+    raw_error: &str,
+) -> bool {
+    let Some(structured) = crate::skills::parse_structured_skill_error(raw_error) else {
+        return false;
+    };
+    let effective_skill = if structured.skill.trim().is_empty() {
+        failed_step.skill.as_str()
+    } else {
+        structured.skill.as_str()
+    };
+    if effective_skill.eq_ignore_ascii_case("db_basic") {
+        return matches!(
+            structured.error_kind.as_str(),
+            "sqlite_open_failed"
+                | "sqlite_query_failed"
+                | "sqlite_execute_failed"
+                | "unsafe_sql"
+                | "confirmation_required"
+                | "invalid_input"
+                | "unsupported_action"
+        );
+    }
+    matches!(structured.error_kind.as_str(), "contract_action_rejected")
 }
 
-fn structured_extra_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
-    value.get(key).and_then(|value| value.as_i64())
+fn push_structured_error_facts(observed_facts: &mut Vec<String>, raw_error: &str) {
+    let Some(structured) = crate::skills::parse_structured_skill_error(raw_error) else {
+        return;
+    };
+    if !structured.error_kind.trim().is_empty() {
+        observed_facts.push(format!("error_kind: {}", structured.error_kind.trim()));
+    }
+    if !structured.skill.trim().is_empty() {
+        observed_facts.push(format!("structured_skill: {}", structured.skill.trim()));
+    }
+    if let Some(extra) = structured.extra.as_ref() {
+        for key in ["exit_code", "stderr", "stdout", "output_truncated"] {
+            if let Some(value) = extra.get(key) {
+                let value_text = value
+                    .as_str()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| value.to_string());
+                observed_facts.push(format!(
+                    "{key}: {}",
+                    crate::truncate_for_agent_trace(&compact_observed_stream(&value_text))
+                ));
+            }
+        }
+    }
 }
 
-fn structured_extra_bool(value: &serde_json::Value, key: &str) -> bool {
-    value
-        .get(key)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
+fn machine_fallback_from_observed_facts(reason_code: &str, observed_facts: &[String]) -> String {
+    let mut lines = vec![format!("reason_code={}", reason_code.trim())];
+    for fact in observed_facts {
+        let fact = fact.trim();
+        if fact.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = fact.split_once(':') else {
+            lines.push(fact.replace(' ', "_"));
+            continue;
+        };
+        let key = key.trim().replace(' ', "_");
+        let value = value.trim();
+        if key == "locator" {
+            lines.push(format!("{key}=`{value}`"));
+        } else {
+            lines.push(format!("{key}={value}"));
+        }
+    }
+    lines.join("\n")
 }
 
 fn compact_observed_stream(text: &str) -> String {
@@ -290,109 +320,6 @@ fn compact_observed_stream(text: &str) -> String {
     } else {
         compact
     }
-}
-
-fn run_cmd_failure_direct_answer(
-    state: &AppState,
-    user_text: &str,
-    skill_name: &str,
-    raw_error: &str,
-    normalized_error: &str,
-) -> Option<String> {
-    let structured = crate::skills::parse_structured_skill_error(raw_error)?;
-    let effective_skill = if structured.skill.trim().is_empty() {
-        skill_name
-    } else {
-        structured.skill.as_str()
-    };
-    if !effective_skill.eq_ignore_ascii_case("run_cmd") {
-        return None;
-    }
-    let extra = structured.extra.as_ref()?;
-    let exit_code = structured_extra_i64(extra, "exit_code");
-    let stderr = structured_extra_string(extra, "stderr");
-    let stdout = structured_extra_string(extra, "stdout");
-    let output_truncated = structured_extra_bool(extra, "output_truncated");
-    let prefer_english = prefer_english_for_user_text(state, user_text);
-
-    if prefer_english {
-        let mut sentence = if let Some(exit_code) = exit_code {
-            format!("The command failed with exit code {exit_code}")
-        } else {
-            format!("The command failed: {normalized_error}")
-        };
-        if let Some(stderr) = stderr.as_deref() {
-            sentence.push_str(&format!(". Stderr: {stderr}"));
-        } else if let Some(stdout) = stdout.as_deref() {
-            sentence.push_str(&format!(". Stdout: {stdout}"));
-        }
-        if output_truncated {
-            sentence.push_str(". Output was truncated");
-        }
-        sentence.push('.');
-        return Some(sentence);
-    }
-
-    let mut sentence = if let Some(exit_code) = exit_code {
-        format!("命令执行失败，退出码为 {exit_code}")
-    } else {
-        format!("命令执行失败：{normalized_error}")
-    };
-    if let Some(stderr) = stderr.as_deref() {
-        sentence.push_str(&format!("，错误输出为：{stderr}"));
-    } else if let Some(stdout) = stdout.as_deref() {
-        sentence.push_str(&format!("，标准输出为：{stdout}"));
-    }
-    if output_truncated {
-        sentence.push_str("，输出已截断");
-    }
-    sentence.push('。');
-    Some(sentence)
-}
-
-fn db_basic_failure_direct_answer(
-    state: &AppState,
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    failed_step: &crate::executor::StepExecutionResult,
-    raw_error: &str,
-    normalized_error: &str,
-) -> Option<String> {
-    let structured = crate::skills::parse_structured_skill_error(raw_error)?;
-    let effective_skill = if structured.skill.trim().is_empty() {
-        failed_step.skill.as_str()
-    } else {
-        structured.skill.as_str()
-    };
-    if !effective_skill.eq_ignore_ascii_case("db_basic") {
-        return None;
-    }
-    if !matches!(
-        structured.error_kind.as_str(),
-        "sqlite_open_failed"
-            | "sqlite_query_failed"
-            | "sqlite_execute_failed"
-            | "unsafe_sql"
-            | "confirmation_required"
-            | "invalid_input"
-            | "unsupported_action"
-    ) {
-        return None;
-    }
-    let target =
-        content_evidence_failed_step_target_label(loop_state, agent_run_context, failed_step);
-    let prefer_english = prefer_english_for_user_text(state, user_text);
-    Some(match (prefer_english, target) {
-        (true, Some(target)) => {
-            format!("The database request for `{target}` failed: {normalized_error}.")
-        }
-        (true, None) => format!("The database request failed: {normalized_error}."),
-        (false, Some(target)) => {
-            format!("数据库请求 `{target}` 执行失败：{normalized_error}。")
-        }
-        (false, None) => format!("数据库请求执行失败：{normalized_error}。"),
-    })
 }
 
 fn missing_content_target_label(
@@ -572,88 +499,30 @@ pub(super) async fn content_evidence_step_failure_answer(
     }
 
     let permission_denied = error_looks_like_os_permission_denied(raw_error);
-    let default_answer = if observable_run_cmd_error {
-        run_cmd_failure_direct_answer(state, user_text, &failed_step.skill, raw_error, error)
-            .unwrap_or_else(|| {
-                content_evidence_step_failure_default_answer(
-                    state,
-                    task,
-                    user_text,
-                    loop_state,
-                    agent_run_context,
-                    failed_step,
-                    error,
-                    permission_denied,
-                )
-            })
-    } else {
-        content_evidence_step_failure_default_answer(
-            state,
-            task,
-            user_text,
-            loop_state,
-            agent_run_context,
-            failed_step,
-            error,
-            permission_denied,
-        )
-    };
-    if permission_denied || recoverable_skill_error || observable_run_cmd_error {
-        return Some((
-            default_answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
-    if let Some(answer) = db_basic_failure_direct_answer(
-        state,
-        user_text,
-        loop_state,
-        agent_run_context,
-        failed_step,
-        raw_error,
-        error,
-    ) {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                completion_ok: Some(true),
-                grounded_ok: Some(true),
-                format_ok: Some(true),
-                needs_clarify: Some(false),
-                used_evidence_ids_count: 1,
-                ..Default::default()
-            },
-        ));
-    }
-    let locator = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
-        .filter(|locator| !locator.is_empty());
+    let publishable_observed_failure = permission_denied
+        || recoverable_skill_error
+        || observable_run_cmd_error
+        || structured_failure_is_publishable_user_result(failed_step, raw_error);
+    let locator = content_evidence_failed_step_locator(loop_state, agent_run_context, failed_step);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let mut observed_facts = vec![
         format!("failed_skill: {}", failed_step.skill.trim()),
         format!("error_summary: {}", crate::truncate_for_agent_trace(error)),
         "content_evidence_observed: false".to_string(),
     ];
-    if let Some(locator) = locator {
+    if let Some(locator) = locator.as_deref() {
         observed_facts.push(format!("locator: {locator}"));
     }
+    push_structured_error_facts(&mut observed_facts, raw_error);
     if permission_denied {
         observed_facts.push("os_permission_denied: true".to_string());
         observed_facts.push("clawd_process_lacks_sudo_or_root_permission: true".to_string());
+    }
+    if recoverable_skill_error {
+        observed_facts.push("recoverable_skill_error: true".to_string());
+    }
+    if observable_run_cmd_error {
+        observed_facts.push("observable_run_cmd_error: true".to_string());
     }
     let mut policy_boundary = vec![
         "Do not claim the content was read or summarized.".to_string(),
@@ -667,19 +536,21 @@ pub(super) async fn content_evidence_step_failure_answer(
                 .to_string(),
         );
     }
+    let reason_code = if permission_denied {
+        "content_evidence_step_permission_denied"
+    } else {
+        "content_evidence_step_failed"
+    };
     let contract = crate::fallback::UserResponseContract::tool_failure(
-        if permission_denied {
-            "content_evidence_step_permission_denied"
-        } else {
-            "content_evidence_step_failed"
-        },
+        reason_code,
         user_text,
         &route_resolved_intent(agent_run_context),
-        observed_facts,
+        observed_facts.clone(),
         policy_boundary,
         "brief_failure_with_next_step",
         &language_hint,
     );
+    let default_answer = machine_fallback_from_observed_facts(reason_code, &observed_facts);
     let answer = crate::fallback::compose_user_response_from_contract_with_default(
         state,
         task,
@@ -692,9 +563,13 @@ pub(super) async fn content_evidence_step_failure_answer(
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+            disposition: Some(if publishable_observed_failure {
+                crate::finalize::FinalizerDisposition::QualifiedCompletion
+            } else {
+                crate::finalize::FinalizerDisposition::AllowFallback
+            }),
             contract_ok: true,
-            completion_ok: Some(false),
+            completion_ok: Some(publishable_observed_failure),
             grounded_ok: Some(true),
             format_ok: Some(true),
             needs_clarify: Some(false),

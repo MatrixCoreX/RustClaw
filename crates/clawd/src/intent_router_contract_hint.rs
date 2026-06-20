@@ -57,7 +57,7 @@ pub(super) fn apply_structured_contract_hint_repair(
     wants_file_delivery: &mut bool,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     let semantic_kind = contract_test_hint_semantic_kind(req)?;
@@ -109,7 +109,7 @@ pub(super) fn apply_structured_contract_hint_repair(
     {
         *needs_clarify = false;
         clarify_question.clear();
-        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style =
             crate::post_route_policy::content_evidence_execution_finalize_style(
                 output_contract,

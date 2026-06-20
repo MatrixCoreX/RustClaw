@@ -580,6 +580,49 @@ if "scalar" in tagset and "allow_multiline_scalar" not in tagset:
         print("scalar_case_multiline_reply")
         raise SystemExit(0)
 
+for token in sorted(tagset):
+    if not token.startswith("expect_max_lines:"):
+        continue
+    raw_limit = token.split(":", 1)[1].strip()
+    try:
+        max_lines = int(raw_limit)
+    except ValueError:
+        print(f"invalid_expect_max_lines_tag:{token}")
+        raise SystemExit(0)
+    visible_lines = [line.strip() for line in final_visible.splitlines() if line.strip()]
+    if len(visible_lines) > max_lines:
+        print(f"reply_exceeds_expected_max_lines expected<={max_lines} got={len(visible_lines)}")
+        raise SystemExit(0)
+
+if (
+    ("missing_file_graceful" in tagset or "failure" in tagset)
+    and final_visible
+    and re.match(r"^(?:FILE|IMAGE_FILE):", final_visible.strip(), flags=re.IGNORECASE)
+):
+    print("failure_case_returned_delivery_token")
+    raise SystemExit(0)
+
+language_render_tags = {
+    "bound_path_summary",
+    "chat",
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "directory_purpose_summary",
+    "recent_artifacts_judgment",
+    "summary",
+    "workspace_project_summary",
+}
+token_only_reply = bool(re.fullmatch(r"[\w./:@+-]+", final_visible.strip()))
+if (
+    "ko" in tagset
+    and tagset & language_render_tags
+    and final_visible
+    and not token_only_reply
+    and not re.search(r"[\uac00-\ud7a3]", final_visible)
+):
+    print("ko_reply_missing_hangul")
+    raise SystemExit(0)
+
 clarify_allowed_tags = {
     "allow_clarify",
     "clarify",

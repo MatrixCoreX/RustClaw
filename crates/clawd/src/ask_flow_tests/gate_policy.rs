@@ -164,7 +164,7 @@ fn direct_answer_gate_still_promotes_locatorless_runtime_observation() {
 fn active_ordered_entries_count_returns_scalar_count() {
     let mut route = chat_route_for_gate();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     route.output_contract.requires_content_evidence = true;
@@ -192,7 +192,7 @@ observed_ordered_entries: 1:archive | 2:release_checklist.md | 3:service_notes.m
 #[test]
 fn active_anchor_observed_judgment_promotes_execute_to_chat() {
     let mut route = chat_route_for_gate();
-    route.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
+    route.set_execute_gate();
     route.route_reason = "structured_anchor_direct_answer_requires_evidence".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -230,7 +230,7 @@ observed_ordered_entries: 1:orders | 2:service_logs | 3:users"
 #[test]
 fn active_anchor_observed_judgment_chat_context_includes_anchor_evidence() {
     let mut route = chat_route_for_gate();
-    route.set_first_layer_decision(crate::FirstLayerDecision::DirectAnswer);
+    route.set_chat_gate();
     route.route_reason = "active_anchor_observed_judgment_to_chat".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;

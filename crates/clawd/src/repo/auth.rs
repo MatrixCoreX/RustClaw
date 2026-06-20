@@ -62,19 +62,70 @@ fn map_pending_channel_bind_session(
     })
 }
 
+const DEFAULT_WEBD_USERNAME: &str = "rustclaw";
+const DEFAULT_WEBD_PASSWORD: &str = "123456";
+
 pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
     let existing_count: i64 =
         db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
-    if existing_count > 0 {
-        return Ok(None);
+    let bootstrap_key = if existing_count > 0 {
+        None
+    } else {
+        let user_key = generate_user_key();
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, ?2, NULL)",
+            params![user_key, now_ts()],
+        )?;
+        Some(user_key)
+    };
+    ensure_default_webd_admin_login(db, bootstrap_key.as_deref())?;
+    Ok(bootstrap_key)
+}
+
+fn ensure_default_webd_admin_login(
+    db: &Connection,
+    preferred_admin_key: Option<&str>,
+) -> anyhow::Result<()> {
+    let existing_login: bool = db
+        .query_row(
+            "SELECT 1 FROM webd_login_accounts WHERE username = ?1 LIMIT 1",
+            params![DEFAULT_WEBD_USERNAME],
+            |_| Ok(1_i32),
+        )
+        .optional()?
+        .is_some();
+    if existing_login {
+        return Ok(());
     }
-    let user_key = generate_user_key();
+
+    let admin_key = match preferred_admin_key {
+        Some(key) if !key.trim().is_empty() => key.trim().to_string(),
+        _ => db
+            .query_row(
+                "SELECT user_key FROM auth_keys
+                 WHERE role = 'admin' AND enabled = 1
+                 ORDER BY created_at ASC
+                 LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .unwrap_or_default(),
+    };
+    if admin_key.is_empty() {
+        return Ok(());
+    }
+
+    let password_hash = auth_webd::hash_password_for_webd_login(DEFAULT_WEBD_PASSWORD)?;
+    let now = now_ts();
     db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-         VALUES (?1, 'admin', 1, ?2, NULL)",
-        params![user_key, now_ts()],
+        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+         ON CONFLICT(username) DO NOTHING",
+        params![DEFAULT_WEBD_USERNAME, password_hash, admin_key, now],
     )?;
-    Ok(Some(user_key))
+    Ok(())
 }
 
 pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
@@ -558,7 +609,7 @@ fn clear_audit_logs_if_exists(audit_db: &DbPool) -> anyhow::Result<usize> {
 
 pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<FactoryResetDbResult> {
     let admin_user_key = generate_user_key();
-    let password_hash = auth_webd::hash_password_for_webd_login("123456")?;
+    let password_hash = auth_webd::hash_password_for_webd_login(DEFAULT_WEBD_PASSWORD)?;
     let now = now_ts();
     let mut db = state
         .core
@@ -578,14 +629,12 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     let preferences_deleted = delete_all_rows_if_exists(&tx, "user_preferences")?;
     let long_term_memories_deleted = delete_all_rows_if_exists(&tx, "long_term_memories")?;
     let memory_facts_deleted = delete_all_rows_if_exists(&tx, "memory_facts")?;
-    let memory_retrieval_rows_deleted =
-        delete_all_rows_if_exists(&tx, "memory_retrieval_index")?;
+    let memory_retrieval_rows_deleted = delete_all_rows_if_exists(&tx, "memory_retrieval_index")?;
     let _ = delete_all_rows_if_exists(&tx, "memory_retrieval_index_fts")?;
 
     let followup_frames_deleted = delete_all_rows_if_exists(&tx, "followup_frames")?;
     let clarify_states_deleted = delete_all_rows_if_exists(&tx, "clarify_states")?;
-    let observed_facts_states_deleted =
-        delete_all_rows_if_exists(&tx, "observed_facts_states")?;
+    let observed_facts_states_deleted = delete_all_rows_if_exists(&tx, "observed_facts_states")?;
     let conversation_states_deleted = delete_all_rows_if_exists(&tx, "conversation_states")?;
     let _ = delete_all_rows_if_exists(&tx, "audit_logs")?;
 
@@ -596,8 +645,8 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     )?;
     tx.execute(
         "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
-         VALUES ('rustclaw', ?1, ?2, 1, ?3, ?3)",
-        params![password_hash, admin_user_key, now],
+         VALUES (?1, ?2, ?3, 1, ?4, ?4)",
+        params![DEFAULT_WEBD_USERNAME, password_hash, admin_user_key, now],
     )?;
 
     tx.commit()?;

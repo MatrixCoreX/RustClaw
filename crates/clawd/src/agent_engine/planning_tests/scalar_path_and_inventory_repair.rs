@@ -592,6 +592,24 @@ fn scalar_path_locator_hint_file_builds_observation_plan_before_auto_locator() {
 }
 
 #[test]
+fn scalar_path_auto_locator_requires_scalar_path_contract() {
+    let root = TempDirGuard::new("scalar_auto_locator_requires_contract");
+    let selected = root.path.join("selected.md");
+    fs::write(&selected, "selected").expect("write selected");
+    let selected_path = selected.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = selected_path;
+
+    assert!(scalar_path_auto_locator_observation_plan(Some(&route), None).is_none());
+}
+
+#[test]
 fn scalar_path_auto_locator_deterministic_plan_uses_structural_locator() {
     let root = TempDirGuard::new("scalar_auto_locator_deterministic_plan");
     let report = root.path.join("my_abcd.txt");
@@ -621,6 +639,311 @@ fn scalar_path_auto_locator_deterministic_plan_uses_structural_locator() {
     assert_eq!(plan.steps.len(), 1);
     assert!(plan.raw_plan_text.contains("stat_paths"));
     assert!(plan.raw_plan_text.contains(&report_path));
+}
+
+#[test]
+fn file_basename_auto_locator_deterministic_plan_uses_stat_paths() {
+    let root = TempDirGuard::new("file_basename_auto_locator_deterministic_plan");
+    let report = root.path.join("release_checklist.md");
+    fs::write(&report, "hello").expect("write report");
+    let report_path = report.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FileBasename;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = report_path.clone();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = scalar_path_auto_locator_deterministic_plan_result(
+        "return only the selected file basename",
+        Some(&route),
+        &loop_state,
+        Some(&report_path),
+    )
+    .expect("fast plan should be available");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0]
+        .to_agent_action()
+        .expect("planned step should convert to action");
+    let args = expect_planned_call(&action, "fs_basic", "stat_paths");
+    assert_eq!(args.get("paths"), Some(&json!([report_path])));
+}
+
+#[test]
+fn scalar_path_current_workspace_deterministic_plan_uses_workspace_contract() {
+    let root = TempDirGuard::new("scalar_current_workspace_deterministic_plan");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let workspace_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = scalar_path_current_workspace_deterministic_plan_result(
+        &state,
+        "return current workspace path",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("current workspace scalar path should have a deterministic plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    match plan.steps[0].to_agent_action().as_ref() {
+        Some(AgentAction::CallTool { tool, args })
+        | Some(AgentAction::CallSkill { skill: tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("stat_paths")
+            );
+            assert_eq!(args.get("paths"), Some(&json!([workspace_path])));
+        }
+        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn plan_round_scalar_path_current_workspace_uses_deterministic_plan_before_llm() {
+    let root = TempDirGuard::new("scalar_current_workspace_plan_round");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let prompt = "???? 帮我看看 pwd 是哪儿 :) thx!!!";
+    let task = ClaimedTask {
+        task_id: "scalar-current-workspace-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = "return current workspace path".to_string();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
+
+    let plan = super::super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        prompt,
+        &policy,
+        &loop_state,
+        None,
+        Some(&route),
+        None,
+    )
+    .await
+    .expect("plan round should use deterministic current workspace path plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert!(plan.planner_notes.split_whitespace().any(|note| {
+        note == "fallback_reason_code=plan_deterministic_scalar_path_current_workspace"
+    }));
+    let actions = plan
+        .steps
+        .iter()
+        .filter_map(|step| step.to_agent_action())
+        .collect::<Vec<_>>();
+    assert!(actions.iter().all(|action| !matches!(
+        action,
+        AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+    )));
+    assert!(matches!(
+        actions.first(),
+        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("stat_paths")
+    ));
+}
+
+#[tokio::test]
+async fn explicit_command_scalar_path_current_workspace_uses_run_cmd_plan() {
+    let root = TempDirGuard::new("explicit_command_scalar_current_workspace_plan_round");
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let prompt = "执行 pwd，只输出当前工作目录的绝对路径";
+    let task = ClaimedTask {
+        task_id: "explicit-command-scalar-current-workspace-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.route_reason = "explicit_command_preserves_structured_observation_contract".to_string();
+    route.resolved_intent =
+        "Execute pwd command and output only the absolute path of the current working directory."
+            .to_string();
+    let loop_state = LoopState::new(1);
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
+    assert!(super::super::explicit_command_request_present(
+        &state.policy.command_intent,
+        prompt,
+        Some(&route)
+    ));
+    assert!(
+        super::super::explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
+            &state.policy.command_intent,
+            prompt,
+            Some(&route)
+        )
+    );
+
+    let plan = super::super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        prompt,
+        &policy,
+        &loop_state,
+        None,
+        Some(&route),
+        None,
+    )
+    .await
+    .expect("explicit current workspace command should use run_cmd plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert!(plan
+        .planner_notes
+        .split_whitespace()
+        .any(|note| note == "fallback_reason_code=plan_deterministic_explicit_command_run_cmd"));
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(
+        plan.steps[0].args.get("command").and_then(Value::as_str),
+        Some("pwd")
+    );
+    assert_eq!(
+        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
+        Some(&json!(true))
+    );
+}
+
+#[tokio::test]
+async fn explicit_command_scalar_path_auto_locator_conflict_uses_run_cmd_plan() {
+    let root = TempDirGuard::new("explicit_command_scalar_auto_locator_conflict");
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let prompt = "Run pwd and output only the raw result.";
+    let task = ClaimedTask {
+        task_id: "explicit-command-scalar-auto-locator-conflict-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root.path.join("run").display().to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.route_reason = concat!(
+        "User requests execution of pwd command; ",
+        "explicit_command_preserves_structured_observation_contract; ",
+        "workspace_child_locator_prebound_from_current_request"
+    )
+    .to_string();
+    route.resolved_intent =
+        "Run pwd command and output the raw current working directory.".to_string();
+    let loop_state = LoopState::new(1);
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
+    assert!(super::super::explicit_command_request_present(
+        &state.policy.command_intent,
+        prompt,
+        Some(&route)
+    ));
+    assert!(
+        super::super::explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
+            &state.policy.command_intent,
+            prompt,
+            Some(&route)
+        )
+    );
+
+    let plan = super::super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        prompt,
+        &policy,
+        &loop_state,
+        None,
+        Some(&route),
+        Some(&route.output_contract.locator_hint),
+    )
+    .await
+    .expect("explicit command should override conflicting auto-locator path");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert!(plan
+        .planner_notes
+        .split_whitespace()
+        .any(|note| note == "fallback_reason_code=plan_deterministic_explicit_command_run_cmd"));
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(
+        plan.steps[0].args.get("command").and_then(Value::as_str),
+        Some("pwd")
+    );
+    assert_eq!(
+        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
+        Some(&json!(true))
+    );
 }
 
 #[test]
@@ -796,11 +1119,19 @@ fn strict_quantity_directory_target_uses_ranked_size_inventory() {
         true,
         OutputResponseShape::Strict,
     );
-    route.resolved_intent =
-        "List the largest 3 files in the selected directory by size.".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target_path.clone();
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::File,
+        target_kind_specified: true,
+        limit: Some(3),
+        sort_by: Some("size_desc".to_string()),
+        include_metadata: Some(true),
+        include_hidden: None,
+    };
+    route.resolved_intent =
+        "legacy first-layer summary selector_limit=9 selector_sort_by=mtime_desc".to_string();
 
     let actions =
         file_facts_auto_locator_observation_plan(Some(&route), Some(&target_path)).unwrap();
@@ -832,6 +1163,8 @@ fn strict_quantity_directory_without_selector_uses_path_metadata_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target_path.clone();
+    route.resolved_intent =
+        "legacy first-layer summary selector_limit=3 selector_sort_by=size_desc".to_string();
 
     let actions =
         file_facts_auto_locator_observation_plan(Some(&route), Some(&target_path)).unwrap();

@@ -183,7 +183,7 @@ pub(super) fn apply_schedule_route_contract_repair(
     needs_clarify: bool,
     output_contract: &mut IntentOutputContract,
     wants_file_delivery: &mut bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if matches!(schedule_kind, ScheduleKind::None) {
@@ -222,8 +222,13 @@ pub(super) fn apply_schedule_route_contract_repair(
         output_contract.response_shape = OutputResponseShape::OneSentence;
         changed = true;
     }
-    if !needs_clarify && !matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute) {
-        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    if !needs_clarify
+        && !matches!(
+            *legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
+    {
+        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         changed = true;
     }
     if !matches!(*execution_finalize_style, ActFinalizeStyle::Plain) {

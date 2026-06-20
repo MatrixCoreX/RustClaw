@@ -61,7 +61,6 @@ pub(crate) const RETRIEVAL_SOURCE_MEMORY_FACT: &str = "memory_fact";
 pub(crate) const MEMORY_FACT_STATUS_ACTIVE: &str = "active";
 pub(crate) const MEMORY_FACT_STATUS_SUPERSEDED: &str = "superseded";
 pub(crate) const MEMORY_FACT_STATUS_EXPIRED: &str = "expired";
-#[allow(dead_code)]
 pub(crate) const MEMORY_FACT_STATUS_DELETED: &str = "deleted";
 
 // `memory_kind` answers "how should this row be recalled/presented?"

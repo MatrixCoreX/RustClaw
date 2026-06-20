@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 PRIMARY_SWITCH_NAME = "semantic_route_authority"
 LEGACY_SWITCH_NAME = "agent_decides_semantic_route"
 ROUTE_DELTA_SWITCH_NAMES = {PRIMARY_SWITCH_NAME, LEGACY_SWITCH_NAME}
+CASE_FILE_RE = re.compile(r"^turn_(?P<turn>\d+)_case_(?P<case>\d+)\.json$")
 PRE_PLANNER_PROMPTS = {
     "normalizer",
     "contract_repair",
@@ -155,6 +157,76 @@ def turn_json_paths(run_dir: Path) -> list[Path]:
     )
 
 
+def case_turn_json_paths(run_dir: Path) -> list[Path]:
+    return sorted(run_dir.glob("turn*_case_*.json"))
+
+
+def turn_case_id(path: Path) -> int | None:
+    match = CASE_FILE_RE.match(path.name)
+    if not match:
+        return None
+    return int(match.group("case"))
+
+
+def turn_file_order(path: Path, run_order: dict[Path, int]) -> tuple[int, str, int, str]:
+    match = CASE_FILE_RE.match(path.name)
+    turn_number = int(match.group("turn")) if match else 0
+    parent = path.parent.resolve()
+    return (
+        run_order.get(parent, -1),
+        parent.name,
+        turn_number,
+        path.name,
+    )
+
+
+def latest_valid_case_paths(run_dirs: list[Path]) -> tuple[list[Path], dict[str, Any]]:
+    run_order = {run_dir.resolve(): index for index, run_dir in enumerate(run_dirs)}
+    latest: dict[int, tuple[tuple[int, str, int, str], Path]] = {}
+    skipped_parse_errors: list[dict[str, str]] = []
+    ignored_without_case_id = 0
+    for run_dir in run_dirs:
+        for path in case_turn_json_paths(run_dir):
+            case_id = turn_case_id(path)
+            if case_id is None:
+                ignored_without_case_id += 1
+                continue
+            obj = load_json(path)
+            if obj.get("_parse_error"):
+                skipped_parse_errors.append(
+                    {
+                        "run_dir": str(run_dir),
+                        "file": path.name,
+                        "error": str(obj["_parse_error"]),
+                    }
+                )
+                continue
+            order = turn_file_order(path, run_order)
+            current = latest.get(case_id)
+            if current is None or order > current[0]:
+                latest[case_id] = (order, path)
+    selected = [latest[case_id][1] for case_id in sorted(latest)]
+    selected_run_counts: Counter[str] = Counter(path.parent.name for path in selected)
+    case_ids = sorted(latest)
+    missing_case_ids: list[int] = []
+    if case_ids:
+        missing_case_ids = [
+            case_id for case_id in range(case_ids[0], case_ids[-1] + 1)
+            if case_id not in latest
+        ]
+    return selected, {
+        "mode": "latest_valid_case_id",
+        "case_count": len(case_ids),
+        "min_case_id": case_ids[0] if case_ids else None,
+        "max_case_id": case_ids[-1] if case_ids else None,
+        "missing_case_ids": missing_case_ids,
+        "selected_run_dir_counts": counter_json(selected_run_counts),
+        "skipped_parse_error_count": len(skipped_parse_errors),
+        "skipped_parse_error_examples": skipped_parse_errors[:10],
+        "ignored_without_case_id": ignored_without_case_id,
+    }
+
+
 def rollout_items(turn_obj: dict[str, Any]) -> list[dict[str, Any]]:
     summary_items = dict_path(
         turn_obj,
@@ -258,10 +330,20 @@ def count_tool_calls(steps: list[dict[str, Any]]) -> int:
     return total
 
 
+def route_legacy_first_layer(route: Any) -> str:
+    if not isinstance(route, dict):
+        return ""
+    return str(
+        route.get("legacy_first_layer_decision")
+        or route.get("first_layer_decision")
+        or ""
+    )
+
+
 def route_requested_clarification(route: dict[str, Any], summary: dict[str, Any]) -> bool:
     return (
         route.get("needs_clarify") is True
-        or route.get("first_layer_decision") == "clarify"
+        or route_legacy_first_layer(route) == "clarify"
         or route.get("route_gate_kind") == "clarify"
         or summary.get("final_status") == "clarification_requested"
     )
@@ -296,6 +378,24 @@ def mismatch_explanation(item: dict[str, Any]) -> str:
     )
     if validation_status in {"shadow_invalid", "invalid"}:
         return f"planner_decision_rejected:{validation_reason}"
+    old_decision = str(item.get("old_first_layer_decision") or "")
+    agent_decision = str(
+        item.get("agent_decision") or decision_envelope.get("decision") or ""
+    )
+    capability_delta = str(item.get("capability_delta") or "")
+    capability_ref = str(
+        item.get("capability_ref") or decision_envelope.get("capability_ref") or ""
+    )
+    if (
+        decision_delta == "different_gate"
+        and validation_status == "valid"
+        and validation_reason == "agent_loop_decision_shadow_valid"
+        and old_decision == "planner_execute"
+        and agent_decision == "respond"
+        and capability_delta == "no_capability_ref"
+        and capability_ref == "respond"
+    ):
+        return "agent_loop_valid_direct_response_vs_legacy_planner"
     return "unexplained"
 
 
@@ -351,7 +451,7 @@ def compact_item(path: Path, turn_obj: dict[str, Any], item: dict[str, Any]) -> 
         "outcome": item.get("outcome"),
         "reason_code": item.get("reason_code"),
         "old_first_layer_decision": item.get("old_first_layer_decision")
-        or route.get("first_layer_decision"),
+        or route_legacy_first_layer(route),
         "agent_decision": item.get("agent_decision"),
         "decision_delta": item.get("decision_delta"),
         "route_layer_that_disagreed": item.get("route_layer_that_disagreed"),
@@ -404,8 +504,13 @@ def compact_item(path: Path, turn_obj: dict[str, Any], item: dict[str, Any]) -> 
     }
 
 
-def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
-    paths = turn_json_paths(run_dir)
+def summarize_run(
+    run_dir: Path,
+    max_examples: int,
+    paths: list[Path] | None = None,
+    source_run_dir: str | None = None,
+) -> dict[str, Any]:
+    paths = turn_json_paths(run_dir) if paths is None else sorted(paths)
     parse_errors = 0
     parse_error_examples: list[dict[str, Any]] = []
     tasks_with_items: set[str] = set()
@@ -662,9 +767,13 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
             ):
                 unexplained_mismatch_examples.append(compact_item(path, obj, item))
 
+    mismatch_explanation_json = counter_json(mismatch_explanation_counts)
+    mismatch_count = sum(
+        count for key, count in mismatch_explanation_json.items() if key != "not_mismatch"
+    )
     return {
         "schema_version": 1,
-        "run_dir": str(run_dir),
+        "run_dir": source_run_dir or str(run_dir),
         "switch_names": sorted(ROUTE_DELTA_SWITCH_NAMES),
         "turn_files": len(paths),
         "parse_errors": parse_errors,
@@ -800,13 +909,31 @@ def summarize_run(run_dir: Path, max_examples: int) -> dict[str, Any]:
             pre_agent_direct_answer_semantic_migration_target_counts
         ),
         "reason_code_counts": counter_json(reason_code_counts),
-        "mismatch_explanation_counts": counter_json(mismatch_explanation_counts),
+        "mismatch_count": mismatch_count,
+        "unexplained_mismatch_count": mismatch_explanation_json.get("unexplained", 0),
+        "mismatch_explanation_counts": mismatch_explanation_json,
         "mismatch_examples": mismatch_examples,
         "unexplained_mismatch_examples": unexplained_mismatch_examples,
     }
 
 
-def summarize_run_dirs(run_dirs: list[Path], max_examples: int) -> dict[str, Any]:
+def summarize_run_dirs(
+    run_dirs: list[Path],
+    max_examples: int,
+    dedupe_latest_case: bool = False,
+) -> dict[str, Any]:
+    if dedupe_latest_case:
+        selected_paths, case_dedupe = latest_valid_case_paths(run_dirs)
+        summary = summarize_run(
+            run_dirs[0],
+            max_examples,
+            paths=selected_paths,
+            source_run_dir="multiple",
+        )
+        summary["run_dirs"] = [str(run_dir) for run_dir in run_dirs]
+        summary["case_dedupe"] = case_dedupe
+        return summary
+
     if len(run_dirs) == 1:
         return summarize_run(run_dirs[0], max_examples)
 
@@ -926,6 +1053,15 @@ def summarize_run_dirs(run_dirs: list[Path], max_examples: int) -> dict[str, Any
     }
     for key in COUNTER_FIELDS:
         merged[key] = merge_counter_dicts(summaries, key)
+    mismatch_explanations = dict_value(merged.get("mismatch_explanation_counts"))
+    merged["mismatch_count"] = sum(
+        safe_int(count)
+        for key, count in mismatch_explanations.items()
+        if key != "not_mismatch"
+    )
+    merged["unexplained_mismatch_count"] = safe_int(
+        mismatch_explanations.get("unexplained")
+    )
     return merged
 
 
@@ -938,16 +1074,42 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero when no route-delta attribution was found.",
     )
+    parser.add_argument(
+        "--allow-parse-errors",
+        action="store_true",
+        help="Report parse errors but do not fail when scanning historical partial run logs.",
+    )
+    parser.add_argument(
+        "--dedupe-latest-case",
+        action="store_true",
+        help="For rerun shards, keep only the latest valid turn per numeric case id.",
+    )
+    parser.add_argument(
+        "--expect-case-count",
+        type=int,
+        default=0,
+        help="Fail when --dedupe-latest-case finds fewer unique cases than this count.",
+    )
     args = parser.parse_args()
 
     for run_dir in args.run_dirs:
         if not run_dir.is_dir():
             raise SystemExit(f"run dir not found: {run_dir}")
-    summary = summarize_run_dirs(args.run_dirs, max(args.max_examples, 0))
+    summary = summarize_run_dirs(
+        args.run_dirs,
+        max(args.max_examples, 0),
+        dedupe_latest_case=args.dedupe_latest_case,
+    )
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2))
     if args.require_items and summary["route_delta_items"] <= 0:
         return 2
-    return 0 if summary["parse_errors"] == 0 else 1
+    if args.expect_case_count:
+        case_count = safe_int(dict_path(summary, "case_dedupe", "case_count"))
+        if case_count < args.expect_case_count:
+            return 3
+    if summary["parse_errors"] and not args.allow_parse_errors:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

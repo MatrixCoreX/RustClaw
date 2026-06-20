@@ -8,10 +8,12 @@ use super::{
 
 pub(super) fn current_workspace_generic_summary_needs_semantic_contract(
     output_contract: &IntentOutputContract,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        && output_contract.requires_content_evidence
+    matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
@@ -267,10 +269,12 @@ pub(super) fn config_mutation_contract_from_surface(
     output_contract: &IntentOutputContract,
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
 ) -> Option<String> {
-    if !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        || output_contract.delivery_required
+    if !matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) || output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(
             output_contract.semantic_kind,
@@ -520,11 +524,13 @@ fn structural_config_value_candidate_tokens(text: &str) -> impl Iterator<Item = 
 pub(super) fn planner_execute_inline_structured_payload_context(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        && req_surface.inline_json_shape.is_some()
+    matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && req_surface.inline_json_shape.is_some()
         && !crate::intent::surface_signals::inline_json_transform_request(req)
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -538,12 +544,14 @@ pub(super) fn planner_execute_inline_structured_payload_context(
 
 pub(super) fn planner_execute_inline_structured_transform_contract_context(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     answer_candidate: &str,
 ) -> bool {
-    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        && req_surface.inline_json_shape.is_some()
+    matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) && req_surface.inline_json_shape.is_some()
         && answer_candidate.trim().is_empty()
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)

@@ -475,6 +475,52 @@ fn scalar_runtime_tool_recipe_kernel_alias_preserves_status_query_patch() {
 }
 
 #[test]
+fn scalar_runtime_tool_recipe_hostname_alias_preserves_status_query_patch() {
+    let raw = r#"{
+          "resolved_user_intent":"current machine hostname",
+          "answer_candidate":"",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"scalar",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"none",
+            "locator_hint":""
+          },
+          "execution_recipe":{
+            "kind":"tool",
+            "name":"system_basic",
+            "params":{"operation":"hostname"}
+          },
+          "turn_type":"status_query"
+        }"#;
+    let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+        raw,
+        "return current hostname only",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|v| v.as_str()),
+        Some("raw_command_output")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/runtime_status_query/kind")
+            .and_then(|v| v.as_str()),
+        Some("host_name")
+    );
+    assert!(report
+        .detail_csv()
+        .contains("execution_recipe_scalar_runtime_tool_observation"));
+}
+
+#[test]
 fn scalar_run_cmd_args_recipe_preserves_status_query_patch() {
     let raw = r#"{
           "resolved_user_intent":"获取当前系统用户名",

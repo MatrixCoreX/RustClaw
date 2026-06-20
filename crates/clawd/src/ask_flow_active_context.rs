@@ -1,5 +1,41 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ActiveFileBasenameDirectAnswer {
+    pub(super) answer: String,
+    pub(super) evidence_path: String,
+}
+
+impl ActiveFileBasenameDirectAnswer {
+    pub(super) fn observed_evidence(&self) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "source": "active_execution_anchor",
+            "action": "active_file_basename",
+            "status": "ok",
+            "path": self.evidence_path,
+            "field_value": self.answer,
+            "observed_evidence": {
+                "extractor": {
+                    "extractor_ref": "active_execution_anchor.file_basename.v1"
+                },
+                "items": [
+                    {
+                        "source": "active_execution_anchor",
+                        "field": "field_value",
+                        "value": self.answer
+                    },
+                    {
+                        "source": "active_execution_anchor",
+                        "field": "path",
+                        "value": self.evidence_path
+                    }
+                ]
+            }
+        })
+    }
+}
+
 pub(super) fn normalizer_answer_candidate_from_resolved_prompt(
     resolved_prompt: &str,
 ) -> Option<String> {
@@ -1003,10 +1039,18 @@ fn path_is_under_root(path: &Path, root: &Path) -> bool {
     }
 }
 
+#[cfg(test)]
 pub(super) fn active_file_basename_direct_answer_candidate(
     state: &AppState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<String> {
+    active_file_basename_direct_answer(state, agent_run_context).map(|candidate| candidate.answer)
+}
+
+pub(super) fn active_file_basename_direct_answer(
+    state: &AppState,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<ActiveFileBasenameDirectAnswer> {
     let ctx = agent_run_context?;
     let route = ctx.route_result.as_ref()?;
     let summary = ctx.context_bundle_summary.as_deref().map(str::trim);
@@ -1030,7 +1074,15 @@ pub(super) fn active_file_basename_direct_answer_candidate(
         semantic_kind,
         crate::OutputSemanticKind::None | crate::OutputSemanticKind::ScalarPathOnly
     );
+    let locator_requires_candidate_match = semantic_basename
+        && has_delivery_anchor
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::Filename
+        && !route.output_contract.locator_hint.trim().is_empty();
     let locator_ok = route.output_contract.locator_kind == crate::OutputLocatorKind::None
+        || (semantic_basename
+            && route.output_contract.locator_kind == crate::OutputLocatorKind::Filename
+            && route.output_contract.locator_hint.trim().is_empty())
+        || locator_requires_candidate_match
         || (candidate_bound_basename
             && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
             && route.output_contract.locator_hint.trim().is_empty());
@@ -1053,68 +1105,100 @@ pub(super) fn active_file_basename_direct_answer_candidate(
     {
         return None;
     }
-    let mut basenames = Vec::new();
+    let mut candidates = Vec::new();
     for target in active_execution_anchor_bound_targets(summary) {
-        push_existing_file_basename_candidate(state, &mut basenames, &target);
+        push_existing_file_basename_answer_candidate(state, &mut candidates, &target);
     }
     if let Some(context) = recent_execution_context {
         for target in recent_execution_delivery_file_targets(state, context) {
-            push_existing_file_basename_candidate(state, &mut basenames, &target);
+            push_existing_file_basename_answer_candidate(state, &mut candidates, &target);
         }
     }
-    match basenames.as_slice() {
-        [basename]
+    if locator_requires_candidate_match {
+        let Some(locator_basename) = route
+            .output_contract
+            .locator_hint
+            .trim()
+            .rsplit(['/', '\\'])
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return None;
+        };
+        candidates.retain(|candidate| candidate.answer.eq_ignore_ascii_case(locator_basename));
+    }
+    match candidates.as_slice() {
+        [candidate]
             if semantic_basename
                 || semantic_delivery_file_name
                 || active_delivery_direct_answer =>
         {
-            Some(basename.clone())
+            Some(candidate.clone())
         }
         _ => {
             let candidate =
                 normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
                     .or_else(|| normalizer_answer_candidate_from_context_bundle_summary(summary))?;
             let candidate = single_component_basename_candidate(&candidate)?;
-            basenames
+            candidates
                 .into_iter()
-                .find(|basename| basename.eq_ignore_ascii_case(candidate))
+                .find(|entry| entry.answer.eq_ignore_ascii_case(candidate))
         }
     }
 }
 
-pub(super) fn push_existing_file_basename_candidate(
+fn push_existing_file_basename_answer_candidate(
     state: &AppState,
-    basenames: &mut Vec<String>,
+    candidates: &mut Vec<ActiveFileBasenameDirectAnswer>,
     target: &str,
 ) {
+    let Some(candidate) = existing_file_basename_answer_candidate(state, target) else {
+        return;
+    };
+    if !candidates
+        .iter()
+        .any(|existing| existing.answer.eq_ignore_ascii_case(&candidate.answer))
+    {
+        candidates.push(candidate);
+    }
+}
+
+fn existing_file_basename_answer_candidate(
+    state: &AppState,
+    target: &str,
+) -> Option<ActiveFileBasenameDirectAnswer> {
     let target = target.trim();
     if target.is_empty() {
-        return;
+        return None;
     }
     let path = Path::new(target);
-    let is_existing_file = path.is_file()
-        || path
-            .canonicalize()
-            .ok()
-            .is_some_and(|canonical| canonical.is_file());
-    let is_workspace_file = !is_existing_file && state.skill_rt.workspace_root.join(path).is_file();
-    if !is_existing_file && !is_workspace_file {
-        return;
-    }
-    let Some(basename) = path
+    let evidence_path = if path.is_file() {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    } else if let Ok(canonical) = path.canonicalize() {
+        if !canonical.is_file() {
+            return None;
+        }
+        canonical
+    } else {
+        let workspace_path = state.skill_rt.workspace_root.join(path);
+        if !workspace_path.is_file() {
+            return None;
+        }
+        workspace_path.canonicalize().unwrap_or(workspace_path)
+    };
+    let Some(basename) = evidence_path
         .file_name()
         .and_then(|name| name.to_str())
         .map(str::trim)
         .filter(|name| !name.is_empty())
     else {
-        return;
+        return None;
     };
-    if !basenames
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(basename))
-    {
-        basenames.push(basename.to_string());
-    }
+    Some(ActiveFileBasenameDirectAnswer {
+        answer: basename.to_string(),
+        evidence_path: evidence_path.display().to_string(),
+    })
 }
 
 pub(super) fn recent_execution_delivery_file_targets(

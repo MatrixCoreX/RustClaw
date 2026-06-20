@@ -150,6 +150,64 @@ fn normalizer_schema_normalization_preserves_list_selector_when_neighbor_field_i
 }
 
 #[test]
+fn normalizer_schema_preserves_name_desc_list_selector() {
+    let raw = r#"{
+          "resolved_user_intent":"list scripts entries by reverse name order",
+          "answer_candidate":"",
+          "resume_behavior":"none",
+          "schedule_kind":"",
+          "schedule_intent":"",
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"directory_entry_groups selector_sort_by=name_desc",
+          "confidence":0.95,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"strict",
+            "exact_sentence_count":0,
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"path",
+            "delivery_intent":"none",
+            "semantic_kind":"directory_entry_groups",
+            "locator_hint":"scripts",
+            "scalar_count_filter":0,
+            "list_selector":{"target_kind":"any","limit":5,"sort_by":"name_desc","include_metadata":false,"include_hidden":false},
+            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+          },
+          "execution_recipe":{"kind":"none"},
+          "turn_type":"task_request",
+          "target_task_policy":"",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "list scripts entries by reverse name order",
+    );
+    let validated = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation")
+    .value;
+    let contract = super::parse_output_contract(validated.output_contract, false);
+
+    assert_eq!(
+        contract.semantic_kind,
+        crate::OutputSemanticKind::DirectoryEntryGroups
+    );
+    assert_eq!(
+        contract.self_extension.list_selector.sort_by.as_deref(),
+        Some("name_desc")
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_drops_null_list_selector_sort_by() {
     let raw = r#"{
           "resolved_user_intent":"列出 scripts/nl_tests/fixtures/device_local/docs 目录中的文件名，读取 release_checklist.md 文件开头内容，并根据内容判断该文件更像操作清单还是普通说明，用一句中文回答判断结果",

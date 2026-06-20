@@ -511,6 +511,8 @@ pub(crate) struct AppState {
     pub(crate) ask_states: AskStateRegistry,
 }
 
+const DEFAULT_AGENT_RUNTIME_IDENTITY: &str = "RustClaw";
+
 /// Phase 3.3 Stage 3.2 — per-task ask_state 注册表。
 ///
 /// 简单的 `Arc<Mutex<HashMap>>` 实现，与 `TaskMetricsRegistry` 形态一致；
@@ -1272,6 +1274,10 @@ impl AppState {
                 allowed_skills: Arc::new(HashSet::new()),
                 llm_providers: Vec::new(),
             })
+    }
+
+    pub(crate) fn agent_runtime_identity_label(&self) -> &'static str {
+        DEFAULT_AGENT_RUNTIME_IDENTITY
     }
 
     pub(crate) fn task_persona_prompt(&self, task: &ClaimedTask) -> String {

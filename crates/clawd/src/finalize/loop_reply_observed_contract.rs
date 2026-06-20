@@ -5,11 +5,12 @@ use super::{
     current_delivery_is_latest_publishable_synthesis, current_user_visible_delivery_text,
     delivery_is_raw_read_observation, delivery_is_single_line_text,
     delivery_message_is_json_container, deterministic_missing_observed_target_answer,
-    deterministic_scalar_markdown_heading_answer_from_loop, latest_contractual_synthesis_output,
-    latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
-    latest_publishable_synthesis_step_matches, log_deterministic_delivery_record,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    matrix_candidate_satisfies_final_shape, planned_delivery_is_publishable_model_language_answer,
+    deterministic_scalar_markdown_heading_answer_from_loop, direct_raw_command_output_projection,
+    latest_contractual_synthesis_output, latest_path_batch_facts_has_implicit_metadata_fields,
+    latest_plan_requested_synthesis, latest_publishable_synthesis_step_matches,
+    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
+    looks_like_structured_machine_output, matrix_candidate_satisfies_final_shape,
+    planned_delivery_is_publishable_model_language_answer,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
     route_prefers_observed_answer, route_requires_matrix_deterministic_final_answer,
     service_status_system_basic_info_answer,
@@ -356,9 +357,15 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
     ) {
         return false;
     }
-    let Some((answer, summary)) =
-        direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-    else {
+    let projected =
+        if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput {
+            direct_raw_command_output_projection(state, route, loop_state).or_else(|| {
+                direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
+            })
+        } else {
+            direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
+        };
+    let Some((answer, summary)) = projected else {
         return false;
     };
     let answer = answer.trim();

@@ -582,8 +582,15 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
         .last()
         .map(String::as_str)
         .unwrap_or_default();
-    if current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery)
-        && recent_artifacts_delivery_mentions_all_entries(current_delivery, answer.as_str())
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let current_is_publishable_synthesis =
+        current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery);
+    let one_sentence_synthesis = route.is_some_and(|route| {
+        route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+    });
+    if current_is_publishable_synthesis
+        && (one_sentence_synthesis
+            || recent_artifacts_delivery_mentions_all_entries(current_delivery, answer.as_str()))
     {
         loop_state.last_user_visible_respond = Some(current_delivery.trim().to_string());
         return true;

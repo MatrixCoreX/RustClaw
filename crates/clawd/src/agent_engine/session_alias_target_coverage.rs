@@ -305,7 +305,9 @@ pub(super) fn plan_repair_reason(
             loop_state.execution_recipe.phase,
             crate::execution_recipe::ExecutionRecipePhase::Apply
         )
-        && !actions.iter().any(action_is_likely_mutating)
+        && !actions
+            .iter()
+            .any(|action| action_is_likely_mutating(state, action))
     {
         return "ops_closed_loop_apply_requires_mutation";
     }
@@ -319,6 +321,12 @@ pub(super) fn plan_repair_reason(
             }
             crate::execution_recipe::ExecutionRecipeProfile::SkillAuthoring => {
                 "skill_authoring_requires_integration_validation"
+            }
+            crate::execution_recipe::ExecutionRecipeProfile::PackageChange => {
+                "package_change_requires_validation"
+            }
+            crate::execution_recipe::ExecutionRecipeProfile::DatabaseChange => {
+                "database_change_requires_validation"
             }
             _ => "ops_closed_loop_requires_validation",
         };
@@ -512,8 +520,13 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
         || route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !(route_locator_hint_is_path_like(route) || actions.iter().any(action_has_path_like_arg))
-        || actions.iter().any(action_is_likely_mutating)
+        || actions
+            .iter()
+            .any(|action| action_is_likely_mutating(state, action))
     {
+        return false;
+    }
+    if active_anchor_detached_read_only_plan_can_execute(state, route, actions) {
         return false;
     }
     let executable_actions = actions.iter().filter(|action| {
@@ -528,6 +541,33 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
             return false;
         }
         saw_read = true;
+    }
+    saw_read
+}
+
+fn active_anchor_detached_read_only_plan_can_execute(
+    state: &AppState,
+    route: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !route_reason_has_marker(
+        route,
+        "active_task_scope_refinement_detached_from_structured_anchor",
+    ) {
+        return false;
+    }
+    let mut saw_read = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
+                if !action_is_filesystem_text_read_observation(state, action) {
+                    return false;
+                }
+                saw_read = true;
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
+            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
+        }
     }
     saw_read
 }
@@ -552,7 +592,9 @@ pub(super) fn plain_act_filesystem_text_read_only_plan_requires_repair(
             crate::OutputResponseShape::FileToken
         )
         || !(route_locator_hint_is_path_like(route) || actions.iter().any(action_has_path_like_arg))
-        || actions.iter().any(action_is_likely_mutating)
+        || actions
+            .iter()
+            .any(|action| action_is_likely_mutating(state, action))
     {
         return false;
     }
@@ -607,7 +649,10 @@ pub(super) fn scalar_path_auto_locator_observation_plan(
     let route = route_result?;
     if route.needs_clarify
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::FileBasename
+        )
     {
         return None;
     }
@@ -949,13 +994,17 @@ pub(super) fn file_facts_auto_locator_observation_plan(
         )
         && path_ref.is_dir()
     {
-        let max_entries = contract_hint_selector_limit(&route.resolved_intent)
-            .or_else(|| first_ascii_integer_limit(&route.resolved_intent))
-            .or_else(|| first_ascii_integer_limit(&route.route_reason));
+        let selector = &route.output_contract.self_extension.list_selector;
+        let max_entries = selector
+            .limit
+            .or_else(|| contract_hint_selector_limit(&route.route_reason));
+        let has_selector_metadata = max_entries.is_some()
+            || selector.sort_by.is_some()
+            || contract_hint_selector_extension(&route.route_reason).is_some()
+            || contract_hint_selector_sort_by(&route.route_reason).is_some();
         if route.output_contract.response_shape == crate::OutputResponseShape::Strict
             && max_entries.is_none()
-            && contract_hint_selector_extension(&route.resolved_intent).is_none()
-            && contract_hint_selector_sort_by(&route.resolved_intent).is_none()
+            && !has_selector_metadata
         {
             // A strict single-target quantity contract without selector metadata is a
             // path metadata request, not a ranked directory inventory request.

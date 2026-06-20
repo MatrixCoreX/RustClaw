@@ -894,11 +894,11 @@ pub(crate) async fn maybe_handle_ask_self_extension(
         agent_run_context.and_then(|ctx| ctx.execution_recipe_hint),
     ) {
         tracing::info!(
-            "{} self_extension bypassed for active execution recipe task_id={} ask_mode={} derived_route_label={}",
+            "{} self_extension bypassed for active execution recipe task_id={} ask_mode={} legacy_route_label={}",
             crate::highlight_tag("self_extension"),
             task.task_id,
             route.ask_mode.as_str(),
-            route.derived_route_label()
+            route.legacy_route_label_for_trace()
         );
         return Ok(None);
     }

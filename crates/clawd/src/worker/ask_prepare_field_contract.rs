@@ -72,6 +72,7 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     let marker_matches_field_value_request = [
         "contract_valid_minor_repair_fields_only",
         "single_path_field_extraction_semantic_kind_none_is_valid",
+        "structured_field_target_from_prompt_repair",
         "structured_field_selector_requires_scalar_value",
         "structured_keys_scalar_response_requires_field_value",
     ]
@@ -87,15 +88,25 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     }
     repair_structured_field_selector_from_target(route_result, prompt);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    let target_count = surface
-        .filename_candidates_excluding_field_selectors()
-        .len();
-    if marker_matches_field_value_request
+    let target_count = filename_target_count_excluding_structured_selector(
+        &surface,
+        route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+    );
+    let structured_refinement_present =
+        surface.has_structured_target_refinement() || selector_declares_field_value_request;
+    if (marker_matches_field_value_request || selector_declares_field_value_request)
         && target_count >= 2
-        && surface.has_structured_target_refinement()
+        && structured_refinement_present
     {
         route_result.output_contract.semantic_kind =
             crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+            route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        }
         route_result
             .route_reason
             .push_str("; scalar_field_pair_contract_repair");
@@ -114,6 +125,30 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     route_result
         .route_reason
         .push_str("; scalar_field_value_contract_repair");
+}
+
+fn filename_target_count_excluding_structured_selector(
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    selector: Option<&str>,
+) -> usize {
+    surface
+        .filename_candidates_excluding_field_selectors()
+        .into_iter()
+        .filter(|candidate| {
+            selector
+                .is_none_or(|selector| !candidate_matches_structured_selector(candidate, selector))
+        })
+        .count()
+}
+
+fn candidate_matches_structured_selector(candidate: &str, selector: &str) -> bool {
+    let candidate = candidate.trim();
+    let selector = selector.trim();
+    !candidate.is_empty()
+        && !selector.is_empty()
+        && (candidate.eq_ignore_ascii_case(selector)
+            || selector_refines_field(candidate, selector)
+            || selector_refines_field(selector, candidate))
 }
 
 fn repair_structured_field_selector_from_target(

@@ -1,6 +1,57 @@
 use super::*;
 
 #[test]
+fn single_file_delivery_rejects_token_mixed_with_prose() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-answer-verifier-token-only-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp root");
+    let file = root.join("token_only_delivery.md");
+    std::fs::write(&file, "ok").expect("write temp file");
+
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-token-only", "ask", "send file");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                json!({
+                    "path": file.display().to_string(),
+                    "resolved_path": file.display().to_string()
+                })
+                .to_string(),
+            ),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        &format!("FILE:{}", file.display())
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        &format!("FILE:{}\nready", file.display())
+    ));
+
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn recent_artifacts_judgment_skips_verifier_when_content_paths_are_grounded() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;

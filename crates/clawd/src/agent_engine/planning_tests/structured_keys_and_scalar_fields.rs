@@ -903,6 +903,55 @@ fn explicit_command_rewrite_preserves_bounded_configured_execute_prefix() {
 }
 
 #[test]
+fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
+    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/workspace/scripts".to_string();
+    route.output_contract.self_extension.list_selector = crate::OutputListSelector {
+        target_kind: crate::OutputScalarCountTargetKind::Any,
+        target_kind_specified: true,
+        limit: Some(5),
+        sort_by: Some("name".to_string()),
+        include_metadata: Some(false),
+        include_hidden: Some(false),
+    };
+    let loop_state = LoopState::new(1);
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "list_dir",
+            "path": "/workspace/scripts",
+            "names_only": true,
+            "max_entries": 5,
+            "sort_by": "name",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &loop_state,
+        "bounded directory listing",
+        Some("execute ls scripts, then output the bounded listing"),
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("/workspace/scripts")
+    );
+}
+
+#[test]
 fn explicit_command_extracts_configured_standalone_command_before_freeform_tail() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
@@ -964,6 +1013,42 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
             if skill == "run_cmd"
                 && args.get("command").and_then(Value::as_str) == Some("pwd")
     ));
+}
+
+#[test]
+fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
+    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "/workspace".to_string();
+    let loop_state = LoopState::new(1);
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "stat_paths",
+            "paths": ["/workspace"],
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &loop_state,
+        "current workspace path",
+        Some("Run pwd and output only the raw result."),
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "stat_paths");
+    assert_eq!(args.get("paths"), Some(&json!(["/workspace"])));
 }
 
 #[test]

@@ -14,7 +14,6 @@ pub(crate) mod observed_output;
 mod planning;
 mod planning_actions;
 mod planning_followup;
-mod planning_numeric_limits;
 mod planning_parse;
 mod planning_path_metadata;
 mod planning_prompt;
@@ -47,7 +46,7 @@ use self::arg_resolver::{
 };
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
 use self::execution_loop::execute_actions_once;
-use self::loop_control::run_agent_with_loop;
+use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 
 use self::skill_execution::execute_prepared_skill_action;
@@ -60,8 +59,12 @@ use self::support::{
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
-pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool {
-    load_agent_loop_guard_policy(state).answer_verifier_enforce_required
+pub(crate) fn answer_verifier_enforce_required_enabled_for_route(
+    state: &AppState,
+    route_result: Option<&crate::RouteResult>,
+) -> bool {
+    load_agent_loop_guard_policy(state)
+        .answer_verifier_required_evidence_enabled_for_route(route_result)
 }
 
 pub(crate) fn agent_loop_semantic_authority_enabled(state: &AppState) -> bool {
@@ -448,6 +451,7 @@ fn build_single_plan_prompt(
     recent_assistant_replies: &str,
     request_language_hint: &str,
     config_response_language: &str,
+    agent_runtime_identity: &str,
     runtime_os: &str,
     runtime_shell: &str,
     workspace_root: &str,
@@ -463,6 +467,7 @@ fn build_single_plan_prompt(
             ("__RECENT_ASSISTANT_REPLIES__", recent_assistant_replies),
             ("__REQUEST_LANGUAGE_HINT__", request_language_hint),
             ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
+            ("__AGENT_RUNTIME_IDENTITY__", agent_runtime_identity),
             ("__RUNTIME_OS__", runtime_os),
             ("__RUNTIME_SHELL__", runtime_shell),
             ("__WORKSPACE_ROOT__", workspace_root),
@@ -558,6 +563,9 @@ pub(crate) struct LoopState {
     pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
     pub(crate) rollout_attribution: Vec<crate::task_journal::TaskJournalRolloutAttribution>,
     pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
+    pub(crate) latest_validation_result: Option<Value>,
+    pub(crate) task_lifecycle: Option<Value>,
+    pub(crate) task_checkpoint: Option<Value>,
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
     pub(crate) last_recipe_progress_scope:
         Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
@@ -577,6 +585,96 @@ impl LoopState {
             max_rounds,
             ..Self::default()
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoopStateCheckpointSeedReport {
+    pub(crate) checkpoint_id: String,
+    pub(crate) resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint,
+    pub(crate) restored_round: usize,
+    pub(crate) restored_step: usize,
+    pub(crate) restored_tool_calls: usize,
+    pub(crate) completed_side_effect_count: usize,
+    pub(crate) observation_count: usize,
+}
+
+pub(crate) fn seed_loop_state_from_task_checkpoint(
+    loop_state: &mut LoopState,
+    checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+) -> LoopStateCheckpointSeedReport {
+    let restored_round = checkpoint.budget.round as usize;
+    let restored_step = checkpoint.budget.step as usize;
+    let restored_tool_calls = checkpoint.budget.tool_calls as usize;
+    loop_state.round_no = loop_state.round_no.max(restored_round);
+    loop_state.total_steps_executed = loop_state.total_steps_executed.max(restored_step);
+    loop_state.tool_calls_total = loop_state.tool_calls_total.max(restored_tool_calls);
+
+    let mut completed_side_effect_count = 0usize;
+    for fingerprint in &checkpoint.completed_side_effect_refs {
+        let fingerprint = fingerprint.trim();
+        if fingerprint.is_empty() {
+            continue;
+        }
+        completed_side_effect_count += 1;
+        loop_state
+            .successful_action_fingerprints
+            .entry(fingerprint.to_string())
+            .or_insert(1);
+    }
+
+    if !checkpoint.observations.is_empty() {
+        loop_state.has_tool_or_skill_output = true;
+    }
+    loop_state.task_checkpoint = Some(checkpoint.to_machine_json());
+    let resume_entrypoint = checkpoint_resume_entrypoint_token(&checkpoint.resume_entrypoint);
+    loop_state.output_vars.insert(
+        "agent_loop.resume_checkpoint_id".to_string(),
+        checkpoint.checkpoint_id.clone(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.resume_entrypoint".to_string(),
+        resume_entrypoint.to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.resume_completed_side_effect_count".to_string(),
+        completed_side_effect_count.to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.resume_observation_count".to_string(),
+        checkpoint.observations.len().to_string(),
+    );
+
+    loop_state.history_compact.push(format!(
+        "checkpoint_resume checkpoint_id={} entrypoint={} round={} step={} tool_calls={} side_effects={} observations={}",
+        checkpoint.checkpoint_id,
+        resume_entrypoint,
+        restored_round,
+        restored_step,
+        restored_tool_calls,
+        completed_side_effect_count,
+        checkpoint.observations.len()
+    ));
+
+    LoopStateCheckpointSeedReport {
+        checkpoint_id: checkpoint.checkpoint_id.clone(),
+        resume_entrypoint: checkpoint.resume_entrypoint.clone(),
+        restored_round,
+        restored_step,
+        restored_tool_calls,
+        completed_side_effect_count,
+        observation_count: checkpoint.observations.len(),
+    }
+}
+
+fn checkpoint_resume_entrypoint_token(
+    entrypoint: &crate::task_lifecycle::ResumeEntrypoint,
+) -> &'static str {
+    match entrypoint {
+        crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound => "next_planner_round",
+        crate::task_lifecycle::ResumeEntrypoint::PollAsyncJob => "poll_async_job",
+        crate::task_lifecycle::ResumeEntrypoint::AwaitUserInput => "await_user_input",
+        crate::task_lifecycle::ResumeEntrypoint::VerifyAndFinalize => "verify_and_finalize",
     }
 }
 
@@ -662,6 +760,17 @@ fn seed_loop_state_from_agent_context(
             spec.target_scope.as_str().to_string(),
         );
     }
+}
+
+pub(crate) fn seed_loop_state_for_agent_run(
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
+) -> Option<LoopStateCheckpointSeedReport> {
+    let checkpoint_seed_report = resume_checkpoint
+        .map(|checkpoint| seed_loop_state_from_task_checkpoint(loop_state, checkpoint));
+    seed_loop_state_from_agent_context(loop_state, agent_run_context);
+    checkpoint_seed_report
 }
 
 fn alias_mention_request_surface(text: &str) -> &str {
@@ -1297,37 +1406,25 @@ pub(crate) async fn build_confirmation_required_resume_context(
     });
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-    let fallback_user_error = crate::bilingual_t_with_default_vars(
-        state,
-        "clawd.msg.resume_confirmation_required",
-        "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{detail}",
-        "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {detail}",
-        prefer_english,
-        &[("detail", detail)],
-    );
     let contract = crate::fallback::UserResponseContract::verifier_gate(
         "resume_confirmation_required",
         user_request,
         goal,
         vec!["explicit_user_confirmation".to_string()],
         vec![
-            format!(
-                "verification_detail: {}",
-                crate::truncate_for_agent_trace(detail)
-            ),
+            "verification_issue_kind: ConfirmationRequired".to_string(),
             format!("remaining_steps_count: {remaining_steps_count}"),
             "needs_confirmation: true".to_string(),
+            format!("confirmation_detail_present: {}", !detail.trim().is_empty()),
         ],
         "brief_failure_with_continue_option",
         &language_hint,
     );
-    let user_error = crate::fallback::compose_user_response_from_contract_with_default(
+    let user_error = crate::fallback::compose_user_response_from_contract(
         state,
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::VerifyRejected,
-        &fallback_user_error,
     )
     .await;
     (user_error, resume_context)
@@ -1352,6 +1449,37 @@ pub(crate) async fn run_agent_with_tools(
         return run_agent_with_loop(state, task, goal, user_text, agent_run_context.as_ref()).await;
     }
     return Ok(AskReply::non_llm(String::new()));
+}
+
+pub(crate) async fn run_agent_with_tools_seeded(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_request: &str,
+    agent_run_context: Option<AgentRunContext>,
+    resume_checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+) -> Result<AskReply, String> {
+    info!(
+        "run_agent_with_tools_seeded: task_id={} user_id={} chat_id={} checkpoint_id={} goal={}",
+        task.task_id,
+        task.user_id,
+        task.chat_id,
+        resume_checkpoint.checkpoint_id,
+        crate::truncate_for_log(goal)
+    );
+    let user_text = user_request.trim();
+    if !user_text.is_empty() {
+        return run_agent_with_loop_seeded(
+            state,
+            task,
+            goal,
+            user_text,
+            agent_run_context.as_ref(),
+            Some(resume_checkpoint),
+        )
+        .await;
+    }
+    Ok(AskReply::non_llm(String::new()))
 }
 
 #[cfg(test)]

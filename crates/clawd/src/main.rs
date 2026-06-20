@@ -141,8 +141,8 @@ pub(crate) use repo::{
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
     upsert_webd_login_account, verify_webd_password_login, FactoryResetDbResult,
-    PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
-    SubmitTaskLimitError, TaskViewerAccessError,
+    PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
+    TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 use task_admin_routes::{cancel_one_task, cancel_tasks, list_active_tasks};
@@ -339,10 +339,12 @@ async fn main() -> anyhow::Result<()> {
         warn!("============================================================");
         warn!("No auth key found in database. Generated initial admin key.");
         warn!("Initial admin key: {}", user_key);
+        warn!("Default web login: username=rustclaw password=123456");
         warn!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         warn!("============================================================");
         eprintln!("============================================================");
         eprintln!("Initial admin key: {}", user_key);
+        eprintln!("Default web login: username=rustclaw password=123456");
         eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         eprintln!("============================================================");
     }

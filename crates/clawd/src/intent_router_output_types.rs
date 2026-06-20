@@ -27,8 +27,8 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) confidence: f64,
     pub(crate) output_contract: IntentOutputContract,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    /// First-layer semantic decision from the normalizer.
-    pub(crate) first_layer_decision: FirstLayerDecision,
+    /// Legacy first-layer decision from the normalizer compatibility schema.
+    pub(crate) legacy_first_layer_decision: FirstLayerDecision,
     /// Execution finalization style. This is not a semantic gate.
     pub(crate) execution_finalize_style: ActFinalizeStyle,
     pub(crate) turn_analysis: Option<TurnAnalysis>,

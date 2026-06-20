@@ -22,6 +22,9 @@ use crate::{
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 
+#[path = "dispatch_support_tests/active_recipe_terminal_discussion.rs"]
+mod active_recipe_terminal_discussion;
+
 fn test_state_with_registry() -> AppState {
     let agents_by_id = HashMap::from([(
         DEFAULT_AGENT_ID.to_string(),

@@ -44,6 +44,67 @@ fn normalize_planned_actions_resolves_action_ref_call_capability_before_policy_g
 }
 
 #[test]
+fn compound_capability_plan_preserves_stat_paths_supporting_content_read() {
+    let state = test_state_with_registry();
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/README.md".to_string();
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "filesystem.stat_paths".to_string(),
+            args: json!({
+                "paths": ["/home/guagua/rustclaw/not_real_20260511"],
+            }),
+        },
+        AgentAction::CallCapability {
+            capability: "filesystem.read_text_range".to_string(),
+            args: json!({
+                "path": "/home/guagua/rustclaw/README.md",
+                "mode": "head",
+                "n": 80,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["s1".to_string(), "s2".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized =
+        normalize_planned_actions(&state, Some(&route), &LoopState::new(1), "", None, actions);
+
+    let stat_action = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "stat_paths"))
+        .unwrap_or_else(|| {
+            panic!("expected fs_basic.stat_paths to be preserved, got {normalized:#?}")
+        });
+    let stat_args = expect_planned_call(stat_action, "fs_basic", "stat_paths");
+    assert_eq!(
+        stat_args
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    let read_action = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+        .expect("expected fs_basic.read_text_range to be preserved");
+    let read_args = expect_planned_call(read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some("/home/guagua/rustclaw/README.md")
+    );
+}
+
+#[test]
 fn normalize_planned_actions_keeps_unresolved_call_capability_for_verifier() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallCapability {
@@ -311,6 +372,62 @@ fn existence_path_summary_plan_inserts_bounded_content_observation() {
             action,
             AgentAction::SynthesizeAnswer { evidence_refs }
                 if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+        )
+    }));
+    assert!(matches!(
+        normalized.last(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
+fn existence_path_summary_workspace_search_scope_does_not_read_directory() {
+    let mut state = test_state();
+    let root = TempDirGuard::new("existence_path_summary_workspace_scope");
+    state.skill_rt.workspace_root = root.path.clone();
+    let loop_state = LoopState::new(1);
+    let mut route = base_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "find_entries",
+                "root": root.path.display().to_string(),
+                "pattern": "rustclaw.service",
+                "kind": "file",
+                "recursive": true,
+                "max_results": 20
+            }),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "",
+        Some(root.path.to_str().expect("utf8 temp path")),
+        actions,
+    );
+
+    assert!(!normalized.iter().any(|action| planned_call_is(
+        action,
+        "fs_basic",
+        "read_text_range"
+    )));
+    assert!(normalized.iter().any(|action| {
+        matches!(
+            action,
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["last_output".to_string()]
         )
     }));
     assert!(matches!(

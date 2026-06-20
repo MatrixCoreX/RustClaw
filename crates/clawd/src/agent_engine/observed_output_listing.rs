@@ -200,6 +200,11 @@ pub(super) fn route_requests_scalar_path_only(route: &crate::RouteResult) -> boo
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
 }
 
+pub(super) fn route_requests_file_basename(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::FileBasename
+}
+
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
     route: &crate::RouteResult,
 ) -> bool {
@@ -211,6 +216,14 @@ pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
         && !route
             .route_reason
             .contains("request_requires_fresh_file_observation_to_extract_title")
+}
+
+pub(super) fn route_allows_path_batch_file_basename_observed_answer(
+    route: &crate::RouteResult,
+) -> bool {
+    route_requests_file_basename(route)
+        && !route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
 }
 
 pub(super) fn recent_file_path_candidate_for_scalar_path(
@@ -456,9 +469,12 @@ pub(super) fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String
     let step = &loop_state.executed_step_results[idx];
     let body = step.output.as_deref().unwrap_or_default();
     match step.skill.as_str() {
-        "system_basic" | "fs_basic" => serde_json::from_str::<serde_json::Value>(body)
-            .ok()
-            .and_then(|value| inventory_dir_hidden_entries(&value)),
+        "system_basic" | "fs_basic" => {
+            let body = normalized_success_body_for_direct_answer(body);
+            serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| inventory_dir_hidden_entries(&value))
+        }
         "list_dir" => {
             normalized_observed_listing(body).map(|listing| hidden_entries_from_listing(&listing))
         }
@@ -466,6 +482,18 @@ pub(super) fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String
             .map(|listing| hidden_entries_from_listing(&listing)),
         _ => None,
     }
+}
+
+fn hidden_entries_answer_limit(route: &crate::RouteResult) -> usize {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
+        .min(8)
 }
 
 pub(super) fn hidden_entries_direct_answer(
@@ -499,7 +527,7 @@ pub(super) fn hidden_entries_direct_answer(
     Some(
         hidden_entries
             .into_iter()
-            .take(8)
+            .take(hidden_entries_answer_limit(route))
             .collect::<Vec<_>>()
             .join("\n"),
     )

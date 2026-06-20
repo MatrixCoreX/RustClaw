@@ -192,6 +192,41 @@ fn matrix_strict_file_names_ranked_inventory_outputs_name_size_lines() {
 }
 
 #[test]
+fn matrix_strict_file_names_ranked_inventory_applies_selector_limit() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/repo/logs","sort_by":"size_desc","entries":[{"kind":"file","name":"large.log","size_bytes":900},{"kind":"file","name":"medium.log","size_bytes":120},{"kind":"file","name":"small.log","size_bytes":12}],"counts":{"files":3,"total":3}}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs".to_string();
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route.output_contract.self_extension.list_selector.limit = Some(2);
+    route.output_contract.self_extension.list_selector.sort_by = Some("size_desc".to_string());
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .include_metadata = Some(true);
+
+    let (answer, summary) = matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("ranked file-name inventory answer");
+
+    assert_eq!(answer, "large.log 900\nmedium.log 120");
+    assert_eq!(summary.completion_ok, Some(true));
+}
+
+#[test]
 fn quantity_comparison_replaces_synthesis_count_with_total_size_answer() {
     let state = test_state();
     let task = claimed_task("task-quantity-replace");

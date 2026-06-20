@@ -77,6 +77,16 @@ def extract_route(obj: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def route_legacy_first_layer(route: Any) -> str:
+    if not isinstance(route, dict):
+        return ""
+    return str(
+        route.get("legacy_first_layer_decision")
+        or route.get("first_layer_decision")
+        or ""
+    )
+
+
 def extract_trace(obj: dict[str, Any]) -> dict[str, Any]:
     return (
         get_path(obj, "data", "result_json", "task_journal", "trace")
@@ -184,7 +194,7 @@ def print_case(path: Path, obj: dict[str, Any], max_chars: int) -> None:
         "ROUTE: gate={gate} routed_mode={mode} legacy_first_layer={first_layer} reason={reason}".format(
             gate=route.get("route_gate_kind", ""),
             mode=route.get("routed_mode", ""),
-            first_layer=route.get("first_layer_decision", ""),
+            first_layer=route_legacy_first_layer(route),
             reason=compact(route.get("route_reason"), max_chars),
         )
     )

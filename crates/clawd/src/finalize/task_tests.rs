@@ -1,10 +1,13 @@
 use super::{
     answer_text_is_machine_json_payload, answer_verifier_failure_machine_line,
-    answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
-    ask_runtime_failure_machine_payload, assistant_memory_source_text,
-    delivery_path_gap_should_finalize_as_clarify, deterministic_filtered_log_entry_recovery,
-    deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
-    journal_has_missing_file_search_evidence, non_failure_final_status,
+    answer_verifier_failure_observed_facts, answer_verifier_forces_task_failure,
+    answer_verifier_should_force_task_failure, ask_runtime_failure_machine_payload,
+    assistant_memory_source_text, delivery_path_gap_should_finalize_as_clarify,
+    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
+    direct_chat_answer_verifier_retry_applicable, drop_execution_summaries_when_delivery_is_scalar,
+    failed_task_lifecycle_payload, journal_has_missing_file_search_evidence,
+    machine_payload_observed_facts, non_failure_final_status,
+    normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
@@ -77,6 +80,24 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
     );
     assert_eq!(
         payload
+            .pointer("/status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        payload
+            .pointer("/failure_attribution")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_gap")
+    );
+    assert_eq!(
+        payload
+            .pointer("/retryable")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
             .pointer("/missing_evidence_fields/0")
             .and_then(serde_json::Value::as_str),
         Some("command_output")
@@ -96,7 +117,7 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
             .to_summary_json()
             .pointer("/rollout_attribution/0/switch_name")
             .and_then(serde_json::Value::as_str),
-        Some("answer_verifier_enforce_required")
+        Some("answer_verifier_enforce_required_scope")
     );
     assert_eq!(
         journal
@@ -105,6 +126,62 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
             .and_then(serde_json::Value::as_str),
         Some("answer_verifier_required_evidence_block")
     );
+}
+
+#[test]
+fn pure_chat_agent_loop_verifier_gap_triggers_direct_retry() {
+    let mut route = route_result(crate::AskMode::planner_execute_chat_wrapped());
+    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
+    let verifier = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate does not satisfy the requested output".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from the original request".to_string(),
+        confidence: 0.9,
+    };
+
+    assert!(direct_chat_answer_verifier_retry_applicable(
+        &route, &journal, &verifier,
+    ));
+}
+
+#[test]
+fn existing_file_delivery_token_answer_canonicalizes_workspace_relative_path() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_finalize_file_token_{}_{}",
+        std::process::id(),
+        nonce
+    ));
+    let logs = root.join("logs");
+    std::fs::create_dir_all(&logs).expect("create logs dir");
+    let file = logs.join("clawd-codex-current.log");
+    std::fs::write(&file, "ok\n").expect("write file");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let normalized =
+        normalize_existing_file_delivery_token_answer(&state, "FILE:logs/clawd-codex-current.log")
+            .expect("normalize file token");
+
+    assert_eq!(
+        normalized,
+        format!("FILE:{}", file.canonicalize().unwrap().display())
+    );
+    assert!(
+        normalize_existing_file_delivery_token_answer(&state, "FILE:logs/missing.log").is_none()
+    );
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -167,8 +244,10 @@ fn delivery_path_gap_without_observation_finalizes_as_clarify() {
 
 #[test]
 fn ask_runtime_failure_payload_is_machine_readable() {
-    let payload: serde_json::Value =
-        serde_json::from_str(&ask_runtime_failure_machine_payload("provider timeout")).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&ask_runtime_failure_machine_payload(
+        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
+    ))
+    .unwrap();
     assert_eq!(
         payload
             .pointer("/message_key")
@@ -183,10 +262,74 @@ fn ask_runtime_failure_payload_is_machine_readable() {
     );
     assert_eq!(
         payload
-            .pointer("/error_summary")
+            .pointer("/status_code")
             .and_then(serde_json::Value::as_str),
-        Some("provider timeout")
+        Some("ask_runtime_failure")
     );
+    assert_eq!(
+        payload
+            .pointer("/failure_attribution")
+            .and_then(serde_json::Value::as_str),
+        Some("provider_gap")
+    );
+    assert_eq!(
+        payload
+            .pointer("/retryable")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .pointer("/raw_error_present")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .pointer("/provider_error_class")
+            .and_then(serde_json::Value::as_str),
+        Some("rate_limited")
+    );
+    assert!(payload.pointer("/error_summary").is_none());
+}
+
+#[test]
+fn ask_runtime_failure_observed_facts_use_machine_payload_fields() {
+    let facts = machine_payload_observed_facts(&ask_runtime_failure_machine_payload(
+        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
+    ));
+    assert!(facts.contains(&"message_key: clawd.msg.ask_runtime_failure".to_string()));
+    assert!(facts.contains(&"status_code: ask_runtime_failure".to_string()));
+    assert!(facts.contains(&"failure_attribution: provider_gap".to_string()));
+    assert!(facts.contains(&"retryable: false".to_string()));
+    assert!(facts.contains(&"raw_error_present: true".to_string()));
+    assert!(facts.contains(&"provider_error_class: rate_limited".to_string()));
+    assert!(!facts.iter().any(|fact| fact.starts_with("error_summary:")));
+}
+
+#[test]
+fn failed_task_lifecycle_payload_marks_provider_gap_terminal_reason() {
+    let payload = failed_task_lifecycle_payload(
+        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
+    );
+
+    assert_eq!(payload["state"], "failed");
+    assert_eq!(payload["source"], "ask_failure_finalize");
+    assert_eq!(payload["can_poll"], true);
+    assert_eq!(payload["can_cancel"], false);
+    assert_eq!(payload["failure_attribution"], "provider_error");
+    assert_eq!(payload["terminal_reason"], "provider_window_exhausted");
+}
+
+#[test]
+fn failed_task_lifecycle_payload_marks_verifier_terminal_reason() {
+    let payload = failed_task_lifecycle_payload(
+        r#"answer_verifier_required_evidence_block missing_required_evidence"#,
+    );
+
+    assert_eq!(payload["state"], "failed");
+    assert_eq!(payload["failure_attribution"], "contract_gap");
+    assert_eq!(payload["terminal_reason"], "verifier_unrecoverable");
 }
 
 #[test]
@@ -221,6 +364,32 @@ fn answer_verifier_failure_machine_line_triggers_user_message_path() {
         "message_key=answer_verifier_required_evidence_block missing_evidence_fields=content_excerpt",
         "",
     ));
+}
+
+#[test]
+fn answer_verifier_failure_observed_facts_use_machine_fields() {
+    let facts = answer_verifier_failure_observed_facts(
+        r#"{"message_key":"answer_verifier_required_evidence_block","reason_code":"answer_verifier_required_evidence_block","status_code":"answer_verifier_required_evidence_block","failure_attribution":"answer_verifier_gap","retryable":false,"missing_evidence_fields":["output_format"],"answer_incomplete_reason":"shape"}"#,
+    );
+    assert!(facts.contains(&"message_key: answer_verifier_required_evidence_block".to_string()));
+    assert!(facts.contains(&"status_code: answer_verifier_required_evidence_block".to_string()));
+    assert!(facts.contains(&"failure_attribution: answer_verifier_gap".to_string()));
+    assert!(facts.contains(&"retryable: false".to_string()));
+    assert!(facts.contains(&"missing_evidence_fields: output_format".to_string()));
+    assert!(facts.contains(&"answer_incomplete_reason: shape".to_string()));
+}
+
+#[test]
+fn answer_verifier_failure_machine_line_observed_facts_add_defaults() {
+    let facts = answer_verifier_failure_observed_facts(
+        "message_key=answer_verifier_required_evidence_block missing_evidence_fields=content_excerpt",
+    );
+    assert!(facts.contains(&"message_key: answer_verifier_required_evidence_block".to_string()));
+    assert!(facts.contains(&"reason_code: answer_verifier_required_evidence_block".to_string()));
+    assert!(facts.contains(&"status_code: answer_verifier_required_evidence_block".to_string()));
+    assert!(facts.contains(&"failure_attribution: answer_verifier_gap".to_string()));
+    assert!(facts.contains(&"retryable: false".to_string()));
+    assert!(facts.contains(&"missing_evidence_fields: content_excerpt".to_string()));
 }
 
 #[test]
@@ -345,6 +514,25 @@ fn assistant_memory_source_text_filters_execution_summary() {
     assert_eq!(
         assistant_memory_source_text("最终答案", &messages),
         "最终答案"
+    );
+}
+
+#[test]
+fn assistant_memory_source_text_filters_machine_execution_summary() {
+    let messages = vec![
+        json!({
+            "message_key": "clawd.msg.execution.summary",
+            "reason_code": "resume_failed_step_summary",
+            "action": "skill(run_cmd)",
+            "error": "Command failed with exit code 127"
+        })
+        .to_string(),
+        "final answer".to_string(),
+    ];
+
+    assert_eq!(
+        assistant_memory_source_text("final answer", &messages),
+        "final answer"
     );
 }
 
@@ -805,7 +993,23 @@ fn resume_failure_structured_service_status_is_success_result() {
 
     let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
     assert_eq!(messages.len(), 1);
-    assert!(messages[0].contains("no matching service found"));
+    let summary: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+    assert_eq!(
+        summary
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.execution.summary")
+    );
+    assert_eq!(
+        summary
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("resume_failed_step_summary")
+    );
+    assert!(summary
+        .pointer("/error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| error.contains("no matching service found")));
     assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
 }
 
@@ -898,7 +1102,22 @@ fn resume_context_execution_summary_uses_failed_step() {
     let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
 
     assert_eq!(messages.len(), 1);
-    assert!(messages[0].contains("**执行过程**"));
-    assert!(messages[0].contains("skill(run_cmd)"));
-    assert!(messages[0].contains("No such file or directory"));
+    assert!(crate::finalize::is_execution_summary_message(&messages[0]));
+    let summary: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+    assert_eq!(
+        summary
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.execution.summary")
+    );
+    assert_eq!(
+        summary
+            .pointer("/action")
+            .and_then(serde_json::Value::as_str),
+        Some("skill(run_cmd)")
+    );
+    assert!(summary
+        .pointer("/error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| error.contains("No such file or directory")));
 }

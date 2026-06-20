@@ -846,6 +846,30 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
 }
 
 #[test]
+fn ordered_entry_target_does_not_duplicate_prefixed_relative_path() {
+    let frame = FollowupFrame {
+        op_kind: FollowupOpKind::List,
+        bound_target: Some(
+            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string(),
+        ),
+        ordered_entries: vec![
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md".to_string(),
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt".to_string(),
+        ],
+        ..FollowupFrame::default()
+    };
+
+    assert_eq!(
+        super::ordered_entry_target_at(&frame, 0).as_deref(),
+        Some("scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+    );
+    assert_eq!(
+        super::ordered_entry_target_at(&frame, 1).as_deref(),
+        Some("scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt")
+    );
+}
+
+#[test]
 fn empty_generic_outcome_preserves_prior_structured_frame() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {

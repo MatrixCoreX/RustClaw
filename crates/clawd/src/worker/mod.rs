@@ -7,8 +7,10 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 
 mod ask_pipeline;
 mod ask_prepare;
+mod async_poll_executor;
 mod channels;
 mod locator;
+mod resume_replay_executor;
 mod run_skill_finalize;
 mod runtime_support;
 
@@ -57,6 +59,8 @@ fn runtime_channel_label(channel: crate::RuntimeChannel) -> &'static str {
 pub(crate) fn schedule_notify_observation(outcome: &ScheduleNotifyOutcome) -> Value {
     let mut value = json!({
         "source": "schedule_notify",
+        "execution_surface": "schedule_notify",
+        "execution_surface_owner": "delivery_boundary",
         "job_id": outcome.job_id,
         "channel": outcome.channel,
         "runtime_channel": outcome.runtime_channel,
@@ -98,7 +102,7 @@ pub(crate) fn is_resume_continue_source(raw: &str) -> bool {
 }
 
 pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
-    maybe_recover_stale_running_tasks_runtime(state)?;
+    maybe_recover_stale_running_tasks_runtime(state).await?;
 
     let Some(task) = repo::claim_next_task(state)? else {
         debug!("worker_once: no queued tasks, idle tick");
@@ -327,40 +331,10 @@ pub(crate) async fn process_ask_task(
     );
     let prepared_flow =
         ask_pipeline::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
-    let cross_turn_recent_execution_context = {
-        let trimmed = prepared_flow.recent_execution_context.trim();
-        if trimmed.is_empty() || trimmed == "<none>" {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    };
-    let agent_run_context = Some(crate::agent_engine::AgentRunContext {
-        route_result: Some(prepared_flow.route_result.clone()),
-        execution_recipe_hint: prepared_flow.execution_recipe_hint,
-        turn_analysis: prepared_flow.turn_analysis.clone(),
-        context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
-        session_alias_bindings: prepared_flow.session_alias_bindings.clone(),
-        auto_locator_path: prepared_flow.auto_locator_path.clone(),
-        has_authoritative_deictic_anchor: prepared_flow.has_authoritative_deictic_anchor,
-        fuzzy_locator_suggestions: prepared_flow.fuzzy_locator_suggestions.clone(),
-        original_user_request: Some(prompt.clone()),
-        // Execution-time context should prefer the resolved prompt that already incorporates
-        // alias bindings / clarify completions / locator stabilization. Otherwise planner and
-        // observed synthesis can fall back to stale raw phrasing and let memory override the
-        // current session state.
-        user_request: Some(prepared_flow.resolved_prompt_for_execution.clone()),
-        semantic_answer_candidate_draft: prepared_flow.semantic_answer_candidate_draft.clone(),
-        memory_context_for_execution: {
-            let trimmed = prepared_flow.memory_context_for_execution.trim();
-            if trimmed.is_empty() || trimmed == "<none>" {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        },
-        cross_turn_recent_execution_context,
-    });
+    let agent_run_context = Some(ask_pipeline::build_agent_run_context_from_prepared_flow(
+        &prompt,
+        &prepared_flow,
+    ));
 
     let Some(result) = ask_pipeline::execute_ask_dispatch(
         state,

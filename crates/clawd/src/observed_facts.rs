@@ -38,44 +38,6 @@ fn effective_user_key(task: &ClaimedTask) -> String {
         .unwrap_or_else(|| format!("anon:{}:{}", task.user_id, task.chat_id))
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
-fn persist_observed_facts(
-    state: &AppState,
-    task: &ClaimedTask,
-    observed_facts: &ObservedFacts,
-) -> Result<()> {
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|err| anyhow::anyhow!("acquire db for observed facts persist: {err}"))?;
-    let user_key = effective_user_key(task);
-    let facts_json = serde_json::to_string(observed_facts)?;
-    let now_ts = crate::now_ts_u64();
-    let expires_at_ts = now_ts + OBSERVED_FACTS_TTL_SECS;
-    db.execute(
-        "INSERT INTO observed_facts_states (
-            user_id, chat_id, user_key, facts_json, source_task_id, updated_at_ts, expires_at_ts
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(user_id, chat_id, user_key) DO UPDATE SET
-            facts_json = excluded.facts_json,
-            source_task_id = excluded.source_task_id,
-            updated_at_ts = excluded.updated_at_ts,
-            expires_at_ts = excluded.expires_at_ts",
-        params![
-            task.user_id,
-            task.chat_id,
-            user_key,
-            facts_json,
-            task.task_id,
-            now_ts as i64,
-            expires_at_ts as i64,
-        ],
-    )?;
-    Ok(())
-}
-
 fn persist_observed_facts_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
@@ -135,15 +97,6 @@ fn clear_active_observed_facts_tx(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub(crate) fn load_active_observed_facts(
-    state: &AppState,
-    task: &ClaimedTask,
-) -> Option<ObservedFacts> {
-    load_active_observed_facts_snapshot(state, task).map(|(facts, _)| facts)
-}
-
-#[allow(dead_code)]
 pub(crate) fn load_active_observed_facts_snapshot(
     state: &AppState,
     task: &ClaimedTask,
@@ -174,34 +127,6 @@ pub(crate) fn load_active_observed_facts_snapshot(
         .ok()
         .filter(|facts| !facts.is_empty())
         .map(|facts| (facts, source_task_id))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn replace_active_observed_facts_from_ask_outcome(
-    state: &AppState,
-    task: &ClaimedTask,
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-    answer_messages: &[String],
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    let observed_facts =
-        derive_observed_facts_from_ask_outcome(answer_text, answer_messages, journal, route_result);
-    let result = if observed_facts.is_empty() {
-        clear_active_observed_facts(state, task)
-    } else {
-        persist_observed_facts(state, task, &observed_facts)
-    };
-    if let Err(err) = result {
-        tracing::warn!(
-            "observed_facts persist failed task_id={} err={}",
-            task.task_id,
-            err
-        );
-        return None;
-    }
-    (!observed_facts.is_empty()).then(|| task.task_id.clone())
 }
 
 pub(crate) fn sync_active_observed_facts_from_ask_outcome_tx(

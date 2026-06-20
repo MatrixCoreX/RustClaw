@@ -48,6 +48,9 @@ pub(super) fn single_name_target_for_directory_locator(
     route: &RouteResult,
     current_user_text: &str,
 ) -> Option<String> {
+    if has_multiple_quoted_search_name_targets(current_user_text) {
+        return None;
+    }
     single_filename_target_for_directory_locator(route, current_user_text)
         .or_else(|| single_quoted_search_name_target(current_user_text))
         .or_else(|| single_quoted_search_name_target(&route.resolved_intent))
@@ -267,12 +270,19 @@ pub(super) fn file_paths_locator_observation_plan(
                 }]);
             }
             let max_entries = requested_file_paths_result_limit(route, "", None).unwrap_or(1000);
-            let sort_by = contract_hint_selector_sort_by(&route.resolved_intent)
+            let selector = &route.output_contract.self_extension.list_selector;
+            let sort_by = selector
+                .sort_by
+                .clone()
                 .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
                 .unwrap_or_else(|| "size_desc".to_string());
-            let target_kind = contract_hint_selector_target_kind(&route.resolved_intent)
-                .or_else(|| contract_hint_selector_target_kind(&route.route_reason))
-                .unwrap_or_else(|| "file".to_string());
+            let target_kind = if selector.target_kind != crate::OutputScalarCountTargetKind::Any {
+                selector.target_kind
+            } else {
+                contract_hint_selector_target_kind(&route.route_reason)
+                    .and_then(|token| selector_target_kind_from_machine_token(&token))
+                    .unwrap_or(crate::OutputScalarCountTargetKind::File)
+            };
             let mut args = serde_json::json!({
                 "action": "list_dir",
                 "path": path,
@@ -280,7 +290,7 @@ pub(super) fn file_paths_locator_observation_plan(
                 "max_entries": max_entries,
                 "sort_by": sort_by,
             });
-            if target_kind == "dir" {
+            if target_kind == crate::OutputScalarCountTargetKind::Dir {
                 args["dirs_only"] = Value::Bool(true);
             } else {
                 args["files_only"] = Value::Bool(true);
@@ -477,6 +487,14 @@ pub(super) fn generic_path_content_log_analyze_target_path(
     {
         return None;
     }
+    if auto_locator_path
+        .map(str::trim)
+        .filter(|path| Path::new(path).is_dir())
+        .is_some()
+        && explicit_log_file_target_under_directory_locator(route, auto_locator_path).is_some()
+    {
+        return None;
+    }
     auto_locator_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -486,6 +504,212 @@ pub(super) fn generic_path_content_log_analyze_target_path(
         })
         .filter(|path| log_analyze_supported_target(path))
         .map(ToString::to_string)
+}
+
+pub(super) fn explicit_log_file_target_under_directory_locator(
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let directory = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
+    let directory = Path::new(directory);
+    if !directory.is_dir() {
+        return None;
+    }
+
+    let mut candidates = Vec::new();
+    for text in [route.resolved_intent.as_str(), route.route_reason.as_str()] {
+        for locator in
+            crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+        {
+            candidates.push(locator.locator_hint);
+        }
+        for filename in crate::delivery_utils::extract_filename_candidates(text) {
+            candidates.push(filename);
+        }
+        for key in ["target_path", "target_file", "file_path", "log_file"] {
+            if let Some(value) = route_machine_token_value(text, key) {
+                candidates.push(value);
+            }
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|candidate| {
+            let candidate = candidate.trim();
+            if candidate.is_empty() {
+                return None;
+            }
+            let candidate_path = Path::new(candidate);
+            let file_name = candidate_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(candidate)
+                .trim();
+            if file_name.is_empty() || !log_analyze_supported_path(file_name) {
+                return None;
+            }
+            let resolved = if candidate_path.is_absolute() {
+                candidate_path.to_path_buf()
+            } else {
+                directory.join(file_name)
+            };
+            (resolved.is_file() && log_analyze_supported_path(resolved.to_string_lossy().as_ref()))
+                .then(|| resolved.display().to_string())
+        })
+        .or_else(|| {
+            route_log_name_filter(route)
+                .and_then(|filter| unique_log_file_matching_name_filter(directory, &filter))
+        })
+}
+
+fn route_machine_token_value(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    text.split_whitespace().find_map(|token| {
+        let token = token.trim_matches(machine_token_outer_delimiter);
+        let value = token.strip_prefix(&prefix)?;
+        let value = value.trim_matches(machine_token_outer_delimiter);
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+fn machine_token_outer_delimiter(ch: char) -> bool {
+    matches!(
+        ch,
+        ',' | '，'
+            | '。'
+            | ';'
+            | '；'
+            | ':'
+            | '：'
+            | ')'
+            | '）'
+            | ']'
+            | '}'
+            | '>'
+            | '》'
+            | '"'
+            | '\''
+    )
+}
+
+fn route_log_name_filter(route: &RouteResult) -> Option<String> {
+    [route.resolved_intent.as_str(), route.route_reason.as_str()]
+        .into_iter()
+        .find_map(|text| route_machine_token_value(text, "name_filter"))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value.len() >= 2)
+}
+
+fn unique_log_file_matching_name_filter(directory: &Path, filter: &str) -> Option<String> {
+    let entries = fs::read_dir(directory).ok()?;
+    let mut matches = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || !log_analyze_supported_path(path.to_string_lossy().as_ref()) {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase());
+        if lower == filter || stem.as_deref() == Some(filter) || lower.contains(filter) {
+            matches.push(path);
+            if matches.len() > 1 {
+                return None;
+            }
+        }
+    }
+    matches.pop().map(|path| path.display().to_string())
+}
+
+fn filename_prefix_pattern(path: &str) -> Option<String> {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    let stem = file_name
+        .split('.')
+        .next()
+        .map(str::trim)
+        .filter(|value| value.len() >= 2)
+        .unwrap_or(file_name);
+    Some(stem.to_string())
+}
+
+pub(super) fn content_excerpt_summary_directory_log_slice_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || !route
+            .output_contract
+            .semantic_kind
+            .is_content_excerpt_summary()
+    {
+        return None;
+    }
+    let spec = route_content_slice_spec(route)?;
+    let path = explicit_log_file_target_under_directory_locator(route, auto_locator_path)?;
+    let root = Path::new(&path)
+        .parent()
+        .map(|parent| parent.display().to_string())?;
+    let mut read_args = serde_json::json!({
+        "action": "read_text_range",
+        "path": path.clone()
+    });
+    if let Some(obj) = read_args.as_object_mut() {
+        apply_content_slice_spec_to_read_args(obj, Some(spec), "tail", 80);
+    }
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "find_entries",
+                "root": root,
+                "pattern": filename_prefix_pattern(&path).unwrap_or_else(|| path.clone()),
+                "target_kind": "file",
+                "max_results": 50
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: read_args,
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["s1".to_string(), "s2".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
 }
 
 pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
@@ -532,11 +756,12 @@ pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
 }
 
 pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
-    route
-        .output_contract
-        .semantic_kind
-        .is_content_excerpt_summary()
-        && !route.output_contract.delivery_required
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::DocumentHeading
+            | crate::OutputSemanticKind::ExcerptKindJudgment
+    ) && !route.output_contract.delivery_required
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -546,6 +771,7 @@ pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult
 }
 
 pub(super) fn single_file_content_understanding_target_path(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Option<String> {
@@ -553,41 +779,31 @@ pub(super) fn single_file_content_understanding_target_path(
     if route.needs_clarify || !route_allows_single_file_content_understanding(route) {
         return None;
     }
-    auto_locator_path
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .or_else(|| {
-            let hint = route.output_contract.locator_hint.trim();
-            (!hint.is_empty() && Path::new(hint).is_file()).then_some(hint)
-        })
-        .filter(|path| Path::new(path).is_file())
-        .map(ToString::to_string)
-}
-
-pub(super) fn workspace_root_context_list_action_for_target(
-    state: &AppState,
-    target_path: &str,
-) -> Option<AgentAction> {
-    let workspace_root = &state.skill_rt.workspace_root;
-    let target = resolve_workspace_path(workspace_root, target_path);
-    if !target.is_file() {
-        return None;
+    let mut candidates = Vec::new();
+    for candidate in auto_locator_path
+        .into_iter()
+        .chain(std::iter::once(route.output_contract.locator_hint.as_str()))
+        .chain(route_locator_targets(route).iter().map(String::as_str))
+    {
+        let candidate = candidate.trim();
+        if !candidate.is_empty()
+            && !candidates
+                .iter()
+                .any(|existing: &String| existing == candidate)
+        {
+            candidates.push(candidate.to_string());
+        }
     }
-    let within_workspace = match (target.canonicalize(), workspace_root.canonicalize()) {
-        (Ok(target), Ok(root)) => target.starts_with(&root) && target != root,
-        _ => target.starts_with(workspace_root) && target != *workspace_root,
-    };
-    if !within_workspace {
-        return None;
+    for source in [route.resolved_intent.as_str(), route.route_reason.as_str()] {
+        for path in collect_existing_file_targets_from_text(state, source) {
+            if !candidates.iter().any(|existing| existing == &path) {
+                candidates.push(path);
+            }
+        }
     }
-    Some(AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args: serde_json::json!({
-            "action": "list_dir",
-            "path": workspace_root.display().to_string(),
-            "names_only": true,
-            "limit": 120
-        }),
+    candidates.into_iter().find_map(|candidate| {
+        let path = resolve_workspace_path(&state.skill_rt.workspace_root, &candidate);
+        path.is_file().then(|| path.display().to_string())
     })
 }
 
@@ -596,17 +812,19 @@ pub(super) fn content_excerpt_summary_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Option<Vec<AgentAction>> {
-    let path = single_file_content_understanding_target_path(route_result, auto_locator_path)?;
+    let route = route_result?;
+    let semantic_kind = route.output_contract.semantic_kind;
+    let path =
+        single_file_content_understanding_target_path(state, route_result, auto_locator_path)?;
     let mut actions = Vec::new();
-    if let Some(context_action) = workspace_root_context_list_action_for_target(state, &path) {
-        actions.push(context_action);
-    }
-    if repo_text_artifact_prefers_bounded_fs_read(&path) {
+    let is_excerpt_kind_judgment = semantic_kind == crate::OutputSemanticKind::ExcerptKindJudgment;
+    if is_excerpt_kind_judgment || repo_text_artifact_prefers_bounded_fs_read(&path) {
         let spec = route_result.and_then(route_content_slice_spec);
         let allow_default_head = matches!(
-            route_result.map(|route| route.output_contract.semantic_kind),
+            Some(semantic_kind),
             Some(crate::OutputSemanticKind::DocumentHeading)
-        ) || repo_prompt_artifact_allows_default_head(&path);
+        ) || is_excerpt_kind_judgment
+            || repo_prompt_artifact_allows_default_head(&path);
         if spec.is_none() && !allow_default_head {
             return None;
         }
@@ -615,7 +833,8 @@ pub(super) fn content_excerpt_summary_auto_locator_observation_plan(
             "path": path
         });
         if let Some(obj) = args.as_object_mut() {
-            apply_content_slice_spec_to_read_args(obj, spec, "head", 120);
+            let default_n = if is_excerpt_kind_judgment { 80 } else { 120 };
+            apply_content_slice_spec_to_read_args(obj, spec, "head", default_n);
         }
         actions.push(AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -682,6 +901,7 @@ pub(super) fn content_excerpt_summary_auto_locator_deterministic_plan_result(
         Some(
             crate::OutputSemanticKind::ContentExcerptSummary
                 | crate::OutputSemanticKind::DocumentHeading
+                | crate::OutputSemanticKind::ExcerptKindJudgment
         )
     ) {
         return None;
@@ -695,6 +915,33 @@ pub(super) fn content_excerpt_summary_auto_locator_deterministic_plan_result(
         auto_locator_path,
     )?;
     let actions = canonicalize_legacy_file_config_capabilities(actions);
+    let mut actions = ensure_content_excerpt_summary_has_bounded_content(
+        route_result,
+        loop_state,
+        auto_locator_path,
+        actions,
+    );
+    if matches!(
+        route_result.map(|route| route.output_contract.semantic_kind),
+        Some(crate::OutputSemanticKind::ExcerptKindJudgment)
+    ) && !actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
+    {
+        let evidence_refs = observation_action_evidence_refs(&actions);
+        if !evidence_refs.is_empty() {
+            actions.push(AgentAction::SynthesizeAnswer {
+                evidence_refs: evidence_refs.clone(),
+            });
+            actions.push(AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            });
+            info!(
+                "plan_insert_excerpt_kind_judgment_synthesis refs={}",
+                evidence_refs.join(",")
+            );
+        }
+    }
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(

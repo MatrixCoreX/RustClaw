@@ -144,7 +144,34 @@ pub(super) fn collect_priority_json_status_scalar_evidence(
     }
     match value {
         Value::Object(map) => {
+            let mut emitted_priority_keys = BTreeSet::new();
+            for key in JSON_STATUS_SCALAR_PRIORITY_KEYS {
+                let Some(child) = map.get(*key) else {
+                    continue;
+                };
+                let field = if prefix.is_empty() {
+                    (*key).to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                if json_status_scalar_field_is_priority(&field, child) {
+                    collector.push(json_observed_evidence_item(source, &field, child));
+                }
+                if matches!(child, Value::Object(_) | Value::Array(_)) {
+                    collect_priority_json_status_scalar_evidence(
+                        collector,
+                        source,
+                        &field,
+                        child,
+                        depth + 1,
+                    );
+                }
+                emitted_priority_keys.insert((*key).to_string());
+            }
             for (key, child) in map {
+                if emitted_priority_keys.contains(key.as_str()) {
+                    continue;
+                }
                 let field = if prefix.is_empty() {
                     key.to_string()
                 } else {
@@ -189,6 +216,56 @@ pub(super) fn collect_priority_json_status_scalar_evidence(
     }
 }
 
+const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
+    "ok",
+    "status",
+    "status_code",
+    "success_status",
+    "healthy",
+    "version",
+    "worker_state",
+    "uptime_seconds",
+    "running_length",
+    "queue_length",
+    "memory_rss_bytes",
+    "task_timeout_seconds",
+    "running_oldest_age_seconds",
+    "clawd_process_count",
+    "clawd_health_port_open",
+    "telegramd_healthy",
+    "telegramd_process_count",
+    "channel_gateway_healthy",
+    "channel_gateway_process_count",
+    "telegram_bot_healthy",
+    "telegram_bot_process_count",
+    "telegram_configured_bot_count",
+    "whatsappd_healthy",
+    "whatsappd_process_count",
+    "webd_healthy",
+    "webd_process_count",
+    "wechatd_healthy",
+    "wechatd_process_count",
+    "feishud_healthy",
+    "feishud_process_count",
+    "larkd_healthy",
+    "larkd_process_count",
+    "user_count",
+    "bound_channel_count",
+    "hostname",
+    "kernel_release",
+    "os_family",
+    "arch",
+    "cpu_count",
+    "service_manager",
+    "load_avg_1m",
+    "load_avg_5m",
+    "load_avg_15m",
+    "memory_available_bytes",
+    "memory_total_bytes",
+    "disk_root_available_bytes",
+    "disk_root_total_bytes",
+];
+
 pub(super) fn json_status_scalar_field_is_priority(field: &str, value: &Value) -> bool {
     let normalized = normalize_evidence_field(field);
     let leaf = normalized_field_leaf(&normalized);
@@ -204,16 +281,33 @@ pub(super) fn json_status_scalar_field_is_priority(field: &str, value: &Value) -
     matches!(
         leaf,
         "ok" | "status"
+            | "status_code"
+            | "success_status"
             | "healthy"
             | "version"
             | "worker_state"
             | "uptime_seconds"
             | "running_length"
+            | "queue_length"
+            | "memory_rss_bytes"
+            | "user_count"
+            | "bound_channel_count"
+            | "hostname"
+            | "kernel_release"
+            | "os_family"
+            | "arch"
+            | "cpu_count"
+            | "service_manager"
+            | "load_avg_1m"
+            | "load_avg_5m"
+            | "load_avg_15m"
             | "memory_available_bytes"
             | "memory_total_bytes"
             | "disk_root_available_bytes"
             | "disk_root_total_bytes"
     ) || leaf.ends_with("_healthy")
+        || leaf.ends_with("_process_count")
+        || leaf.ends_with("_memory_rss_bytes")
         || leaf.ends_with("_status")
         || leaf.ends_with("_state")
         || (matches!(leaf, "name" | "kind" | "scope") && normalized.contains("statuses["))
@@ -347,13 +441,58 @@ pub(super) fn sampled_multiline_excerpt_lines(text: &str) -> Vec<(usize, &str)> 
         return lines;
     }
 
+    let mut selected = std::collections::BTreeSet::new();
+    for (idx, line) in &lines {
+        if line_has_diagnostic_severity_signal(line) {
+            selected.insert(*idx);
+            if selected.len() >= MAX_OBSERVED_MULTILINE_EXCERPT_LINES {
+                break;
+            }
+        }
+    }
+
     let head_count = MAX_OBSERVED_MULTILINE_EXCERPT_LINES / 2;
+    for (idx, _) in lines.iter().take(head_count) {
+        if selected.len() >= MAX_OBSERVED_MULTILINE_EXCERPT_LINES {
+            break;
+        }
+        selected.insert(*idx);
+    }
+
     let tail_count = MAX_OBSERVED_MULTILINE_EXCERPT_LINES - head_count;
     let tail_start = lines.len().saturating_sub(tail_count);
-    let mut sampled = Vec::with_capacity(MAX_OBSERVED_MULTILINE_EXCERPT_LINES);
-    sampled.extend(lines.iter().take(head_count).copied());
-    sampled.extend(lines.iter().skip(tail_start).copied());
-    sampled
+    for (idx, _) in lines.iter().skip(tail_start) {
+        if selected.len() >= MAX_OBSERVED_MULTILINE_EXCERPT_LINES {
+            break;
+        }
+        selected.insert(*idx);
+    }
+
+    for (idx, _) in &lines {
+        if selected.len() >= MAX_OBSERVED_MULTILINE_EXCERPT_LINES {
+            break;
+        }
+        selected.insert(*idx);
+    }
+
+    lines
+        .iter()
+        .copied()
+        .filter(|(idx, _)| selected.contains(idx))
+        .collect()
+}
+
+fn line_has_diagnostic_severity_signal(line: &str) -> bool {
+    line.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .any(|token| {
+            token.eq_ignore_ascii_case("warn")
+                || token.eq_ignore_ascii_case("warning")
+                || token.eq_ignore_ascii_case("error")
+                || token.eq_ignore_ascii_case("fatal")
+                || token.eq_ignore_ascii_case("critical")
+                || token.eq_ignore_ascii_case("panic")
+        })
 }
 
 pub(super) fn json_field_should_split_multiline_excerpt(field: &str) -> bool {

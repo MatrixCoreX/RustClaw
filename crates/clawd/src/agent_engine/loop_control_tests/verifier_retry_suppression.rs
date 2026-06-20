@@ -1,5 +1,6 @@
 use super::{
     answer_verifier_retry_summary, ok_step, route_result,
+    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
 };
@@ -89,6 +90,115 @@ fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() 
         .as_ref()
         .and_then(|journal| journal.answer_verifier_summary.as_ref())
         .is_none());
+}
+
+#[test]
+fn answer_verifier_retry_summary_skips_confirmed_missing_file_delivery() {
+    let mut route = route_result(OutputResponseShape::FileToken);
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-missing-file-delivery", "ask", "prompt");
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_name","count":0,"results":[],"root":"/workspace","pattern":"definitely_missing_named_file_rustclaw_001.txt"},"text":"{}"}"#,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["path".to_string(), "content_excerpt".to_string()],
+        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
+        should_retry: true,
+        retry_instruction: "repeat missing file search".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm(
+        "没找到 definitely_missing_named_file_rustclaw_001.txt 这个文件。".to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(
+        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, Some(&route))
+    );
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
+}
+
+#[test]
+fn confirmed_missing_file_delivery_suppresses_retry_without_legacy_delivery_intent() {
+    let mut route = route_result(OutputResponseShape::FileToken);
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-missing-file-delivery-no-intent",
+        "ask",
+        "prompt",
+    );
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_name","count":0,"exact":false,"patterns":["definitely_missing_named_file_golden_001.txt"],"results":[],"root":""},"text":"{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_named_file_golden_001.txt\"],\"results\":[],\"root\":\"\"}"}"#,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["path".to_string()],
+        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
+        should_retry: true,
+        retry_instruction: "repeat missing file search".to_string(),
+        confidence: 0.9,
+    });
+    let mut reply = AskReply::non_llm("definitely_missing_named_file_golden_001.txt".to_string())
+        .with_task_journal(journal);
+
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(
+        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, Some(&route))
+    );
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
+}
+
+#[test]
+fn confirmed_missing_file_delivery_does_not_suppress_success_token_claim() {
+    let mut route = route_result(OutputResponseShape::FileToken);
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-missing-file-delivery-token-claim",
+        "ask",
+        "prompt",
+    );
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_name","count":0,"results":[],"root":""},"text":"{}"}"#,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["path".to_string()],
+        answer_incomplete_reason: "file delivery target is confirmed missing".to_string(),
+        should_retry: true,
+        retry_instruction: "repeat missing file search".to_string(),
+        confidence: 0.9,
+    });
+    let mut reply = AskReply::non_llm("FILE:/tmp/definitely_missing_named_file.txt".to_string())
+        .with_task_journal(journal);
+
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+    assert!(
+        !suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
+            &mut reply,
+            Some(&route)
+        )
+    );
 }
 
 #[test]

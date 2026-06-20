@@ -6,9 +6,11 @@ use super::{
     maybe_record_agent_decides_shadow_first_action_attribution, parse_log_analyze_finding,
     selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
     structured_respond_terminal_intent_from_plan,
+    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
-    terminal_user_answer_stop_signal, try_preserve_rss_source_hosts_from_structured_evidence,
+    terminal_user_answer_stop_signal, try_accept_language_only_output_format_answer_verifier_gap,
+    try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
@@ -18,7 +20,9 @@ use super::{
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
-use crate::agent_engine::support::SemanticRouteAuthority;
+use crate::agent_engine::support::{
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+};
 use crate::{
     agent_engine::{AgentRunContext, LoopState},
     execution_recipe::{
@@ -987,6 +991,45 @@ fn answer_verifier_exhaustion_marks_reply_failure() {
 }
 
 #[test]
+fn language_only_output_format_gap_keeps_best_model_answer_success() {
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_answer("best model answer");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "shape".to_string(),
+        should_retry: true,
+        retry_instruction: "retry with requested shape".to_string(),
+        confidence: 0.93,
+    });
+    let mut reply = AskReply::non_llm("best model answer".to_string())
+        .with_messages(vec!["best model answer".to_string()])
+        .with_task_journal(journal);
+
+    assert!(try_accept_language_only_output_format_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.text, "best model answer");
+    assert!(reply.error_text.is_none());
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(journal.final_answer.as_deref(), Some("best model answer"));
+}
+
+#[test]
 fn http_health_verifier_gap_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::WebPageSummary;
@@ -1066,6 +1109,185 @@ fn http_health_verifier_gap_recovers_with_structured_status_line() {
     );
 }
 
+#[test]
+fn http_health_command_summary_gap_recovers_with_structured_status_line() {
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Url;
+    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+
+    let body = json!({
+        "ok": true,
+        "data": {
+            "version": "0.1.8",
+            "uptime_seconds": 1050,
+            "running_length": 1,
+            "channel_gateway_healthy": false,
+            "telegram_bot_healthy": false,
+            "gateway_instance_statuses": [
+                {"kind": "telegram", "name": "primary", "healthy": false, "status": "stale"},
+                {"kind": "feishu", "name": "primary", "healthy": false, "status": "stopped"}
+            ]
+        },
+        "error": null
+    });
+    let output = json!({
+        "extra": {
+            "action": "get",
+            "url": "http://127.0.0.1:8787/v1/health",
+            "status_code": 200,
+            "success_status": true,
+            "body_json": body
+        },
+        "text": "status=200"
+    })
+    .to_string();
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-http-health", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "http_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(output),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec![
+            "output_format".to_string(),
+            "unsupported_claims".to_string(),
+        ],
+        answer_incomplete_reason: "generated summary added unsupported fields".to_string(),
+        should_retry: true,
+        retry_instruction: "use only observed health fields".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply =
+        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
+
+    assert!(try_recover_http_health_answer_verifier_gap(
+        Some(&route),
+        &mut reply,
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert!(reply.text.contains("http_reachability=reachable"));
+    assert!(reply.text.contains("status_code=200"));
+    assert!(reply.text.contains("ok=true"));
+    assert!(reply.text.contains("version=0.1.8"));
+    assert!(reply.text.contains("uptime_seconds=1050"));
+    assert!(reply.text.contains("running_length=1"));
+    assert!(reply.text.contains("channel_gateway_healthy=false"));
+    assert!(reply.text.contains("telegram_bot_healthy=false"));
+    assert!(reply.text.contains("telegram:primary:stale:false"));
+    assert!(reply.text.contains("feishu:primary:stopped:false"));
+    assert!(!reply.text.contains("memory"));
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
+}
+
+#[test]
+fn http_health_command_summary_gap_prefers_latest_language_synthesis() {
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Url;
+    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+
+    let body = json!({
+        "ok": true,
+        "data": {
+            "version": "0.1.8",
+            "uptime_seconds": 1050,
+            "running_length": 1,
+            "channel_gateway_healthy": false,
+            "telegram_bot_healthy": false
+        },
+        "error": null
+    });
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-http-health-language", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "http_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                json!({
+                    "extra": {
+                        "action": "get",
+                        "url": "http://127.0.0.1:8787/v1/health",
+                        "status_code": 200,
+                        "success_status": true,
+                        "body_json": body
+                    },
+                    "text": "status=200"
+                })
+                .to_string(),
+            ),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                "health 接口可连通，版本 0.1.8 正在运行，但渠道网关和 Telegram 机器人当前不健康。"
+                    .to_string(),
+            ),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["unsupported_claims".to_string()],
+        answer_incomplete_reason: "verifier asked for retry".to_string(),
+        should_retry: true,
+        retry_instruction: "use only observed health fields".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply =
+        AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
+
+    assert!(try_recover_http_health_answer_verifier_gap(
+        Some(&route),
+        &mut reply,
+    ));
+
+    assert_eq!(
+        reply.text,
+        "health 接口可连通，版本 0.1.8 正在运行，但渠道网关和 Telegram 机器人当前不健康。"
+    );
+    assert!(!reply.text.contains("http_reachability="));
+    assert!(!reply.should_fail_task);
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_none());
+}
+
 fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 8,
@@ -1076,10 +1298,10 @@ fn test_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
-        answer_verifier_enforce_required: false,
+        answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
         agent_loop_canary_bucket: "none".to_string(),
-        registry_idempotency_guard: false,
+        registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
@@ -1676,130 +1898,20 @@ fn boundary_context_keeps_migration_class_unselected_by_default() {
     );
 }
 
-#[test]
-fn boundary_context_classifies_pre_agent_gate_machine_summary() {
-    let policy = test_policy();
-    let mut route = route_result(OutputResponseShape::Scalar);
-    route.route_reason =
-        "clarify_reason_code:missing_read_target; direct_answer_gate_unbound_deictic_clarify"
-            .to_string();
-    route.output_contract.requires_content_evidence = true;
-
-    let boundary = boundary_context_snapshot_json(
-        &test_task(),
-        &policy,
-        Some(&AgentRunContext {
-            fuzzy_locator_suggestions: vec!["README.md".to_string()],
-            ..AgentRunContext::default()
-        }),
-        Some(&route),
-        super::LoopBudgetProfile::FastRead,
-    );
-
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/boundary_class")
-            .and_then(serde_json::Value::as_str),
-        Some("locator_fuzzy_candidates")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/ownership_class")
-            .and_then(serde_json::Value::as_str),
-        Some("boundary_machine_check")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/boundary_allowed")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/semantic_migration_target")
-            .and_then(serde_json::Value::as_str),
-        Some("none")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/fuzzy_locator_suggestion_count")
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/observed")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/observation_class")
-            .and_then(serde_json::Value::as_str),
-        Some("legacy_gate_observed")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
-            .and_then(serde_json::Value::as_str),
-        Some("locator_binding_fallback")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/boundary_allowed")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-}
-
-#[test]
-fn boundary_context_marks_direct_answer_execution_promotion_as_planner_migration_debt() {
-    let policy = test_policy();
-    let mut route = route_result(OutputResponseShape::Scalar);
-    route.route_reason = "direct_answer_gate_contract_execute".to_string();
-    route.output_contract.requires_content_evidence = true;
-
-    let boundary = boundary_context_snapshot_json(
-        &test_task(),
-        &policy,
-        Some(&AgentRunContext::default()),
-        Some(&route),
-        super::LoopBudgetProfile::FastRead,
-    );
-
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
-            .and_then(serde_json::Value::as_str),
-        Some("semantic_execution_promotion")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/ownership_class")
-            .and_then(serde_json::Value::as_str),
-        Some("semantic_policy_candidate")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/boundary_allowed")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/semantic_migration_target")
-            .and_then(serde_json::Value::as_str),
-        Some("planner_loop_decision_envelope")
-    );
-}
+#[path = "loop_control_tests/boundary_context_direct_gate.rs"]
+mod boundary_context_direct_gate;
 
 #[path = "loop_control_tests/local_health_recovery.rs"]
 mod local_health_recovery;
 
+#[path = "loop_control_tests/dispatch_handoff.rs"]
+mod dispatch_handoff;
 #[path = "loop_control_tests/observed_finalize.rs"]
 mod observed_finalize;
 #[path = "loop_control_tests/recent_artifacts_recovery.rs"]
 mod recent_artifacts_recovery;
+#[path = "loop_control_tests/soft_budget_checkpoint.rs"]
+mod soft_budget_checkpoint;
 #[path = "loop_control_tests/terminal_answer_stop.rs"]
 mod terminal_answer_stop;
 #[path = "loop_control_tests/verifier_retry_suppression.rs"]

@@ -1116,6 +1116,89 @@ fn session_alias_target_direct_answer_allows_current_schema_filename_request() {
 }
 
 #[test]
+fn session_alias_target_direct_answer_allows_scalar_workspace_alias_basename_request() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "alias-fast-path-scalar-workspace".to_string(),
+        user_id: 51,
+        chat_id: 53,
+        user_key: Some("alias-user-scalar-workspace".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({
+            "text":"What file does the note file refer to now? Output only the basename."
+        })
+        .to_string(),
+    };
+    let conversation = crate::conversation_state::ConversationState {
+        alias_bindings: vec![
+            crate::conversation_state::SessionAliasBinding {
+                alias: "structured_field_selector".to_string(),
+                target: "package.name".to_string(),
+                updated_at_ts: 1,
+            },
+            crate::conversation_state::SessionAliasBinding {
+                alias: "note file".to_string(),
+                target: "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+                    .to_string(),
+                updated_at_ts: 2,
+            },
+        ],
+        last_task_id: "alias-fast-path-scalar-workspace-prior".to_string(),
+        updated_at_ts: 2,
+        ..Default::default()
+    };
+    let state_json = serde_json::to_string(&conversation).expect("conversation json");
+    state
+        .core
+        .db
+        .get()
+        .expect("db")
+        .execute(
+            "INSERT INTO conversation_states (
+                    user_id, chat_id, user_key, state_json, last_task_id, updated_at_ts
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                task.user_id,
+                task.chat_id,
+                task.user_key.as_deref().unwrap_or_default(),
+                state_json,
+                conversation.last_task_id,
+                conversation.updated_at_ts as i64
+            ],
+        )
+        .expect("insert conversation state");
+
+    let mut route = chat_route_for_gate();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = concat!(
+        "What file path does the session alias 'note file' currently refer to? ",
+        "Output only the basename of that file."
+    )
+    .to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        session_alias_target_direct_answer_candidate(
+            &state,
+            &task,
+            "What file path does the session alias 'note file' currently refer to?",
+            Some(&ctx),
+        )
+        .as_deref(),
+        Some("release_checklist.md")
+    );
+}
+
+#[test]
 fn structured_scalar_extraction_ignores_embedded_answer_candidate() {
     assert!(resolved_intent_declares_structured_scalar_extraction(
         "confirm_read_note_title\nanswer_candidate: Confirmed"

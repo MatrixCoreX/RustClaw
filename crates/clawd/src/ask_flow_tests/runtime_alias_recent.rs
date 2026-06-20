@@ -254,6 +254,112 @@ observed_bound_target: {target}\n"
 }
 
 #[test]
+fn active_file_basename_direct_answer_accepts_empty_filename_locator_contract() {
+    let root = TempDirGuard::new("active_file_basename_filename_locator");
+    let target = root.path.join("README.md");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Return the active file target basename.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "file_basename contract from active execution anchor".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::FileBasename,
+            locator_kind: crate::OutputLocatorKind::Filename,
+            locator_hint: String::new(),
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false execution_view=true\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver file\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n\
+observed_ordered_entries: 1:{target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.md")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_accepts_matching_filename_locator_hint() {
+    let root = TempDirGuard::new("active_file_basename_filename_hint");
+    let target = root.path.join("README.md");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let target = target.display().to_string();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Return the active file target basename.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "file_basename contract from active execution anchor".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::FileBasename,
+            locator_kind: crate::OutputLocatorKind::Filename,
+            locator_hint: target.clone(),
+            ..Default::default()
+        },
+    };
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false execution_view=true\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver file\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n\
+observed_ordered_entries: 1:{target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.md")
+    );
+}
+
+#[test]
 fn active_file_basename_direct_answer_uses_recent_delivery_token() {
     let root = TempDirGuard::new("active_file_basename_recent_delivery");
     let target = root.path.join("clawd-dev.log");
@@ -460,6 +566,69 @@ observed_bound_target: {target}\n"
         active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
         Some("release_checklist.md")
     );
+}
+
+#[test]
+fn active_file_basename_direct_answer_observation_satisfies_field_value_evidence() {
+    let root = TempDirGuard::new("active_file_basename_evidence");
+    let target = root.path.join("clawd-codex-current.log");
+    std::fs::write(&target, "tail\n").expect("write log");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Return only the active delivered file basename.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "direct_answer_decision_overridden_by_executable_contract".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::FileBasename,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: false,
+            ..Default::default()
+        },
+    };
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route.clone()),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver second entry\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {}\n\
+observed_bound_target: {}\n",
+            target.display(),
+            target.display()
+        )),
+        ..Default::default()
+    };
+
+    let candidate = active_file_basename_direct_answer(&state, Some(&ctx)).expect("candidate");
+    assert_eq!(candidate.answer, "clawd-codex-current.log");
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-active-basename",
+        "ask",
+        "只说这个文件名",
+    );
+    journal.record_route_result(&route);
+    journal.push_task_observation(candidate.observed_evidence());
+    let coverage = crate::task_journal::evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage.missing_evidence.is_empty(), "{coverage:?}");
 }
 
 #[test]

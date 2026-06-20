@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use rusqlite::{params, Connection};
 
 use super::intent::{MemoryAction, MemoryActionKind, MemoryActionOp, MemoryScope, MemoryTtlPolicy};
@@ -243,14 +242,6 @@ fn delete_preference(
         );
     }
     Ok(deleted)
-}
-
-#[allow(dead_code)]
-pub(crate) fn record_memory_action_audit(action: &MemoryAction) -> anyhow::Result<()> {
-    if action.reason.trim().is_empty() {
-        return Err(anyhow!("memory action audit requires a reason"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

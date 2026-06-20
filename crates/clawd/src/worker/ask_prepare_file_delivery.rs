@@ -151,9 +151,15 @@ fn active_read_bound_target(
 fn bind_structural_file_delivery_to_recent_read_target(
     route_result: &mut crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
     if !route_requests_file_delivery(route_result)
         || file_delivery_has_concrete_locator(route_result)
+        || turn_analysis_has_unresolved_deictic_reference(turn_analysis)
+        || route_reason_has_structural_marker(
+            route_result,
+            "directory_file_delivery_requires_structured_selection",
+        )
     {
         return false;
     }
@@ -182,6 +188,23 @@ fn bind_structural_file_delivery_to_recent_read_target(
         .route_reason
         .push_str("; structural_file_delivery_bound_to_recent_read_target");
     true
+}
+
+fn turn_analysis_has_unresolved_deictic_reference(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    turn_analysis
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .and_then(|patch| patch.get("deictic_reference"))
+        .and_then(Value::as_object)
+        .and_then(|obj| obj.get("target"))
+        .and_then(Value::as_str)
+        .is_some_and(|target| {
+            matches!(
+                target,
+                "unresolved_prior_object" | "missing_locator" | "ambiguous_locator"
+            )
+        })
 }
 
 fn active_delivery_bound_target(
@@ -335,9 +358,18 @@ fn allow_generated_file_delivery_without_locator(route_result: &mut crate::Route
         .push_str("; generated_file_delivery_allows_runtime_target");
 }
 
+#[cfg(test)]
 pub(in crate::worker) fn repair_structural_file_delivery_resolution(
     route_result: &mut crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    repair_structural_file_delivery_resolution_for_turn(route_result, session_snapshot, None)
+}
+
+pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
     if !route_requests_file_delivery(route_result) {
         return false;
@@ -349,7 +381,11 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution(
     if file_delivery_has_concrete_locator(route_result) {
         return false;
     }
-    if bind_structural_file_delivery_to_recent_read_target(route_result, session_snapshot) {
+    if bind_structural_file_delivery_to_recent_read_target(
+        route_result,
+        session_snapshot,
+        turn_analysis,
+    ) {
         return true;
     }
     force_unresolved_file_delivery_clarify(route_result);

@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use super::support::LoopBudgetProfile;
+use super::support::{publish_agent_loop_checkpoint_progress, LoopBudgetProfile};
 use super::{
     append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
     execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
@@ -560,6 +560,33 @@ fn evaluate_round_outcome(
     false
 }
 
+fn soft_budget_checkpoint_resume_reason(
+    loop_state: &LoopState,
+    policy: &AgentLoopGuardPolicy,
+    outcome: &RoundOutcome,
+) -> Option<&'static str> {
+    if outcome.had_error {
+        return None;
+    }
+    if outcome
+        .stop_signal
+        .as_deref()
+        .is_some_and(|signal| signal == "recoverable_failure_continue_round")
+    {
+        return None;
+    }
+    if outcome.stop_signal.is_some() || outcome.executed_actions == 0 {
+        return None;
+    }
+    if outcome.no_progress && loop_state.consecutive_no_progress > policy.no_progress_limit {
+        return Some("agent_loop_no_progress_limit");
+    }
+    if policy.multi_round_enabled && loop_state.round_no >= loop_state.max_rounds {
+        return Some("agent_loop_max_rounds");
+    }
+    None
+}
+
 async fn run_agent_round(
     state: &AppState,
     task: &ClaimedTask,
@@ -685,6 +712,7 @@ fn maybe_record_agent_decides_shadow_attribution(
     let Some(route) = route_result else {
         return;
     };
+    maybe_record_dispatch_handoff_attribution(route, loop_state);
     loop_state.rollout_attribution.push(
         crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
             route,
@@ -698,6 +726,42 @@ fn maybe_record_agent_decides_shadow_attribution(
             )),
         ),
     );
+}
+
+fn maybe_record_dispatch_handoff_attribution(route: &RouteResult, loop_state: &mut LoopState) {
+    for (marker, old_owner, new_owner, chosen_path) in [
+        (
+            "ordinary_clarify_deferred_to_agent_loop",
+            "legacy_pre_agent_semantic_clarify",
+            "agent_loop_terminal_clarify",
+            "agent_loop_structured_respond_clarify",
+        ),
+        (
+            "resume_discussion_requires_agent_loop",
+            "legacy_pre_agent_resume_discussion",
+            "agent_loop_resume_discussion",
+            "agent_loop_chat_wrapped_resume",
+        ),
+    ] {
+        if !route_reason_has_marker(route, marker)
+            || loop_state
+                .rollout_attribution
+                .iter()
+                .any(|item| item.event == marker)
+        {
+            continue;
+        }
+        loop_state.rollout_attribution.push(
+            crate::task_journal::TaskJournalRolloutAttribution::dispatch_boundary_attribution(
+                route,
+                marker,
+                old_owner,
+                new_owner,
+                chosen_path,
+                "semantic_route_authority:legacy_pre_agent",
+            ),
+        );
+    }
 }
 
 fn maybe_record_agent_decides_shadow_first_action_attribution(
@@ -1191,9 +1255,20 @@ pub(super) async fn run_agent_with_loop(
     user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<AskReply, String> {
+    run_agent_with_loop_seeded(state, task, goal, user_text, agent_run_context, None).await
+}
+
+pub(super) async fn run_agent_with_loop_seeded(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
+) -> Result<AskReply, String> {
     let base_policy = load_agent_loop_guard_policy(state);
     let mut loop_state = LoopState::new(base_policy.max_rounds.max(1));
-    super::seed_loop_state_from_agent_context(&mut loop_state, agent_run_context);
+    super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         initial_execution_recipe_spec(goal, user_text, agent_run_context),
     );
@@ -1247,6 +1322,16 @@ pub(super) async fn run_agent_with_loop(
             .await?;
             loop_state.last_stop_signal = outcome.stop_signal.clone();
             if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
+                if let Some(resume_reason) =
+                    soft_budget_checkpoint_resume_reason(&loop_state, &policy, &outcome)
+                {
+                    publish_agent_loop_checkpoint_progress(
+                        state,
+                        task,
+                        &mut loop_state,
+                        resume_reason,
+                    );
+                }
                 break;
             }
             round += 1;
@@ -1272,6 +1357,7 @@ pub(super) async fn run_agent_with_loop(
         let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
+        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, route_result);
         if try_preserve_rss_source_hosts_from_structured_evidence(route_result, &mut reply) {
             return Ok(reply);
         }
@@ -1367,6 +1453,10 @@ pub(super) async fn run_agent_with_loop(
                 return Ok(reply);
             }
             if try_recover_content_excerpt_summary_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
+            if try_accept_language_only_output_format_answer_verifier_gap(route_result, &mut reply)
+            {
                 return Ok(reply);
             }
             mark_reply_failed_after_answer_verifier_exhausted(user_text, &mut reply, &verifier);

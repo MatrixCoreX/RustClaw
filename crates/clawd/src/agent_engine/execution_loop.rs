@@ -88,6 +88,7 @@ fn check_repeat_action_guard(
     loop_state: &mut LoopState,
     policy: &AgentLoopGuardPolicy,
     action: &AgentAction,
+    route_result: Option<&crate::RouteResult>,
     fingerprint: &str,
     step_in_round: usize,
 ) -> Option<String> {
@@ -107,6 +108,7 @@ fn check_repeat_action_guard(
             state,
             policy,
             action,
+            route_result,
             fingerprint,
             "registry_idempotency_repeat_completed_action",
             Some(*success_count),
@@ -132,6 +134,7 @@ fn check_repeat_action_guard(
             state,
             policy,
             action,
+            route_result,
             fingerprint,
             "registry_idempotency_repeat_action_limit",
             Some(*repeat_count),
@@ -182,11 +185,12 @@ pub(super) async fn execute_actions_once(
     let snapshot = capture_round_progress_snapshot(loop_state);
     let mut ended_with_user_visible_output = false;
     let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     for (idx, action) in actions.iter().take(policy.max_steps.max(1)).enumerate() {
         ensure_task_running(state, task)?;
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
-        let fingerprint = super::action_fingerprint_for_policy(state, policy, action);
+        let fingerprint = super::action_fingerprint_for_policy(state, policy, action, route_result);
         if action_counts_as_tool_call(action)
             && loop_state.tool_calls_total >= policy.max_tool_calls.max(1)
         {
@@ -207,6 +211,7 @@ pub(super) async fn execute_actions_once(
             loop_state,
             policy,
             action,
+            route_result,
             &fingerprint,
             step_in_round,
         ) {

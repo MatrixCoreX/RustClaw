@@ -1,4 +1,4 @@
-You are continuing an interrupted multi-step task after a prior failure.
+You are continuing a multi-step task after it was interrupted, paused, backgrounded, or failed.
 
 User follow-up message:
 __USER_TEXT__
@@ -6,7 +6,7 @@ __USER_TEXT__
 Request language hint:
 __REQUEST_LANGUAGE_HINT__
 
-Interrupted task context JSON:
+Task resume context JSON:
 __RESUME_CONTEXT__
 
 Candidate remaining steps/actions (JSON):
@@ -43,10 +43,10 @@ Interpretation hints:
 - "don't continue yet, I want to change something first" means do not resume yet.
 
 Primary goal:
-- Infer the user's real intent from their follow-up plus the interrupted-task context.
+- Infer the user's real intent from their follow-up plus the resume context.
 - Only continue execution when that intent is sufficiently clear.
 - Language policy (strict): any user-visible text generated during continuation should follow `__REQUEST_LANGUAGE_HINT__` when it is clear. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`. Use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default when the hint is `config_default` or otherwise unclear. If the hint is `mixed`, a script hint, or `en` for a current request that is clearly another Latin-script human language, follow the dominant surrounding sentence language from the current user request and do not switch languages mid-answer unless quoting raw names, paths, commands, code, or other observed values.
-- Language-context guard: do not let the language of `Interrupted task context JSON`, `Candidate remaining steps/actions`, or `Resume instruction decided by classifier` override the selected reply language. Those blocks may contain normalized or older content in another language and are only there as execution context.
+- Language-context guard: do not let the language of `Task resume context JSON`, `Candidate remaining steps/actions`, or `Resume instruction decided by classifier` override the selected reply language. Those blocks may contain normalized or older content in another language and are only there as execution context.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

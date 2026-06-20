@@ -374,7 +374,7 @@ fn locatorless_service_status_observation_does_not_clarify() {
 fn locatorless_status_query_clarify_promotes_to_service_status_execution() {
     let state = test_state_with_root(make_temp_root("locatorless_status_query_clarify"));
     let mut route = executable_filename_route();
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.needs_clarify = true;
     route.clarify_question.clear();
     route.resolved_intent =

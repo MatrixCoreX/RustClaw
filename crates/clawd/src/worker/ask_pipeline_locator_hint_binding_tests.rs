@@ -130,7 +130,7 @@ fn clarify_scalar_count_binds_workspace_root_from_resolved_prompt_path() {
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.resolved_intent = format!(
         "Count direct child directories in {} and exclude hidden entries.",
         root.display()

@@ -36,6 +36,7 @@ struct SearchItem {
 enum Backend {
     SerpApi,
     DuckDuckGoHtml,
+    BingHtml,
 }
 
 impl Backend {
@@ -43,6 +44,7 @@ impl Backend {
         match v.to_ascii_lowercase().as_str() {
             "serpapi" => Some(Self::SerpApi),
             "duckduckgo_html" | "duckduckgo" | "ddg" => Some(Self::DuckDuckGoHtml),
+            "bing_html" | "bing" => Some(Self::BingHtml),
             _ => None,
         }
     }
@@ -50,6 +52,7 @@ impl Backend {
         match self {
             Self::SerpApi => "serpapi",
             Self::DuckDuckGoHtml => "duckduckgo_html",
+            Self::BingHtml => "bing_html",
         }
     }
 }
@@ -233,10 +236,11 @@ fn handle(input: &SearchInput) -> Result<Value> {
             if matches!(input.backend.as_deref().map(|s| s.to_ascii_lowercase()), Some(ref b) if b == "serpapi") {
                 Err(e)
             } else {
-                search_duckduckgo_html(input)
+                search_bing_html(input).or_else(|_| search_duckduckgo_html(input))
             }
         })?,
         Backend::DuckDuckGoHtml => search_duckduckgo_html(input)?,
+        Backend::BingHtml => search_bing_html(input)?,
     };
 
     normalize_and_filter(&mut items, input);
@@ -437,6 +441,95 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
     Ok(out)
 }
 
+fn search_bing_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .context("build http client failed")?;
+    let mut url = Url::parse("https://www.bing.com/search").expect("valid url");
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("q", &input.query);
+        q.append_pair("count", &input.top_k.to_string());
+        if let Some(lang) = &input.lang {
+            q.append_pair("setlang", lang);
+        }
+    }
+    let html = client
+        .get(url)
+        .header(
+            "user-agent",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        )
+        .send()
+        .context("bing request failed")?
+        .error_for_status()
+        .context("bing non-success response")?
+        .text()
+        .context("bing body read failed")?;
+    Ok(parse_bing_html_results(&html, input.top_k * 3))
+}
+
+fn parse_bing_html_results(html: &str, max_items: usize) -> Vec<SearchItem> {
+    let row_re = Regex::new(r#"(?is)<li class="b_algo"[^>]*>(.*?)</li>"#).expect("regex");
+    let a_re = Regex::new(r#"(?is)<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>\s*</h2>"#)
+        .expect("regex");
+    let sn_re =
+        Regex::new(r#"(?is)<div[^>]*class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>"#).expect("regex");
+    let tag_re = Regex::new(r"(?is)<[^>]+>").expect("regex");
+
+    let mut out = vec![];
+    for row in row_re.captures_iter(html) {
+        let Some(block) = row.get(1).map(|m| m.as_str()) else {
+            continue;
+        };
+        let Some(ac) = a_re.captures(block) else {
+            continue;
+        };
+        let href = ac.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        let title_html = ac.get(2).map(|m| m.as_str()).unwrap_or("").trim();
+        let title = clean_html_text(title_html, &tag_re);
+        if title.is_empty() || href.is_empty() {
+            continue;
+        }
+        let snippet = sn_re.captures(block).and_then(|captures| {
+            captures
+                .get(1)
+                .map(|m| clean_html_text(m.as_str(), &tag_re))
+                .filter(|value| !value.is_empty())
+        });
+        out.push(SearchItem {
+            title,
+            url: href.to_string(),
+            snippet,
+            source: "bing".to_string(),
+            rank: out.len() + 1,
+        });
+        if out.len() >= max_items {
+            break;
+        }
+    }
+    out
+}
+
+fn clean_html_text(raw: &str, tag_re: &Regex) -> String {
+    decode_basic_html_entities(&tag_re.replace_all(raw, " "))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn decode_basic_html_entities(raw: &str) -> String {
+    raw.replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&nbsp;", " ")
+        .replace("&ensp;", " ")
+        .replace("&emsp;", " ")
+        .replace("&#0183;", "·")
+}
+
 fn unwrap_ddg_redirect(href: &str) -> Option<String> {
     let parsed = Url::parse(href).ok()?;
     if parsed.domain() == Some("duckduckgo.com") && parsed.path() == "/l/" {
@@ -633,5 +726,32 @@ mod tests {
             extra.pointer("/extract_urls/0").and_then(Value::as_str),
             Some("https://example.com/rust-async")
         );
+    }
+
+    #[test]
+    fn parse_bing_html_results_extracts_title_url_and_snippet() {
+        let html = r#"
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://rust-lang.github.io/async-book/">Asynchronous Programming in Rust</a></h2>
+            <div class="b_caption"><p>The Async Book explains futures, async, and await in Rust.</p></div>
+          </li>
+          <li class="b_algo">
+            <h2><a href="https://tokio.rs/tokio/tutorial">Tokio Tutorial</a></h2>
+            <div class="b_caption"><p>Learn to build asynchronous applications with Tokio.</p></div>
+          </li>
+        </ol>
+        "#;
+
+        let items = parse_bing_html_results(html, 3);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "Asynchronous Programming in Rust");
+        assert_eq!(items[0].url, "https://rust-lang.github.io/async-book/");
+        assert_eq!(
+            items[0].snippet.as_deref(),
+            Some("The Async Book explains futures, async, and await in Rust.")
+        );
+        assert_eq!(items[1].source, "bing");
     }
 }

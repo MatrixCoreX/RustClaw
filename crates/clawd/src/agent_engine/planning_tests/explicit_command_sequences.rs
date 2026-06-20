@@ -430,6 +430,37 @@ fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
 }
 
 #[test]
+fn prefixed_single_command_with_format_tail_is_single_step_safe() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
+    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
+
+    assert_eq!(
+        super::super::explicit_command_single_step_segment(
+            &state.policy.command_intent,
+            "执行 pwd，只输出当前工作目录的绝对路径"
+        )
+        .as_deref(),
+        Some("pwd")
+    );
+}
+
+#[test]
+fn prefixed_single_command_with_second_command_tail_is_not_single_step_safe() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
+    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
+
+    assert_eq!(
+        super::super::explicit_command_single_step_segment(
+            &state.policy.command_intent,
+            "执行 pwd，再执行 whoami，然后输出结果"
+        ),
+        None
+    );
+}
+
+#[test]
 fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];

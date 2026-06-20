@@ -60,3 +60,59 @@ fn recent_artifacts_verifier_gap_recovers_from_inventory_metadata() {
         .and_then(|journal| journal.answer_verifier_summary.as_ref())
         .is_none());
 }
+
+#[test]
+fn recent_artifacts_verifier_gap_recovery_respects_selector_limit_and_target_kind() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = true;
+    route.output_contract.self_extension.list_selector.limit = Some(1);
+
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-recent-artifacts-limit",
+        "ask",
+        "judge logs",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            r#"{"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2048},{"kind":"dir","modified_ts":8,"name":"agent_rollout_metrics","path":"logs/agent_rollout_metrics","size_bytes":0},{"kind":"file","modified_ts":7,"name":"model_io.log","path":"logs/model_io.log","size_bytes":4096}],"path":"/repo/logs","sort_by":"mtime_desc"},"text":"metadata"}"#.to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate leaked raw step output".to_string(),
+        should_retry: true,
+        retry_instruction: "render observed recent entries".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
+
+    assert!(try_recover_recent_artifacts_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(reply.text.contains("recent_entries.count=1"));
+    assert!(reply.text.contains("recent_entries[0].name=clawd.run.log"));
+    assert!(!reply.text.contains("agent_rollout_metrics"));
+    assert!(!reply.text.contains("recent_entries[1]"));
+}

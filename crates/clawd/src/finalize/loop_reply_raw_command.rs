@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -93,15 +94,7 @@ pub(super) fn direct_raw_command_output_projection(
     {
         return None;
     }
-    let outputs = loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| step.is_ok() && step.skill == "run_cmd")
-        .filter_map(|step| step.output.as_deref())
-        .map(str::trim)
-        .filter(|output| !output.is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
+    let outputs = latest_run_cmd_output_group(loop_state);
     if outputs.is_empty() {
         if let Some((answer, used_evidence_ids_count)) =
             direct_read_range_raw_command_projection(state, route, loop_state)
@@ -234,6 +227,57 @@ fn collapse_identical_raw_command_outputs(outputs: &[String]) -> Option<String> 
         .iter()
         .all(|output| output.trim() == first)
         .then(|| first.to_string())
+}
+
+fn latest_run_cmd_output_group(loop_state: &LoopState) -> Vec<String> {
+    let mut outputs = Vec::new();
+    let mut seen_keys = HashSet::new();
+    let mut seen_outputs = HashSet::new();
+    let mut started = false;
+    for step in loop_state.executed_step_results.iter().rev() {
+        if matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think"
+        ) {
+            if started {
+                break;
+            }
+            continue;
+        }
+        if step.skill == "run_cmd" {
+            let Some(output) = step.output.as_deref().map(str::trim) else {
+                if started {
+                    break;
+                }
+                return Vec::new();
+            };
+            if !step.is_ok() || output.is_empty() {
+                if started {
+                    break;
+                }
+                return Vec::new();
+            }
+            started = true;
+            let output_key = output.to_string();
+            let command_key = plan_step_for_execution(loop_state, step)
+                .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+                .or_else(|| run_cmd_machine_command_from_output(output))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("command:{value}"))
+                .unwrap_or_else(|| format!("step:{}", step.step_id));
+            if !seen_keys.insert(command_key) || !seen_outputs.insert(output_key) {
+                break;
+            }
+            outputs.push(output.to_string());
+            continue;
+        }
+        if started {
+            break;
+        }
+    }
+    outputs.reverse();
+    outputs
 }
 
 fn latest_run_cmd_redirect_existing_file_path(

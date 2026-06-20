@@ -17,6 +17,9 @@ pub(super) fn answer_verifier_retry_summary<'a>(
     if answer_verifier_gap_requires_user_locator_disambiguation(reply, route_result, summary) {
         return None;
     }
+    if answer_verifier_gap_has_confirmed_missing_file_delivery(reply, route_result, summary) {
+        return None;
+    }
     summary.high_confidence_retry_gap().then_some(summary)
 }
 
@@ -39,6 +42,32 @@ pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
     info!(
         "answer_verifier_retry_suppressed_structural_satisfaction reason={}",
         crate::truncate_for_log(&summary.answer_incomplete_reason)
+    );
+    journal.answer_verifier_summary = None;
+    true
+}
+
+pub(super) fn suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
+    reply: &mut AskReply,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    let Some(summary) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !answer_verifier_gap_has_confirmed_missing_file_delivery(reply, route_result, summary) {
+        return false;
+    }
+    let reason = summary.answer_incomplete_reason.clone();
+    let Some(journal) = reply.task_journal.as_mut() else {
+        return false;
+    };
+    info!(
+        "answer_verifier_retry_suppressed_missing_file_delivery reason={}",
+        crate::truncate_for_log(&reason)
     );
     journal.answer_verifier_summary = None;
     true
@@ -99,6 +128,99 @@ fn answer_verifier_gap_requires_user_locator_disambiguation(
         .step_results
         .iter()
         .any(step_has_non_unique_file_search_candidates)
+}
+
+fn answer_verifier_gap_has_confirmed_missing_file_delivery(
+    reply: &AskReply,
+    route_result: Option<&RouteResult>,
+    summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    if !summary.missing_evidence_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "path" | "content_excerpt" | "any_of(candidates|count|path)"
+        )
+    }) {
+        return false;
+    }
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::FileToken
+    {
+        return false;
+    }
+    if final_user_answer_candidate(reply).is_some_and(answer_has_file_delivery_token) {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    journal
+        .step_results
+        .iter()
+        .any(step_has_missing_file_search_evidence)
+}
+
+fn step_has_missing_file_search_evidence(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
+    step.output_excerpt
+        .as_deref()
+        .is_some_and(output_excerpt_has_missing_file_search_evidence)
+        || step
+            .error_excerpt
+            .as_deref()
+            .is_some_and(step_error_has_missing_file_evidence)
+}
+
+fn output_excerpt_has_missing_file_search_evidence(output: &str) -> bool {
+    if output.trim().eq_ignore_ascii_case("NOT_FOUND") {
+        return true;
+    }
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()
+        .is_some_and(|value| output_value_has_missing_file_search_evidence(&value))
+}
+
+fn output_value_has_missing_file_search_evidence(value: &serde_json::Value) -> bool {
+    let locator_found_nothing = value
+        .get("action")
+        .and_then(|v| v.as_str())
+        .is_some_and(|action| matches!(action, "find_name" | "find_path"))
+        && value.get("count").and_then(|v| v.as_i64()) == Some(0)
+        && ["results", "matches"].iter().any(|field| {
+            value
+                .get(field)
+                .and_then(|v| v.as_array())
+                .is_some_and(|items| items.is_empty())
+        });
+    if locator_found_nothing {
+        return true;
+    }
+    value
+        .get("extra")
+        .is_some_and(output_value_has_missing_file_search_evidence)
+        || value
+            .get("text")
+            .and_then(|text| text.as_str())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .is_some_and(|inner| output_value_has_missing_file_search_evidence(&inner))
+}
+
+fn answer_has_file_delivery_token(answer: &str) -> bool {
+    answer
+        .lines()
+        .any(|line| crate::finalize::parse_delivery_file_token(line.trim()).is_some())
+}
+
+fn step_error_has_missing_file_evidence(error: &str) -> bool {
+    let trimmed = error.trim();
+    trimmed.starts_with("__RC_READ_FILE_NOT_FOUND__:")
+        || crate::skills::parse_structured_skill_error(trimmed)
+            .is_some_and(|structured| structured.error_kind == "not_found")
 }
 
 fn step_has_non_unique_file_search_candidates(
@@ -950,8 +1072,12 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::WebPageSummary
-        || route.output_contract.locator_kind != crate::OutputLocatorKind::Url
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::WebPageSummary
+            | crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::ServiceStatus
+    ) || route.output_contract.locator_kind != crate::OutputLocatorKind::Url
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {
@@ -965,17 +1091,31 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
         return false;
     };
     if !verifier.high_confidence_retry_gap()
-        || !verifier
-            .missing_evidence_fields
-            .iter()
-            .any(|field| field == "content_excerpt")
+        || !verifier.missing_evidence_fields.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                "content_excerpt"
+                    | "command_output"
+                    | "output_format"
+                    | "unsupported_claims"
+                    | "any_of(command_output|content_excerpt|field_value)"
+                    | "any_of(command_output|content_excerpt|count|field_value)"
+            )
+        })
     {
         return false;
     }
     let Some(finding) = observed_http_health_finding(reply) else {
         return false;
     };
-    let answer = deterministic_http_health_status_line(&finding);
+    let (answer, reason) = latest_publishable_http_health_synthesis(reply)
+        .map(|answer| (answer, "http_health_synthesis"))
+        .unwrap_or_else(|| {
+            (
+                deterministic_http_health_status_line(&finding),
+                "http_health_structured_status",
+            )
+        });
     if let Some(journal) = reply.task_journal.as_mut() {
         journal.answer_verifier_summary = None;
         journal.record_final_answer(&answer);
@@ -986,7 +1126,7 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
     reply.should_fail_task = false;
     reply.error_text = None;
     reply.is_llm_reply = false;
-    info!("answer_verifier_retry_exhausted_recovered_with_http_health_structured_status");
+    info!("answer_verifier_retry_exhausted_recovered_with_{reason}");
     true
 }
 
@@ -1002,6 +1142,47 @@ pub(super) fn observed_http_health_finding(reply: &AskReply) -> Option<HttpHealt
         })
         .filter_map(|step| step.output_excerpt.as_deref())
         .find_map(parse_http_health_finding)
+}
+
+pub(super) fn latest_publishable_http_health_synthesis(reply: &AskReply) -> Option<String> {
+    let answer = reply
+        .task_journal
+        .as_ref()?
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            step.skill == "synthesize_answer"
+                && step.status == crate::executor::StepExecutionStatus::Ok
+                && step
+                    .output_excerpt
+                    .as_deref()
+                    .is_some_and(|text| !text.trim().is_empty())
+        })?
+        .output_excerpt
+        .as_deref()?
+        .trim();
+    if answer.is_empty()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+        || crate::finalize::is_execution_summary_message(answer)
+        || looks_like_machine_key_value_status_line(answer)
+    {
+        return None;
+    }
+    Some(answer.to_string())
+}
+
+pub(super) fn looks_like_machine_key_value_status_line(answer: &str) -> bool {
+    let mut token_count = 0usize;
+    let mut kv_count = 0usize;
+    for token in answer.split_whitespace() {
+        token_count += 1;
+        if token.contains('=') {
+            kv_count += 1;
+        }
+    }
+    token_count > 0 && kv_count >= 3 && kv_count.saturating_mul(2) >= token_count
 }
 
 pub(super) fn parse_http_health_finding(output: &str) -> Option<HttpHealthFinding> {

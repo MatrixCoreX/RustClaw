@@ -33,7 +33,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `list_dir` | `files_only` / `dirs_only` | no | bool | `false` | Narrow inventory to files or directories. |
 | `list_dir` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `list_dir` | `names_only` | no | bool | `false` | Return only entry names when names are sufficient; runtime also exposes `names_by_kind` for grouped file/directory answers. |
-| `list_dir` | `sort_by` | no | string | `name` | `name|mtime_desc|mtime_asc|size_desc|size_asc`. |
+| `list_dir` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`. |
 | `list_dir` | `ext_filter` | no | string/string[] | - | Extension filter for files. |
 | `list_dir` | `max_entries` | no | integer | impl default | Output cap. |
 | `count_entries` | `path` | no | string(path) | `.` | Directory whose direct entries should be counted. |

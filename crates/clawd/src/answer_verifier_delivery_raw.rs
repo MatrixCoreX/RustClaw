@@ -609,6 +609,20 @@ pub(super) fn scalar_answer_value_is_grounded_in_successful_observation(
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileBasename
+        && observed_single_path_values(route, journal)
+            .iter()
+            .filter_map(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+            })
+            .any(|basename| basename == candidate_answer)
+    {
+        return true;
+    }
     if observed_scalar_values_from_evidence_map_for_route(route, journal)
         .iter()
         .any(|observed| observed == candidate_answer)

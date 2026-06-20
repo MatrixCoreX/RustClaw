@@ -11,7 +11,7 @@ fn direct_answer_maps_to_normalizer_chat() {
     );
     assert!(m.is_chat_gate());
     assert!(m.is_normalizer_chat());
-    assert_eq!(m.route_label(), "Chat");
+    assert_eq!(m.legacy_route_label_for_trace(), "Chat");
 }
 
 #[test]
@@ -26,14 +26,14 @@ fn clarify_maps_to_normalizer_clarify() {
     assert!(m.is_clarify_gate());
     assert!(m.is_clarify_only());
     assert!(!m.is_execute_gate());
-    assert_eq!(m.route_label(), "AskClarify");
+    assert_eq!(m.legacy_route_label_for_trace(), "AskClarify");
 }
 
 #[test]
 fn resume_discussion_override_keeps_chat_label() {
     let m = AskMode::direct_answer().with_resume_overrides(true, false);
     assert!(m.is_resume_discussion());
-    assert_eq!(m.route_label(), "Chat");
+    assert_eq!(m.legacy_route_label_for_trace(), "Chat");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn resume_execution_override_wins_over_discussion() {
     let m = AskMode::direct_answer().with_resume_overrides(true, true);
     assert!(m.resume_execution());
     assert!(m.is_execute_gate());
-    assert_eq!(m.route_label(), "Act");
+    assert_eq!(m.legacy_route_label_for_trace(), "Act");
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn planner_execute_plain_maps_to_plain() {
     );
     assert!(m.is_execute_gate());
     assert!(!m.finalize_chat_wrapped());
-    assert_eq!(m.route_label(), "Act");
+    assert_eq!(m.legacy_route_label_for_trace(), "Act");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn planner_execute_chat_wrapped_maps_to_chat_wrapped() {
     );
     assert!(m.is_execute_gate());
     assert!(m.finalize_chat_wrapped());
-    assert_eq!(m.route_label(), "ChatAct");
+    assert_eq!(m.legacy_route_label_for_trace(), "ChatAct");
 }
 
 #[test]
@@ -101,39 +101,8 @@ fn named_constructors_are_explicit() {
 }
 
 #[test]
-fn from_first_layer_decision_uses_explicit_finalize_style_only_for_execution() {
-    assert_eq!(
-        AskMode::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::Clarify,
-            ActFinalizeStyle::ChatWrapped,
-        ),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::NormalizerThenClarify
-        }
-    );
-    assert_eq!(
-        AskMode::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::DirectAnswer,
-            ActFinalizeStyle::Plain,
-        ),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::NormalizerThenChat
-        }
-    );
-    assert_eq!(
-        AskMode::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::PlannerExecute,
-            ActFinalizeStyle::ChatWrapped,
-        ),
-        AskMode::Act {
-            finalize: ActFinalizeStyle::ChatWrapped
-        }
-    );
-}
-
-#[test]
 fn resume_overrides_layer_on_top_of_normalized_mode() {
-    let base = AskMode::from_first_layer_decision(FirstLayerDecision::DirectAnswer);
+    let base = AskMode::direct_answer();
     assert_eq!(
         base.clone().with_resume_overrides(false, false),
         AskMode::ClarifyOrChat {
@@ -155,12 +124,21 @@ fn resume_overrides_layer_on_top_of_normalized_mode() {
 }
 
 #[test]
-fn derived_route_labels_match_legacy_log_names() {
-    assert_eq!(AskMode::direct_answer().route_label(), "Chat");
-    assert_eq!(AskMode::clarify().route_label(), "AskClarify");
-    assert_eq!(AskMode::planner_execute_plain().route_label(), "Act");
+fn legacy_route_labels_match_legacy_log_names() {
     assert_eq!(
-        AskMode::planner_execute_chat_wrapped().route_label(),
+        AskMode::direct_answer().legacy_route_label_for_trace(),
+        "Chat"
+    );
+    assert_eq!(
+        AskMode::clarify().legacy_route_label_for_trace(),
+        "AskClarify"
+    );
+    assert_eq!(
+        AskMode::planner_execute_plain().legacy_route_label_for_trace(),
+        "Act"
+    );
+    assert_eq!(
+        AskMode::planner_execute_chat_wrapped().legacy_route_label_for_trace(),
         "ChatAct"
     );
 }
@@ -240,21 +218,21 @@ fn gate_kind_maps_to_three_gates() {
 }
 
 #[test]
-fn first_layer_decision_maps_to_three_decisions() {
+fn legacy_first_layer_trace_maps_to_three_decisions() {
     assert_eq!(
-        AskMode::direct_answer().first_layer_decision(),
+        AskMode::direct_answer().legacy_first_layer_decision_for_trace(),
         FirstLayerDecision::DirectAnswer
     );
     assert_eq!(
-        AskMode::clarify().first_layer_decision(),
+        AskMode::clarify().legacy_first_layer_decision_for_trace(),
         FirstLayerDecision::Clarify
     );
     assert_eq!(
-        AskMode::planner_execute_plain().first_layer_decision(),
+        AskMode::planner_execute_plain().legacy_first_layer_decision_for_trace(),
         FirstLayerDecision::PlannerExecute
     );
     assert_eq!(
-        AskMode::planner_execute_chat_wrapped().first_layer_decision(),
+        AskMode::planner_execute_chat_wrapped().legacy_first_layer_decision_for_trace(),
         FirstLayerDecision::PlannerExecute
     );
 }

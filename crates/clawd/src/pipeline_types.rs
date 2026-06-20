@@ -423,19 +423,8 @@ impl RouteResult {
         self.ask_mode = ask_mode;
     }
 
-    pub(crate) fn derived_route_label(&self) -> &'static str {
-        self.ask_mode.route_label()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_first_layer_decision(&mut self, decision: FirstLayerDecision) {
-        let finalize = self
-            .ask_mode
-            .act_finalize_style()
-            .unwrap_or(ActFinalizeStyle::Plain);
-        self.set_ask_mode(AskMode::from_first_layer_decision_with_finalize(
-            decision, finalize,
-        ));
+    pub(crate) fn legacy_route_label_for_trace(&self) -> &'static str {
+        self.ask_mode.legacy_route_label_for_trace()
     }
 
     pub(crate) fn set_chat_gate(&mut self) {
@@ -458,8 +447,8 @@ impl RouteResult {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 
-    pub(crate) fn first_layer_decision(&self) -> FirstLayerDecision {
-        self.ask_mode.first_layer_decision()
+    pub(crate) fn legacy_first_layer_decision_for_trace(&self) -> FirstLayerDecision {
+        self.ask_mode.legacy_first_layer_decision_for_trace()
     }
 
     pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {

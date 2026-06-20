@@ -660,6 +660,34 @@ fn structured_observed_body_includes_inventory_dir_entry_metadata_for_synthesis(
 }
 
 #[test]
+fn structured_observed_body_includes_inventory_dir_size_summary_for_synthesis() {
+    let body = r#"{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"entries":[{"hidden":false,"kind":"file","modified_ts":1777513843,"name":"intent_normalizer.schema.json","path":"prompts/schemas/intent_normalizer.schema.json","size_bytes":9402},{"hidden":false,"kind":"file","modified_ts":1777526917,"name":"plan_result.schema.json","path":"prompts/schemas/plan_result.schema.json","size_bytes":4187}],"names":["intent_normalizer.schema.json","plan_result.schema.json"],"path":"prompts/schemas","resolved_path":"/tmp/repo/prompts/schemas","size_summary":{"largest_file":{"kind":"file","modified_ts":1777513843,"name":"intent_normalizer.schema.json","path":"prompts/schemas/intent_normalizer.schema.json","size_bytes":9402},"matched_file_count":2,"smallest_file":{"kind":"file","modified_ts":1777526917,"name":"plan_result.schema.json","path":"prompts/schemas/plan_result.schema.json","size_bytes":4187},"total_file_size_bytes":13589},"sort_by":"name"}"#;
+    let observed = structured_observed_body("system_basic", body).expect("observed body");
+    assert!(observed.contains("size_summary.matched_file_count=2"));
+    assert!(observed.contains("size_summary.total_file_size_bytes=13589"));
+    assert!(observed.contains(
+        "size_summary.largest_file name=intent_normalizer.schema.json path=prompts/schemas/intent_normalizer.schema.json kind=file size_bytes=9402 modified_ts=1777513843"
+    ));
+    assert!(observed.contains(
+        "size_summary.smallest_file name=plan_result.schema.json path=prompts/schemas/plan_result.schema.json kind=file size_bytes=4187 modified_ts=1777526917"
+    ));
+}
+
+#[test]
+fn structured_observed_body_unwraps_extra_inventory_dir_for_synthesis() {
+    let body = r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"entries":[{"hidden":false,"kind":"file","modified_ts":1777513843,"name":"intent_normalizer.schema.json","path":"prompts/schemas/intent_normalizer.schema.json","size_bytes":9402},{"hidden":false,"kind":"file","modified_ts":1777526917,"name":"plan_result.schema.json","path":"prompts/schemas/plan_result.schema.json","size_bytes":4187}],"names":["intent_normalizer.schema.json","plan_result.schema.json"],"path":"prompts/schemas","resolved_path":"/tmp/repo/prompts/schemas","size_summary":{"largest_file":{"kind":"file","modified_ts":1777513843,"name":"intent_normalizer.schema.json","path":"prompts/schemas/intent_normalizer.schema.json","size_bytes":9402},"matched_file_count":2,"total_file_size_bytes":13589},"sort_by":"name"},"text":"raw wrapper fallback text"}"#;
+    let observed = structured_observed_body("fs_basic", body).expect("observed body");
+    assert!(observed.starts_with(
+        "inventory_dir path=/tmp/repo/prompts/schemas sort_by=name total=2 files=2 dirs=0 hidden=0"
+    ));
+    assert!(observed.contains("size_summary.largest_file name=intent_normalizer.schema.json"));
+    assert!(observed.contains(
+        "entry name=plan_result.schema.json kind=file size_bytes=4187 modified_ts=1777526917"
+    ));
+    assert!(!observed.contains("raw wrapper fallback text"));
+}
+
+#[test]
 fn structured_observed_body_compacts_large_inventory_dir_by_kind() {
     let entries = (0..9)
         .map(|idx| {

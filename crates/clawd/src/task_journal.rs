@@ -255,6 +255,9 @@ impl TaskJournalAnswerVerifierSummary {
             "schema_version": 1,
             "message_key": "answer_verifier_required_evidence_block",
             "reason_code": "answer_verifier_required_evidence_block",
+            "status_code": "answer_verifier_required_evidence_block",
+            "failure_attribution": "answer_verifier_gap",
+            "retryable": false,
             "missing_evidence_fields": &self.missing_evidence_fields,
             "answer_incomplete_reason": &self.answer_incomplete_reason,
             "confidence": self.confidence,
@@ -308,11 +311,54 @@ pub(crate) struct TaskJournalRolloutAttribution {
 }
 
 impl TaskJournalRolloutAttribution {
+    pub(crate) fn dispatch_boundary_attribution(
+        route: &crate::RouteResult,
+        event: impl Into<String>,
+        old_owner: impl Into<String>,
+        new_owner: impl Into<String>,
+        chosen_path: impl Into<String>,
+        rollback_token: impl Into<String>,
+    ) -> Self {
+        let event = event.into();
+        let old_owner = old_owner.into();
+        let new_owner = new_owner.into();
+        let chosen_path = chosen_path.into();
+        let rollback_token = rollback_token.into();
+        Self {
+            switch_name: "semantic_route_authority".to_string(),
+            event,
+            outcome: "observed".to_string(),
+            reason_code: Some("dispatch_boundary_attribution_recorded".to_string()),
+            owner_layer: Some(new_owner.clone()),
+            decision: Some(chosen_path.clone()),
+            route_gate_kind: Some(route.gate_kind().as_str().to_string()),
+            old_first_layer_decision: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
+            agent_decision: Some(chosen_path.clone()),
+            decision_delta: Some("boundary_shortcut_retained".to_string()),
+            route_layer_that_disagreed: Some(old_owner.clone()),
+            risk_level: Some(route.risk_ceiling.as_str().to_string()),
+            output_contract_ref: Some(output_contract_ref_for_route(route)),
+            boundary_context: Some(json!({
+                "schema_version": 1,
+                "old_owner": old_owner,
+                "new_owner": new_owner,
+                "chosen_path": chosen_path,
+                "rollback_token": rollback_token,
+            })),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn answer_verifier_required_evidence_block(
         summary: Option<&TaskJournalAnswerVerifierSummary>,
     ) -> Self {
         Self {
-            switch_name: "answer_verifier_enforce_required".to_string(),
+            switch_name: "answer_verifier_enforce_required_scope".to_string(),
             event: "answer_verifier_required_evidence_block".to_string(),
             outcome: "blocked".to_string(),
             reason_code: Some("answer_verifier_required_evidence_block".to_string()),
@@ -366,7 +412,7 @@ impl TaskJournalRolloutAttribution {
         limit: Option<usize>,
     ) -> Self {
         Self {
-            switch_name: "registry_idempotency_guard".to_string(),
+            switch_name: "registry_idempotency_guard_scope".to_string(),
             event: "registry_idempotency_guard_block".to_string(),
             outcome: "blocked".to_string(),
             reason_code: Some(reason_code.into()),
@@ -418,7 +464,12 @@ impl TaskJournalRolloutAttribution {
             owner_layer: Some("agent_loop_shadow".to_string()),
             decision: Some(route.gate_kind().as_str().to_string()),
             route_gate_kind: Some(route.gate_kind().as_str().to_string()),
-            old_first_layer_decision: Some(route.first_layer_decision().as_str().to_string()),
+            old_first_layer_decision: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
             agent_decision: Some("not_evaluated".to_string()),
             decision_delta: Some("not_evaluated".to_string()),
             missing_slots: contract.missing_parameters,
@@ -458,7 +509,12 @@ impl TaskJournalRolloutAttribution {
             decision: Some(agent_decision.to_string()),
             capability_ref: first_non_think_action_capability_ref(actions).map(str::to_string),
             route_gate_kind: Some(route.gate_kind().as_str().to_string()),
-            old_first_layer_decision: Some(route.first_layer_decision().as_str().to_string()),
+            old_first_layer_decision: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
             agent_decision: Some(agent_decision.to_string()),
             decision_delta: Some(decision_delta.to_string()),
             route_layer_that_disagreed,
@@ -545,7 +601,11 @@ fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
     })
 }
 
-fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
+fn verify_trace_json(
+    verify: &TaskJournalVerifySummary,
+    plan: Option<&crate::PlanResult>,
+    route: Option<&crate::RouteResult>,
+) -> Value {
     let first_issue = verify.issues.first();
     json!({
         "approved": verify.approved,
@@ -558,16 +618,7 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
         "shadow_blocked_reason": verify.shadow_blocked_reason.as_deref().map(crate::truncate_for_log),
         "needs_confirmation": verify.needs_confirmation,
         "issues": verify.issues.iter().map(|issue| {
-            json!({
-                "step_id": &issue.step_id,
-                "kind": issue.kind.as_str(),
-                "reason_code": issue.kind.reason_code(),
-                "status_code": issue.kind.status_code(),
-                "message_key": issue.kind.message_key(),
-                "owner_layer": "plan_verifier",
-                "failure_attribution": issue.kind.failure_attribution().as_str(),
-                "detail": crate::truncate_for_log(&issue.detail),
-            })
+            verifier_issue_repair_signal_json(issue, plan, route)
         }).collect::<Vec<_>>(),
     })
 }
@@ -641,6 +692,77 @@ fn plan_step_raw_action_ref(step: &crate::PlanStep) -> Option<String> {
         .map(|action| action.as_key())
 }
 
+fn plan_step_fallback_action_ref(step: &crate::PlanStep) -> Option<String> {
+    plan_step_raw_action_ref(step).or_else(|| {
+        [step.skill.trim(), step.action_type.trim()]
+            .into_iter()
+            .find(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn canonical_json_for_fingerprint(value: &Value) -> String {
+    canonical_value_for_fingerprint(value).to_string()
+}
+
+fn canonical_value_for_fingerprint(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(canonical_value_for_fingerprint)
+                .collect::<Vec<_>>(),
+        ),
+        Value::Object(map) => {
+            let mut sorted = serde_json::Map::new();
+            let mut keys = map.keys().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                if let Some(item) = map.get(key) {
+                    sorted.insert(key.clone(), canonical_value_for_fingerprint(item));
+                }
+            }
+            Value::Object(sorted)
+        }
+        _ => value.clone(),
+    }
+}
+
+fn verifier_issue_forbidden_repeat_fingerprint(
+    issue: &TaskJournalVerifyIssue,
+    plan: Option<&crate::PlanResult>,
+    route: Option<&crate::RouteResult>,
+) -> Option<String> {
+    let step = plan?
+        .steps
+        .iter()
+        .find(|step| step.step_id == issue.step_id)?;
+    let action_ref =
+        plan_step_action_ref(step, route).or_else(|| plan_step_fallback_action_ref(step))?;
+    let args_fingerprint = crate::contract_matrix::fnv1a_hex(&format!(
+        "{}\n{}",
+        action_ref.trim(),
+        canonical_json_for_fingerprint(&step.args)
+    ));
+    Some(format!("{}:{}", action_ref.trim(), args_fingerprint))
+}
+
+fn verifier_issue_repair_signal_json(
+    issue: &TaskJournalVerifyIssue,
+    plan: Option<&crate::PlanResult>,
+    route: Option<&crate::RouteResult>,
+) -> Value {
+    crate::repair_signal::RepairSignal::from_verifier_issue_parts(
+        &issue.step_id,
+        issue.kind,
+        &issue.detail,
+    )
+    .with_forbidden_repeat_fingerprint(verifier_issue_forbidden_repeat_fingerprint(
+        issue, plan, route,
+    ))
+    .to_json()
+}
+
 fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
@@ -677,8 +799,8 @@ fn plan_trace_json(plan: &crate::PlanResult, route: Option<&crate::RouteResult>)
 fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "route_gate_kind": route.gate_kind().as_str(),
-        "first_layer_decision": route.first_layer_decision().as_str(),
-        "route_label": route.derived_route_label(),
+        "legacy_first_layer_decision": route.legacy_first_layer_decision_for_trace().as_str(),
+        "legacy_route_label": route.legacy_route_label_for_trace(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
         "agent_display_name_hint": route.agent_display_name_hint,
@@ -789,45 +911,240 @@ fn requested_capabilities_for_plan(
         .collect()
 }
 
-fn requested_capability_queues(
-    journal: &TaskJournal,
-) -> BTreeMap<String, Vec<RequestedPlanCapability>> {
-    let mut requested_by_step_id: BTreeMap<String, Vec<RequestedPlanCapability>> = BTreeMap::new();
+fn requested_capability_sequence(journal: &TaskJournal) -> Vec<RequestedPlanCapability> {
+    let mut requested = Vec::new();
     for round in &journal.rounds {
         if let Some(plan) = round.plan_result.as_ref() {
-            let requested = requested_capabilities_for_plan(plan, journal.route_result.as_ref());
-            for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
-                requested_by_step_id
-                    .entry(step.step_id.clone())
-                    .or_default()
-                    .push(requested);
-            }
+            requested.extend(requested_capabilities_for_plan(
+                plan,
+                journal.route_result.as_ref(),
+            ));
         }
     }
-    if requested_by_step_id.is_empty() {
+    if requested.is_empty() {
         if let Some(plan) = journal.plan_result.as_ref() {
-            let requested = requested_capabilities_for_plan(plan, journal.route_result.as_ref());
-            for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
-                requested_by_step_id
-                    .entry(step.step_id.clone())
-                    .or_default()
-                    .push(requested);
-            }
+            requested.extend(requested_capabilities_for_plan(
+                plan,
+                journal.route_result.as_ref(),
+            ));
         }
     }
-    requested_by_step_id
+    requested
+}
+
+fn boundary_context_summary_json(journal: &TaskJournal) -> Option<Value> {
+    journal
+        .rollout_attribution
+        .iter()
+        .find_map(|item| item.boundary_context.clone())
+        .or_else(|| {
+            journal
+                .context_bundle_summary
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(|summary| {
+                    json!({
+                        "schema_version": 1,
+                        "source": "context_bundle_summary",
+                        "summary": crate::truncate_for_log(summary),
+                    })
+                })
+        })
+}
+
+fn budget_profile_json(journal: &TaskJournal) -> Option<&str> {
+    journal
+        .rollout_attribution
+        .iter()
+        .find_map(|item| item.budget_profile.as_deref())
+}
+
+fn round_capability_resolution_records_json(
+    round: &TaskJournalRoundTrace,
+    route: Option<&crate::RouteResult>,
+) -> Vec<Value> {
+    let Some(plan) = round.plan_result.as_ref() else {
+        return Vec::new();
+    };
+    let requested = requested_capabilities_for_plan(plan, route);
+    plan.steps
+        .iter()
+        .zip(requested)
+        .map(|(step, requested)| {
+            let action_type = requested.action_type.clone();
+            json!({
+                "step_id": &step.step_id,
+                "requested_action_type": action_type,
+                "requested_capability": requested.capability,
+                "requested_action_ref": requested.action_ref,
+                "resolution_source": capability_resolution_source(&action_type),
+            })
+        })
+        .collect()
+}
+
+fn capability_resolution_source(action_type: &str) -> &'static str {
+    match action_type {
+        "call_capability" => "capability_resolver",
+        "call_tool" | "call_skill" => "direct_tool_or_skill_compat",
+        "respond" | "synthesize_answer" | "think" => "planner_terminal_action",
+        _ => "planner_action",
+    }
+}
+
+fn verify_repair_signals_json(
+    verify: Option<&TaskJournalVerifySummary>,
+    plan: Option<&crate::PlanResult>,
+    route: Option<&crate::RouteResult>,
+) -> Vec<Value> {
+    verify
+        .into_iter()
+        .flat_map(|summary| summary.issues.iter())
+        .map(|issue| verifier_issue_repair_signal_json(issue, plan, route))
+        .collect()
 }
 
 fn next_requested_capability(
-    requested_by_step_id: &mut BTreeMap<String, Vec<RequestedPlanCapability>>,
-    step_id: &str,
+    requested: &mut Vec<RequestedPlanCapability>,
+    step: &TaskJournalStepTrace,
 ) -> Option<RequestedPlanCapability> {
-    let queue = requested_by_step_id.get_mut(step_id)?;
-    if queue.is_empty() {
-        None
-    } else {
-        Some(queue.remove(0))
+    if requested.is_empty() {
+        return None;
     }
+    let requested_idx = requested
+        .iter()
+        .position(|candidate| requested_capability_matches_step(candidate, step))
+        .unwrap_or(0);
+    Some(requested.remove(requested_idx))
+}
+
+fn requested_capability_matches_step(
+    requested: &RequestedPlanCapability,
+    step: &TaskJournalStepTrace,
+) -> bool {
+    let step_skill = step.skill.trim();
+    if step_skill.is_empty() {
+        return false;
+    }
+    if requested.capability.eq_ignore_ascii_case(step_skill) {
+        return true;
+    }
+    if requested
+        .action_ref
+        .as_deref()
+        .and_then(|action_ref| action_ref.split_once('.'))
+        .is_some_and(|(skill, _)| skill.eq_ignore_ascii_case(step_skill))
+    {
+        return true;
+    }
+    matches!(
+        (requested.action_type.as_str(), step_skill),
+        ("respond", "respond") | ("synthesize_answer", "synthesize_answer") | ("think", "think")
+    )
+}
+
+fn step_action_kind(
+    step: &TaskJournalStepTrace,
+    requested: Option<&RequestedPlanCapability>,
+) -> String {
+    if let Some(requested) = requested {
+        return requested.action_type.clone();
+    }
+    match step.skill.as_str() {
+        "respond" | "synthesize_answer" | "think" | "answer_verifier" => step.skill.clone(),
+        _ => "call_skill".to_string(),
+    }
+}
+
+fn output_evidence_ids(step: &TaskJournalStepTrace, evidence: Option<&Value>) -> Vec<String> {
+    evidence
+        .and_then(|value| value.get("items"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .enumerate()
+                .map(|(idx, _)| format!("{}:evidence:{}", step.step_id, idx + 1))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn artifact_refs_from_step_output(output: Option<&str>) -> Vec<Value> {
+    let Some(value) = output.and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())
+    else {
+        return Vec::new();
+    };
+    let mut refs = Vec::new();
+    collect_artifact_refs(&value, &mut refs, 0);
+    refs
+}
+
+fn collect_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {
+    if refs.len() >= 8 || depth > 3 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            for key in [
+                "path",
+                "resolved_path",
+                "file_path",
+                "output_path",
+                "artifact_path",
+                "archive_path",
+            ] {
+                if let Some(path) = map.get(key).and_then(Value::as_str) {
+                    push_artifact_ref(refs, key, path);
+                }
+            }
+            for key in ["paths", "files", "artifacts", "outputs"] {
+                if let Some(items) = map.get(key).and_then(Value::as_array) {
+                    for item in items {
+                        collect_artifact_refs(item, refs, depth + 1);
+                        if refs.len() >= 8 {
+                            return;
+                        }
+                    }
+                }
+            }
+            for item in map.values() {
+                collect_artifact_refs(item, refs, depth + 1);
+                if refs.len() >= 8 {
+                    return;
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_artifact_refs(item, refs, depth + 1);
+                if refs.len() >= 8 {
+                    return;
+                }
+            }
+        }
+        Value::String(path) => push_artifact_ref(refs, "value", path),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn push_artifact_ref(refs: &mut Vec<Value>, field: &str, path: &str) {
+    let path = path.trim();
+    if path.is_empty() || refs.len() >= 8 {
+        return;
+    }
+    if refs.iter().any(|item| {
+        item.get("ref")
+            .and_then(Value::as_str)
+            .is_some_and(|existing| existing == path)
+    }) {
+        return;
+    }
+    refs.push(json!({
+        "kind": "path",
+        "field": field,
+        "ref": crate::truncate_for_log(path),
+    }));
 }
 
 fn step_trace_json(
@@ -841,20 +1158,45 @@ fn step_trace_json(
         .and_then(crate::skills::parse_structured_skill_error);
     let failure_attribution = structured_error_failure_attribution(structured_error.as_ref());
     let contract_policy = contract_policy_trace_json(structured_error.as_ref());
+    let action_kind = step_action_kind(step, requested);
+    let observed_evidence = observed_evidence_for_step_trace(step);
+    let output_evidence_ids = output_evidence_ids(step, observed_evidence.as_ref());
+    let output_evidence_count = output_evidence_ids.len();
+    let artifact_refs = artifact_refs_from_step_output(step.output_excerpt.as_deref());
+    let artifact_ref_count = artifact_refs.len();
     json!({
         "step_id": &step.step_id,
+        "action_kind": action_kind,
         "skill": &step.skill,
         "requested_action_type": requested.map(|value| value.action_type.as_str()),
         "requested_capability": requested.map(|value| value.capability.as_str()),
         "requested_action_ref": requested.and_then(|value| value.action_ref.as_deref()),
         "executed_skill": &step.skill,
+        "resolved_tool_or_skill": &step.skill,
+        "resolved_capability": requested
+            .filter(|value| value.action_type == "call_capability")
+            .map(|value| value.capability.as_str()),
+        "resolution_source": requested
+            .map(|value| capability_resolution_source(&value.action_type))
+            .unwrap_or("step_trace_compat"),
         "status": step.status.as_str(),
         "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
         "failure_attribution": failure_attribution.as_deref(),
         "contract_policy": contract_policy,
         "contract": step_contract_trace_json(route, requested),
+        "sanitized_args_summary": requested.and_then(|value| value.action_ref.as_deref()),
+        "sanitized_args_summary_status": requested
+            .and_then(|value| value.action_ref.as_deref())
+            .map(|_| "action_ref_only")
+            .unwrap_or("not_recorded_in_step_trace"),
         "output_excerpt": step.output_excerpt.as_deref(),
-        "observed_evidence": observed_evidence_for_step_trace(step),
+        "observed_evidence": observed_evidence,
+        "output_evidence_ids": output_evidence_ids,
+        "output_evidence_count": output_evidence_count,
+        "artifact_refs": artifact_refs,
+        "artifact_ref_count": artifact_ref_count,
+        "retry_fingerprint": null,
+        "retry_fingerprint_status": "not_recorded_in_step_trace",
         "error_excerpt": step.error_excerpt.as_deref(),
         "started_at": step.started_at,
         "finished_at": step.finished_at,
@@ -946,6 +1288,73 @@ fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
     })
 }
 
+fn validation_result_json(journal: &TaskJournal) -> Value {
+    let signals = journal
+        .step_results
+        .iter()
+        .filter_map(validation_signal_from_step)
+        .collect::<Vec<_>>();
+    let latest_status = signals
+        .last()
+        .and_then(|signal| signal.get("status"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    json!({
+        "schema_version": 1,
+        "source": "task_journal_step_trace",
+        "validation_step_count": signals.len(),
+        "latest_status": latest_status,
+        "signals": signals,
+    })
+}
+
+fn validation_signal_from_step(step: &TaskJournalStepTrace) -> Option<Value> {
+    if let Some(error) = step
+        .error_excerpt
+        .as_deref()
+        .and_then(crate::skills::parse_structured_skill_error)
+    {
+        if matches!(
+            error.error_kind.as_str(),
+            "validation_failed" | "validation_inconclusive"
+        ) {
+            return Some(json!({
+                "step_id": &step.step_id,
+                "source": "step_error",
+                "status": error.error_kind.as_str(),
+                "status_code": error.error_kind.as_str(),
+                "message_key": error
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.get("message_key"))
+                    .and_then(Value::as_str),
+            }));
+        }
+    }
+    let value = step
+        .output_excerpt
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())?;
+    let validation = value
+        .get("validation_result")
+        .or_else(|| value.get("validation"))?;
+    let status = validation
+        .get("status")
+        .or_else(|| validation.get("status_code"))
+        .and_then(Value::as_str)
+        .unwrap_or("present");
+    Some(json!({
+        "step_id": &step.step_id,
+        "source": "step_output",
+        "status": status,
+        "status_code": validation
+            .get("status_code")
+            .and_then(Value::as_str)
+            .unwrap_or(status),
+        "message_key": validation.get("message_key").and_then(Value::as_str),
+    }))
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalTaskMetrics {
@@ -980,6 +1389,8 @@ pub(crate) struct TaskJournal {
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
+    pub(crate) task_lifecycle: Option<Value>,
+    pub(crate) task_checkpoint: Option<Value>,
     pub(crate) final_answer: Option<String>,
     pub(crate) final_status: Option<TaskJournalFinalStatus>,
     pub(crate) final_stop_signal: Option<String>,
@@ -1165,6 +1576,18 @@ impl TaskJournal {
         self.task_metrics.by_prompt = Some(by_prompt);
     }
 
+    pub(crate) fn record_task_lifecycle(&mut self, lifecycle: Value) {
+        if lifecycle.is_object() {
+            self.task_lifecycle = Some(lifecycle);
+        }
+    }
+
+    pub(crate) fn record_task_checkpoint(&mut self, checkpoint: Value) {
+        if checkpoint.is_object() {
+            self.task_checkpoint = Some(checkpoint);
+        }
+    }
+
     pub(crate) fn record_final_answer(&mut self, final_answer: impl Into<String>) {
         self.final_answer = Some(final_answer.into());
     }
@@ -1284,6 +1707,12 @@ impl TaskJournal {
         if self.task_metrics.by_prompt.is_none() {
             self.task_metrics.by_prompt = other.task_metrics.by_prompt.clone();
         }
+        if self.task_lifecycle.is_none() {
+            self.task_lifecycle = other.task_lifecycle.clone();
+        }
+        if self.task_checkpoint.is_none() {
+            self.task_checkpoint = other.task_checkpoint.clone();
+        }
         if self.final_answer.is_none() {
             self.final_answer = other.final_answer.clone();
         }
@@ -1360,14 +1789,17 @@ impl TaskJournal {
                 .as_ref()
                 .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
+            "task_lifecycle": self.task_lifecycle.clone(),
+            "task_checkpoint": self.task_checkpoint.clone(),
             "task_outcome": task_outcome_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
+            "validation_result": validation_result_json(self),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
         })
     }
 
     pub(crate) fn to_trace_json(&self) -> Value {
-        let mut requested_by_step_id = requested_capability_queues(self);
+        let mut requested = requested_capability_sequence(self);
         json!({
             "task_id": self.task_id.as_deref(),
             "kind": self.kind.as_deref(),
@@ -1395,9 +1827,40 @@ impl TaskJournal {
                 .as_ref()
                 .map(|route| evidence_coverage_trace_json(route, self)),
             "rounds": self.rounds.iter().map(|round| {
+                let decision_envelope = self.route_result.as_ref().and_then(|route| {
+                    round
+                        .plan_result
+                        .as_ref()
+                        .map(|plan| agent_loop_round_plan_decision_envelope_json(route, plan))
+                });
+                let first_action_decision = decision_envelope
+                    .as_ref()
+                    .and_then(|value| value.get("decision"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let first_action_capability_ref = decision_envelope
+                    .as_ref()
+                    .and_then(|value| value.get("capability_ref"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 json!({
                     "round_no": round.round_no,
+                    "owner_layer": "agent_loop_round",
                     "goal": crate::truncate_for_log(&round.goal),
+                    "boundary_context_summary": boundary_context_summary_json(self),
+                    "budget_profile": budget_profile_json(self),
+                    "stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
+                    "first_action_decision": first_action_decision,
+                    "first_action_capability_ref": first_action_capability_ref,
+                    "capability_resolution_records": round_capability_resolution_records_json(
+                        round,
+                        self.route_result.as_ref(),
+                    ),
+                    "repair_signals": verify_repair_signals_json(
+                        round.verify_result.as_ref(),
+                        round.plan_result.as_ref(),
+                        self.route_result.as_ref(),
+                    ),
                     "execution_recipe_summary": round
                         .execution_recipe_summary
                         .as_deref()
@@ -1406,17 +1869,18 @@ impl TaskJournal {
                         .plan_result
                         .as_ref()
                         .map(|plan| plan_trace_json(plan, self.route_result.as_ref())),
-                    "verify_result": round.verify_result.as_ref().map(verify_trace_json),
-                    "decision_envelope": self.route_result.as_ref().and_then(|route| {
-                        round
-                            .plan_result
-                            .as_ref()
-                            .map(|plan| agent_loop_round_plan_decision_envelope_json(route, plan))
+                    "verify_result": round.verify_result.as_ref().map(|verify| {
+                        verify_trace_json(
+                            verify,
+                            round.plan_result.as_ref(),
+                            self.route_result.as_ref(),
+                        )
                     }),
+                    "decision_envelope": decision_envelope,
                 })
             }).collect::<Vec<_>>(),
             "step_results": self.step_results.iter().map(|step| {
-                let requested = next_requested_capability(&mut requested_by_step_id, &step.step_id);
+                let requested = next_requested_capability(&mut requested, step);
                 step_trace_json(step, requested.as_ref(), self.route_result.as_ref())
             }).collect::<Vec<_>>(),
             "task_observations": self.task_observations.clone(),
@@ -1425,7 +1889,10 @@ impl TaskJournal {
                 .as_ref()
                 .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
+            "task_lifecycle": self.task_lifecycle.clone(),
+            "task_checkpoint": self.task_checkpoint.clone(),
             "task_metrics": task_metrics_json(&self.task_metrics),
+            "validation_result": validation_result_json(self),
             "ask_state_transitions": self.transitions.iter().map(ask_transition_json).collect::<Vec<_>>(),
         })
     }
