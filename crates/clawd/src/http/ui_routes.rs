@@ -202,6 +202,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/config", get(get_nni_config).post(update_nni_config))
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
+        .route("/nni/heartbeat/records", get(nni_heartbeat_records))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
