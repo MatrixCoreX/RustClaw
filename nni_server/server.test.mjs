@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync, sign as signMessage } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +11,40 @@ import { setTimeout as delay } from "node:timers/promises";
 const VALID_PUBKEY = "aa".repeat(64);
 const OTHER_PUBKEY = "bb".repeat(64);
 const VALID_SIGNATURE = "11".repeat(64);
+
+function base64urlToBuffer(value) {
+  return Buffer.from(value, "base64url");
+}
+
+function derIntegerToRaw(der, offset) {
+  assert.equal(der[offset], 0x02);
+  const len = der[offset + 1];
+  let value = der.subarray(offset + 2, offset + 2 + len);
+  while (value.length > 32 && value[0] === 0x00) value = value.subarray(1);
+  if (value.length < 32) value = Buffer.concat([Buffer.alloc(32 - value.length), value]);
+  assert.equal(value.length, 32);
+  return { value, nextOffset: offset + 2 + len };
+}
+
+function derSignatureToRawHex(derSignature) {
+  const der = Buffer.from(derSignature);
+  assert.equal(der[0], 0x30);
+  const r = derIntegerToRaw(der, 2);
+  const s = derIntegerToRaw(der, r.nextOffset);
+  return Buffer.concat([r.value, s.value]).toString("hex");
+}
+
+function generateSigningFixture() {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const jwk = publicKey.export({ format: "jwk" });
+  const pubkey = Buffer.concat([base64urlToBuffer(jwk.x), base64urlToBuffer(jwk.y)]).toString("hex");
+  return {
+    pubkey,
+    signChallenge(challenge) {
+      return derSignatureToRawHex(signMessage("sha256", Buffer.from(challenge, "utf8"), privateKey));
+    },
+  };
+}
 
 async function freePort() {
   const server = createServer();
@@ -186,4 +221,41 @@ test("join verify rejects tasks whose public key is no longer whitelisted", asyn
   assert.equal(state.tasks[taskId].status, "rejected");
   assert.equal(state.tasks[taskId].error_code, "nni_pubkey_not_allowlisted");
   assert.equal(state.requests[0].status, "blocked");
+});
+
+test("heartbeat verify records public key request time and count", async (t) => {
+  const fixture = generateSigningFixture();
+  const server = await startServer({ publicKeyWhitelist: fixture.pubkey });
+  t.after(() => server.stop());
+
+  const request = await postJson(server.baseUrl, "/v1/nni/server/heartbeat/request", {
+    device_pubkey: fixture.pubkey,
+    client_user_key: "clawd-nni-heartbeat",
+  });
+  assert.equal(request.status, 200);
+  assert.equal(request.body.ok, true);
+  assert.equal(request.body.data.status, "heartbeat_challenge_created");
+  assert.equal(request.body.data.device_pubkey, fixture.pubkey);
+
+  const signature = fixture.signChallenge(request.body.data.challenge);
+  const verify = await postJson(server.baseUrl, "/v1/nni/server/heartbeat/verify", {
+    task_id: request.body.data.task_id,
+    signature,
+  });
+  assert.equal(verify.status, 200);
+  assert.equal(verify.body.ok, true);
+  assert.equal(verify.body.data.status, "heartbeat_accepted");
+  assert.equal(verify.body.data.device_pubkey, fixture.pubkey);
+  assert.equal(verify.body.data.heartbeat_count, 1);
+  assert.equal(typeof verify.body.data.request_time_ts, "number");
+
+  const state = JSON.parse(await readFile(server.statePath, "utf8"));
+  const device = state.devices[`clawd-nni-heartbeat:${fixture.pubkey}`];
+  assert.equal(device.device_pubkey, fixture.pubkey);
+  assert.equal(device.heartbeat_count, 1);
+  assert.equal(device.last_heartbeat_ts, verify.body.data.request_time_ts);
+  assert.equal(state.requests[0].request_kind, "nni_heartbeat");
+  assert.equal(state.requests[0].device_pubkey, fixture.pubkey);
+  assert.equal(state.requests[0].created_at_ts, verify.body.data.request_time_ts);
+  assert.equal(state.requests[0].status, "accepted");
 });
