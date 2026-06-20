@@ -618,7 +618,59 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
     true
 }
 
-fn recent_artifacts_delivery_is_machine_field_dump(delivery: &str) -> bool {
+pub(super) async fn compose_recent_artifacts_machine_field_delivery(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery: &str,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentArtifactsJudgment
+        || !recent_artifacts_delivery_is_machine_field_dump(delivery)
+    {
+        return None;
+    }
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let observed_facts = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(80)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if observed_facts.is_empty() {
+        return None;
+    }
+    let contract = crate::fallback::UserResponseContract {
+        kind: crate::fallback::UserResponseKind::FinalAnswer,
+        reason_code: "recent_artifacts_machine_field_render".to_string(),
+        missing_slots: Vec::new(),
+        observed_facts,
+        policy_boundary: vec![
+            "Use only observed_facts for entry names, paths, kinds, sizes, and classifications."
+                .to_string(),
+            "Do not output raw key=value machine fields, JSON, trace names, or schema names."
+                .to_string(),
+            "Cover the selected recent entries and the grounded judgment requested by the user."
+                .to_string(),
+        ],
+        original_user_request: user_text.trim().to_string(),
+        resolved_user_intent: route.resolved_intent.trim().to_string(),
+        response_shape: route.output_contract.response_shape.as_str().to_string(),
+        language_hint,
+    };
+    let rendered = crate::fallback::compose_user_response_from_contract(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+    )
+    .await;
+    (!recent_artifacts_delivery_is_machine_field_dump(&rendered)).then_some(rendered)
+}
+
+pub(super) fn recent_artifacts_delivery_is_machine_field_dump(delivery: &str) -> bool {
     let mut nonempty_lines = 0usize;
     let mut machine_field_lines = 0usize;
     for line in delivery

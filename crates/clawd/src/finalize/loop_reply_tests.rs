@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::directory_purpose;
 use super::{
     agent_context_allows_observed_output_language_fallback,
     append_compound_file_delivery_token_from_route,
