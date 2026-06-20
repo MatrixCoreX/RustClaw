@@ -1,3 +1,20 @@
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum WorkspaceUpdateMode {
+    Full,
+    UiOnly,
+    ClawdOnly,
+}
+
+impl WorkspaceUpdateMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::UiOnly => "ui_only",
+            Self::ClawdOnly => "clawd_only",
+        }
+    }
+}
+
 async fn get_workspace_update(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -73,14 +90,14 @@ async fn refresh_workspace_update_versions(
     let mut guard = shared.lock().unwrap();
     if let Some(local_commit) = local_commit.clone() {
         guard.old_commit = Some(local_commit.clone());
-        if matches!(guard.status.as_str(), "idle" | "up_to_date") {
+        if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") {
             guard.new_commit = Some(local_commit);
         }
     }
     if let Some(remote_commit) = remote_commit.clone() {
         guard.remote_commit = Some(remote_commit);
     }
-    if matches!(guard.status.as_str(), "idle" | "up_to_date") {
+    if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") {
         match (local_commit.as_deref(), remote_commit.as_deref()) {
             (Some(local), Some(remote)) if local == remote => {
                 guard.status = "up_to_date".to_string();
@@ -108,6 +125,28 @@ async fn refresh_workspace_update_versions(
 async fn start_workspace_update(
     State(state): State<AppState>,
     headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::Full).await
+}
+
+async fn start_workspace_update_ui_only(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::UiOnly).await
+}
+
+async fn start_workspace_update_clawd_only(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ClawdOnly).await
+}
+
+async fn start_workspace_update_with_mode(
+    state: AppState,
+    headers: HeaderMap,
+    mode: WorkspaceUpdateMode,
 ) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
@@ -150,6 +189,7 @@ async fn start_workspace_update(
         *guard = WorkspaceUpdateStatus {
             status: "running".to_string(),
             step: "starting".to_string(),
+            mode: mode.as_str().to_string(),
             started_ts: Some(current_unix_ts()),
             ..WorkspaceUpdateStatus::default()
         };
@@ -162,7 +202,12 @@ async fn start_workspace_update(
     }
 
     let workspace_root = state.skill_rt.workspace_root.clone();
-    tokio::spawn(run_workspace_update_job(workspace_root, shared, control));
+    tokio::spawn(run_workspace_update_job(
+        workspace_root,
+        shared,
+        control,
+        mode,
+    ));
 
     (
         StatusCode::ACCEPTED,
@@ -242,7 +287,20 @@ async fn run_workspace_update_job(
     workspace_root: PathBuf,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
     control: Arc<Mutex<WorkspaceUpdateControl>>,
+    mode: WorkspaceUpdateMode,
 ) {
+    match mode {
+        WorkspaceUpdateMode::Full => {}
+        WorkspaceUpdateMode::UiOnly => {
+            run_workspace_update_ui_only_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::ClawdOnly => {
+            run_workspace_update_clawd_only_job(workspace_root, shared, control).await;
+            return;
+        }
+    }
+
     set_workspace_update_step(&shared, "checking_current_version");
     let old_commit = match run_workspace_update_command(
         "git",
@@ -559,6 +617,209 @@ async fn run_workspace_update_job(
             );
         }
     }
+}
+
+async fn run_workspace_update_ui_only_job(
+    workspace_root: PathBuf,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    record_workspace_update_current_version(&workspace_root, &shared).await;
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "building_ui");
+    reset_workspace_update_build_logs(&shared);
+    match run_workspace_update_command_streaming(
+        "bash",
+        &["./build-ui-nginx.sh"],
+        &workspace_root,
+        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
+        shared.clone(),
+        control.clone(),
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            finish_workspace_update_succeeded(&shared, "ui_build_succeeded", out);
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "./build-ui-nginx.sh failed",
+                "请查看 UI 编译日志；修复依赖或编译错误后再重试。",
+                out,
+            );
+        }
+        Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请确认 UI 依赖完整，并查看编译日志。",
+            );
+        }
+    }
+}
+
+async fn run_workspace_update_clawd_only_job(
+    workspace_root: PathBuf,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    record_workspace_update_current_version(&workspace_root, &shared).await;
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "building_clawd");
+    reset_workspace_update_build_logs(&shared);
+    match run_workspace_update_command_streaming(
+        "bash",
+        &[
+            "-lc",
+            r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
+        ],
+        &workspace_root,
+        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
+        shared.clone(),
+        control.clone(),
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "cargo build -p clawd --release failed",
+                "请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
+            fail_workspace_update_with_error(&shared, err, "请确认 Rust 依赖完整，并查看编译日志。");
+            return;
+        }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "restarting_clawd");
+    match schedule_workspace_update_clawd_restart(&workspace_root) {
+        Ok(()) => {
+            let mut guard = shared.lock().unwrap();
+            guard.status = "restarting".to_string();
+            guard.step = "clawd_restart_scheduled".to_string();
+            guard.finished_ts = Some(current_unix_ts());
+            guard.error = None;
+            guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+            );
+        }
+    }
+}
+
+async fn record_workspace_update_current_version(
+    workspace_root: &Path,
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+) {
+    set_workspace_update_step(shared, "checking_current_version");
+    if let Ok(out) =
+        run_workspace_update_command("git", &["rev-parse", "--short", "HEAD"], workspace_root, 30)
+            .await
+    {
+        if out.exit_code == Some(0) {
+            let local_commit = first_output_line(&out.stdout_tail);
+            let mut guard = shared.lock().unwrap();
+            guard.old_commit = local_commit.clone();
+            guard.new_commit = local_commit;
+        }
+    }
+}
+
+fn reset_workspace_update_build_logs(shared: &Arc<Mutex<WorkspaceUpdateStatus>>) {
+    let mut guard = shared.lock().unwrap();
+    guard.exit_code = None;
+    guard.stdout_tail.clear();
+    guard.stderr_tail.clear();
+    guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
+}
+
+fn finish_workspace_update_succeeded(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    step: &str,
+    output: WorkspaceUpdateCommandOutput,
+) {
+    let mut guard = shared.lock().unwrap();
+    guard.status = "succeeded".to_string();
+    guard.step = step.to_string();
+    guard.finished_ts = Some(current_unix_ts());
+    guard.exit_code = output.exit_code;
+    guard.stdout_tail = output.stdout_tail;
+    guard.stderr_tail = output.stderr_tail;
+    guard.error = None;
+    guard.next_step = None;
+}
+
+fn schedule_workspace_update_clawd_restart(workspace_root: &Path) -> Result<(), String> {
+    let script_path = workspace_root.join("component_start/start-clawd.sh");
+    if !script_path.exists() {
+        return Err("component_start/start-clawd.sh not found in workspace root".to_string());
+    }
+
+    let workspace = workspace_root.to_string_lossy();
+    let script = format!(
+        "sleep 2; cd {} && mkdir -p logs .pids; \
+         if [ -f .pids/clawd.pid ]; then \
+           pid=\"$(cat .pids/clawd.pid 2>/dev/null || true)\"; \
+           case \"$pid\" in ''|*[!0-9]*) ;; *) \
+             if kill -0 \"$pid\" >/dev/null 2>&1; then \
+               kill \"$pid\" >/dev/null 2>&1 || true; sleep 1; \
+               kill -9 \"$pid\" >/dev/null 2>&1 || true; \
+             fi; \
+           esac; \
+           rm -f .pids/clawd.pid; \
+         fi; \
+         pkill -TERM -f '[t]arget/release/clawd|cargo run -p clawd' >/dev/null 2>&1 || true; \
+         sleep 1; \
+         RUSTCLAW_SKIP_BANNER=1 nohup bash ./component_start/start-clawd.sh release > logs/restart-clawd.log 2>&1 &",
+        shell_escape_arg(workspace.as_ref())
+    );
+    let spawn_result = StdCommand::new("nohup")
+        .arg("bash")
+        .arg("-c")
+        .arg(&script)
+        .current_dir(workspace_root)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .spawn();
+
+    spawn_result
+        .map(|_| ())
+        .map_err(|err| format!("failed to schedule clawd restart: {err}"))
 }
 
 fn set_workspace_update_step(shared: &Arc<Mutex<WorkspaceUpdateStatus>>, step: &str) {
