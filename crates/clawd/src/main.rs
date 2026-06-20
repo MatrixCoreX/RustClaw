@@ -58,6 +58,7 @@ mod pipeline_types;
 mod post_route_policy;
 mod prompt_utils;
 mod providers;
+mod repair_signal;
 mod repo;
 mod routing_context;
 mod runtime;
@@ -71,6 +72,7 @@ mod task_admin_routes;
 mod task_context_builder;
 mod task_contract;
 mod task_journal;
+mod task_lifecycle;
 mod verifier;
 mod virtual_tools;
 mod visible_text;
@@ -127,7 +129,7 @@ pub(crate) use repo::{
     build_conversation_chat_id, build_submit_task_payload, cancel_one_task_for_user_chat,
     cancel_tasks_for_user_chat, check_submit_task_access, check_submit_task_limits,
     check_task_view_access, create_auth_key, create_pending_channel_bind_session,
-    delete_auth_key_by_id, exchange_credential_status_for_user_key,
+    delete_auth_key_by_id, exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, find_recent_failed_resume_context,
     get_auth_key_value_by_id, get_pending_channel_bind_session_by_id,
     get_pending_channel_bind_session_by_token, get_task_query_record,
@@ -138,15 +140,15 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login, PendingChannelBindSession,
-    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
+    upsert_webd_login_account, verify_webd_password_login, FactoryResetDbResult,
+    PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
+    SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 use task_admin_routes::{cancel_one_task, cancel_tasks, list_active_tasks};
 pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
 // ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
-#[allow(unused_imports)]
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
@@ -1427,6 +1429,8 @@ struct ActiveTaskItem {
     status: String,
     summary: String,
     age_seconds: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lifecycle: Option<serde_json::Value>,
 }
 
 /// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-rustclaw-key 鉴权。
