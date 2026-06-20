@@ -776,6 +776,79 @@ fn direct_answer_formats_hidden_entries_check_strict_shape_from_listing() {
 }
 
 #[test]
+fn direct_answer_formats_hidden_entries_check_strict_shape_from_wrapped_inventory_with_limit() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":3,"files":2,"hidden":5,"total":5},"entries":[],"include_hidden":true,"names":[".agents",".codex",".git",".gitignore",".pids","README.md"],"names_only":true,"path":"/tmp/workspace"},"text":"{\"action\":\"inventory_dir\"}"}"#,
+    ));
+    let mut route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "hidden entries selector_limit=3".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+            locator_hint: ".".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    route_result
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit = Some(3);
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some(".agents\n.codex\n.git")
+    );
+}
+
+#[test]
+fn direct_answer_formats_hidden_entries_check_from_names_when_entries_empty() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"dirs":33,"files":43,"hidden":5,"total":76},"entries":[],"include_hidden":true,"names":[".agents",".codex",".git",".gitignore",".pids","README.md"],"path":"/tmp/workspace"}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some(".agents\n.codex\n.git\n.gitignore\n.pids")
+    );
+}
+
+#[test]
 fn direct_answer_formats_hidden_entries_check_empty_inventory_without_followup() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

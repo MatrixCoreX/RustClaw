@@ -1,0 +1,170 @@
+use serde_json::json;
+
+fn async_poll_claimed_dispatch(
+    adapter_result: Option<serde_json::Value>,
+) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
+    let task = crate::ClaimedTask {
+        task_id: "task-async-poll-adapter".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: Some("test-key".to_string()),
+        channel: "telegram".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({"text": "continue"}).to_string(),
+    };
+    let checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "ckpt-async-poll-adapter".to_string(),
+        boundary_context: json!({"route_gate_kind": "execute"}),
+        last_successful_round: Some(1),
+        last_successful_step: Some("step_1".to_string()),
+        pending_action: None,
+        observations: Vec::new(),
+        evidence_refs: Vec::new(),
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: Vec::new(),
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 1,
+            step: 1,
+            llm_calls: 2,
+            tool_calls: 1,
+            elapsed_ms: 100,
+        },
+        pending_async_job: Some(crate::task_lifecycle::AsyncJobRef {
+            job_id: "job-async-poll-adapter".to_string(),
+            status: crate::task_lifecycle::AsyncJobStatus::Running,
+            poll_after_seconds: 7,
+            expires_at: 2_000,
+            cancel_ref: "cancel:job-async-poll-adapter".to_string(),
+            message_key: "tool.msg.job.running".to_string(),
+        }),
+        repair_signal: None,
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::PollAsyncJob,
+    };
+    let mut dispatch_payload = json!({
+        "dispatch_state": "ready_to_poll_async_job",
+        "checkpoint_id": "ckpt-async-poll-adapter",
+        "job_id": "job-async-poll-adapter",
+        "expires_at": 2_000,
+    });
+    if let Some(adapter_result) = adapter_result {
+        dispatch_payload["async_poll_adapter_result"] = adapter_result;
+    }
+    crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
+        task,
+        task_id: "task-async-poll-adapter".to_string(),
+        checkpoint_id: "ckpt-async-poll-adapter".to_string(),
+        executor_state: "executing_async_poll".to_string(),
+        executor_action: "poll_async_job".to_string(),
+        executor_status: "async_poll_adapter_pending".to_string(),
+        dispatch_state: "ready_to_poll_async_job".to_string(),
+        dispatch_execution_state: "claimed_to_poll_async_job".to_string(),
+        resume_trigger: "worker_recovery".to_string(),
+        resume_directive: "poll_async_job".to_string(),
+        lease_expires_at: 1_500,
+        handoff_claim_expires_at: 1_400,
+        dispatch_claim_expires_at: 1_300,
+        execution_plan: json!({
+            "executor_action": "poll_async_job",
+            "checkpoint_id": "ckpt-async-poll-adapter",
+            "job_id": "job-async-poll-adapter",
+            "poll_after_seconds": 7,
+            "expires_at": 2_000,
+            "cancel_ref": "cancel:job-async-poll-adapter",
+            "message_key": "tool.msg.job.running",
+        }),
+        dispatch_payload,
+        dispatch_claim: json!({
+            "dispatch_execution_state": "claimed_to_poll_async_job",
+            "checkpoint_id": "ckpt-async-poll-adapter"
+        }),
+        task_checkpoint: checkpoint,
+    }
+}
+
+#[test]
+fn async_poll_adapter_success_becomes_machine_terminal_result() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "succeeded",
+        "final_result_json": {
+            "status": "ok",
+            "result_ref": "artifact:job-async-poll-adapter"
+        }
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll completed payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_completed");
+    assert_eq!(payload["reason_code"], "async_poll_completed");
+    assert_eq!(payload["adapter_status"], "succeeded");
+    assert_eq!(
+        payload["final_result_json"]["result_ref"],
+        "artifact:job-async-poll-adapter"
+    );
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn async_poll_adapter_running_becomes_machine_reschedule() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "running",
+        "poll_after_seconds": 13,
+        "expires_at": 1_050
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll rescheduled payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(payload["reason_code"], "async_poll_running");
+    assert_eq!(payload["defer_reason_code"], "async_poll_running");
+    assert_eq!(payload["next_check_after"], 1_013);
+    assert_eq!(payload["expires_at"], 1_050);
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn async_poll_adapter_failure_keeps_machine_error_contract() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "failed",
+        "error_code": "provider_job_failed",
+        "message_key": "provider.job.failed",
+        "failure_result_json": {
+            "status": "error",
+            "error_code": "provider_job_failed"
+        }
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll failure payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(payload["error_code"], "provider_job_failed");
+    assert_eq!(payload["message_key"], "provider.job.failed");
+    assert_eq!(payload["failure_result_json"]["status"], "error");
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn async_poll_adapter_result_rejects_text_leak_and_job_mismatch() {
+    let text_leak = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "succeeded",
+        "text": "leak",
+        "final_result_json": {"status": "ok"}
+    })));
+    assert!(super::execute_async_poll_dispatch_result(&text_leak, 1_000, 30).is_none());
+
+    let mismatch = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "other-job",
+        "status": "succeeded",
+        "final_result_json": {"status": "ok"}
+    })));
+    assert!(super::execute_async_poll_dispatch_result(&mismatch, 1_000, 30).is_none());
+}

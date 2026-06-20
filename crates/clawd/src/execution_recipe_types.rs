@@ -29,6 +29,8 @@ pub(crate) enum ExecutionRecipeProfile {
     ConfigChange,
     CodeChange,
     SkillAuthoring,
+    PackageChange,
+    DatabaseChange,
 }
 
 impl ExecutionRecipeProfile {
@@ -39,6 +41,8 @@ impl ExecutionRecipeProfile {
             Self::ConfigChange => "config_change",
             Self::CodeChange => "code_change",
             Self::SkillAuthoring => "skill_authoring",
+            Self::PackageChange => "package_change",
+            Self::DatabaseChange => "database_change",
         }
     }
 }
@@ -51,8 +55,25 @@ pub(crate) fn parse_execution_recipe_profile_text(value: &str) -> ExecutionRecip
             ExecutionRecipeProfile::CodeChange
         }
         "skill_authoring" | "skill" | "extension_build" => ExecutionRecipeProfile::SkillAuthoring,
+        "package_change" | "package" | "package_manager" | "dependency_change" => {
+            ExecutionRecipeProfile::PackageChange
+        }
+        "database_change" | "database" | "schema_change" | "migration" => {
+            ExecutionRecipeProfile::DatabaseChange
+        }
         _ => ExecutionRecipeProfile::None,
     }
+}
+
+pub(crate) fn profile_requires_specific_validation(profile: ExecutionRecipeProfile) -> bool {
+    matches!(
+        profile,
+        ExecutionRecipeProfile::ConfigChange
+            | ExecutionRecipeProfile::CodeChange
+            | ExecutionRecipeProfile::SkillAuthoring
+            | ExecutionRecipeProfile::PackageChange
+            | ExecutionRecipeProfile::DatabaseChange
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -174,6 +195,12 @@ impl ExecutionRecipeRuntimeState {
             }
             ExecutionRecipeProfile::SkillAuthoring => {
                 "Focus on building or updating a reusable skill/extension: inspect existing interface, registration, prompts, and docs first, then validate structure, integration points, and targeted tests."
+            }
+            ExecutionRecipeProfile::PackageChange => {
+                "Focus on package/dependency state: inspect the current manager and dependency context first, make the minimal install/update/remove change, and validate with package manager state, build/test, or runtime command evidence."
+            }
+            ExecutionRecipeProfile::DatabaseChange => {
+                "Focus on database/schema state: inspect schema or target rows first, apply only confirmed structured mutations, and validate with schema/version/table/query evidence after the change."
             }
         }
     }

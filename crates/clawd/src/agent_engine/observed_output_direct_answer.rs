@@ -498,6 +498,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                     {
                         path_batch_file_delivery_token_candidate(route, &value)
                     } else if action == Some("path_batch_facts")
+                        && route.is_some_and(route_allows_path_batch_file_basename_observed_answer)
+                    {
+                        system_basic_path_batch_file_basename_candidate(&value)
+                    } else if action == Some("path_batch_facts")
                         && route.is_some_and(|route| {
                             route_allows_path_batch_scalar_path_observed_answer(route)
                                 || route_scalar_has_plain_path_terminal_respond(route, loop_state)
@@ -599,6 +603,21 @@ pub(super) fn fs_search_output_direct_answer_candidate(
             && route.output_contract.requires_content_evidence
     }) {
         return None;
+    }
+    if route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    }) {
+        return fs_search_direct_answer_candidate(
+            state,
+            value,
+            locator_hint,
+            prefer_english,
+            true,
+            false,
+        )
+        .map(|answer| {
+            absolutize_fs_search_answer_paths(state, route, value, answer, prefer_full_path)
+        });
     }
     route
         .and_then(|route| {

@@ -23,7 +23,7 @@ act|act_explicit_command_raw_pwd||执行命令 pwd，直接回复执行结果，
 act|act_find_service_exists_with_path||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
 act|act_health_check_brief_singleton||帮我做一次基础健康检查，只列最重要的结论
 act|act_http_local_health_brief_singleton||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
-act|act_fuzzy_top3||去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd
+act|act_fuzzy_top3|expect_max_lines:3|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd，最多输出前 3 个路径
 act|act_transform_inline_json_table||把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]|expect=beta
 
 # ---------- failure ----------

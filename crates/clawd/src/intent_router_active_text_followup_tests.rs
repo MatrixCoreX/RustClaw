@@ -382,7 +382,7 @@ fn active_text_followup_reuses_execution_failed_step_observed_context() {
         active_observed_facts: None,
     };
     let mut turn_type = Some(TurnType::TaskRequest);
-    let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
+    let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
     let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -425,6 +425,73 @@ fn active_text_followup_reuses_execution_failed_step_observed_context() {
     assert!(!needs_clarify);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+}
+
+#[test]
+fn active_text_followup_preserves_standalone_execution_failed_step_contract() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some(
+                "Run two ordered commands and report their execution status.".to_string(),
+            ),
+            last_primary_task_output: Some(
+                "step_1 status=ok output=THINK_BREAK_CN; step_2 status=error exit_code=127"
+                    .to_string(),
+            ),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut turn_type = Some(TurnType::TaskRequest);
+    let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut wants_file_delivery = false;
+    let mut answer_candidate = String::new();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_active_text_followup_route_repair(
+        "Run a fresh ordered command sequence and stop at the failed step.",
+        Some(&snapshot),
+        &mut turn_type,
+        &mut target_task_policy,
+        false,
+        &mut decision,
+        &mut finalize_style,
+        &mut needs_clarify,
+        super::ScheduleKind::None,
+        false,
+        &mut wants_file_delivery,
+        &mut contract,
+        None,
+        false,
+        false,
+        &mut answer_candidate,
+    );
+
+    assert_eq!(reason, None);
+    assert_eq!(turn_type, Some(TurnType::TaskRequest));
+    assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(!needs_clarify);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExecutionFailedStep
+    );
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
 }
 
@@ -565,7 +632,11 @@ fn replacement_pairs_remove_conflicting_required_old_literals() {
     );
     assert_eq!(
         patch["required_content_literals"],
-        serde_json::json!(["3. Install missing packages"])
+        serde_json::json!([
+            "3. Install missing packages",
+            "1. Check PATH and installation",
+            "2. Check ownership and permissions"
+        ])
     );
     assert_eq!(
         patch["forbidden_visible_literals"],
@@ -573,6 +644,33 @@ fn replacement_pairs_remove_conflicting_required_old_literals() {
             "1. Verify installation and PATH",
             "2. Check file ownership and permissions"
         ])
+    );
+}
+
+#[test]
+fn replacement_pairs_seed_required_new_literals_even_without_old_required_conflict() {
+    let mut state_patch = Some(serde_json::json!({
+        "replacement_pairs": [
+            {"from": "Python 3.10", "to": "Python 3.11"}
+        ],
+        "required_content_literals": [],
+        "forbidden_visible_literals": []
+    }));
+
+    let reason = super::repair_state_patch_replacement_literal_conflicts(&mut state_patch);
+    let patch = state_patch.expect("patch");
+
+    assert_eq!(
+        reason,
+        Some("state_patch_replacement_literal_conflict_repair")
+    );
+    assert_eq!(
+        patch["required_content_literals"],
+        serde_json::json!(["Python 3.11"])
+    );
+    assert_eq!(
+        patch["forbidden_visible_literals"],
+        serde_json::json!(["Python 3.10"])
     );
 }
 

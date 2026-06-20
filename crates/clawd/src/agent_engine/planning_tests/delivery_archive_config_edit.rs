@@ -564,6 +564,129 @@ fn config_change_preview_guard_plan_rewrites_to_config_edit_plan() {
 }
 
 #[test]
+fn config_mutation_recipe_readback_only_rewrites_to_closed_loop() {
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string();
+    let mut loop_state = LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+        crate::execution_recipe::ExecutionRecipeSpec {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            profile: crate::execution_recipe::ExecutionRecipeProfile::ConfigChange,
+            target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+        },
+    );
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "config_edit".to_string(),
+            args: json!({
+                "action": "read_back",
+                "path": "run/nl_eval_tmp/config_edit_smoke/config.toml",
+                "field_path": "skills.skill_switches.config_edit_nl_smoke",
+                "format": "toml",
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
+        Some(&route),
+        &loop_state,
+        "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true",
+        Some("run/nl_eval_tmp/config_edit_smoke/config.toml"),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 6);
+    let plan_args = expect_planned_call(&rewritten[0], "config_edit", "plan_config_change");
+    assert_eq!(
+        plan_args.get("path").and_then(Value::as_str),
+        Some("run/nl_eval_tmp/config_edit_smoke/config.toml")
+    );
+    assert_eq!(
+        plan_args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_smoke")
+    );
+    assert_eq!(plan_args.get("value").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        plan_args.get("format").and_then(Value::as_str),
+        Some("toml")
+    );
+
+    let apply_args = expect_planned_call(&rewritten[1], "config_edit", "apply_config_change");
+    assert_eq!(
+        apply_args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_smoke")
+    );
+    assert_eq!(apply_args.get("value").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        apply_args.get("operation").and_then(Value::as_str),
+        Some("set")
+    );
+    let validate_args = expect_planned_call(&rewritten[2], "config_edit", "validate_config");
+    assert_eq!(
+        validate_args.get("format").and_then(Value::as_str),
+        Some("toml")
+    );
+    let read_back_args = expect_planned_call(&rewritten[3], "config_edit", "read_back");
+    assert_eq!(
+        read_back_args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_smoke")
+    );
+    assert!(matches!(
+        &rewritten[4],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &vec![
+                "step_1".to_string(),
+                "step_2".to_string(),
+                "step_3".to_string(),
+                "step_4".to_string()
+            ]
+    ));
+}
+
+#[test]
+fn config_mutation_without_recipe_does_not_upgrade_readback_to_apply() {
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let loop_state = LoopState::new(2);
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: json!({
+            "action": "read_back",
+            "path": "configs/config.toml",
+            "field_path": "skills.skill_switches.config_edit_nl_plan",
+            "format": "toml",
+        }),
+    }];
+
+    let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
+        Some(&route),
+        &loop_state,
+        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        Some("configs/config.toml"),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 1);
+    expect_planned_call(&rewritten[0], "config_edit", "read_back");
+}
+
+#[test]
 fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
     let state = test_state_with_enabled_skills(&["config_edit", "synthesize_answer"]);
     let mut route = route_result(

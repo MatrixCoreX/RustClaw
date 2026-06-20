@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 pub(super) fn is_read_range_action(skill: &str, obj: &serde_json::Map<String, Value>) -> bool {
     let action = obj
@@ -119,7 +120,7 @@ pub(super) fn rewrite_config_validation_read_plan_to_validate(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigValidation
         || actions.iter().any(action_is_structured_config_validation)
     {
@@ -177,7 +178,7 @@ pub(super) fn rewrite_unrequested_path_like_config_field_read_to_validate(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
     {
@@ -247,7 +248,8 @@ pub(super) fn unrequested_path_like_config_field_validation_path(
     {
         return None;
     }
-    if structured_scalar_field_selector(route, user_text, None, Some(&current_text)).is_some() {
+    if structured_scalar_field_selector(route, user_text, true, None, Some(&current_text)).is_some()
+    {
         return None;
     }
     if !request
@@ -303,6 +305,7 @@ pub(super) fn normalize_evidence_contract_actions(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    let actions = rewrite_active_anchor_basename_file_reads_to_bound_target(plan_context, actions);
     let actions = replace_file_paths_anchor_respond_only_with_find_entries(
         route_result,
         plan_context,
@@ -339,9 +342,17 @@ pub(super) fn normalize_evidence_contract_actions(
         auto_locator_path,
         actions,
     );
+    let actions = rewrite_config_mutation_to_config_edit_closed_loop(
+        route_result,
+        loop_state,
+        user_text,
+        auto_locator_path,
+        actions,
+    );
     let actions = rewrite_structured_multi_field_read_plan_to_read_fields(
         route_result,
         user_text,
+        true,
         plan_context,
         auto_locator_path,
         actions,
@@ -350,6 +361,7 @@ pub(super) fn normalize_evidence_contract_actions(
         state,
         route_result,
         user_text,
+        true,
         plan_context,
         auto_locator_path,
         actions,
@@ -428,6 +440,115 @@ pub(super) fn normalize_evidence_contract_actions(
     let actions =
         strip_workspace_synthesis_without_text_evidence(route_result, loop_state, actions);
     actions
+}
+
+pub(super) fn rewrite_active_anchor_basename_file_reads_to_bound_target(
+    plan_context: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let anchor = active_anchor_plan_context(plan_context);
+    let Some(bound_target) = anchor
+        .bound_target
+        .as_deref()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+    else {
+        return actions;
+    };
+    if anchor.ordered_entries.is_empty() {
+        return actions;
+    }
+    let bound_path = Path::new(bound_target);
+    if !bound_path.is_dir() {
+        return actions;
+    }
+
+    let mut rewrites = HashMap::<String, String>::new();
+    for entry in &anchor.ordered_entries {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let entry_path = Path::new(entry);
+        let target = if entry_path.is_absolute() || entry_path.components().count() > 1 {
+            entry_path.to_path_buf()
+        } else {
+            bound_path.join(entry_path)
+        };
+        if !target.is_file() {
+            continue;
+        }
+        let Some(basename) = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        rewrites
+            .entry(basename.to_ascii_lowercase())
+            .or_insert_with(|| target.display().to_string());
+    }
+    if rewrites.is_empty() {
+        return actions;
+    }
+
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|mut action| {
+            if rewrite_read_action_basename_path(&mut action, &rewrites) {
+                changed = true;
+            }
+            action
+        })
+        .collect::<Vec<_>>();
+    if changed {
+        info!("plan_rewrite_active_anchor_basename_file_reads_to_bound_target");
+    }
+    rewritten
+}
+
+fn rewrite_read_action_basename_path(
+    action: &mut AgentAction,
+    rewrites: &HashMap<String, String>,
+) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            (tool.as_str(), args)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => return false,
+    };
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    if !is_read_range_action(skill, obj) {
+        return false;
+    }
+    let Some(current) = obj
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return false;
+    };
+    let current_path = Path::new(current);
+    if current_path.is_absolute() || current_path.components().count() != 1 {
+        return false;
+    }
+    let Some(target) = rewrites.get(&current.to_ascii_lowercase()) else {
+        return false;
+    };
+    if target == current {
+        return false;
+    }
+    obj.insert("path".to_string(), Value::String(target.clone()));
+    true
 }
 
 #[derive(Debug, Default)]
@@ -579,7 +700,7 @@ pub(super) fn replace_file_paths_anchor_respond_only_with_find_entries(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
         || !route.output_contract.requires_content_evidence
@@ -621,7 +742,7 @@ pub(super) fn replace_scalar_path_anchor_respond_only_with_stat_paths(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
         || !route.output_contract.requires_content_evidence
@@ -666,7 +787,7 @@ pub(super) fn rewrite_config_change_preview_to_config_edit_plan(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || actions.iter().any(|action| {
             action_targets_config_edit(action)
@@ -696,6 +817,107 @@ pub(super) fn rewrite_config_change_preview_to_config_edit_plan(
             "value": parsed.value,
         }),
     }]
+}
+
+pub(super) fn rewrite_config_mutation_to_config_edit_closed_loop(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route_has_unresolved_clarify_or_locator_marker(route)
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
+        || loop_state.execution_recipe.kind
+            != crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+        || loop_state.execution_recipe.profile
+            != crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
+        || actions.iter().any(action_is_obvious_mutation)
+    {
+        return actions;
+    }
+    let Some(parsed) = parse_config_change_preview(user_text, route, auto_locator_path) else {
+        return actions;
+    };
+
+    info!(
+        "plan_rewrite_config_mutation_to_config_edit_closed_loop path={} field={}",
+        crate::truncate_for_log(&parsed.path),
+        crate::truncate_for_log(&parsed.field_path)
+    );
+    vec![
+        config_edit_change_action("plan_config_change", &parsed),
+        config_edit_change_action("apply_config_change", &parsed),
+        config_edit_validate_action(&parsed.path),
+        config_edit_read_back_action(&parsed),
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec![
+                "step_1".to_string(),
+                "step_2".to_string(),
+                "step_3".to_string(),
+                "step_4".to_string(),
+            ],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ]
+}
+
+fn config_edit_change_action(action: &str, parsed: &ParsedConfigChangePreview) -> AgentAction {
+    let mut args = serde_json::Map::new();
+    args.insert("action".to_string(), Value::String(action.to_string()));
+    args.insert("path".to_string(), Value::String(parsed.path.clone()));
+    args.insert(
+        "field_path".to_string(),
+        Value::String(parsed.field_path.clone()),
+    );
+    args.insert("value".to_string(), parsed.value.clone());
+    args.insert("operation".to_string(), Value::String("set".to_string()));
+    if let Some(format) = structured_config_format_for_path(&parsed.path) {
+        args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(args),
+    }
+}
+
+fn config_edit_validate_action(path: &str) -> AgentAction {
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "action".to_string(),
+        Value::String("validate_config".to_string()),
+    );
+    args.insert("path".to_string(), Value::String(path.to_string()));
+    if let Some(format) = structured_config_format_for_path(path) {
+        args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(args),
+    }
+}
+
+fn config_edit_read_back_action(parsed: &ParsedConfigChangePreview) -> AgentAction {
+    let mut args = serde_json::Map::new();
+    args.insert("action".to_string(), Value::String("read_back".to_string()));
+    args.insert("path".to_string(), Value::String(parsed.path.clone()));
+    args.insert(
+        "field_path".to_string(),
+        Value::String(parsed.field_path.clone()),
+    );
+    if let Some(format) = structured_config_format_for_path(&parsed.path) {
+        args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(args),
+    }
 }
 
 pub(super) fn parse_config_change_preview(
@@ -751,6 +973,7 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
     state: &AppState,
     route_result: Option<&RouteResult>,
     user_text: &str,
+    allow_route_resolved_intent_selector: bool,
     plan_context: Option<&str>,
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
@@ -762,7 +985,7 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
         route,
         "structured_identifier_presence_requires_content_evidence",
     );
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || route.output_contract.semantic_kind == crate::OutputSemanticKind::StructuredKeys
@@ -795,19 +1018,23 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
     else {
         return actions;
     };
-    let Some(field_path) =
-        structured_scalar_field_selector(route, user_text, plan_context, Some(&path)).or_else(
-            || {
-                structured_scalar_field_selector_from_structural_candidates(
-                    state,
-                    route,
-                    user_text,
-                    plan_context,
-                    &path,
-                )
-            },
+    let Some(field_path) = structured_scalar_field_selector(
+        route,
+        user_text,
+        allow_route_resolved_intent_selector,
+        plan_context,
+        Some(&path),
+    )
+    .or_else(|| {
+        structured_scalar_field_selector_from_structural_candidates(
+            state,
+            route,
+            user_text,
+            allow_route_resolved_intent_selector,
+            plan_context,
+            &path,
         )
-    else {
+    }) else {
         return actions;
     };
     if !matches!(
@@ -838,7 +1065,7 @@ pub(super) fn rewrite_scalar_candidate_respond_to_structured_field_read(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || !matches!(
@@ -970,7 +1197,7 @@ pub(super) fn add_prior_structured_text_field_read_for_scalar_compare(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.needs_clarify
+    if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind
             != crate::OutputSemanticKind::RecentScalarEqualityCheck

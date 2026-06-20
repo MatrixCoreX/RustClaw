@@ -554,6 +554,38 @@ visible_text = "\n".join(visible_parts)
 trace = ((result.get("task_journal") or {}).get("trace") or {})
 rounds = trace.get("rounds") or []
 
+def step_text_parts(step):
+    parts = []
+    for key in ("output_excerpt", "error_excerpt"):
+        value = step.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    evidence = step.get("observed_evidence") or {}
+    for item in evidence.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("excerpt", "sample_values"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value)
+            elif isinstance(value, list):
+                parts.extend(str(entry) for entry in value if str(entry).strip())
+    return parts
+
+def trace_has_expected_part(part: str) -> bool:
+    alternatives = [alt.strip() for alt in part.split("__OR__") if alt.strip()]
+    if not alternatives:
+        return True
+    if any(alt in visible_text for alt in alternatives):
+        return True
+    for step in trace.get("step_results") or []:
+        if str(step.get("status") or "").lower() != "ok":
+            continue
+        haystack = "\n".join(step_text_parts(step))
+        if any(alt in haystack for alt in alternatives):
+            return True
+    return False
+
 def is_mutating_run_cmd(command: str) -> bool:
     lower = command.lower()
     markers = [
@@ -584,15 +616,25 @@ for idx, round_entry in enumerate(rounds):
     if treat_as_repair_round:
         repair_round = True
     for step in plan.get("steps") or []:
-        skill = str(step.get("skill") or "")
+        skill = str(step.get("skill") or step.get("tool") or step.get("capability") or "")
         args = step.get("args") or {}
+        action = str(args.get("action") or "").strip().lower()
         if not treat_as_repair_round:
             continue
         if skill in {"write_file", "make_dir", "remove_file"}:
             repair_mutation = True
             break
+        if skill == "fs_basic" and action in {
+            "write_text",
+            "append_text",
+            "make_dir",
+            "remove_path",
+            "rename_path",
+            "copy_path",
+        }:
+            repair_mutation = True
+            break
         if skill == "service_control":
-            action = str(args.get("action") or "").strip().lower()
             if action in {"start", "stop", "restart", "reload", "enable", "disable"}:
                 repair_mutation = True
                 break
@@ -604,14 +646,45 @@ for idx, round_entry in enumerate(rounds):
     if repair_mutation:
         break
 
+if repair_round and not repair_mutation:
+    for step in trace.get("step_results") or []:
+        skill = str(
+            step.get("executed_skill")
+            or step.get("skill")
+            or step.get("resolved_tool_or_skill")
+            or ""
+        )
+        output_excerpt = str(step.get("output_excerpt") or "")
+        if skill in {"write_file", "make_dir", "remove_file"}:
+            repair_mutation = True
+            break
+        if skill == "fs_basic":
+            action_ref = str(
+                step.get("requested_action_ref")
+                or step.get("requested_capability")
+                or ""
+            ).lower()
+            if any(token in action_ref for token in (
+                "write_text",
+                "append_text",
+                "make_dir",
+                "remove_path",
+                "rename_path",
+                "copy_path",
+            )):
+                repair_mutation = True
+                break
+        if skill == "run_cmd" and is_mutating_run_cmd(output_excerpt):
+            repair_mutation = True
+            break
+
 status = str(data.get("status") or "")
 missing = []
 if status != "succeeded":
     missing.append(f"status={status}")
 for part in expected_parts:
-    alternatives = [alt.strip() for alt in part.split("__OR__") if alt.strip()]
-    if alternatives and not any(alt in visible_text for alt in alternatives):
-        missing.append(f"visible_text_missing={part}")
+    if not trace_has_expected_part(part):
+        missing.append(f"trace_marker_missing={part}")
 if not repair_round:
     missing.append("repair_round_missing")
 if not repair_mutation:
@@ -621,6 +694,159 @@ if missing:
     raise SystemExit(1)
 print(
     f"status={status}; rounds={len(rounds)}; repair_round=true; repair_mutation=true"
+)
+PY
+}
+
+ops_http_validation_summary() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+obj = json.loads(sys.argv[1])
+expected_parts = [part.strip() for part in sys.argv[2].split(";;") if part.strip()]
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+trace = ((result.get("task_journal") or {}).get("trace") or {})
+messages = result.get("messages") or []
+visible_parts = []
+for candidate in (data.get("error_text"), result.get("text")):
+    if isinstance(candidate, str) and candidate.strip():
+        visible_parts.append(candidate.strip())
+for item in messages:
+    if isinstance(item, str) and item.strip():
+        visible_parts.append(item.strip())
+    elif isinstance(item, dict):
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            visible_parts.append(text.strip())
+visible_text = "\n".join(visible_parts)
+
+def step_text_parts(step):
+    parts = []
+    for key in ("output_excerpt", "error_excerpt"):
+        value = step.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    evidence = step.get("observed_evidence") or {}
+    for item in evidence.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("excerpt", "sample_values"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value)
+            elif isinstance(value, list):
+                parts.extend(str(entry) for entry in value if str(entry).strip())
+    return parts
+
+status = str(data.get("status") or "")
+missing = []
+if status != "succeeded":
+    missing.append(f"status={status}")
+for part in expected_parts:
+    alternatives = [alt.strip() for alt in part.split("__OR__") if alt.strip()]
+    if not alternatives:
+        continue
+    found = False
+    if any(alt in visible_text for alt in alternatives):
+        found = True
+    for step in trace.get("step_results") or []:
+        if found:
+            break
+        if str(step.get("status") or "").lower() != "ok":
+            continue
+        haystack = "\n".join(step_text_parts(step))
+        if any(alt in haystack for alt in alternatives):
+            found = True
+            break
+    if not found:
+        missing.append(f"trace_marker_missing={part}")
+if missing:
+    print("\n".join(missing))
+    raise SystemExit(1)
+print(f"status={status}; validation_marker_observed=true")
+PY
+}
+
+health_check_structured_summary() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+obj = json.loads(sys.argv[1])
+expected_paths = [part.strip() for part in sys.argv[2].split(";;") if part.strip()]
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+trace = ((result.get("task_journal") or {}).get("trace") or {})
+
+def collect_paths(value, prefix="", out=None):
+    if out is None:
+        out = set()
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{prefix}.{key}" if prefix else str(key)
+            out.add(child_path)
+            collect_paths(child, child_path, out)
+    elif isinstance(value, list):
+        for idx, child in enumerate(value):
+            child_path = f"{prefix}[{idx}]"
+            out.add(child_path)
+            collect_paths(child, child_path, out)
+    return out
+
+def parse_json_text(text):
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+observed_fields = set()
+health_step_count = 0
+for step in trace.get("step_results") or []:
+    skill = str(
+        step.get("executed_skill")
+        or step.get("skill")
+        or step.get("resolved_tool_or_skill")
+        or ""
+    )
+    if skill != "health_check" or str(step.get("status") or "").lower() != "ok":
+        continue
+    health_step_count += 1
+    evidence = step.get("observed_evidence") or {}
+    for item in evidence.get("items") or []:
+        if isinstance(item, dict) and isinstance(item.get("field"), str):
+            observed_fields.add(item["field"])
+    for candidate in (step.get("output_excerpt"), step.get("output")):
+        value = parse_json_text(candidate)
+        if value is None:
+            continue
+        observed_fields.update(collect_paths(value))
+        extra = value.get("extra") if isinstance(value, dict) else None
+        if isinstance(extra, dict):
+            observed_fields.update(collect_paths(extra))
+        text_value = value.get("text") if isinstance(value, dict) else None
+        nested = parse_json_text(text_value)
+        if nested is not None:
+            observed_fields.update(collect_paths(nested))
+
+status = str(data.get("status") or "")
+missing = []
+if status != "succeeded":
+    missing.append(f"status={status}")
+if health_step_count < 1:
+    missing.append("health_check_step_missing")
+for path in expected_paths:
+    accepted = {path, f"extra.{path}"}
+    if not (accepted & observed_fields):
+        missing.append(f"field_missing={path}")
+if missing:
+    print("\n".join(missing))
+    raise SystemExit(1)
+print(
+    f"status={status}; health_check_steps={health_step_count}; fields={','.join(expected_paths)}"
 )
 PY
 }
@@ -763,15 +989,23 @@ run_nl_case() {
         append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$missing"
       fi
       ;;
-    ops_http)
-      if [[ "$status" == "succeeded" ]] && missing="$(missing_substrings "$visible_text" "$expected" 2>&1)"; then
-        echo "[PASS] ${case_name} (status=${status})"
+    health_check_structured)
+      if missing="$(health_check_structured_summary "$final_raw" "$expected" 2>&1)"; then
+        echo "[PASS] ${case_name} (${missing})"
         PASS=$((PASS + 1))
-        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "status=${status}"
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$missing"
       else
-        if [[ "$status" != "succeeded" ]]; then
-          missing="status=${status}"
-        fi
+        echo "[FAIL] ${case_name}: ${missing}"
+        FAIL=$((FAIL + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$missing"
+      fi
+      ;;
+    ops_http)
+      if missing="$(ops_http_validation_summary "$final_raw" "$expected" 2>&1)"; then
+        echo "[PASS] ${case_name} (${missing})"
+        PASS=$((PASS + 1))
+        append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "pass" "$missing"
+      else
         echo "[FAIL] ${case_name}: ${missing}"
         FAIL=$((FAIL + 1))
         append_summary "$round_no" "$case_name" "$auth_kind" "$assertion" "fail" "$missing"

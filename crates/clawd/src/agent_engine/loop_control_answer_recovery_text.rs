@@ -169,3 +169,49 @@ pub(super) fn mark_reply_failed_after_answer_verifier_exhausted(
     reply.should_fail_task = true;
     reply.error_text = Some(message);
 }
+
+pub(super) fn try_accept_language_only_output_format_answer_verifier_gap(
+    route_result: Option<&RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        )
+    {
+        return false;
+    }
+    if reply.text.trim().is_empty() {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_mut() else {
+        return false;
+    };
+    let Some(summary) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if summary.pass
+        || summary.missing_evidence_fields.is_empty()
+        || !summary
+            .missing_evidence_fields
+            .iter()
+            .all(|field| field == "output_format")
+    {
+        return false;
+    }
+    journal.answer_verifier_summary = None;
+    journal.record_final_answer(&reply.text);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    info!("answer_verifier_retry_exhausted_accepted_language_only_output_format_gap");
+    true
+}

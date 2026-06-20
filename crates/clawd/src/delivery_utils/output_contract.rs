@@ -121,6 +121,11 @@ pub(super) fn enforce_output_contract(
             // contract as one_sentence. Preserve the synthesized answer when a
             // structured count says the user requested more than one sentence.
         }
+        OutputResponseShape::OneSentence
+            if matches!(
+                output_contract.semantic_kind,
+                crate::OutputSemanticKind::QuantityComparison
+            ) => {}
         OutputResponseShape::OneSentence => {
             if output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
                 *normalized_text = if output_contract.semantic_kind.is_content_excerpt_summary() {

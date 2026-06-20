@@ -21,204 +21,117 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: answer, clarify, call a capability, synthesize, continue, or stop. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
 
-### Runtime Flow
-
-```mermaid
-flowchart TD
-    A[User input] --> B[Channel / API ingress]
-    B --> B1[Task queue<br/>POST /v1/tasks]
-    B1 --> B2[worker_once / process task]
-    B2 --> B3{Task kind}
-    B3 -->|run_skill| RS[Direct skill task<br/>bypass normalizer / planner]
-    B3 -->|ask| C0{Scheduled direct text?}
-    C0 -->|yes| SD0[Schedule direct-text finalize<br/>before normalizer]
-    C0 -->|no| C[Session snapshot + local surface hints]
-    C --> D[Binding / resume / active-task context]
-    D --> E[Intent normalizer LLM]
-    E --> ER{Contract repair needed?}
-    ER -->|optional| RJ[Contract-repair judge LLM<br/>schema-backed semantic repair]
-    ER -->|no| EC[Build ask context bundle<br/>memory + attachments + recent execution]
-    RJ --> EC
-    CM[Task contract matrix<br/>semantic kind + required evidence + allowed action + response shape] --> E2
-    CM --> DG
-    CM --> VF
-    CM --> EV
-    CM --> Q
-    EC --> E2[Boundary post-route policy<br/>locator + contract matrix guards]
-    E2 -->|schedule direct| SD[Schedule direct finalize]
-    E2 -->|resume discussion| RD[Resume discussion prompt]
-    E2 -->|resume execution| H
-    E2 -->|runtime-grounded scalar/direct candidate| RDC[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|ordinary eligible ask| H[Agent-loop semantic authority<br/>decision envelope + runtime context]
-    E2 -->|rollback / non-eligible / release-gated| F{Boundary dispatch<br/>compatibility path}
-    F -->|route_gate_kind=clarify| G[Clarify question]
-    F -->|route_gate_kind=chat| DG[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
-    DG -->|grounded candidate| VP
-    DG -->|direct| CH[Build direct-answer chat context + prompt]
-    DG -->|clarify| G
-    DG -->|promote to execute| H
-    CH --> CR[Chat response LLM]
-    F -->|route_gate_kind=execute fallback| H
-    SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> RV
-    H --> I[Planner / runtime loop]
-    I --> ID{Narrow deterministic<br/>observation contract?}
-    ID -->|yes| JD[Runtime-built observation plan<br/>no planner LLM]
-    ID -->|no| PL[Planner LLM round<br/>call_capability preferred]
-    JD --> RV[CapabilityResolver<br/>capability / legacy action normalization]
-    PL --> RV
-    RV --> VF[PlanVerifier + contract action gate<br/>schema + allowed action + risk/effect]
-    VF --> L{Verified action}
-    L -->|respond| M[Respond]
-    L -->|synthesize_answer| SS[Grounded synthesis LLM]
-    L -->|call_tool| N[Tool execution<br/>virtual tool dispatch]
-    L -->|call_skill| N0[execution_adapters::run_skill<br/>shared skill entry]
-    N0 --> N1[run_skill_with_runner<br/>skill dispatch]
-    RS --> N1
-    N1 -->|builtin| N1B[In-process builtin skill]
-    N1 -->|external| N1E[External skill adapter]
-    N1 -->|runner| N2[skill-runner subprocess]
-    N2 --> N3[Concrete skill binary]
-    N1B --> SR[Skill result]
-    N1E --> SR
-    N3 --> SR
-    SR -->|planner call_skill| P
-    SR -->|direct run_skill| RSK[run_skill finalize<br/>task result + journal]
-    N --> P[Loop observations<br/>failure classification]
-    SS --> P
-    P --> EV[Evidence coverage verifier<br/>required evidence + answer shape]
-    EV -->|missing evidence / repair| I
-    EV -->|enough evidence| OF[Observed-output finalizer<br/>direct answer or synthesis]
-    M --> VP[User-visible message assembly<br/>contract-bound body + optional sanitized messages]
-    CR --> VP
-    G --> VP
-    OF --> VP
-    RDC --> VP
-    SD --> VP
-    RD --> RDL[Resume discussion LLM]
-    RDL --> VP
-    VP --> Q[Final delivery / output-contract guard<br/>shape + delivery consistency]
-    Q --> R[Finalize result<br/>text + messages]
-    SD0 --> R
-    RSK --> R
-    R --> S[Channel delivery<br/>single or multi-message]
-    R --> T[Update session state / task journal<br/>persist observed facts]
-    R -. background .-> U[Long-term memory refresh]
-    R -. optional .-> V[Memory preference LLM fallback]
-```
-
-- `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is boundary context, not a separate “taxonomy engine” LLM.
-- `Intent normalizer LLM`: emits compatibility `first_layer_decision`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields. Runtime immediately derives the code-facing `AskMode` / `route_gate_kind`; route labels remain log/journal compatibility only. When schema repair marks a semantic contract as suspect, an optional contract-repair judge LLM can refine the structured contract before dispatch. Under `agent_loop_default`, eligible low-risk planner-execute classes treat normalizer fields as initial hints and let the loop decision envelope own the ordinary semantic decision.
-- `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
-- `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
-- `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
-- `Boundary post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It consumes machine fields and safety state; it should not grow into a language-specific semantic router.
-- `Task contract matrix`: keeps semantic kind, allowed action, required evidence, and response shape in one shared contract used by post-route guards, direct-answer preflight, plan verification, evidence coverage checks, and final delivery.
-- `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
-- `semantic_route_authority`: current live config uses `agent_loop_default`. For eligible low-risk buckets such as structured reads, exact path/name lists, grounded summaries, recent artifact judgments, scalar counts, status/config/log observations, workspace questions, and tool discovery, ordinary semantic authority is in the agent loop. `legacy` remains a short-term emergency rollback token; `shadow` and `agent_loop_canary` are rollout/debug modes, not the long-term architecture.
-- `AskMode / boundary dispatch`: keeps compatibility handling for clarify / chat / execute when a case is not selected for agent-loop authority. `AskMode` and `route_gate_kind` are the code-facing dispatch signals; `FirstLayerDecision` and route labels such as `AskClarify`, `Chat`, `Act`, and `ChatAct` are retained only as compatibility trace fields for logs and journals.
-- `Direct-answer candidate / optional preflight`: before a normal chat answer is sent, the runtime can reuse a grounded scalar/direct candidate when it matches current runtime facts; otherwise it can run a lightweight contract/advice-only check. It keeps pure chat in the chat gate, can promote tool-backed requests to the execute gate, or can ask one clarification when the normalizer was too weak.
-- `Chat response LLM`: compatibility direct-answer paths can still use a chat prompt, while the default low-risk pure-chat submode can finish inside the agent loop with a structured `respond` terminal intent.
-- `Planner / runtime loop`: for selected agent-loop authority and execute-gate fallback, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today; execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
-- `Agent-loop runtime context`: reuses the ask context bundle, boundary snapshot, contract, visible capabilities, memory policy output, and resolved prompt, so memory cannot override the latest user instruction.
-- `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
-- `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier and contract action gate then check visibility, allowed actions, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
-- `call_skill` / direct `run_skill`: planner `call_skill` enters `execution_adapters::run_skill`, and both planner and direct task paths converge on `run_skill_with_runner`. The shared dispatcher applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
-- `Loop observations`, `Evidence coverage`, and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop. The evidence verifier checks required evidence and answer shape before publication; recoverable failures re-enter the planner with compact attempted-method history, while terminal failures finish with a grounded result. Observation-only plans can still finish through runtime-owned structured answers, with observed-answer synthesis only when runtime cannot safely format the answer.
-- `User-visible message assembly`: pure chat can remain a single answer. Execution, clarification, retry, and skill paths may attach sanitized progress/status `messages` separate from the final deliverable body. Strict, scalar, and file-token contracts keep the final body contract-bound; raw prompts, stack traces, full tool JSON, and secrets must not be exposed unless the user explicitly asks and the output contract allows it.
-- `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
-- `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
-
-### LLM Request Flow
+### Request And Agent Loop Flow
 
 ```mermaid
 flowchart TD
-    A[Current user input] --> B[Build normalizer prompt]
-    B --> C[LLM request 1<br/>Intent normalizer]
-    C --> D[Parse JSON]
-    D --> E{Structured result}
-    E --> Er{Semantic contract repair needed?}
-    Er -->|yes| Ej[Optional contract-repair judge LLM]
-    Er -->|no| Ec[Build ask context bundle<br/>memory + attachments + recent execution]
-    Ej --> Ec
-    CM[Task contract matrix<br/>allowed actions + required evidence + response shape] --> E2
-    CM --> G0
-    CM --> Kv
-    CM --> Ev
-    CM --> R
-    Ec --> E2[Boundary post-route policy<br/>locator + contract matrix guards]
-    E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
-    E2 -->|resume discussion| Fr[Resume discussion prompt]
-    E2 -->|resume execution| H
-    E2 -->|runtime-grounded scalar/direct candidate| Gd[Grounded direct candidate<br/>no extra LLM]
-    E2 -->|ordinary eligible ask| H[Build agent-loop runtime context]
-    E2 -->|rollback / non-eligible / release-gated| Bd{Boundary dispatch<br/>compatibility path}
-    Bd -->|route_gate_kind=clarify| F[Clarify question]
-    Bd -->|route_gate_kind=chat| G0[Direct-answer candidate / optional preflight<br/>runtime evidence + contract check]
-    G0 -->|grounded candidate| VP
-    G0 -->|direct| G[Build direct-answer chat prompt]
-    G0 -->|clarify| F
-    G0 -->|promote to execute| H
-    Bd -->|route_gate_kind=execute| H
-    SK[Skill registry + generated skill docs<br/>planner capabilities] --> H
-    SK --> Kr
-    G --> Ic[Next LLM request<br/>Chat response]
-    Fr --> Ir[Next LLM request<br/>Resume discussion]
-    H --> H0{Narrow deterministic<br/>observation contract?}
-    H0 -->|yes| Jd[Runtime-built observation plan<br/>no planner LLM]
-    H0 -->|no| Ip[Next LLM request+<br/>Planner per round]
-    Ip --> J[Parse plan steps]
-    J --> Kr[CapabilityResolver<br/>call_capability -> concrete action]
-    Jd --> Kr
-    Kr --> Kv[PlanVerifier + contract action gate<br/>schema + allowed action + risk/effect]
-    Kv --> K{Verified step type}
-    K -->|respond| L[Respond text]
-    K -->|call_tool| M[Execute tool<br/>virtual tool dispatch]
-    K -->|call_skill| Ma[execution_adapters::run_skill<br/>shared skill entry]
-    Ma --> Ms[run_skill_with_runner<br/>skill dispatch]
-    Ms -->|builtin| Msb[In-process builtin skill]
-    Ms -->|external| Mse[External skill adapter]
-    Ms -->|runner| Msr[skill-runner subprocess]
-    Msr --> Msbinary[Concrete skill binary]
-    K -->|synthesize_answer| N[Synthesis LLM from evidence]
-    M --> O[Record loop observations<br/>failure/progress state]
-    Msb --> O
-    Mse --> O
-    Msbinary --> O
+    A[Channel / UI / API request] --> B[POST /v1/tasks]
+    B --> C[Persist task + queue]
+    C --> D[worker_once claims task]
+    D --> E{Task kind}
+    E -->|run_skill| RS[Direct run_skill path]
+    E -->|ask| F[Resolve identity + session + active task]
+    F --> G[Intent normalizer<br/>structured hint only]
+    G --> H[Ask context bundle<br/>memory + attachments + recent execution]
+    H --> I[Boundary guards<br/>locator + contract + safety + budget + compat]
+    I -->|ordinary eligible work| J[Agent-loop semantic authority]
+    I -->|schedule / clarify / direct / rollback| K[Boundary-owned finalize path]
+    J --> L{Loop round}
+    L -->|deterministic observation contract| M[Runtime-built observation plan]
+    L -->|general work| N[Planner LLM<br/>call_capability preferred]
+    M --> O[CapabilityResolver]
     N --> O
-    O --> Ev[Evidence coverage check<br/>required evidence + answer shape]
-    Ev --> P{Need another planner round?}
-    P -->|yes / missing evidence / repair| H
-    P -->|no / enough evidence| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
-    L --> VP[User-visible message assembly<br/>contract-bound body + optional sanitized messages]
-    Q --> VP
-    Ic --> VP
-    Ir --> VP
-    F --> VP
-    Fs --> VP
-    Gd --> VP
-    VP --> R[Final delivery / output-contract guard]
-    R --> S[Finalize / user-visible reply]
-    S -. optional background .-> T[Long-term summary LLM]
-    S -. optional background .-> U[Memory preference extraction LLM]
+    O --> P[PlanVerifier<br/>visibility + args + risk + effect + contract]
+    P --> Q{Verified step}
+    Q -->|respond| R[Terminal response]
+    Q -->|synthesize_answer| S[Grounded synthesis]
+    Q -->|call_tool| T[Tool execution]
+    Q -->|call_skill| U[Shared skill dispatch]
+    RS --> U
+    T --> V[Observed result]
+    U --> V
+    S --> V
+    V --> W[Evidence coverage + answer-shape check]
+    W -->|repair / missing evidence| J
+    W -->|complete| X[Observed-output finalizer]
+    R --> Y[User-visible message assembly]
+    K --> Y
+    X --> Y
+    Y --> Z[Output-contract guard + task result]
+    Z --> AA[Channel delivery]
+    Z --> AB[Journal + session update]
+    Z -. optional .-> AC[Background memory refresh]
 ```
 
-- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer. Under `agent_loop_default`, its route fields are initial hints for eligible ordinary semantic classes rather than the final semantic authority. If schema normalization flags a semantic contract that cannot be safely repaired deterministically, an optional contract-repair judge LLM can run before the ask context bundle is dispatched.
-- This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
-- `Build chat prompt / agent-loop runtime context`: combines mode, session state, boundary snapshot, working context, visible capabilities, and output contract for follow-on requests. The full planner prompt is only needed when the current loop round actually calls the planner LLM.
-- `Task contract matrix`: shares the same semantic kind, allowed action, required evidence, and response-shape contract across post-route policy, direct-answer preflight, plan verification, evidence coverage checks, final delivery, and generated NL evaluations.
-- `Skill registry + generated skill docs`: planner prompts and resolver mappings are built from enabled skill views, generated interface documents, and `planner_capabilities`, so skill capability growth should be data/contract driven.
-- `Chat-gate candidate / preflight`: the chat gate may reuse a runtime-grounded direct candidate or run a lightweight preflight LLM before the chat reply is sent. If the request is confirmed as direct answer, chat response runs and finalizes; if it detects missing required information, the request becomes clarification; if it detects real tool/workspace/system evidence is needed, it is promoted into the execute gate.
-- `semantic_route_authority`: current config sets `agent_loop_default`, which selects any eligible low-risk bucket instead of a single canary token. Non-eligible, high-risk, delivery-gated, or release-gated cases stay on compatibility dispatch until their deletion gates pass.
-- `Execute gate / agent loop`: usually uses one-or-more **planner** calls per loop round; narrow deterministic observation contracts can skip the planner LLM for that round and emit runtime-built observation steps instead. Planner JSON steps are `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Prefer `call_capability`; `call_tool` and `call_skill` remain compatible direct actions. `AskMode` finalization style controls whether the execution result is returned plainly or chat-wrapped.
-- `CapabilityResolver / PlanVerifier`: `call_capability` is normalized into the current tool/skill implementation before execution. The verifier and contract action gate block unavailable capabilities, disallowed actions, missing required fields, risk-budget violations, and unsafe mutation plans before the executor sees them.
-- `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
-- `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
-- `Evidence coverage / observed-output finalizer`: observations must satisfy the contract's required evidence and answer shape before publication. If a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
-- `User-visible message assembly`: pure chat replies can pass through without an extra progress block. Clarification and execution paths can include sanitized progress/status messages, but the final body remains governed by the output contract and should not surface raw tool JSON, prompts, stack traces, or secrets unless explicitly requested and allowed.
-- `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
-- `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
+- `POST /v1/tasks`: channel daemons, the browser UI, and HTTP callers converge on the same persisted task queue.
+- `Task kind`: `kind=ask` enters the agent-capable natural-language path; `kind=run_skill` bypasses normalizer and planner and uses the shared skill dispatcher directly.
+- `Intent normalizer`: produces structured hints and compatibility trace fields. It is not the final semantic owner for ordinary eligible work.
+- `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
+- `Agent-loop semantic authority`: ordinary eligible work enters the loop, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
+- `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
+- `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
+- `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
+- `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
+- `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
+
+### Planner, LLM, And Capability Flow
+
+```mermaid
+flowchart TD
+    A[User turn] --> B[Normalizer prompt]
+    B --> C[LLM: structured route hint]
+    C --> D[Parse schema fields]
+    D --> E[Ask context bundle]
+    E --> F[Boundary guards<br/>machine fields only]
+    F -->|ordinary eligible| G[Agent-loop context]
+    F -->|compat/direct/schedule| H[Compatibility finalization path]
+    G --> I{Round source}
+    I -->|runtime can prove plan| J[Deterministic plan]
+    I -->|needs reasoning| K[LLM: planner round]
+    K --> L[Plan JSON steps]
+    J --> M[CapabilityResolver]
+    L --> M
+    N[Skill registry<br/>planner_capabilities] --> M
+    O[Generated INTERFACE prompts] --> K
+    M --> P[PlanVerifier<br/>schema + visibility + risk + effect]
+    P --> Q{Step}
+    Q -->|call_capability| R[Resolved tool or skill]
+    Q -->|call_tool| S[Tool executor]
+    Q -->|call_skill| T[Skill dispatcher]
+    R --> S
+    R --> T
+    T --> U{Skill kind}
+    U -->|builtin| V[In-process builtin]
+    U -->|external| W[External adapter]
+    U -->|runner| X[skill-runner subprocess]
+    X --> Y[Concrete skill binary<br/>single-line JSON protocol]
+    S --> Z[Observation]
+    V --> Z
+    W --> Z
+    Y --> Z
+    Q -->|synthesize_answer| ZA[LLM: grounded synthesis]
+    Q -->|respond| ZB[Terminal response]
+    ZA --> ZC[Evidence coverage]
+    Z --> ZC
+    ZC -->|repair needed| G
+    ZC -->|complete| ZD[Observed-output finalizer]
+    ZB --> ZE[Output-contract guard]
+    ZD --> ZE
+    H --> ZE
+    ZE --> ZF[Persist result + deliver]
+```
+
+- `Normalizer prompt`: lets an LLM read the user turn and emit schema-backed fields. Runtime consumes those fields as hints and contracts rather than matching user phrases.
+- `Planner prompt`: is built only for loop rounds that need model reasoning. Narrow observation contracts can use runtime-built plans without an extra planner call.
+- `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
+- `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
+- `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs.
+- `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
+- `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
+- `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
+- `Compatibility finalization`: remains for non-eligible, high-risk, schedule, delivery, and rollback cases, but it is not the ordinary semantic decision path.
 
 ## Natural Language Contract Boundary
 
@@ -357,58 +270,41 @@ Useful code and config entry points:
 - `crates/clawd/src/memory/indexing.rs`
 - `crates/clawd/src/memory/api.rs`
 
-### Memory Flow
+### Background, Resume, And Memory Flow
 
 ```mermaid
 flowchart TD
-    User[User request] --> Ingress[Channel / UI / POST /v1/tasks]
-    Ingress --> Identity[Resolve identity<br/>user_key + user_id + chat_id]
-    Identity --> Session[(conversation_states<br/>aliases + active task anchors)]
-    Identity --> Worker[worker_once]
-    Worker --> Kind{Task kind}
-    Kind -->|run_skill| DirectSkill[Direct run_skill path]
-    Kind -->|ask| Snapshot[Session snapshot + local surface hints]
-    Session --> Snapshot
-    Snapshot --> Normalizer[Intent normalizer]
-    Normalizer --> Bundle[Ask context bundle]
-    Bundle --> Recall[Structured memory recall]
-    Index[(memory_retrieval_index)] --> Recall
-    Stores[(memories<br/>user_preferences<br/>memory_facts<br/>long_term_memories)] --> Index
-    Recall --> Safety[Safety / expiry / status filter]
-    Safety --> Policy[Memory use policy<br/>route / planner / chat / skill]
-    Policy --> RouteCtx[Route memory context]
-    Policy --> PlannerCtx[Planner memory context]
-    Policy --> ChatCtx[Chat memory context]
-    Policy --> SkillArgs[Skill _memory args]
-    SkillArgs --> SkillPolicy[Registry memory_policy crop]
-    RouteCtx --> PostRoute[Post-route policy<br/>contract + locator guards]
-    PlannerCtx --> Runtime[Planner / runtime loop]
-    ChatCtx --> Chat[Direct chat answer]
-    SkillPolicy --> SkillRuntime[Shared skill dispatch<br/>builtin / external / runner]
-    PostRoute --> Runtime
-    PostRoute --> Chat
-    DirectSkill --> SkillRuntime
-    SkillRuntime --> Runtime
-    Runtime --> Visible[User-visible answer]
-    Chat --> Visible
-    Visible --> Finalize[Finalize task result + journal]
-    Finalize --> RecentWrite[Short-term write filter]
-    RecentWrite --> Memories[(memories)]
-    Finalize -. optional .-> MemIntent[Structured memory intent extractor]
-    MemIntent --> Validate[Runtime enum / scope / confidence / safety validation]
-    Validate --> Prefs[(user_preferences)]
-    Validate --> Facts[(memory_facts)]
-    Finalize -. optional .-> Summary[Long-term summary refresh]
-    Summary --> LongTerm[(long_term_memories)]
-    Facts --> Conflict[Conflict-group supersede / expire]
-    Conflict --> Facts
-    Memories --> Reindex[Index update / reindex_on_startup]
-    Prefs --> Reindex
-    Facts --> Reindex
-    LongTerm --> Reindex
-    Reindex --> Index
-    Policy --> Trace[Task journal memory_trace]
-    Runtime --> Trace
+    A[Foreground task submit] --> B[Persist task record]
+    B --> C[Worker claim + lease]
+    C --> D[Heartbeat + timeout policy]
+    D --> E[Agent loop round]
+    E --> F[Journal checkpoint<br/>decision + observations + evidence]
+    F --> G{Task state}
+    G -->|needs more loop work| E
+    G -->|long tool / provider wait| H[Waiting or background state]
+    G -->|budget nearly spent| I[Soft stop checkpoint]
+    G -->|complete| J[Finalize visible result]
+    H --> K[Poll / wake / user follow-up]
+    I --> K
+    K --> L[Reload journal + session anchors]
+    L --> E
+    J --> M[Task result + channel delivery]
+    J --> N[Session update<br/>aliases + active task anchors]
+    J --> O[Task journal trace]
+    J -. optional .-> P[Structured memory intent extractor]
+    P --> Q[Runtime validation<br/>enum + scope + confidence + safety]
+    Q --> R[(user_preferences)]
+    Q --> S[(memory_facts)]
+    J -. optional .-> T[Short-term memory write]
+    T --> U[(memories)]
+    J -. optional .-> V[Long-term summary refresh]
+    V --> W[(long_term_memories)]
+    R --> X[Index update]
+    S --> X
+    U --> X
+    W --> X
+    X --> Y[(memory_retrieval_index)]
+    O --> Z[memory_trace + route/loop evidence]
 ```
 
 ## Main Components

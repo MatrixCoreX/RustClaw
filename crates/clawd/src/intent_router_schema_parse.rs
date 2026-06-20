@@ -110,7 +110,7 @@ pub(super) fn parse_target_task_policy(s: &str) -> Option<TargetTaskPolicy> {
 pub(super) fn infer_missing_turn_type_from_policy(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -119,7 +119,7 @@ pub(super) fn infer_missing_turn_type_from_policy(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || matches!(first_layer_decision, FirstLayerDecision::Clarify)
+        || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
     {
         return turn_type;
     }
@@ -444,7 +444,7 @@ fn parse_list_selector_sort_by(raw: &str) -> Option<String> {
     let normalized = raw.trim().to_ascii_lowercase();
     matches!(
         normalized.as_str(),
-        "name" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+        "name" | "name_desc" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
     )
     .then_some(normalized)
 }

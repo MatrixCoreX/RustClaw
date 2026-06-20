@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,12 @@ COUNTER_FIELDS = (
     "rollout_switch_counts",
     "rollout_event_counts",
     "rollout_reason_counts",
+    "stop_signal_counts",
+    "guard_signal_counts",
+    "round_owner_layer_counts",
+    "execution_surface_owner_counts",
+    "repair_signal_status_counts",
+    "validation_status_counts",
     "configured_migration_class_counts",
     "eligible_migration_class_counts",
     "selected_migration_class_counts",
@@ -55,6 +62,7 @@ COUNTER_FIELDS = (
 )
 CLARIFICATION_FINAL_STATUS_KEYS = {"clarify", "clarification_requested"}
 VERIFIER_BLOCK_KEYS = {"False", "false"}
+CASE_FILE_RE = re.compile(r"^turn_(?P<turn>\d+)_case_(?P<case>\d+)\.json$")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -76,6 +84,16 @@ def get_path(obj: dict[str, Any], *keys: str) -> Any:
 
 def dict_value(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def route_legacy_first_layer(route: Any) -> str:
+    if not isinstance(route, dict):
+        return ""
+    return str(
+        route.get("legacy_first_layer_decision")
+        or route.get("first_layer_decision")
+        or ""
+    )
 
 
 def safe_int(value: Any) -> int:
@@ -330,6 +348,72 @@ def turn_json_paths(run_dir: Path) -> list[Path]:
     return sorted(run_dir.glob("turn*_case_*.json"))
 
 
+def turn_case_id(path: Path) -> int | None:
+    match = CASE_FILE_RE.match(path.name)
+    if not match:
+        return None
+    return int(match.group("case"))
+
+
+def turn_file_order(path: Path, run_order: dict[Path, int]) -> tuple[int, str, int, str]:
+    match = CASE_FILE_RE.match(path.name)
+    turn_number = int(match.group("turn")) if match else 0
+    parent = path.parent.resolve()
+    return (
+        run_order.get(parent, -1),
+        parent.name,
+        turn_number,
+        path.name,
+    )
+
+
+def latest_valid_case_paths(run_dirs: list[Path]) -> tuple[list[Path], dict[str, Any]]:
+    run_order = {run_dir.resolve(): index for index, run_dir in enumerate(run_dirs)}
+    latest: dict[int, tuple[tuple[int, str, int, str], Path]] = {}
+    skipped_parse_errors: list[dict[str, str]] = []
+    ignored_without_case_id = 0
+    for run_dir in run_dirs:
+        for path in turn_json_paths(run_dir):
+            case_id = turn_case_id(path)
+            if case_id is None:
+                ignored_without_case_id += 1
+                continue
+            obj = load_json(path)
+            if obj.get("_parse_error"):
+                skipped_parse_errors.append(
+                    {
+                        "run_dir": str(run_dir),
+                        "file": path.name,
+                        "error": str(obj["_parse_error"]),
+                    }
+                )
+                continue
+            order = turn_file_order(path, run_order)
+            current = latest.get(case_id)
+            if current is None or order > current[0]:
+                latest[case_id] = (order, path)
+    selected = [latest[case_id][1] for case_id in sorted(latest)]
+    selected_run_counts: Counter[str] = Counter(path.parent.name for path in selected)
+    case_ids = sorted(latest)
+    missing_case_ids: list[int] = []
+    if case_ids:
+        missing_case_ids = [
+            case_id for case_id in range(case_ids[0], case_ids[-1] + 1)
+            if case_id not in latest
+        ]
+    return selected, {
+        "mode": "latest_valid_case_id",
+        "case_count": len(case_ids),
+        "min_case_id": case_ids[0] if case_ids else None,
+        "max_case_id": case_ids[-1] if case_ids else None,
+        "missing_case_ids": missing_case_ids,
+        "selected_run_dir_counts": dict(sorted(selected_run_counts.items())),
+        "skipped_parse_error_count": len(skipped_parse_errors),
+        "skipped_parse_error_examples": skipped_parse_errors[:10],
+        "ignored_without_case_id": ignored_without_case_id,
+    }
+
+
 def step_results(trace: dict[str, Any]) -> list[dict[str, Any]]:
     steps = trace.get("step_results")
     if not isinstance(steps, list):
@@ -344,8 +428,76 @@ def trace_rounds(trace: dict[str, Any]) -> list[dict[str, Any]]:
     return [round_item for round_item in rounds if isinstance(round_item, dict)]
 
 
+def task_observations(trace: dict[str, Any]) -> list[dict[str, Any]]:
+    observations = trace.get("task_observations")
+    if not isinstance(observations, list):
+        return []
+    return [item for item in observations if isinstance(item, dict)]
+
+
+def journal_rollout_items(summary: dict[str, Any], trace: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in (summary.get("rollout_attribution"), trace.get("rollout_attribution")):
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            fingerprint = json.dumps(item, sort_keys=True, ensure_ascii=True)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            items.append(item)
+    return items
+
+
+def first_trace_round_value(trace: dict[str, Any], key: str) -> str:
+    for round_item in trace_rounds(trace):
+        value = round_item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def detected_budget_profile(
+    summary: dict[str, Any],
+    trace: dict[str, Any],
+    fallback: str,
+) -> str:
+    round_budget = first_trace_round_value(trace, "budget_profile")
+    if round_budget:
+        return round_budget
+    for item in journal_rollout_items(summary, trace):
+        value = item.get("budget_profile")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    context_summary = summary.get("context_bundle_summary")
+    return (
+        machine_token_value(context_summary, "budget_profile")
+        or machine_token_value(context_summary, "execution_budget")
+        or machine_token_value(context_summary, "route_budget")
+        or fallback
+    )
+
+
+def step_output_json(step: dict[str, Any]) -> dict[str, Any]:
+    output = step.get("output_excerpt")
+    if not isinstance(output, str) or not output.strip():
+        return {}
+    try:
+        value = json.loads(output)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def planner_first_action(trace: dict[str, Any]) -> str:
     for round_item in trace_rounds(trace):
+        for key in ("first_action_capability_ref", "first_action_decision"):
+            value = round_item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
         plan = dict_value(round_item.get("plan_result"))
         steps = plan.get("steps")
         if not isinstance(steps, list):
@@ -369,6 +521,36 @@ def bool_token(value: Any) -> str:
     if value is None:
         return "missing"
     return str(value)
+
+
+REPEAT_GUARD_SIGNALS = {
+    "repeat_completed_action",
+    "repeat_action_limit",
+    "registry_idempotency_repeat_completed_action",
+    "registry_idempotency_repeat_action_limit",
+}
+GUARD_SIGNALS = REPEAT_GUARD_SIGNALS | {
+    "max_tool_calls",
+    "max_rounds",
+    "multi_round_disabled",
+    "no_actions",
+    "no_progress",
+}
+
+
+def normalized_signal(value: Any) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def guard_signal(value: Any) -> str:
+    signal = normalized_signal(value)
+    if signal in GUARD_SIGNALS:
+        return signal
+    return ""
+
+
+def repeat_action_guard_count(counts: Counter[str] | dict[str, int]) -> int:
+    return sum(safe_int(counts.get(signal)) for signal in REPEAT_GUARD_SIGNALS)
 
 
 def count_tool_calls(steps: list[dict[str, Any]]) -> tuple[int, int]:
@@ -514,8 +696,11 @@ def summarize_run(
     provider: str = "unknown",
     vendor: str = "unknown",
     budget_profile: str = "unknown",
+    paths: list[Path] | None = None,
+    attribution_run_dirs: list[Path] | None = None,
+    source_run_dir: str | None = None,
 ) -> dict[str, Any]:
-    paths = turn_json_paths(run_dir)
+    paths = turn_json_paths(run_dir) if paths is None else sorted(paths)
     status_counts: Counter[str] = Counter()
     final_status_counts: Counter[str] = Counter()
     first_layer_counts: Counter[str] = Counter()
@@ -525,6 +710,12 @@ def summarize_run(
     rollout_switch_counts: Counter[str] = Counter()
     rollout_event_counts: Counter[str] = Counter()
     rollout_reason_counts: Counter[str] = Counter()
+    stop_signal_counts: Counter[str] = Counter()
+    guard_signal_counts: Counter[str] = Counter()
+    round_owner_layer_counts: Counter[str] = Counter()
+    execution_surface_owner_counts: Counter[str] = Counter()
+    repair_signal_status_counts: Counter[str] = Counter()
+    validation_status_counts: Counter[str] = Counter()
     provider_counts: Counter[str] = Counter()
     vendor_counts: Counter[str] = Counter()
     budget_profile_counts: Counter[str] = Counter()
@@ -585,22 +776,23 @@ def summarize_run(
 
         status_counts[str(data.get("status") or "unknown")] += 1
         final_status_counts[str(summary.get("final_status") or "unknown")] += 1
-        first_layer_counts[str(route.get("first_layer_decision") or "unknown")] += 1
+        first_layer_counts[route_legacy_first_layer(route) or "unknown"] += 1
         route_gate_counts[str(route.get("route_gate_kind") or "unknown")] += 1
         failure_attribution_counts[str(summary.get("final_failure_attribution") or "none")] += 1
         if verifier:
             verifier_pass_counts[str(verifier.get("pass"))] += 1
         else:
             verifier_pass_counts["missing"] += 1
+        final_stop_signal = normalized_signal(summary.get("final_stop_signal")) or normalized_signal(
+            trace.get("final_stop_signal")
+        )
+        if final_stop_signal:
+            stop_signal_counts[final_stop_signal] += 1
+            if signal := guard_signal(final_stop_signal):
+                guard_signal_counts[signal] += 1
         provider_counts[provider] += 1
         vendor_counts[vendor] += 1
-        context_summary = summary.get("context_bundle_summary")
-        detected_budget = (
-            machine_token_value(context_summary, "budget_profile")
-            or machine_token_value(context_summary, "execution_budget")
-            or machine_token_value(context_summary, "route_budget")
-            or budget_profile
-        )
+        detected_budget = detected_budget_profile(summary, trace, budget_profile)
         budget_profile_counts[detected_budget] += 1
         language_counts[language_bucket(summary.get("input_text"))] += 1
         semantic_kind_counts[str(contract.get("semantic_kind") or "unknown")] += 1
@@ -623,75 +815,114 @@ def summarize_run(
             for switch in switches:
                 if isinstance(switch, str) and switch.strip():
                     rollout_switch_counts[switch.strip()] += 1
-        attribution = summary.get("rollout_attribution")
-        if isinstance(attribution, list):
-            for item in attribution:
-                if not isinstance(item, dict):
-                    continue
-                event = item.get("event")
-                reason = item.get("reason_code")
-                if isinstance(event, str) and event.strip():
-                    rollout_event_counts[event.strip()] += 1
-                if isinstance(reason, str) and reason.strip():
-                    rollout_reason_counts[reason.strip()] += 1
-                boundary_context = dict_value(item.get("boundary_context"))
-                boundary_budget = dict_value(boundary_context.get("budget"))
-                semantic_routing = dict_value(boundary_context.get("semantic_routing"))
-                configured_migration_class_counts[
-                    str(boundary_budget.get("agent_decides_migration_class") or "unknown")
-                ] += 1
-                eligible_migration_class_counts[
-                    str(boundary_budget.get("eligible_migration_class") or "unknown")
-                ] += 1
-                selected_migration_class_counts[
-                    str(boundary_budget.get("selected_migration_class") or "unknown")
-                ] += 1
-                agent_loop_eligibility_bucket_counts[
-                    str(boundary_budget.get("agent_loop_eligibility_bucket") or "unknown")
-                ] += 1
-                agent_loop_eligibility_blocked_reason_counts[
-                    str(
-                        boundary_budget.get("agent_loop_eligibility_blocked_reason")
-                        or "unknown"
-                    )
-                ] += 1
-                agent_loop_authority_enabled_counts[
-                    bool_token(semantic_routing.get("agent_loop_authority_enabled"))
-                ] += 1
-                semantic_routing_activation_state_counts[
-                    str(semantic_routing.get("activation_state") or "not_recorded")
-                ] += 1
-                semantic_routing_authority_counts[
-                    str(semantic_routing.get("ordinary_semantic_authority") or "not_recorded")
-                ] += 1
-                semantic_routing_chosen_authority_counts[
-                    str(semantic_routing.get("chosen_authority") or "not_recorded")
-                ] += 1
-                semantic_routing_runtime_default_authority_counts[
-                    str(semantic_routing.get("runtime_default_authority") or "not_recorded")
-                ] += 1
-                semantic_routing_normalizer_role_counts[
-                    str(semantic_routing.get("normalizer_role") or "not_recorded")
-                ] += 1
-                semantic_routing_post_route_role_counts[
-                    str(semantic_routing.get("post_route_role") or "not_recorded")
-                ] += 1
-                semantic_routing_direct_answer_gate_role_counts[
-                    str(semantic_routing.get("direct_answer_gate_role") or "not_recorded")
-                ] += 1
+        for round_item in trace_rounds(trace):
+            round_owner_layer_counts[
+                str(round_item.get("owner_layer") or "not_recorded")
+            ] += 1
+            stop_signal = normalized_signal(round_item.get("stop_signal"))
+            if stop_signal:
+                stop_signal_counts[stop_signal] += 1
+                if signal := guard_signal(stop_signal):
+                    guard_signal_counts[signal] += 1
+            for signal in round_item.get("repair_signals") or []:
+                if isinstance(signal, dict):
+                    repair_signal_status_counts[
+                        str(signal.get("status_code") or "not_recorded")
+                    ] += 1
+
+        validation_result = dict_value(summary.get("validation_result")) or dict_value(
+            trace.get("validation_result")
+        )
+        validation_status_counts[
+            str(validation_result.get("latest_status") or "not_recorded")
+        ] += 1
+
+        for item in journal_rollout_items(summary, trace):
+            event = item.get("event")
+            reason = item.get("reason_code")
+            if isinstance(event, str) and event.strip():
+                rollout_event_counts[event.strip()] += 1
+            if isinstance(reason, str) and reason.strip():
+                rollout_reason_counts[reason.strip()] += 1
+                if signal := guard_signal(reason):
+                    guard_signal_counts[signal] += 1
+            boundary_context = dict_value(item.get("boundary_context"))
+            boundary_budget = dict_value(boundary_context.get("budget"))
+            semantic_routing = dict_value(boundary_context.get("semantic_routing"))
+            configured_migration_class_counts[
+                str(boundary_budget.get("agent_decides_migration_class") or "unknown")
+            ] += 1
+            eligible_migration_class_counts[
+                str(boundary_budget.get("eligible_migration_class") or "unknown")
+            ] += 1
+            selected_migration_class_counts[
+                str(boundary_budget.get("selected_migration_class") or "unknown")
+            ] += 1
+            agent_loop_eligibility_bucket_counts[
+                str(boundary_budget.get("agent_loop_eligibility_bucket") or "unknown")
+            ] += 1
+            agent_loop_eligibility_blocked_reason_counts[
+                str(
+                    boundary_budget.get("agent_loop_eligibility_blocked_reason")
+                    or "unknown"
+                )
+            ] += 1
+            agent_loop_authority_enabled_counts[
+                bool_token(semantic_routing.get("agent_loop_authority_enabled"))
+            ] += 1
+            semantic_routing_activation_state_counts[
+                str(semantic_routing.get("activation_state") or "not_recorded")
+            ] += 1
+            semantic_routing_authority_counts[
+                str(semantic_routing.get("ordinary_semantic_authority") or "not_recorded")
+            ] += 1
+            semantic_routing_chosen_authority_counts[
+                str(semantic_routing.get("chosen_authority") or "not_recorded")
+            ] += 1
+            semantic_routing_runtime_default_authority_counts[
+                str(semantic_routing.get("runtime_default_authority") or "not_recorded")
+            ] += 1
+            semantic_routing_normalizer_role_counts[
+                str(semantic_routing.get("normalizer_role") or "not_recorded")
+            ] += 1
+            semantic_routing_post_route_role_counts[
+                str(semantic_routing.get("post_route_role") or "not_recorded")
+            ] += 1
+            semantic_routing_direct_answer_gate_role_counts[
+                str(semantic_routing.get("direct_answer_gate_role") or "not_recorded")
+            ] += 1
 
         steps = step_results(trace)
         for step in steps:
-            capability = step.get("requested_capability") or step.get("skill")
+            capability = (
+                step.get("resolved_capability")
+                or step.get("requested_capability")
+                or step.get("resolved_tool_or_skill")
+                or step.get("skill")
+            )
             if isinstance(capability, str) and capability.strip():
                 capability_counts[capability.strip()] += 1
+            owner = step.get("execution_surface_owner") or step_output_json(step).get(
+                "execution_surface_owner"
+            )
+            if isinstance(owner, str) and owner.strip():
+                execution_surface_owner_counts[owner.strip()] += 1
+            for key in ("error_kind", "failure_attribution"):
+                if signal := guard_signal(step.get(key)):
+                    guard_signal_counts[signal] += 1
+        for observation in task_observations(trace):
+            owner = observation.get("execution_surface_owner")
+            if isinstance(owner, str) and owner.strip():
+                execution_surface_owner_counts[owner.strip()] += 1
         tool_calls, external_tool_calls = count_tool_calls(steps)
         total_tool_calls += tool_calls
         total_external_tool_calls += external_tool_calls
 
     total_turns = len(paths)
     succeeded = status_counts.get("succeeded", 0)
-    attribution_counts = load_attribution_counts(run_dir)
+    attribution_counts: Counter[str] = Counter()
+    for attribution_run_dir in attribution_run_dirs or [run_dir]:
+        attribution_counts.update(load_attribution_counts(attribution_run_dir))
     by_prompt = dict(sorted(by_prompt_totals.items()))
     provider_attempt_count = sum_by_prompt_field(by_prompt, "provider_attempt_count")
     provider_retry_count = sum_by_prompt_field(by_prompt, "provider_retry_count")
@@ -700,7 +931,7 @@ def summarize_run(
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_run_dir": str(run_dir),
+        "source_run_dir": source_run_dir or str(run_dir),
         "turns_total": total_turns,
         "parse_errors": parse_errors,
         "pass_rate": ratio(succeeded, total_turns),
@@ -724,6 +955,14 @@ def summarize_run(
         "rollout_switch_counts": dict(sorted(rollout_switch_counts.items())),
         "rollout_event_counts": dict(sorted(rollout_event_counts.items())),
         "rollout_reason_counts": dict(sorted(rollout_reason_counts.items())),
+        "stop_signal_counts": dict(sorted(stop_signal_counts.items())),
+        "guard_signal_counts": dict(sorted(guard_signal_counts.items())),
+        "round_owner_layer_counts": dict(sorted(round_owner_layer_counts.items())),
+        "execution_surface_owner_counts": dict(
+            sorted(execution_surface_owner_counts.items())
+        ),
+        "repair_signal_status_counts": dict(sorted(repair_signal_status_counts.items())),
+        "validation_status_counts": dict(sorted(validation_status_counts.items())),
         "configured_migration_class_counts": dict(
             sorted(configured_migration_class_counts.items())
         ),
@@ -783,6 +1022,8 @@ def summarize_run(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "repeat_action_guard_hit_count": repeat_action_guard_count(guard_signal_counts),
+            "no_progress_stop_count": safe_int(guard_signal_counts.get("no_progress")),
         },
     }
 
@@ -792,7 +1033,24 @@ def summarize_run_dirs(
     provider: str = "unknown",
     vendor: str = "unknown",
     budget_profile: str = "unknown",
+    dedupe_latest_case: bool = False,
 ) -> dict[str, Any]:
+    if dedupe_latest_case:
+        selected_paths, case_dedupe = latest_valid_case_paths(run_dirs)
+        unique_run_dirs = sorted({path.parent for path in selected_paths})
+        result = summarize_run(
+            run_dirs[0],
+            provider=provider,
+            vendor=vendor,
+            budget_profile=budget_profile,
+            paths=selected_paths,
+            attribution_run_dirs=unique_run_dirs,
+            source_run_dir="multiple",
+        )
+        result["source_run_dirs"] = [str(run_dir) for run_dir in run_dirs]
+        result["case_dedupe"] = case_dedupe
+        return result
+
     if len(run_dirs) == 1:
         return summarize_run(
             run_dirs[0],
@@ -854,6 +1112,14 @@ def summarize_run_dirs(
         safe_int(get_path(summary, "execution", "external_tool_call_count"))
         for summary in summaries
     )
+    repeat_action_guard_hit_count = sum(
+        safe_int(get_path(summary, "execution", "repeat_action_guard_hit_count"))
+        for summary in summaries
+    )
+    no_progress_stop_count = sum(
+        safe_int(get_path(summary, "execution", "no_progress_stop_count"))
+        for summary in summaries
+    )
     status_counts = merge_counter_field(summaries, "status_counts")
     by_prompt = merge_by_prompt(summaries)
     result: dict[str, Any] = {
@@ -886,6 +1152,8 @@ def summarize_run_dirs(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "repeat_action_guard_hit_count": repeat_action_guard_hit_count,
+            "no_progress_stop_count": no_progress_stop_count,
         },
     }
     for key in COUNTER_FIELDS:
@@ -893,11 +1161,13 @@ def summarize_run_dirs(
     return result
 
 
-def default_output_path(run_dirs: list[Path]) -> Path:
+def default_output_path(run_dirs: list[Path], dedupe_latest_case: bool = False) -> Path:
     if len(run_dirs) == 1:
         name = f"{run_dirs[0].name}_rollout_metrics.json"
     else:
         name = f"multi_{len(run_dirs)}_{run_dirs[0].name}_to_{run_dirs[-1].name}_rollout_metrics.json"
+    if dedupe_latest_case:
+        name = name.removesuffix(".json") + "_dedupe_latest_case.json"
     return Path("logs/agent_rollout_metrics") / name
 
 
@@ -932,20 +1202,42 @@ def main() -> int:
     parser.add_argument("--max-verifier-block-rate", type=float, default=0.01)
     parser.add_argument("--max-avg-llm-calls-rise", type=float, default=0.15)
     parser.add_argument("--max-avg-elapsed-rise", type=float, default=0.20)
+    parser.add_argument(
+        "--dedupe-latest-case",
+        action="store_true",
+        help="For rerun shards, keep only the latest valid turn per numeric case id.",
+    )
+    parser.add_argument(
+        "--expect-case-count",
+        type=int,
+        default=0,
+        help="Fail when --dedupe-latest-case finds fewer unique cases than this count.",
+    )
     args = parser.parse_args()
 
     run_dirs = [Path(run_dir).resolve() for run_dir in args.run_dirs]
     for run_dir in run_dirs:
         if not run_dir.is_dir():
             raise SystemExit(f"run dir not found: {run_dir}")
-    output = Path(args.output) if args.output else default_output_path(run_dirs)
+    output = (
+        Path(args.output)
+        if args.output
+        else default_output_path(run_dirs, dedupe_latest_case=args.dedupe_latest_case)
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     result = summarize_run_dirs(
         run_dirs,
         provider=args.provider.strip() or "unknown",
         vendor=args.vendor.strip() or "unknown",
         budget_profile=args.budget_profile.strip() or "unknown",
+        dedupe_latest_case=args.dedupe_latest_case,
     )
+    if args.expect_case_count:
+        case_count = safe_int(get_path(result, "case_dedupe", "case_count"))
+        if case_count < args.expect_case_count:
+            raise SystemExit(
+                f"deduped case count {case_count} below expected {args.expect_case_count}"
+            )
     if args.baseline:
         baseline = load_json(Path(args.baseline))
         if baseline.get("_parse_error"):

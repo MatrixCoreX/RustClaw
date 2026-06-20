@@ -4,6 +4,9 @@ use std::path::{Component, Path};
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
 
+use crate::task_lifecycle::{
+    CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint, TaskLifecycleState,
+};
 use crate::{repo, AgentAction, AppState, ClaimedTask};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -76,6 +79,42 @@ impl SemanticRouteAuthority {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RegistryIdempotencyGuardScope {
+    Off,
+    SelectedAgentLoop,
+    All,
+}
+
+impl RegistryIdempotencyGuardScope {
+    fn from_token(token: &str) -> Option<Self> {
+        match token.trim() {
+            "off" => Some(Self::Off),
+            "selected_agent_loop" => Some(Self::SelectedAgentLoop),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AnswerVerifierRequiredEvidenceScope {
+    Off,
+    SelectedAgentLoop,
+    All,
+}
+
+impl AnswerVerifierRequiredEvidenceScope {
+    fn from_token(token: &str) -> Option<Self> {
+        match token.trim() {
+            "off" => Some(Self::Off),
+            "selected_agent_loop" => Some(Self::SelectedAgentLoop),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct AgentLoopGuardPolicy {
     pub(super) max_steps: usize,
@@ -86,10 +125,10 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) no_progress_limit: usize,
     pub(super) multi_round_enabled: bool,
     pub(super) answer_verifier_retry_limit: usize,
-    pub(super) answer_verifier_enforce_required: bool,
+    pub(super) answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope,
     pub(super) semantic_route_authority: SemanticRouteAuthority,
     pub(super) agent_loop_canary_bucket: String,
-    pub(super) registry_idempotency_guard: bool,
+    pub(super) registry_idempotency_guard_scope: RegistryIdempotencyGuardScope,
     pub(super) structured_evidence_required_for_selected_contracts: bool,
     pub(super) fast_read: LoopRecipeOverrides,
     pub(super) grounded_summary: LoopRecipeOverrides,
@@ -131,19 +170,76 @@ impl AgentLoopGuardPolicy {
 
     pub(super) fn enabled_rollout_switches(&self) -> Vec<&'static str> {
         let mut switches = Vec::new();
-        if self.answer_verifier_enforce_required {
-            switches.push("answer_verifier_enforce_required");
+        match self.effective_answer_verifier_required_evidence_scope() {
+            AnswerVerifierRequiredEvidenceScope::Off => {}
+            AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop
+            | AnswerVerifierRequiredEvidenceScope::All => {
+                switches.push("answer_verifier_enforce_required_scope")
+            }
         }
         if self.effective_semantic_route_authority() != SemanticRouteAuthority::Legacy {
             switches.push("semantic_route_authority");
         }
-        if self.registry_idempotency_guard {
-            switches.push("registry_idempotency_guard");
+        match self.effective_registry_idempotency_guard_scope() {
+            RegistryIdempotencyGuardScope::Off => {}
+            RegistryIdempotencyGuardScope::SelectedAgentLoop
+            | RegistryIdempotencyGuardScope::All => {
+                switches.push("registry_idempotency_guard_scope")
+            }
         }
         if self.structured_evidence_required_for_selected_contracts {
             switches.push("structured_evidence_required_for_selected_contracts");
         }
         switches
+    }
+
+    pub(super) fn effective_answer_verifier_required_evidence_scope(
+        &self,
+    ) -> AnswerVerifierRequiredEvidenceScope {
+        self.answer_verifier_enforce_required_scope
+    }
+
+    pub(super) fn answer_verifier_required_evidence_enabled_for_route(
+        &self,
+        route_result: Option<&crate::RouteResult>,
+    ) -> bool {
+        match self.effective_answer_verifier_required_evidence_scope() {
+            AnswerVerifierRequiredEvidenceScope::Off => false,
+            AnswerVerifierRequiredEvidenceScope::All => true,
+            AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop => {
+                route_result.is_some_and(|route| self.selected_agent_loop_route(route))
+            }
+        }
+    }
+
+    pub(super) fn effective_registry_idempotency_guard_scope(
+        &self,
+    ) -> RegistryIdempotencyGuardScope {
+        self.registry_idempotency_guard_scope
+    }
+
+    pub(super) fn registry_idempotency_guard_enabled_for_route(
+        &self,
+        route_result: Option<&crate::RouteResult>,
+    ) -> bool {
+        match self.effective_registry_idempotency_guard_scope() {
+            RegistryIdempotencyGuardScope::Off => false,
+            RegistryIdempotencyGuardScope::All => true,
+            RegistryIdempotencyGuardScope::SelectedAgentLoop => {
+                route_result.is_some_and(|route| self.selected_agent_loop_route(route))
+            }
+        }
+    }
+
+    fn selected_agent_loop_route(&self, route: &crate::RouteResult) -> bool {
+        if !self.uses_agent_loop_semantic_authority()
+            || route.risk_ceiling == crate::RiskCeiling::High
+            || route.schedule_kind != crate::ScheduleKind::None
+        {
+            return false;
+        }
+        let eligible = super::migration_class::agent_decides_eligible_migration_class(route);
+        self.selected_migration_class_for_eligible(eligible) != "none"
     }
 
     pub(super) fn budget_profile_for_context(
@@ -346,38 +442,10 @@ fn parse_agent_loop_canary_bucket(root: &TomlValue) -> String {
         "low_risk_log_observation",
         "low_risk_workspace_question",
         "low_risk_tool_discovery",
+        "low_risk_single_file_delivery",
     ];
     let mut cursor = root;
     for key in ["agent", "loop_guard", "agent_loop_canary_bucket"] {
-        let Some(next) = cursor.get(key) else {
-            return parse_legacy_agent_decides_migration_class(root);
-        };
-        cursor = next;
-    }
-    let value = cursor.as_str().unwrap_or("none").trim();
-    if ALLOWED.contains(&value) {
-        value.to_string()
-    } else {
-        "none".to_string()
-    }
-}
-
-fn parse_legacy_agent_decides_migration_class(root: &TomlValue) -> String {
-    const ALLOWED: &[&str] = &[
-        "none",
-        "bound_path_summary",
-        "structured_field_read",
-        "exact_path_list",
-        "recent_artifacts_judgment",
-        "scalar_count",
-        "low_risk_status_observation",
-        "low_risk_config_read",
-        "low_risk_log_observation",
-        "low_risk_workspace_question",
-        "low_risk_tool_discovery",
-    ];
-    let mut cursor = root;
-    for key in ["agent", "loop_guard", "agent_decides_migration_class"] {
         let Some(next) = cursor.get(key) else {
             return "none".to_string();
         };
@@ -397,6 +465,30 @@ fn parse_semantic_route_authority(root: &TomlValue) -> Option<SemanticRouteAutho
         cursor = cursor.get(key)?;
     }
     SemanticRouteAuthority::from_token(cursor.as_str().unwrap_or("legacy"))
+}
+
+fn parse_answer_verifier_required_evidence_scope(
+    root: &TomlValue,
+) -> Option<AnswerVerifierRequiredEvidenceScope> {
+    let mut cursor = root;
+    for key in [
+        "agent",
+        "loop_guard",
+        "answer_verifier_enforce_required_scope",
+    ] {
+        cursor = cursor.get(key)?;
+    }
+    AnswerVerifierRequiredEvidenceScope::from_token(cursor.as_str().unwrap_or("off"))
+}
+
+fn parse_registry_idempotency_guard_scope(
+    root: &TomlValue,
+) -> Option<RegistryIdempotencyGuardScope> {
+    let mut cursor = root;
+    for key in ["agent", "loop_guard", "registry_idempotency_guard_scope"] {
+        cursor = cursor.get(key)?;
+    }
+    RegistryIdempotencyGuardScope::from_token(cursor.as_str().unwrap_or("off"))
 }
 
 fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
@@ -441,18 +533,13 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         .ok()
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
         .unwrap_or(TomlValue::Table(Default::default()));
-    let legacy_agent_decides_semantic_route = parse_bool_from_toml(
-        &parsed,
-        &["agent", "loop_guard", "agent_decides_semantic_route"],
-        false,
-    );
-    let parsed_semantic_route_authority = parse_semantic_route_authority(&parsed);
     let semantic_route_authority =
-        parsed_semantic_route_authority.unwrap_or(if legacy_agent_decides_semantic_route {
-            SemanticRouteAuthority::Shadow
-        } else {
-            SemanticRouteAuthority::Legacy
-        });
+        parse_semantic_route_authority(&parsed).unwrap_or(SemanticRouteAuthority::Legacy);
+    let answer_verifier_enforce_required_scope =
+        parse_answer_verifier_required_evidence_scope(&parsed)
+            .unwrap_or(AnswerVerifierRequiredEvidenceScope::Off);
+    let registry_idempotency_guard_scope = parse_registry_idempotency_guard_scope(&parsed)
+        .unwrap_or(RegistryIdempotencyGuardScope::Off);
     let policy = AgentLoopGuardPolicy {
         max_steps: parse_usize_from_toml(
             &parsed,
@@ -490,18 +577,10 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &["agent", "loop_guard", "answer_verifier_retry_limit"],
             2,
         ),
-        answer_verifier_enforce_required: parse_bool_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "answer_verifier_enforce_required"],
-            false,
-        ),
+        answer_verifier_enforce_required_scope,
         semantic_route_authority,
         agent_loop_canary_bucket: parse_agent_loop_canary_bucket(&parsed),
-        registry_idempotency_guard: parse_bool_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "registry_idempotency_guard"],
-            false,
-        ),
+        registry_idempotency_guard_scope,
         structured_evidence_required_for_selected_contracts: parse_bool_from_toml(
             &parsed,
             &[
@@ -550,6 +629,14 @@ fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[S
     }
     let payload = json!({
         "progress_messages": progress_messages,
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "running",
+            "source": "agent_progress",
+            "can_poll": true,
+            "can_cancel": true,
+            "last_heartbeat_ts": crate::now_ts_u64() as i64,
+        },
     });
     if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
     {
@@ -563,6 +650,165 @@ fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[S
             task.task_id,
             progress_messages.len(),
             crate::truncate_for_log(progress_messages.last().map(|s| s.as_str()).unwrap_or(""))
+        );
+    }
+}
+
+fn saturating_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn agent_loop_checkpoint_id(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    reason: &str,
+) -> String {
+    format!(
+        "agent-loop:{}:round-{}:step-{}:{}",
+        task.task_id, loop_state.round_no, loop_state.total_steps_executed, reason
+    )
+}
+
+fn checkpoint_step_observations(loop_state: &super::LoopState) -> Vec<Value> {
+    let mut observations = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .take(8)
+        .map(|step| {
+            json!({
+                "step_id": step.step_id,
+                "skill": step.skill,
+                "status": step.status.as_str(),
+                "has_output": step.output.as_deref().is_some_and(|value| !value.trim().is_empty()),
+                "has_error": step.error.as_deref().is_some_and(|value| !value.trim().is_empty()),
+            })
+        })
+        .collect::<Vec<_>>();
+    observations.reverse();
+    observations
+}
+
+fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {
+    let mut refs = loop_state
+        .successful_action_fingerprints
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    refs.sort();
+    refs
+}
+
+pub(super) fn build_agent_loop_checkpoint_progress_payload(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    resume_reason: &str,
+    now_ts: i64,
+    next_check_after: i64,
+) -> Value {
+    let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
+    let last_successful_step = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.is_ok())
+        .map(|step| step.step_id.clone());
+    let evidence_refs = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok())
+        .map(|step| step.step_id.clone())
+        .collect::<Vec<_>>();
+    let checkpoint = TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.clone(),
+        boundary_context: json!({
+            "schema_version": 1,
+            "source": "agent_loop_soft_budget",
+            "task_id": task.task_id,
+            "resume_reason": resume_reason,
+        }),
+        last_successful_round: (loop_state.round_no > 0)
+            .then_some(saturating_u32(loop_state.round_no)),
+        last_successful_step,
+        pending_action: None,
+        observations: checkpoint_step_observations(loop_state),
+        evidence_refs,
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: completed_side_effect_refs(loop_state),
+        budget: CheckpointBudgetCounters {
+            round: saturating_u32(loop_state.round_no),
+            step: saturating_u32(loop_state.total_steps_executed),
+            llm_calls: 0,
+            tool_calls: saturating_u32(loop_state.tool_calls_total),
+            elapsed_ms: 0,
+        },
+        pending_async_job: None,
+        repair_signal: loop_state.last_stop_signal.as_ref().map(|signal| {
+            json!({
+                "kind": "agent_loop_stop_signal",
+                "signal": signal,
+            })
+        }),
+        resume_entrypoint: ResumeEntrypoint::NextPlannerRound,
+    };
+
+    json!({
+        "progress_messages": loop_state.progress_messages,
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": TaskLifecycleState::Waiting,
+            "source": "agent_loop_soft_budget",
+            "resume_reason": resume_reason,
+            "next_check_after": next_check_after.max(now_ts + 1),
+            "checkpoint_id": checkpoint_id,
+            "can_poll": true,
+            "can_cancel": true,
+            "last_heartbeat_ts": now_ts,
+        },
+        "task_checkpoint": checkpoint.to_machine_json(),
+    })
+}
+
+pub(super) fn publish_agent_loop_checkpoint_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    resume_reason: &str,
+) {
+    let now_ts = crate::now_ts_u64() as i64;
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        task,
+        loop_state,
+        resume_reason,
+        now_ts,
+        now_ts + 60,
+    );
+    if let Some(checkpoint_id) = payload
+        .pointer("/task_lifecycle/checkpoint_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+    {
+        loop_state
+            .output_vars
+            .insert("agent_loop.checkpoint_id".to_string(), checkpoint_id);
+    }
+    loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
+    loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
+    loop_state.output_vars.insert(
+        "agent_loop.resume_reason".to_string(),
+        resume_reason.to_string(),
+    );
+    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
+    {
+        warn!(
+            "run_agent_with_tools: task_id={} publish checkpoint progress failed: {}",
+            task.task_id, err
+        );
+    } else {
+        debug!(
+            "checkpoint progress published task_id={} reason={}",
+            task.task_id, resume_reason
         );
     }
 }
@@ -904,8 +1150,9 @@ pub(super) fn action_fingerprint_for_policy(
     state: &AppState,
     policy: &AgentLoopGuardPolicy,
     action: &AgentAction,
+    route_result: Option<&crate::RouteResult>,
 ) -> String {
-    if !policy.registry_idempotency_guard {
+    if !policy.registry_idempotency_guard_enabled_for_route(route_result) {
         return action_fingerprint(state, action);
     }
     let Some((skill_name, args)) = action_skill_and_args(action) else {
@@ -921,6 +1168,14 @@ pub(super) fn action_fingerprint_for_policy(
     let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
     if once_per_task || dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
+        if literal_execution_failed_step_run_cmd_uses_args_fingerprint(
+            &normalized_skill,
+            action_token.as_deref(),
+            args,
+            route_result,
+        ) {
+            return action_fingerprint(state, action);
+        }
         return format!(
             "skill:{}:action:{}",
             normalized_skill,
@@ -934,12 +1189,13 @@ pub(super) fn registry_idempotency_guard_attribution(
     state: &AppState,
     policy: &AgentLoopGuardPolicy,
     action: &AgentAction,
+    route_result: Option<&crate::RouteResult>,
     fingerprint: &str,
     reason_code: &str,
     repeat_count: Option<usize>,
     limit: Option<usize>,
 ) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
-    if !policy.registry_idempotency_guard {
+    if !policy.registry_idempotency_guard_enabled_for_route(route_result) {
         return None;
     }
     let (skill_name, args) = action_skill_and_args(action)?;
@@ -951,6 +1207,14 @@ pub(super) fn registry_idempotency_guard_attribution(
     let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
     if !once_per_task && dedup_scope != claw_core::skill_registry::RegistryDedupScope::Action {
+        return None;
+    }
+    if literal_execution_failed_step_run_cmd_uses_args_fingerprint(
+        &normalized_skill,
+        action_token.as_deref(),
+        args,
+        route_result,
+    ) {
         return None;
     }
     Some(
@@ -992,6 +1256,29 @@ fn registry_action_token_from_args(args: &Value) -> Option<String> {
                 .collect::<String>()
         })
         .filter(|value| !value.is_empty())
+}
+
+fn literal_execution_failed_step_run_cmd_uses_args_fingerprint(
+    normalized_skill: &str,
+    action_token: Option<&str>,
+    args: &Value,
+    route_result: Option<&crate::RouteResult>,
+) -> bool {
+    let is_run_command_action = normalized_skill == "run_cmd"
+        || (normalized_skill == "system_basic" && action_token == Some("run_cmd"));
+    if !is_run_command_action {
+        return false;
+    }
+    if args
+        .get(super::CLAWD_LITERAL_COMMAND_ARG)
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return false;
+    }
+    route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+    })
 }
 
 #[cfg(test)]

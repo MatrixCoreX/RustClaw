@@ -54,6 +54,42 @@ fn step_path_matches_target(step: &PlanStep, target_path: &str) -> bool {
         .is_some_and(|value| value == target_path)
 }
 
+fn step_has_explicit_path(step: &PlanStep) -> bool {
+    step.args
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn step_is_structured_field_read(state: &AppState, step: &PlanStep) -> bool {
+    if state.resolve_canonical_skill_name(&step.skill) != "config_basic" {
+        return false;
+    }
+    step.args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|action| matches!(action, "read_field" | "read_fields"))
+}
+
+fn plan_has_multiple_explicit_structured_field_reads(
+    state: &AppState,
+    plan_result: &PlanResult,
+) -> bool {
+    plan_result
+        .steps
+        .iter()
+        .filter(|step| {
+            step_is_structured_field_read(state, step)
+                && step_has_explicit_path(step)
+                && !step_field_paths(step).is_empty()
+        })
+        .take(2)
+        .count()
+        > 1
+}
+
 fn route_allows_structured_field_selector_repair(route: &crate::RouteResult) -> bool {
     !route.needs_clarify
         && route.output_contract.requires_content_evidence
@@ -222,8 +258,10 @@ pub(super) fn apply_structured_field_selector_repair(
         return;
     };
     let target_path = structured_field_target_path(state, route);
+    let preserve_explicit_multi_target_reads =
+        plan_has_multiple_explicit_structured_field_reads(state, plan_result);
     for step in &mut plan_result.steps {
-        if state.resolve_canonical_skill_name(&step.skill) != "config_basic" {
+        if !step_is_structured_field_read(state, step) {
             continue;
         }
         let Some(action) = step
@@ -242,6 +280,17 @@ pub(super) fn apply_structured_field_selector_repair(
         let target_path_matches = target_path
             .as_deref()
             .is_some_and(|target_path| step_path_matches_target(step, target_path));
+        let explicit_step_would_be_overwritten = !field_paths_match
+            || target_path
+                .as_deref()
+                .is_some_and(|target_path| !step_path_matches_target(step, target_path));
+        if preserve_explicit_multi_target_reads
+            && step_has_explicit_path(step)
+            && !step_field_paths(step).is_empty()
+            && explicit_step_would_be_overwritten
+        {
+            continue;
+        }
         let step_id = step.step_id.clone();
         let Some(obj) = step.args.as_object_mut() else {
             continue;
@@ -528,5 +577,53 @@ mod tests {
             Some(&json!("package.version"))
         );
         assert_eq!(issues.len(), 2);
+    }
+
+    #[test]
+    fn keeps_explicit_multi_target_structured_reads() {
+        let state = AppState::test_default_with_fixture_provider();
+        let first = TempFileGuard::new("first_target");
+        let second = TempFileGuard::new("second_target");
+        let first_path = first.path.display().to_string();
+        let second_path = second.path.display().to_string();
+        let route = route_with_selector_and_locator("package.name", &second_path);
+        let mut plan = plan_result(vec![
+            PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": first_path,
+                    "field_path": "name",
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            },
+            PlanStep {
+                step_id: "s2".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": second_path,
+                    "field_path": "package.name",
+                }),
+                depends_on: vec!["s1".to_string()],
+                why: String::new(),
+            },
+        ]);
+        let mut issues = Vec::new();
+
+        apply_structured_field_selector_repair(&state, Some(&route), None, &mut plan, &mut issues);
+
+        assert_eq!(plan.steps[0].args.get("path"), Some(&json!(first_path)));
+        assert_eq!(plan.steps[0].args.get("field_path"), Some(&json!("name")));
+        assert_eq!(plan.steps[1].args.get("path"), Some(&json!(second_path)));
+        assert_eq!(
+            plan.steps[1].args.get("field_path"),
+            Some(&json!("package.name"))
+        );
+        assert!(issues.is_empty());
     }
 }

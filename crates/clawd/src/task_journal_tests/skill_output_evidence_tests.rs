@@ -832,6 +832,25 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
             == Some("extra.system_health.disk_root_total_bytes")
             && item.get("excerpt").and_then(Value::as_str) == Some("156546629632")
     }));
+    for (field, expected) in [
+        ("extra.system_health.hostname", "ThinkPad-X1"),
+        ("extra.system_health.kernel_release", "6.17.0-29-generic"),
+        ("extra.system_health.os_family", "linux"),
+        ("extra.system_health.arch", "x86_64"),
+        ("extra.system_health.cpu_count", "8"),
+        ("extra.system_health.service_manager", "systemd"),
+        ("extra.system_health.load_avg_1m", "0.15"),
+        ("extra.system_health.load_avg_5m", "0.56"),
+        ("extra.system_health.load_avg_15m", "1.26"),
+    ] {
+        assert!(
+            items.iter().any(|item| {
+                item.get("field").and_then(Value::as_str) == Some(field)
+                    && item.get("excerpt").and_then(Value::as_str) == Some(expected)
+            }),
+            "missing priority health_check field {field}"
+        );
+    }
     assert!(items.iter().any(|item| {
         item.get("field").and_then(Value::as_str) == Some("extra.system_health.warnings")
             && item
@@ -1284,6 +1303,10 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
             "version": "0.1.7",
             "worker_state": "running",
             "uptime_seconds": 53,
+            "queue_length": 0,
+            "memory_rss_bytes": 161181696,
+            "user_count": 2,
+            "bound_channel_count": 3,
             "channel_gateway_healthy": false,
             "telegram_bot_statuses": [
                 {
@@ -1331,6 +1354,14 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
     assert!(coverage
         .observed_fields
         .contains("body.data.uptime_seconds"));
+    assert!(coverage.observed_fields.contains("body.data.queue_length"));
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.memory_rss_bytes"));
+    assert!(coverage.observed_fields.contains("body.data.user_count"));
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.bound_channel_count"));
     assert!(coverage
         .observed_fields
         .contains("body.data.telegram_bot_statuses[0].name"));

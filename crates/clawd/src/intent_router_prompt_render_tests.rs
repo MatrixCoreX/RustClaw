@@ -60,6 +60,7 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(
         prompt.contains("Do not use runtime_status_query.kind=\"approval_wait\" for task queue")
     );
+    assert!(prompt.contains("current_user, host_name, or kernel_release"));
     assert!(prompt.contains("kb.ingest=>planner_execute filesystem_mutation_result"));
     assert!(prompt.contains("do not classify these as service_status"));
     assert!(prompt.contains("inherit only the slice/count constraint"));
@@ -75,6 +76,8 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(prompt.contains("Do not import a prior directory/path scope"));
     assert!(prompt.contains("Fresh unresolved deictic executable targets are missing locators"));
     assert!(prompt.contains("Do not resolve a fresh deictic target from MEMORY alone"));
+    assert!(prompt.contains("current_workspace_scope_from_current_request"));
+    assert!(prompt.contains("resolved current workspace scope, not a missing locator"));
 }
 
 #[test]

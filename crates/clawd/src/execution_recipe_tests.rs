@@ -137,6 +137,45 @@ planner_capabilities = [
 }
 
 #[test]
+fn registry_observe_http_get_with_expectation_becomes_validation() {
+    let state = test_state_with_registry(
+        r#"
+[[skills]]
+name = "http_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+planner_capabilities = [
+  { name = "http.get", action = "get", effect = "observe" },
+]
+"#,
+        &["http_basic"],
+    );
+
+    let plain = classify_skill_action_effect(
+        &state,
+        "http_basic",
+        &json!({"action": "get", "url": "http://127.0.0.1:12345/"}),
+    );
+    assert!(plain.observes);
+    assert!(!plain.mutates);
+    assert!(!plain.validates);
+
+    let validation = classify_skill_action_effect(
+        &state,
+        "http_basic",
+        &json!({
+            "action": "get",
+            "url": "http://127.0.0.1:12345/",
+            "expect_contains": "VALIDATION_PASSED"
+        }),
+    );
+    assert!(validation.observes);
+    assert!(!validation.mutates);
+    assert!(validation.validates);
+}
+
+#[test]
 fn classify_skill_action_effect_uses_registry_read_only_fallback_before_skill_name_branch() {
     let state = test_state_with_registry(
         r#"
@@ -225,6 +264,183 @@ fn structured_validation_success_fallback_accepts_custom_command_output() {
     });
     let observation = assess_validation_output(&state, "run_cmd", &args, "OK\n");
     assert_eq!(observation, ValidationObservation::Passed);
+}
+
+#[test]
+fn code_change_run_cmd_build_or_test_satisfies_recipe_profile() {
+    let state = test_state();
+    let recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::CodeChange,
+        target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 2,
+    });
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "cargo test -p clawd"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "npm run build"})
+    ));
+    assert!(!validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "cat README.md"})
+    ));
+}
+
+#[test]
+fn skill_authoring_run_cmd_build_or_test_satisfies_recipe_profile() {
+    let state = test_state();
+    let recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::SkillAuthoring,
+        target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 2,
+    });
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "cargo check -p skill-runner"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "python3 -m pytest tests"})
+    ));
+    assert!(!validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "ls crates/skills"})
+    ));
+}
+
+#[test]
+fn parse_execution_recipe_profile_accepts_package_and_database_tokens() {
+    assert_eq!(
+        super::parse_execution_recipe_profile_text("package_change"),
+        ExecutionRecipeProfile::PackageChange
+    );
+    assert_eq!(
+        super::parse_execution_recipe_profile_text("dependency_change"),
+        ExecutionRecipeProfile::PackageChange
+    );
+    assert_eq!(
+        super::parse_execution_recipe_profile_text("database_change"),
+        ExecutionRecipeProfile::DatabaseChange
+    );
+    assert_eq!(
+        super::parse_execution_recipe_profile_text("schema_change"),
+        ExecutionRecipeProfile::DatabaseChange
+    );
+}
+
+#[test]
+fn config_change_accepts_structured_config_and_run_cmd_validation() {
+    let state = test_state();
+    let recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::ConfigChange,
+        target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 2,
+    });
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "config_edit",
+        &json!({"action": "validate_config", "path": "configs/config.toml"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "config_edit",
+        &json!({"action": "read_back", "path": "configs/config.toml", "field_path": "tools.allow_sudo"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "nginx -t"})
+    ));
+    assert!(!validation_satisfies_recipe_profile(
+        recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "cat configs/config.toml"})
+    ));
+}
+
+#[test]
+fn package_and_database_profiles_require_matching_validation() {
+    let state = test_state();
+    let package_recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::PackageChange,
+        target_scope: ExecutionRecipeTargetScope::System,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 2,
+    });
+    assert!(validation_satisfies_recipe_profile(
+        package_recipe,
+        &state,
+        "run_cmd",
+        &json!({"command": "cargo build"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        package_recipe,
+        &state,
+        "package_manager",
+        &json!({"action": "detect"})
+    ));
+    assert!(!validation_satisfies_recipe_profile(
+        package_recipe,
+        &state,
+        "package_manager",
+        &json!({"action": "install", "package": "jq"})
+    ));
+
+    let database_recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::DatabaseChange,
+        target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 2,
+    });
+    assert!(validation_satisfies_recipe_profile(
+        database_recipe,
+        &state,
+        "db_basic",
+        &json!({"action": "schema_version", "db_path": "data/app.db"})
+    ));
+    assert!(validation_satisfies_recipe_profile(
+        database_recipe,
+        &state,
+        "db_basic",
+        &json!({"action": "sqlite_query", "db_path": "data/app.db", "sql": "SELECT 1"})
+    ));
+    assert!(!validation_satisfies_recipe_profile(
+        database_recipe,
+        &state,
+        "db_basic",
+        &json!({"action": "sqlite_execute", "db_path": "data/app.db", "sql": "UPDATE users SET active=1", "confirm": true})
+    ));
 }
 
 #[test]

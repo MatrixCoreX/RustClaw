@@ -101,14 +101,9 @@ pub(super) fn requested_directory_entry_groups_result_limit(
         .self_extension
         .list_selector
         .limit
-        .or_else(|| contract_hint_selector_limit(&route.resolved_intent))
-        .or_else(|| first_ascii_integer_limit(&route.resolved_intent))
         .or_else(|| contract_hint_selector_limit(user_text))
-        .or_else(|| first_ascii_integer_limit(user_text))
         .or_else(|| original_user_text.and_then(contract_hint_selector_limit))
-        .or_else(|| original_user_text.and_then(first_ascii_integer_limit))
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
-        .or_else(|| first_ascii_integer_limit(&route.route_reason))
 }
 
 pub(super) fn requested_directory_entry_groups_inventory_sort_by(
@@ -131,7 +126,6 @@ pub(super) fn requested_directory_entry_groups_inventory_sort_by(
                 original_user_text,
             )
         })
-        .or_else(|| contract_hint_selector_sort_by(&route.resolved_intent))
         .or_else(|| contract_hint_selector_sort_by(user_text))
         .or_else(|| original_user_text.and_then(contract_hint_selector_sort_by))
         .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
@@ -177,7 +171,6 @@ pub(super) fn directory_entry_groups_sort_by_has_structural_support(
         return true;
     }
     [
-        Some(route.resolved_intent.as_str()),
         Some(user_text),
         original_user_text,
         Some(route.route_reason.as_str()),
@@ -400,6 +393,8 @@ pub(super) fn directory_tree_auto_locator_deterministic_plan_result(
 pub(super) const DIRECTORY_PURPOSE_MAX_TEXT_READS: usize = 24;
 pub(super) const DIRECTORY_PURPOSE_TREE_SUMMARY_TEXT_READ_THRESHOLD: usize = 8;
 pub(super) const DIRECTORY_PURPOSE_EXTENSION_TEXT_READ_LIMIT: usize = 3;
+const DIRECTORY_PURPOSE_EXTENSION_SCAN_DIR_LIMIT: usize = 256;
+const DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT: usize = 5000;
 
 pub(super) fn directory_purpose_text_like_path(path: &Path) -> bool {
     let Some(ext) = path
@@ -481,22 +476,45 @@ pub(super) fn directory_purpose_extension_text_read_paths(root: &str, ext: &str)
     let canonical_root = root_path
         .canonicalize()
         .unwrap_or_else(|_| root_path.to_path_buf());
-    let mut candidates = fs::read_dir(root_path)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && directory_purpose_text_like_path(path)
+    let mut candidates = Vec::new();
+    let mut stack = vec![root_path.to_path_buf()];
+    let mut visited_dirs = 0usize;
+    let mut seen_entries = 0usize;
+    while let Some(dir) = stack.pop() {
+        if visited_dirs >= DIRECTORY_PURPOSE_EXTENSION_SCAN_DIR_LIMIT
+            || seen_entries >= DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT
+        {
+            break;
+        }
+        visited_dirs += 1;
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if seen_entries >= DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT {
+                break;
+            }
+            seen_entries += 1;
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if file_type.is_file()
+                && directory_purpose_text_like_path(&path)
                 && path
                     .extension()
                     .and_then(|value| value.to_str())
                     .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
                     .is_some_and(|value| value == normalized_ext)
-        })
-        .collect::<Vec<_>>();
+            {
+                candidates.push(path);
+            }
+        }
+    }
     candidates.sort_by(|left, right| {
         let left_size = fs::metadata(left).map(|meta| meta.len()).unwrap_or(0);
         let right_size = fs::metadata(right).map(|meta| meta.len()).unwrap_or(0);
@@ -570,7 +588,7 @@ pub(super) fn directory_purpose_selector_target_kind(
     if selector != crate::OutputScalarCountTargetKind::Any {
         return selector;
     }
-    [route.resolved_intent.as_str(), route.route_reason.as_str()]
+    [route.route_reason.as_str()]
         .into_iter()
         .filter_map(contract_hint_selector_target_kind)
         .find_map(|token| selector_target_kind_from_machine_token(&token))
@@ -583,7 +601,6 @@ pub(super) fn directory_purpose_selector_limit(route: &RouteResult) -> Option<u6
         .self_extension
         .list_selector
         .limit
-        .or_else(|| contract_hint_selector_limit(&route.resolved_intent))
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
 }
 
@@ -594,7 +611,6 @@ pub(super) fn directory_purpose_selector_sort_by(route: &RouteResult) -> Option<
         .list_selector
         .sort_by
         .clone()
-        .or_else(|| contract_hint_selector_sort_by(&route.resolved_intent))
         .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
 }
 
@@ -772,13 +788,12 @@ pub(super) fn directory_purpose_extension_inventory_deterministic_plan_result(
     let mut actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "list_dir",
-            "path": root,
-            "names_only": false,
-            "files_only": true,
-            "dirs_only": false,
-            "ext_filter": [ext.clone()],
-            "max_entries": 1000,
+            "action": "find_entries",
+            "root": root,
+            "ext": ext.clone(),
+            "target_kind": "file",
+            "max_results": 1000,
+            "recursive": true,
             "sort_by": "size_desc",
         }),
     }];

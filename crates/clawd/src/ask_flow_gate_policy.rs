@@ -904,7 +904,7 @@ pub(super) fn direct_answer_gate_contract_is_pure_chat(
         )
 }
 
-pub(super) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResult) -> bool {
+pub(crate) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResult) -> bool {
     route.is_chat_gate()
         && !route.needs_clarify
         && !route.wants_file_delivery

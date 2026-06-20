@@ -62,6 +62,166 @@ fn explicit_command_execution_repair_prevents_executionless_downgrade() {
 }
 
 #[test]
+fn explicit_command_execution_repair_preserves_directory_entry_groups_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["执行 ".to_string()],
+        standalone_commands: vec!["ls".to_string()],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "scripts".to_string(),
+        semantic_kind: OutputSemanticKind::DirectoryEntryGroups,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "执行 ls scripts",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_preserves_structured_observation_contract")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::DirectoryEntryGroups
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "scripts");
+}
+
+#[test]
+fn explicit_ls_selector_repair_converts_raw_command_to_directory_entry_groups() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["执行 ".to_string()],
+        standalone_commands: vec!["ls".to_string()],
+        default_locale: "zh-CN".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        semantic_kind: OutputSemanticKind::RawCommandOutput,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "执行 ls scripts，把结果按字母倒序排，只输出前 5 个",
+        "selector_target_kind=any selector_limit=5 selector_sort_by=name_desc selector_include_hidden=false.",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_directory_listing_selector_contract_repair")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::DirectoryEntryGroups
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "scripts");
+    assert_eq!(contract.self_extension.list_selector.limit, Some(5));
+    assert_eq!(
+        contract.self_extension.list_selector.sort_by.as_deref(),
+        Some("name_desc")
+    );
+    assert_eq!(
+        contract.self_extension.list_selector.target_kind,
+        crate::OutputScalarCountTargetKind::Any
+    );
+    assert_eq!(
+        contract.self_extension.list_selector.include_hidden,
+        Some(false)
+    );
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_current_workspace_scalar_path_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec!["pwd".to_string()],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::ScalarPathOnly,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run pwd and output only the raw result.",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_preserves_structured_observation_contract")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ScalarPathOnly);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+}
+
+#[test]
 fn explicit_command_execution_repair_preserves_command_summary_contract() {
     let runtime = crate::CommandIntentRuntime {
         all_result_suffixes: vec![],

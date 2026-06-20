@@ -44,7 +44,49 @@ fn file_paths_contract_rewrites_legacy_list_dir_with_extension_token_to_find_ent
 }
 
 #[test]
-fn file_paths_contract_enforces_requested_numeric_limit_on_find_entries() {
+fn active_anchor_basename_read_uses_bound_directory() {
+    let root = TempDirGuard::new("anchor_read_bound_dir");
+    let logs = root.path.join("logs");
+    fs::create_dir_all(&logs).expect("create logs");
+    let selected = logs.join("clawd-codex-current.log");
+    fs::write(&selected, "one\ntwo\n").expect("write selected log");
+    let selected_path = selected.display().to_string();
+    let plan_context = format!(
+        "### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: {}\nfollowup_ordered_entries: 1:act_plan.log | 2:clawd-codex-current.log",
+        logs.display()
+    );
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "read_text_range",
+            "path": "clawd-codex-current.log",
+            "mode": "tail",
+            "n": 2
+        }),
+    }];
+
+    let normalized = super::super::normalize_planned_actions_with_original_and_context(
+        &test_state(),
+        Some(&base_route_result()),
+        &LoopState::new(1),
+        "read selected active entry",
+        Some("read selected active entry"),
+        Some(&plan_context),
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(selected_path.as_str())
+    );
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(args.get("n").and_then(Value::as_u64), Some(2));
+}
+
+#[test]
+fn file_paths_contract_enforces_structured_selector_limit_on_find_entries() {
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({
@@ -63,13 +105,14 @@ fn file_paths_contract_enforces_requested_numeric_limit_on_find_entries() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.resolved_intent = "找出仓库里 5 个代表性的 toml 文件，只输出路径列表".to_string();
+    route.output_contract.self_extension.list_selector.limit = Some(5);
+    route.resolved_intent = "find representative toml files and output only paths".to_string();
 
     let normalized = super::super::normalize_planned_actions(
         &test_state(),
         Some(&route),
         &LoopState::new(2),
-        "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
+        "find representative toml files and output only paths",
         None,
         actions,
     );
@@ -80,7 +123,7 @@ fn file_paths_contract_enforces_requested_numeric_limit_on_find_entries() {
 }
 
 #[test]
-fn file_paths_contract_uses_original_user_text_numeric_limit() {
+fn file_paths_contract_uses_original_user_text_selector_limit_token() {
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({
@@ -107,7 +150,7 @@ fn file_paths_contract_uses_original_user_text_numeric_limit() {
         Some(&route),
         &LoopState::new(2),
         &route.resolved_intent,
-        Some("find 5 representative toml files in this repo and output only the paths"),
+        Some("selector_limit=5"),
         None,
         actions,
     );

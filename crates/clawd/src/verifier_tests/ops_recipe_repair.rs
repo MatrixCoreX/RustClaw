@@ -454,6 +454,193 @@ fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_prefligh
 }
 
 #[test]
+fn ops_recipe_code_change_accepts_run_cmd_build_validation_after_mutation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({"path": "crates/clawd/src/main.rs"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({
+                        "path": "crates/clawd/src/main.rs",
+                        "content": "fn main() {}\n"
+                    }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({"command": "cargo test -p clawd planning"}),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| issue.kind != VerifyIssueKind::RecipeValidationAfterMutateRequired));
+}
+
+#[test]
+fn ops_recipe_package_change_requires_validation_after_install() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "package_manager".to_string(),
+                    args: json!({"action": "detect"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "package_manager".to_string(),
+                    args: json!({"action": "install", "package": "jq", "dry_run": false}),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::PackageChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::System,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    let issue = result
+        .issues
+        .iter()
+        .find(|issue| {
+            matches!(
+                issue.kind,
+                VerifyIssueKind::RecipeValidationAfterMutateRequired
+            )
+        })
+        .expect("expected package validation issue");
+    assert!(issue
+        .detail
+        .contains("package_change requires package state"));
+}
+
+#[test]
+fn ops_recipe_database_change_accepts_schema_validation_after_execute() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "db_basic".to_string(),
+                    args: json!({
+                        "action": "sqlite_query",
+                        "db_path": "data/app.db",
+                        "sql": "SELECT id FROM users LIMIT 1"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "db_basic".to_string(),
+                    args: json!({
+                        "action": "sqlite_execute",
+                        "db_path": "data/app.db",
+                        "sql": "UPDATE users SET active=1 WHERE id=1",
+                        "confirm": true
+                    }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "db_basic".to_string(),
+                    args: json!({
+                        "action": "schema_version",
+                        "db_path": "data/app.db"
+                    }),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::DatabaseChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| issue.kind != VerifyIssueKind::RecipeValidationAfterMutateRequired));
+}
+
+#[test]
 fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
     let state = test_state();
     let task = test_task();

@@ -122,7 +122,7 @@ pub(super) fn strict_raw_command_output_exact_observation_answer(
             .is_some_and(|body| !body.is_empty() && body == answer)
 }
 
-fn candidate_matches_successful_external_observation(
+pub(super) fn candidate_matches_successful_external_observation(
     loop_state: &LoopState,
     candidate: &str,
 ) -> bool {
@@ -412,12 +412,12 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
         return false;
     };
-    if current_delivery == synthesis
-        || !crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+    let delivery_matches_external_observation =
+        crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
             current_delivery,
             loop_state,
-        )
-    {
+        ) || candidate_matches_successful_external_observation(loop_state, current_delivery);
+    if current_delivery == synthesis || !delivery_matches_external_observation {
         return false;
     }
 

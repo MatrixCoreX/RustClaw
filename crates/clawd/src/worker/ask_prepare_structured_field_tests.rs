@@ -367,3 +367,77 @@ fn structured_field_target_repair_moves_dotted_field_locator_to_structured_file(
         .route_reason
         .contains("structured_field_target_from_prompt_repair"));
 }
+
+#[test]
+fn structured_field_with_text_target_promotes_to_recent_scalar_contract() {
+    let root = TempDirGuard::new("structured_field_text_pair");
+    fs::write(
+        root.path.join("Cargo.toml"),
+        r#"[workspace]
+members = []
+
+[workspace.package]
+version = "0.1.8"
+"#,
+    )
+    .expect("write cargo manifest");
+    fs::write(root.path.join("README.md"), "version: 0.1.8\n").expect("write readme");
+
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent:
+            "Read workspace.package.version from Cargo.toml and compare it with README.md"
+                .to_string(),
+        needs_clarify: false,
+        route_reason: "semantic_contract_requires_evidence".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: root.path.display().to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let prompt = "Read workspace.package.version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.";
+
+    repair_structured_field_target_from_prompt(&mut route, prompt, &root.path, &root.path);
+    assert!(route
+        .route_reason
+        .contains("structured_field_target_from_prompt_repair"));
+    assert_eq!(
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        Some("workspace.package.version")
+    );
+
+    repair_scalar_field_value_contract_for_locator_reply(&mut route, prompt);
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::RecentScalarEqualityCheck
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Strict
+    );
+    assert!(route
+        .route_reason
+        .contains("scalar_field_pair_contract_repair"));
+}

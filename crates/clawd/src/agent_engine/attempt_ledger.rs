@@ -146,6 +146,17 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
             let contract_policy = contract_policy_from_structured_error(error_text)
                 .or_else(|| contract_policy_from_structured_error(output_text));
             let retryable = retryable_from_status(step.status, error_kind.as_deref());
+            let error_code = structured_error_code(error_text)
+                .or_else(|| structured_error_code(output_text))
+                .or_else(|| error_kind.clone());
+            let missing_evidence = missing_evidence_fields(
+                "not_recorded_in_step_result",
+                error_text,
+                output_text,
+                &contract_policy,
+            );
+            let why_not_satisfied = why_not_satisfied_from_status(step.status, output_text, error_text);
+            let forbidden_repeat = forbidden_repeat_signature(&action_ref, &args_fingerprint);
             json!({
                 "attempt_id": format!("a{}", idx + 1),
                 "action_ref": action_ref,
@@ -154,25 +165,29 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
                 "status": step.status.as_str(),
                 "args_summary": "not_recorded_in_step_result",
                 "observed_output": crate::truncate_for_agent_trace(output_text),
-                "error_code": structured_error_code(error_text)
-                    .or_else(|| structured_error_code(output_text))
-                    .or_else(|| error_kind.clone()),
-                "error_kind": error_kind,
+                "error_code": error_code.clone(),
+                "error_kind": error_kind.clone(),
                 "exit_code": structured_exit_code(error_text).or_else(|| structured_exit_code(output_text)),
-                "missing_evidence": missing_evidence_fields(
-                    "not_recorded_in_step_result",
-                    error_text,
-                    output_text,
-                    &contract_policy,
-                ),
+                "missing_evidence": missing_evidence.clone(),
                 "verifier_reason_code": verifier_reason_code(&action_ref, error_kind.as_deref()),
                 "retry_allowed": retryable,
                 "retryable": retryable,
-                "why_not_satisfied": why_not_satisfied_from_status(step.status, output_text, error_text),
+                "why_not_satisfied": why_not_satisfied.clone(),
                 "retry_instruction": null,
-                "forbidden_repeat_signature": forbidden_repeat_signature(&action_ref, &args_fingerprint),
+                "forbidden_repeat_signature": forbidden_repeat.clone(),
                 "avoid_repeating": avoid_repeating_hint(step.status, error_kind.as_deref()),
                 "contract_policy": contract_policy,
+                "repair_signal": executor_repair_signal_json(
+                    &step.skill,
+                    step.status.as_str(),
+                    error_code.as_deref(),
+                    error_kind.as_deref(),
+                    retryable,
+                    &missing_evidence,
+                    &forbidden_repeat,
+                    &why_not_satisfied,
+                    output_text,
+                ),
             })
         })
         .collect::<Vec<_>>();
@@ -201,6 +216,17 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
         "forbidden_repeat_signature": entry.forbidden_repeat_signature,
         "avoid_repeating": entry.avoid_repeating,
         "contract_policy": entry.contract_policy,
+        "repair_signal": executor_repair_signal_json(
+            &entry.tool_or_skill,
+            &entry.status,
+            entry.error_code.as_deref(),
+            entry.error_kind.as_deref(),
+            entry.retryable,
+            &entry.missing_evidence,
+            &entry.forbidden_repeat_signature,
+            &entry.why_not_satisfied,
+            &entry.observed_output,
+        ),
     })
 }
 
@@ -219,6 +245,85 @@ fn args_fingerprint(action_ref: &str, args_summary: &str) -> String {
 
 fn forbidden_repeat_signature(action_ref: &str, args_fingerprint: &str) -> String {
     format!("{}:{}", action_ref.trim(), args_fingerprint.trim())
+}
+
+fn executor_repair_signal_json(
+    tool_or_skill: &str,
+    status: &str,
+    error_code: Option<&str>,
+    error_kind: Option<&str>,
+    retryable: bool,
+    missing_evidence: &[String],
+    forbidden_repeat_signature: &str,
+    why_not_satisfied: &str,
+    observed_output: &str,
+) -> Option<Value> {
+    if status == crate::executor::StepExecutionStatus::Ok.as_str()
+        && error_code.is_none()
+        && error_kind.is_none()
+    {
+        return None;
+    }
+    let status_code = error_code
+        .or(error_kind)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(status);
+    let message_key = structured_message_key(why_not_satisfied)
+        .or_else(|| structured_message_key(observed_output))
+        .unwrap_or_else(|| "clawd.execution.step_failed".to_string());
+    let failure_attribution = executor_failure_attribution(error_code.or(error_kind));
+    let source = if tool_or_skill.trim() == "answer_verifier" {
+        crate::repair_signal::RepairSignalSource::AnswerVerifier
+    } else {
+        crate::repair_signal::RepairSignalSource::Executor
+    };
+    let owner_layer = if tool_or_skill.trim() == "answer_verifier" {
+        "answer_verifier"
+    } else {
+        "execution_loop"
+    };
+    let signal = crate::repair_signal::RepairSignal {
+        source,
+        owner_layer: Some(owner_layer),
+        step_id: None,
+        kind: Some(tool_or_skill.trim().to_string()),
+        status_code: status_code.to_string(),
+        message_key,
+        reason_code: Some("executor_step_failed".to_string()),
+        failure_attribution: failure_attribution.to_string(),
+        retryable: Some(retryable),
+        missing_fields: missing_evidence.to_vec(),
+        rejected_action: None,
+        suggested_contract_action: None,
+        forbidden_repeat_fingerprint: (!forbidden_repeat_signature.trim().is_empty())
+            .then(|| forbidden_repeat_signature.trim().to_string()),
+        detail: (!why_not_satisfied.trim().is_empty())
+            .then(|| crate::truncate_for_agent_trace(why_not_satisfied.trim())),
+    };
+    Some(signal.to_json())
+}
+
+fn structured_message_key(error_text: &str) -> Option<String> {
+    crate::skills::parse_structured_skill_error(error_text)?
+        .extra
+        .as_ref()?
+        .get("message_key")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn executor_failure_attribution(error_kind: Option<&str>) -> &'static str {
+    match error_kind.unwrap_or_default() {
+        "contract_action_rejected" | "contract_arg_rejected" => "contract_gap",
+        "unsafe_sql" | "invalid_credentials" | "credential_missing" | "auth_failed" => {
+            "permission_denied"
+        }
+        "missing_input" => "model_error",
+        _ => "tool_gap",
+    }
 }
 
 fn structured_error_kind(error_text: &str) -> Option<String> {
@@ -266,6 +371,7 @@ fn contract_policy_from_structured_error(error_text: &str) -> Option<Value> {
         "expected_target_args": extra.get("expected_target_args").cloned(),
         "required_evidence": extra.get("required_evidence").cloned(),
         "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
+        "evidence_profile": extra.get("evidence_profile").and_then(Value::as_str),
     }))
 }
 

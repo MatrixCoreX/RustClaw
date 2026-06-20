@@ -23,8 +23,40 @@ fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_c
         &loop_state,
     )
     .expect("closeout note");
-    assert!(note.contains("external workspace"));
-    assert!(note.contains("code changes"));
+    assert!(note.contains("message_key=clawd.msg.execution_recipe_closeout_external_workspace"));
+    assert!(note.contains("target_scope=external_workspace"));
+    assert!(note.contains("profile=code_change"));
+    assert!(note.contains("validation_status=validated"));
+}
+
+#[test]
+fn execution_recipe_closeout_note_quotes_machine_validation_result() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::PackageChange,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::System,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Done,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        saw_mutation: true,
+        saw_validation: true,
+        ..Default::default()
+    };
+    loop_state.latest_validation_result = Some(serde_json::json!({
+        "status_code": "validation_passed",
+        "skill": "run_cmd",
+        "global_step": 3
+    }));
+
+    let note =
+        execution_recipe_closeout_note(None, "Install the package and verify it.", &loop_state)
+            .expect("closeout note");
+
+    assert!(note.contains("validation_status=validation_passed"));
+    assert!(note.contains("validation_skill=run_cmd"));
+    assert!(note.contains("validation_step=3"));
 }
 
 #[test]
@@ -58,7 +90,9 @@ fn execution_recipe_closeout_prefixes_greenfield_plain_text_delivery() {
     );
 
     assert_eq!(delivery.len(), 1);
-    assert!(delivery[0].starts_with("Created the new artifact"));
+    assert!(delivery[0].starts_with("message_key=clawd.msg.execution_recipe_closeout_greenfield"));
+    assert!(delivery[0].contains("target_scope=greenfield"));
+    assert!(delivery[0].contains("profile=code_change"));
     assert!(delivery[0].ends_with("Validation passed."));
 }
 
@@ -94,7 +128,8 @@ fn execution_recipe_closeout_does_not_infer_success_marker_from_user_text() {
     );
 
     assert_eq!(delivery.len(), 1);
-    assert!(delivery[0].contains("系统范围"));
+    assert!(delivery[0].contains("target_scope=system"));
+    assert!(delivery[0].contains("profile=ops_service"));
     assert!(!delivery[0].contains("VALIDATION_PASSED"));
     assert!(delivery[0].ends_with("修复已经完成。"));
 }
@@ -129,7 +164,9 @@ fn execution_recipe_closeout_prefixes_current_repo_plain_text_delivery() {
     );
 
     assert_eq!(delivery.len(), 1);
-    assert!(delivery[0].starts_with("已在当前仓库完成代码修改"));
+    assert!(delivery[0].starts_with("message_key=clawd.msg.execution_recipe_closeout_current_repo"));
+    assert!(delivery[0].contains("target_scope=current_repo"));
+    assert!(delivery[0].contains("profile=code_change"));
     assert!(delivery[0].ends_with("修复已经验证通过。"));
 }
 
@@ -155,8 +192,10 @@ fn execution_recipe_closeout_note_mentions_system_scope_for_english_ops() {
         &loop_state,
     )
     .expect("closeout note");
-    assert!(note.contains("system scope"));
-    assert!(note.contains("ops work"));
+    assert!(note.contains("message_key=clawd.msg.execution_recipe_closeout_system"));
+    assert!(note.contains("target_scope=system"));
+    assert!(note.contains("profile=ops_service"));
+    assert!(note.contains("validation_status=validated"));
 }
 
 #[test]

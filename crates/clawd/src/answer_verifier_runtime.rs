@@ -35,6 +35,17 @@ pub(crate) async fn verify_answer_observe_only(
         );
         return Some(local_gap);
     }
+    if let Some(identity_guard) =
+        backend_identity_metadata_answer_verifier_guard(state, route_result, candidate_answer)
+    {
+        tracing::info!(
+            task_id = %task.task_id,
+            pass = identity_guard.pass,
+            answer_incomplete_reason = %identity_guard.answer_incomplete_reason,
+            "answer_verifier_backend_identity_metadata_guard"
+        );
+        return Some(identity_guard);
+    }
     if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
         tracing::info!(
             task_id = %task.task_id,
@@ -77,6 +88,10 @@ pub(crate) async fn verify_answer_observe_only(
                 "__CURRENT_CONTEXT__",
                 &current_context_prompt_block(journal),
             ),
+            (
+                "__AGENT_RUNTIME_IDENTITY__",
+                state.agent_runtime_identity_label(),
+            ),
             ("__CANDIDATE_ANSWER__", candidate_answer.trim()),
         ],
     );
@@ -114,11 +129,11 @@ pub(crate) async fn verify_answer_observe_only(
         Ok(validated) => {
             if !validated.raw_parse_ok || validated.schema_normalized {
                 tracing::info!(
-                        "answer_verifier schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
-                        task.task_id,
-                        validated.raw_parse_ok,
-                        validated.schema_normalized
-                    );
+                    "answer_verifier schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
+                    task.task_id,
+                    validated.raw_parse_ok,
+                    validated.schema_normalized
+                );
             }
             validated.value.normalized()
         }
@@ -155,6 +170,87 @@ pub(crate) async fn verify_answer_observe_only(
     Some(validation)
 }
 
+pub(super) fn backend_identity_metadata_answer_verifier_guard(
+    state: &AppState,
+    route_result: &RouteResult,
+    candidate_answer: &str,
+) -> Option<AnswerVerifierOut> {
+    if !route_reason_has_backend_identity_metadata_marker(route_result) {
+        return None;
+    }
+    if candidate_answer_mentions_backend_identity_metadata(state, candidate_answer) {
+        return Some(AnswerVerifierOut {
+            pass: false,
+            missing_evidence_fields: vec!["identity".to_string()],
+            answer_incomplete_reason: "backend_identity_metadata_in_final_answer".to_string(),
+            should_retry: true,
+            retry_instruction: "answer_with_agent_runtime_identity".to_string(),
+            confidence: 0.98,
+        });
+    }
+    if candidate_answer_is_runtime_identity_label(state, candidate_answer) {
+        return Some(AnswerVerifierOut {
+            pass: true,
+            missing_evidence_fields: Vec::new(),
+            answer_incomplete_reason: String::new(),
+            should_retry: false,
+            retry_instruction: String::new(),
+            confidence: 0.99,
+        });
+    }
+    None
+}
+
+fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
+    [
+        "agent_display_name_hint_backend_metadata_removed",
+        "normalizer_answer_candidate_backend_metadata_removed",
+    ]
+    .iter()
+    .any(|marker| route_result.route_reason.contains(marker))
+}
+
+fn candidate_answer_mentions_backend_identity_metadata(
+    state: &AppState,
+    candidate_answer: &str,
+) -> bool {
+    let normalized_answer = normalize_identity_metadata_token(candidate_answer);
+    if normalized_answer.is_empty() {
+        return false;
+    }
+    state.core.llm_providers.iter().any(|provider| {
+        provider
+            .config
+            .name
+            .trim()
+            .strip_prefix("vendor-")
+            .into_iter()
+            .chain([
+                provider.config.name.trim(),
+                provider.config.model.trim(),
+                provider.config.provider_type.trim(),
+            ])
+            .map(normalize_identity_metadata_token)
+            .filter(|token| token.len() >= 4)
+            .any(|token| normalized_answer.contains(&token))
+    })
+}
+
+fn candidate_answer_is_runtime_identity_label(state: &AppState, candidate_answer: &str) -> bool {
+    let candidate = candidate_answer
+        .trim()
+        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_ascii_whitespace());
+    !candidate.is_empty() && candidate.eq_ignore_ascii_case(state.agent_runtime_identity_label())
+}
+
+fn normalize_identity_metadata_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
+}
+
 pub(super) fn structural_satisfaction_can_skip_verifier(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
@@ -162,6 +258,19 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
 ) -> bool {
     if workspace_project_summary_requires_model_verifier(route_result) {
         return false;
+    }
+    if confirmed_missing_file_delivery_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
+    if route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && latest_missing_target_answer_mentions_observed_path(journal, candidate_answer)
+    {
+        return true;
     }
     local_missing_evidence_verifier_gap_for_answer(route_result, journal, candidate_answer)
         .is_none()
@@ -371,6 +480,14 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
     let gap = local_missing_evidence_verifier_gap(route_result, journal)?;
+    if missing_target_answer_is_grounded_in_latest_error(
+        route_result,
+        journal,
+        candidate_answer,
+        &gap,
+    ) {
+        return None;
+    }
     if scalar_field_value_gap_is_grounded_in_structured_read(
         route_result,
         journal,
@@ -379,7 +496,239 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
     ) {
         return None;
     }
+    if confirmed_missing_file_delivery_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return None;
+    }
     Some(gap)
+}
+
+pub(super) fn missing_target_answer_is_grounded_in_latest_error(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+    gap: &AnswerVerifierOut,
+) -> bool {
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !missing_gap_allows_negative_path_evidence(gap)
+    {
+        return false;
+    }
+    latest_missing_target_answer_mentions_observed_path(journal, candidate_answer)
+}
+
+fn latest_missing_target_answer_mentions_observed_path(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let paths = latest_missing_target_paths(journal);
+    !paths.is_empty()
+        && paths
+            .iter()
+            .any(|path| candidate_answer_contains_machine_path(candidate_answer, path))
+}
+
+fn missing_gap_allows_negative_path_evidence(gap: &AnswerVerifierOut) -> bool {
+    gap.missing_evidence_fields.iter().any(|field| {
+        field == "content_excerpt"
+            || field == "candidates"
+            || field == "path"
+            || field.contains("content_excerpt")
+            || field.contains("candidates")
+    })
+}
+
+fn confirmed_missing_file_delivery_can_skip_answer_verifier(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    route.output_contract.delivery_required
+        && route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+        && !candidate_answer_has_file_delivery_token(candidate_answer)
+        && journal_has_confirmed_missing_file_delivery_evidence(journal)
+}
+
+fn candidate_answer_has_file_delivery_token(candidate_answer: &str) -> bool {
+    candidate_answer
+        .lines()
+        .any(|line| crate::finalize::parse_delivery_file_token(line.trim()).is_some())
+}
+
+fn journal_has_confirmed_missing_file_delivery_evidence(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .any(step_has_confirmed_missing_file_delivery_evidence)
+}
+
+fn step_has_confirmed_missing_file_delivery_evidence(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    step.output_excerpt
+        .as_deref()
+        .is_some_and(output_has_confirmed_missing_file_delivery_evidence)
+        || step
+            .error_excerpt
+            .as_deref()
+            .is_some_and(step_error_is_missing_target)
+}
+
+fn output_has_confirmed_missing_file_delivery_evidence(output: &str) -> bool {
+    structured_json_values_from_step_output(output)
+        .iter()
+        .any(value_has_confirmed_missing_file_delivery_evidence)
+}
+
+fn value_has_confirmed_missing_file_delivery_evidence(value: &serde_json::Value) -> bool {
+    if value.get("exists").and_then(serde_json::Value::as_bool) == Some(false) {
+        return true;
+    }
+    let action = value.get("action").and_then(serde_json::Value::as_str);
+    let count = value.get("count").and_then(serde_json::Value::as_u64);
+    let has_empty_results = ["results", "matches"].iter().any(|field| {
+        value
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(Vec::is_empty)
+    });
+    matches!(action, Some("find_name" | "find_path")) && count == Some(0) && has_empty_results
+}
+
+fn latest_missing_target_paths(journal: &crate::task_journal::TaskJournal) -> Vec<String> {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .find_map(|step| {
+            let paths = missing_target_paths_from_step_result(step);
+            (!paths.is_empty()).then_some(paths)
+        })
+        .unwrap_or_default()
+}
+
+fn missing_target_paths_from_step_result(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> Vec<String> {
+    if step.status == crate::executor::StepExecutionStatus::Error {
+        return step
+            .error_excerpt
+            .as_deref()
+            .filter(|error| step_error_is_missing_target(error))
+            .map(missing_target_paths_from_error)
+            .unwrap_or_default();
+    }
+    if step.status != crate::executor::StepExecutionStatus::Ok {
+        return Vec::new();
+    }
+    step.output_excerpt
+        .as_deref()
+        .map(missing_target_paths_from_output)
+        .unwrap_or_default()
+}
+
+fn missing_target_paths_from_error(error: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(path) = error.trim().strip_prefix("__RC_READ_FILE_NOT_FOUND__:") {
+        push_non_empty_path(&mut paths, path);
+    }
+    if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+        if let Some(extra) = structured.extra.as_ref() {
+            collect_path_like_strings(extra, &mut paths);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn missing_target_paths_from_output(output: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    collect_missing_target_paths_from_json(&value, &mut paths);
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn collect_missing_target_paths_from_json(value: &serde_json::Value, paths: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("exists").and_then(serde_json::Value::as_bool) == Some(false) {
+                collect_path_like_strings(value, paths);
+            }
+            for value in map.values() {
+                if let Some(text) = value.as_str() {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+                        collect_missing_target_paths_from_json(&parsed, paths);
+                    }
+                }
+                collect_missing_target_paths_from_json(value, paths);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_missing_target_paths_from_json(item, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_path_like_strings(value: &serde_json::Value, paths: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if matches!(
+                    key.as_str(),
+                    "path" | "resolved_path" | "target" | "locator" | "root"
+                ) {
+                    if let Some(path) = value.as_str() {
+                        push_non_empty_path(paths, path);
+                    }
+                }
+                collect_path_like_strings(value, paths);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_path_like_strings(item, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_non_empty_path(paths: &mut Vec<String>, path: &str) {
+    let path = path.trim();
+    if !path.is_empty() {
+        paths.push(path.to_string());
+    }
+}
+
+fn candidate_answer_contains_machine_path(candidate_answer: &str, path: &str) -> bool {
+    !path.trim().is_empty() && candidate_answer.contains(path.trim())
 }
 
 pub(super) fn scalar_field_value_gap_is_grounded_in_structured_read(
@@ -587,10 +936,19 @@ pub(super) fn observed_inventory_names_for_contract(
 }
 
 pub(super) fn requested_listing_name_limit(route_result: &RouteResult) -> Option<usize> {
-    contract_hint_selector_limit(&route_result.resolved_intent)
-        .or_else(|| contract_hint_selector_limit(&route_result.route_reason))
+    route_result
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
         .and_then(|limit| usize::try_from(limit).ok())
         .filter(|limit| *limit > 0)
+        .or_else(|| {
+            contract_hint_selector_limit(&route_result.resolved_intent)
+                .or_else(|| contract_hint_selector_limit(&route_result.route_reason))
+                .and_then(|limit| usize::try_from(limit).ok())
+                .filter(|limit| *limit > 0)
+        })
 }
 
 pub(super) fn contract_hint_selector_limit(text: &str) -> Option<u64> {
@@ -780,6 +1138,8 @@ pub(super) fn task_contract_prompt_block(task_contract: &TaskContract) -> String
 }
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {
+    let contract_matrix_trace =
+        crate::contract_matrix::trace_snapshot_for_output_contract(&route_result.output_contract);
     serde_json::to_string_pretty(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
         "requires_content_evidence": route_result.output_contract.requires_content_evidence,
@@ -788,6 +1148,7 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
         "semantic_kind": route_result.output_contract.semantic_kind.as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
+        "contract_matrix": contract_matrix_trace,
     }))
     .unwrap_or_else(|_| "{}".to_string())
 }

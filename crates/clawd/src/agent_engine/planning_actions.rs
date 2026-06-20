@@ -7,6 +7,16 @@ pub(super) fn build_plan_result(
     plan_kind: PlanKind,
     actions: &[AgentAction],
 ) -> PlanResult {
+    build_plan_result_with_notes(goal, raw_plan_text, plan_kind, actions, "")
+}
+
+pub(super) fn build_plan_result_with_notes(
+    goal: &str,
+    raw_plan_text: &str,
+    plan_kind: PlanKind,
+    actions: &[AgentAction],
+    planner_notes: &str,
+) -> PlanResult {
     let mut previous_actionable_step_id: Option<String> = None;
     let mut steps = Vec::new();
     for (idx, action) in actions.iter().enumerate() {
@@ -27,7 +37,7 @@ pub(super) fn build_plan_result(
         missing_slots: Vec::new(),
         needs_confirmation: false,
         steps,
-        planner_notes: String::new(),
+        planner_notes: planner_notes.trim().to_string(),
         plan_kind,
         raw_plan_text: raw_plan_text.to_string(),
     }

@@ -26,7 +26,7 @@ It is search-only:
 - `time_range` (optional, string): backend-dependent passthrough
 - `domains_allow` (optional, string[])
 - `domains_deny` (optional, string[])
-- `backend` (optional, string): `serpapi|duckduckgo_html`
+- `backend` (optional, string): `serpapi|bing_html|duckduckgo_html`
 - `include_snippet` (optional, bool, default `true`)
 
 ## Error Contract

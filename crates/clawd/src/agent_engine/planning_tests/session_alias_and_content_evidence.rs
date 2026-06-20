@@ -350,6 +350,53 @@ fn pure_chat_agent_loop_submode_allows_respond_only_plan_before_observation() {
 }
 
 #[test]
+fn chat_plain_text_plan_parse_failure_becomes_terminal_respond() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::direct_answer(),
+        false,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+
+    let actions =
+        super::super::plain_text_terminal_respond_fallback_actions(Some(&route), "corrected body")
+            .expect("plain text fallback");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::Respond { content }] if content == "corrected body"
+    ));
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn plain_text_plan_parse_failure_does_not_replace_evidence_route() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+
+    let actions = super::super::plain_text_terminal_respond_fallback_actions(
+        Some(&route),
+        "unobserved answer",
+    );
+
+    assert!(actions.is_none());
+}
+
+#[test]
 fn tool_discovery_route_allows_context_only_respond_plan() {
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::Respond {
@@ -490,6 +537,48 @@ fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
         "execute_route_requires_non_readonly_file_plan"
     );
     assert!(!can_fallback_to_initial_plan_after_repair_failure(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
+fn active_anchor_detached_read_only_plan_does_not_force_repair() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "active_task_scope_refinement_detached_from_structured_anchor".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/logs/clawd-codex-current.log",
+                "mode": "tail",
+                "n": 2
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+    assert!(can_fallback_to_initial_plan_after_repair_failure(
         &test_state(),
         Some(&route),
         &loop_state,

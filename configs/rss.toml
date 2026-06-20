@@ -4,36 +4,6 @@ default_limit = 10
 timeout_seconds = 20
 deprecate_after_failures = 3
 
-[rss.categories.web3]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://www.theblock.co/rss.xml",
-    "https://decrypt.co/feed",
-    "https://messari.io/rss",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "en-US"
-bilingual_summary = true
-
-[rss.categories.international]
-sources = [
-    "https://www.reuters.com/world/rss",
-    "https://feeds.apnews.com/apnews/topnews",
-    "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://www.ft.com/rss/home",
-    "https://www.economist.com/the-world-this-week/rss.xml",
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "en-US"
-bilingual_summary = true
-
 [rss.categories.aggregator]
 sources = [
     "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
@@ -46,6 +16,57 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+
+[rss.categories.tech]
+sources = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://techcrunch.com/feed/",
+    "https://www.wired.com/feed/rss",
+    "https://feeds.arstechnica.com/arstechnica/index",
+    "https://www.tomshardware.com/feeds/all",
+    "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "en-US"
+bilingual_summary = true
+
+[[rss.categories.tech.source_entries]]
+url = "https://www.theverge.com/rss/index.xml"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.tech.source_entries]]
+url = "https://techcrunch.com/feed/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.tech.source_entries]]
+url = "https://www.wired.com/feed/rss"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.tech.source_entries]]
+url = "https://feeds.arstechnica.com/arstechnica/index"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.tech.source_entries]]
+url = "https://www.tomshardware.com/feeds/all"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.tech.source_entries]]
+url = "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
 
 [rss.categories.general]
 sources = [
@@ -69,6 +90,80 @@ url = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
 failure_count = 0
 last_error = ""
 last_failed_at = ""
+
+[rss.categories.web3]
+sources = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://www.theblock.co/rss.xml",
+    "https://decrypt.co/feed",
+    "https://messari.io/rss",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "en-US"
+bilingual_summary = true
+
+[rss.categories.crypto]
+sources = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://decrypt.co/feed",
+    "https://www.theblock.co/rss.xml",
+    "https://www.newsbtc.com/feed/",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://cointelegraph.com/rss"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://decrypt.co/feed"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.theblock.co/rss.xml"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.newsbtc.com/feed/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[rss.categories.international]
+sources = [
+    "https://www.reuters.com/world/rss",
+    "https://feeds.apnews.com/apnews/topnews",
+    "https://feeds.bbci.co.uk/news/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://www.ft.com/rss/home",
+    "https://www.economist.com/the-world-this-week/rss.xml",
+    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "en-US"
+bilingual_summary = true
 
 [rss.categories.china]
 sources = [
@@ -125,101 +220,6 @@ last_failed_at = ""
 
 [[rss.categories.business.source_entries]]
 url = "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[rss.categories.crypto]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://decrypt.co/feed",
-    "https://www.theblock.co/rss.xml",
-    "https://www.newsbtc.com/feed/",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "zh-CN"
-bilingual_summary = false
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://cointelegraph.com/rss"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://decrypt.co/feed"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.theblock.co/rss.xml"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.newsbtc.com/feed/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[rss.categories.tech]
-sources = [
-    "https://www.theverge.com/rss/index.xml",
-    "https://techcrunch.com/feed/",
-    "https://www.wired.com/feed/rss",
-    "https://feeds.arstechnica.com/arstechnica/index",
-    "https://www.tomshardware.com/feeds/all",
-    "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "en-US"
-bilingual_summary = true
-
-[[rss.categories.tech.source_entries]]
-url = "https://www.theverge.com/rss/index.xml"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.tech.source_entries]]
-url = "https://techcrunch.com/feed/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.tech.source_entries]]
-url = "https://www.wired.com/feed/rss"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.tech.source_entries]]
-url = "https://feeds.arstechnica.com/arstechnica/index"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.tech.source_entries]]
-url = "https://www.tomshardware.com/feeds/all"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.tech.source_entries]]
-url = "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en"
 failure_count = 0
 last_error = ""
 last_failed_at = ""

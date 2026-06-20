@@ -1065,9 +1065,8 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = rewrite_rustclaw_config_risk_assessment_to_guard(route_result, None, actions);
     let actions = rewrite_structured_multi_field_read_plan_to_read_fields(
         route_result,
-        route_result
-            .map(|route| route.resolved_intent.as_str())
-            .unwrap_or_default(),
+        "",
+        false,
         None,
         None,
         actions,
@@ -1075,9 +1074,8 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
         state,
         route_result,
-        route_result
-            .map(|route| route.resolved_intent.as_str())
-            .unwrap_or_default(),
+        "",
+        false,
         None,
         None,
         actions,
@@ -1101,6 +1099,7 @@ pub(super) fn rewrite_raw_runtime_status_to_run_cmd(
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
         || !run_cmd_available_for_plan(state)
+        || system_basic_available_for_plan(state)
     {
         return actions;
     }

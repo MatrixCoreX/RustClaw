@@ -147,6 +147,7 @@ pub(super) fn unresolved_runtime_template_argument_error(
 }
 
 pub(super) fn contract_matrix_action_policy_error(
+    state: &AppState,
     loop_state: &LoopState,
     normalized_skill: &str,
     classification_args: &Value,
@@ -163,6 +164,22 @@ pub(super) fn contract_matrix_action_policy_error(
         classification_args,
     )?;
     if policy.is_allowed() {
+        return None;
+    }
+    if active_ops_recipe_allows_mutation_despite_contract(
+        state,
+        loop_state,
+        normalized_skill,
+        classification_args,
+        policy.decision,
+    ) {
+        info!(
+            "preflight_keep_active_ops_recipe_mutation_despite_contract skill={} action={} contract={} phase={}",
+            normalized_skill,
+            policy.action_key,
+            policy.contract_match,
+            loop_state.execution_recipe.phase.as_str()
+        );
         return None;
     }
     if action_has_user_named_output_path_marker(classification_args) {
@@ -203,8 +220,41 @@ pub(super) fn contract_matrix_action_policy_error(
             "freshness": policy.freshness,
             "artifact_kind": policy.artifact_kind,
             "channel_visibility": policy.channel_visibility,
+            "evidence_profile": policy.evidence_profile,
         })),
     ))
+}
+
+fn active_ops_recipe_allows_mutation_despite_contract(
+    state: &AppState,
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    args: &Value,
+    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+) -> bool {
+    if policy_decision != crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed {
+        return false;
+    }
+    let recipe = loop_state.execution_recipe;
+    if !matches!(
+        recipe.kind,
+        crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+    ) || !matches!(
+        recipe.phase,
+        crate::execution_recipe::ExecutionRecipePhase::Apply
+            | crate::execution_recipe::ExecutionRecipePhase::Repair
+    ) {
+        return false;
+    }
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    effect.mutates
+        && !crate::execution_recipe::action_conflicts_with_recipe_target_scope(
+            recipe,
+            state,
+            normalized_skill,
+            args,
+        )
 }
 
 pub(super) fn contract_matrix_arg_policy_error(
@@ -252,6 +302,7 @@ pub(super) fn contract_matrix_arg_policy_error(
             "freshness": policy.freshness,
             "artifact_kind": policy.artifact_kind,
             "channel_visibility": policy.channel_visibility,
+            "evidence_profile": policy.evidence_profile,
         })),
     ))
 }

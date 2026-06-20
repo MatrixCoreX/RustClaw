@@ -109,6 +109,47 @@ fn excerpt_contract_keeps_preferred_log_read_when_synthesizing() {
 }
 
 #[test]
+fn raw_command_output_preserves_fs_basic_grep_text_plan() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log".to_string();
+    route.output_contract.requires_content_evidence = true;
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "grep_text",
+            "path": route.output_contract.locator_hint,
+            "query": "ERROR"
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(1),
+        "bounded content search",
+        None,
+        None,
+        Some(route.output_contract.locator_hint.as_str()),
+        actions,
+    );
+
+    assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
+    let args = expect_planned_call(&normalized[0], "fs_basic", "grep_text");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(route.output_contract.locator_hint.as_str())
+    );
+    assert_eq!(args.get("query").and_then(Value::as_str), Some("ERROR"));
+}
+
+#[test]
 fn structured_tool_output_placeholder_is_synthesized_before_respond() {
     let loop_state = LoopState::new(1);
     let route = route_result(
@@ -274,6 +315,98 @@ fn command_output_summary_keeps_planned_fs_count_entries_actions() {
     assert_eq!(
         second_args.get("path").and_then(Value::as_str),
         Some("scripts/nl_tests/fixtures/device_local/logs")
+    );
+}
+
+#[test]
+fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observation() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let loop_state = LoopState::new(1);
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "write_text",
+            "path": "document/nl_ops_http_repair_demo/index.html",
+            "content": "VALIDATION_PASSED\n",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "repair local fixture",
+        None,
+        actions,
+    );
+
+    assert!(
+        normalized
+            .iter()
+            .all(|action| !planned_call_is(action, "fs_basic", "write_text")),
+        "normalized actions: {normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "process_basic", "ps")),
+        "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
+fn active_ops_apply_keeps_mutation_despite_summary_contract_hint() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let mut loop_state = LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        ..Default::default()
+    };
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "write_text",
+            "path": "document/nl_ops_http_repair_demo/index.html",
+            "content": "VALIDATION_PASSED\n",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "repair local fixture",
+        None,
+        actions,
+    );
+
+    assert!(
+        !normalized.is_empty(),
+        "normalized actions should retain the mutation: {normalized:?}"
+    );
+    let args = expect_planned_call(&normalized[0], "fs_basic", "write_text");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("document/nl_ops_http_repair_demo/index.html")
     );
 }
 

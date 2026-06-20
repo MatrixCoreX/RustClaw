@@ -2,9 +2,13 @@ use super::*;
 
 pub(super) fn shell_sequence_part_can_run_independently(part: &str, is_last: bool) -> bool {
     let words = shell_like_words(part);
-    let Some(first) = words.first().map(|word| command_basename(word).trim()) else {
+    let Some(first_word) = words.first().map(|word| word.trim()) else {
         return false;
     };
+    if !is_last && shell_word_is_variable_assignment(first_word) {
+        return false;
+    }
+    let first = command_basename(first_word).trim();
     let first = first.to_ascii_lowercase();
     if matches!(
         first.as_str(),
@@ -37,6 +41,19 @@ pub(super) fn shell_sequence_part_can_run_independently(part: &str, is_last: boo
         return false;
     }
     true
+}
+
+fn shell_word_is_variable_assignment(word: &str) -> bool {
+    let Some((name, _value)) = word.split_once('=') else {
+        return false;
+    };
+    let Some(first) = name.chars().next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 pub(super) fn split_sequential_run_cmd_actions(

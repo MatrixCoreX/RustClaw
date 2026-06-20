@@ -433,7 +433,7 @@ fn standalone_task_request_preserves_prior_primary(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
             Some(crate::intent_router::TargetTaskPolicy::Standalone)
         )
-        && route_result.is_chat_gate()
+        && route_allows_standalone_answer_candidate_non_promotion(route_result)
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -448,13 +448,14 @@ fn standalone_answer_candidate_request_should_not_promote(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
 ) -> bool {
-    let is_standalone_task_request = matches!(
-        turn_analysis.and_then(|analysis| analysis.turn_type),
-        Some(crate::intent_router::TurnType::TaskRequest)
-    ) && matches!(
-        turn_analysis.and_then(|analysis| analysis.target_task_policy),
-        Some(crate::intent_router::TargetTaskPolicy::Standalone)
-    ) && route_result.is_chat_gate();
+    let is_standalone_task_request =
+        matches!(
+            turn_analysis.and_then(|analysis| analysis.turn_type),
+            Some(crate::intent_router::TurnType::TaskRequest)
+        ) && matches!(
+            turn_analysis.and_then(|analysis| analysis.target_task_policy),
+            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+        ) && route_allows_standalone_answer_candidate_non_promotion(route_result);
     if !is_standalone_task_request
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -478,6 +479,36 @@ fn standalone_answer_candidate_request_should_not_promote(
         && resolved_prompt_for_execution
             .lines()
             .any(|line| line.trim_start().starts_with("answer_candidate:"))
+}
+
+fn route_allows_standalone_answer_candidate_non_promotion(
+    route_result: &crate::RouteResult,
+) -> bool {
+    if route_result.is_chat_gate() {
+        return true;
+    }
+    route_result.is_execute_gate()
+        && route_result
+            .route_reason
+            .contains("pure_chat_agent_loop_submode")
+        && route_result.schedule_kind == crate::ScheduleKind::None
+        && !route_result.needs_clarify
+        && !route_result.wants_file_delivery
+        && !route_result.should_refresh_long_term_memory
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        && matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        )
+        && matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        )
 }
 
 fn standalone_answer_candidate_output_should_not_promote(
@@ -794,6 +825,7 @@ fn effective_locale_hint(
     })
 }
 
+#[cfg(test)]
 fn persist_conversation_state(
     state: &AppState,
     task: &ClaimedTask,
@@ -872,43 +904,6 @@ pub(crate) fn load_active_conversation_state(
         })
         .ok()?;
     serde_json::from_str::<ConversationState>(&state_json).ok()
-}
-
-#[allow(dead_code)]
-pub(crate) fn replace_active_conversation_state_from_session_snapshot(
-    state: &AppState,
-    task: &ClaimedTask,
-    payload: Option<&Value>,
-) {
-    let prior_state = load_active_conversation_state(state, task);
-    let followup = crate::followup_frame::load_active_followup_frame(state, task);
-    let clarify = crate::clarify_state::load_active_clarify_state(state, task);
-    let observed_facts = crate::observed_facts::load_active_observed_facts_snapshot(state, task);
-    let conversation_state = ConversationState {
-        active_followup_task_id: followup.map(|frame| frame.source_task_id),
-        active_clarify_task_id: clarify.map(|clarify| clarify.source_task_id),
-        active_observed_facts_task_id: observed_facts.map(|(_, source_task_id)| source_task_id),
-        alias_bindings: prior_state
-            .as_ref()
-            .map(|state| state.alias_bindings.clone())
-            .unwrap_or_default(),
-        last_primary_task_prompt: prior_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_prompt.clone()),
-        last_primary_task_output: prior_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_output.clone()),
-        locale_hint: effective_locale_hint(prior_state.as_ref(), payload),
-        last_task_id: task.task_id.clone(),
-        updated_at_ts: crate::now_ts_u64(),
-    };
-    if let Err(err) = persist_conversation_state(state, task, &conversation_state) {
-        tracing::warn!(
-            "conversation_state persist failed task_id={} err={}",
-            task.task_id,
-            err
-        );
-    }
 }
 
 #[cfg(test)]

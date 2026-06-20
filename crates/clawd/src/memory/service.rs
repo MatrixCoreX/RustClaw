@@ -75,50 +75,6 @@ pub(crate) struct PromptMemoryContext {
     pub(crate) recent_related_events: Vec<RetrievedMemoryItem>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PromptMemoryBudgetMode {
-    Full,
-    Light,
-}
-
-#[allow(dead_code)]
-pub(crate) fn prepare_prompt_with_memory(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    chat_memory_budget_chars: usize,
-) -> PromptMemoryContext {
-    prepare_prompt_with_memory_for_mode(
-        state,
-        task,
-        prompt,
-        chat_memory_budget_chars,
-        PromptMemoryBudgetMode::Full,
-    )
-}
-
-pub(crate) fn prepare_prompt_with_memory_for_mode(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    chat_memory_budget_chars: usize,
-    mode: PromptMemoryBudgetMode,
-) -> PromptMemoryContext {
-    let planner_budget = planner_memory_budget_chars(state, mode);
-    let chat_budget = chat_memory_budget_for_mode(state, chat_memory_budget_chars, mode);
-    let planner_decision = MemoryUseDecision::planner_scoped(
-        planner_budget,
-        "legacy_prompt_memory_mode_planner_policy",
-    );
-    let chat_decision = MemoryUseDecision::chat_scoped(
-        chat_budget,
-        matches!(mode, PromptMemoryBudgetMode::Full),
-        "legacy_prompt_memory_mode_chat_policy",
-    );
-    prepare_prompt_with_memory_for_policy(state, task, prompt, &planner_decision, &chat_decision)
-}
-
 pub(crate) fn prepare_prompt_with_memory_for_policy(
     state: &AppState,
     task: &ClaimedTask,
@@ -284,40 +240,6 @@ fn push_memory_trace_items(
             "included": true,
             "reason": decision.reason.as_str(),
         }));
-    }
-}
-
-fn planner_memory_budget_chars(state: &AppState, mode: PromptMemoryBudgetMode) -> usize {
-    match mode {
-        PromptMemoryBudgetMode::Full => state
-            .policy
-            .memory
-            .agent_memory_budget_chars
-            .max(512)
-            .min(state.policy.memory.prompt_max_chars.max(512)),
-        PromptMemoryBudgetMode::Light => state
-            .policy
-            .memory
-            .agent_memory_budget_chars
-            .max(512)
-            .min(768)
-            .min(state.policy.memory.prompt_max_chars.max(512)),
-    }
-}
-
-fn chat_memory_budget_for_mode(
-    state: &AppState,
-    chat_memory_budget_chars: usize,
-    mode: PromptMemoryBudgetMode,
-) -> usize {
-    match mode {
-        PromptMemoryBudgetMode::Full => chat_memory_budget_chars
-            .max(384)
-            .min(state.policy.memory.prompt_max_chars.max(384)),
-        PromptMemoryBudgetMode::Light => chat_memory_budget_chars
-            .max(384)
-            .min(640)
-            .min(state.policy.memory.prompt_max_chars.max(384)),
     }
 }
 

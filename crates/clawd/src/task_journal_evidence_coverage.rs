@@ -278,42 +278,25 @@ pub(super) fn observed_evidence_field_sets(
         let Some(evidence) = observed_evidence_for_step_trace(step) else {
             continue;
         };
-        let extractor_ref = evidence
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        if let Some(extractor_ref) = extractor_ref.as_ref() {
-            observed_extractors.insert(extractor_ref.clone());
-        }
-        let Some(items) = evidence.get("items").and_then(Value::as_array) else {
+        ingest_observed_evidence_value(
+            &evidence,
+            &mut observed_fields,
+            &mut observed_canonical,
+            &mut observed_extractors,
+            &mut observed_evidence_sources,
+        );
+    }
+    for observation in &journal.task_observations {
+        let Some(evidence) = observation.get("observed_evidence") else {
             continue;
         };
-        for item in items {
-            let Some(field) = item.get("field").and_then(Value::as_str) else {
-                continue;
-            };
-            let normalized = normalize_evidence_field(field);
-            if normalized.is_empty() {
-                continue;
-            }
-            observed_fields.insert(normalized.clone());
-            let canonical_fields = canonical_evidence_fields_for_observed_item(&normalized, item);
-            if let Some(extractor_ref) = extractor_ref.as_ref() {
-                observed_evidence_sources
-                    .entry(normalized.clone())
-                    .or_default()
-                    .insert(extractor_ref.clone());
-            }
-            for canonical in canonical_fields {
-                if let Some(extractor_ref) = extractor_ref.as_ref() {
-                    observed_evidence_sources
-                        .entry(canonical.clone())
-                        .or_default()
-                        .insert(extractor_ref.clone());
-                }
-                observed_canonical.insert(canonical);
-            }
-        }
+        ingest_observed_evidence_value(
+            evidence,
+            &mut observed_fields,
+            &mut observed_canonical,
+            &mut observed_extractors,
+            &mut observed_evidence_sources,
+        );
     }
     (
         observed_fields,
@@ -321,6 +304,51 @@ pub(super) fn observed_evidence_field_sets(
         observed_extractors,
         observed_evidence_sources,
     )
+}
+
+fn ingest_observed_evidence_value(
+    evidence: &Value,
+    observed_fields: &mut BTreeSet<String>,
+    observed_canonical: &mut BTreeSet<String>,
+    observed_extractors: &mut BTreeSet<String>,
+    observed_evidence_sources: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    let extractor_ref = evidence
+        .pointer("/extractor/extractor_ref")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let Some(extractor_ref) = extractor_ref.as_ref() {
+        observed_extractors.insert(extractor_ref.clone());
+    }
+    let Some(items) = evidence.get("items").and_then(Value::as_array) else {
+        return;
+    };
+    for item in items {
+        let Some(field) = item.get("field").and_then(Value::as_str) else {
+            continue;
+        };
+        let normalized = normalize_evidence_field(field);
+        if normalized.is_empty() {
+            continue;
+        }
+        observed_fields.insert(normalized.clone());
+        let canonical_fields = canonical_evidence_fields_for_observed_item(&normalized, item);
+        if let Some(extractor_ref) = extractor_ref.as_ref() {
+            observed_evidence_sources
+                .entry(normalized.clone())
+                .or_default()
+                .insert(extractor_ref.clone());
+        }
+        for canonical in canonical_fields {
+            if let Some(extractor_ref) = extractor_ref.as_ref() {
+                observed_evidence_sources
+                    .entry(canonical.clone())
+                    .or_default()
+                    .insert(extractor_ref.clone());
+            }
+            observed_canonical.insert(canonical);
+        }
+    }
 }
 
 pub(super) fn augment_route_canonical_evidence(
@@ -368,11 +396,13 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("candidates".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
-        && (observed_canonical.contains("path")
-            || observed_canonical.contains("content_match")
-            || observed_canonical.contains("candidates")
-            || observed_field_with_prefix(observed_fields, "results["))
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::FileBasename
+    ) && (observed_canonical.contains("path")
+        || observed_canonical.contains("content_match")
+        || observed_canonical.contains("candidates")
+        || observed_field_with_prefix(observed_fields, "results["))
     {
         observed_canonical.insert("field_value".to_string());
     }
@@ -956,5 +986,6 @@ pub(super) fn contract_policy_trace_json(
         "freshness": extra.get("freshness").and_then(Value::as_str),
         "artifact_kind": extra.get("artifact_kind").and_then(Value::as_str),
         "channel_visibility": extra.get("channel_visibility").and_then(Value::as_str),
+        "evidence_profile": extra.get("evidence_profile").and_then(Value::as_str),
     }))
 }

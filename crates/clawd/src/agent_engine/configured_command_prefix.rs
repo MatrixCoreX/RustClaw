@@ -371,6 +371,8 @@ pub(super) fn followup_tail_has_structured_command_payload(
     let followup = followup.trim();
     !followup.is_empty()
         && (configured_explicit_command_candidate(runtime, followup).is_some()
+            || embedded_configured_explicit_command_candidate(runtime, followup).is_some()
+            || embedded_standalone_command_candidate(runtime, followup).is_some()
             || shellish_literal_command_segment(followup).is_some()
             || leading_shellish_command_sequence_segment(followup).is_some())
 }
@@ -437,6 +439,23 @@ pub(super) fn embedded_standalone_command_candidate(
         .next()
 }
 
+pub(super) fn embedded_configured_explicit_command_candidate(
+    runtime: &crate::CommandIntentRuntime,
+    request: &str,
+) -> Option<ExplicitCommandCandidate> {
+    let request = request.trim();
+    if request.is_empty() {
+        return None;
+    }
+    request
+        .char_indices()
+        .filter(|(idx, _)| command_candidate_start_boundary(request, *idx))
+        .filter_map(|(idx, _)| {
+            configured_explicit_command_candidate_from_text(runtime, &request[idx..], true)
+        })
+        .next()
+}
+
 pub(super) fn configured_explicit_command_candidate_from_text(
     runtime: &crate::CommandIntentRuntime,
     text: &str,
@@ -469,7 +488,7 @@ pub(super) fn configured_explicit_command_candidate_from_text(
                 command,
                 single_step_safe: explicit_command_followup_tail(tail).map_or_else(
                     || !followup_tail_has_structured_command_payload(runtime, freeform_followup),
-                    |followup| followup.is_empty(),
+                    |followup| !followup_tail_has_structured_command_payload(runtime, followup),
                 ),
             })
         })
@@ -798,11 +817,12 @@ pub(super) fn structural_contract_deterministic_plan_overrides_literal_command_g
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
+        let semantic_kind = route.output_contract.semantic_kind;
         route.is_execute_gate()
             && route.output_contract.requires_content_evidence
             && !route.output_contract.delivery_required
-            && matches!(
-                route.output_contract.semantic_kind,
+            && (matches!(
+                semantic_kind,
                 crate::OutputSemanticKind::StructuredKeys
                     | crate::OutputSemanticKind::DirectoryPurposeSummary
                     | crate::OutputSemanticKind::DirectoryEntryGroups
@@ -814,8 +834,19 @@ pub(super) fn structural_contract_deterministic_plan_overrides_literal_command_g
                     | crate::OutputSemanticKind::ExistenceWithPath
                     | crate::OutputSemanticKind::ExistenceWithPathSummary
                     | crate::OutputSemanticKind::RecentScalarEqualityCheck
-            )
+            ) || (semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+                && scalar_path_contract_has_structural_locator(route)))
     })
+}
+
+fn scalar_path_contract_has_structural_locator(route: &RouteResult) -> bool {
+    match route.output_contract.locator_kind {
+        crate::OutputLocatorKind::CurrentWorkspace => true,
+        crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename => {
+            !route.output_contract.locator_hint.trim().is_empty()
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn missing_target_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
@@ -956,6 +987,7 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
 ) -> Vec<AgentAction> {
     if loop_state.has_tool_or_skill_output
         || !route_allows_explicit_command_preservation(route_result)
+        || structural_contract_deterministic_plan_overrides_literal_command_guard(route_result)
         || !run_cmd_available_for_plan(state)
     {
         return actions;
@@ -1103,6 +1135,7 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     let actions = replace_contract_rejected_actions_with_preferred_refs(
         state,
         route_result,
+        loop_state,
         original_user_text.or(Some(user_text)),
         auto_locator_path,
         actions,
@@ -1194,5 +1227,70 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     );
     let actions =
         mark_non_mutating_run_cmd_sequences_continue_on_error(state, route_result, actions);
+    let actions =
+        rewrite_backend_identity_metadata_respond_to_runtime_identity(state, route_result, actions);
     apply_scalar_count_contract_filter_to_count_entries_actions(route_result, actions)
+}
+
+fn rewrite_backend_identity_metadata_respond_to_runtime_identity(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_reason_has_backend_identity_metadata_marker(route) {
+        return actions;
+    }
+    let [AgentAction::Respond { content }] = actions.as_slice() else {
+        return actions;
+    };
+    if !respond_content_mentions_backend_identity_metadata(state, content) {
+        return actions;
+    }
+    info!("plan_rewrite_backend_identity_metadata_respond_to_runtime_identity");
+    vec![AgentAction::Respond {
+        content: state.agent_runtime_identity_label().to_string(),
+    }]
+}
+
+fn route_reason_has_backend_identity_metadata_marker(route: &RouteResult) -> bool {
+    [
+        "agent_display_name_hint_backend_metadata_removed",
+        "normalizer_answer_candidate_backend_metadata_removed",
+    ]
+    .iter()
+    .any(|marker| route_reason_has_structural_marker(route, marker))
+}
+
+fn respond_content_mentions_backend_identity_metadata(state: &AppState, content: &str) -> bool {
+    let normalized_content = normalize_backend_identity_token(content);
+    if normalized_content.is_empty() {
+        return false;
+    }
+    state.core.llm_providers.iter().any(|provider| {
+        provider
+            .config
+            .name
+            .trim()
+            .strip_prefix("vendor-")
+            .into_iter()
+            .chain([
+                provider.config.name.trim(),
+                provider.config.model.trim(),
+                provider.config.provider_type.trim(),
+            ])
+            .map(normalize_backend_identity_token)
+            .filter(|token| token.len() >= 4)
+            .any(|token| normalized_content.contains(&token))
+    })
+}
+
+fn normalize_backend_identity_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }

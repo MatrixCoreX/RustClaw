@@ -10,9 +10,9 @@ use super::{
     deterministic_structured_container_summary_answer, direct_config_edit_observed_answer,
     direct_current_workspace_top_level_dirs_overview_answer, direct_db_basic_observed_answer,
     direct_quantity_comparison_from_compare_paths, direct_rustclaw_config_risk_answer,
-    output_text_from_execution_result, preferred_route_clarify_question,
-    route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
-    route_structured_clarify_context,
+    output_text_from_execution_result, planned_delivery_identifies_failed_observed_step,
+    preferred_route_clarify_question, route_prefers_language_rendered_execution_failed_step,
+    route_resolved_intent, route_structured_clarify_context,
 };
 
 pub(super) async fn pending_confirmation_resume_payload(
@@ -453,13 +453,18 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let has_deterministic_answer = deterministic_answer.is_some();
-    let finalizer_summary = finalizer_summary.or_else(|| {
-        deterministic_answer
-            .as_ref()
-            .map(|(_, summary)| summary.clone())
-    });
+    let language_rendered_failed_step_summary =
+        language_rendered_failed_step_finalizer_summary(agent_run_context, loop_state, &message);
+    let has_language_rendered_failed_step_answer = language_rendered_failed_step_summary.is_some();
+    let finalizer_summary = finalizer_summary
+        .or_else(|| {
+            deterministic_answer
+                .as_ref()
+                .map(|(_, summary)| summary.clone())
+        })
+        .or(language_rendered_failed_step_summary);
     let (final_status, should_fail_task) = observed_execution_without_publishable_delivery_outcome(
-        has_deterministic_answer,
+        has_deterministic_answer || has_language_rendered_failed_step_answer,
         finalizer_summary.as_ref(),
     );
     let journal = build_loop_journal(
@@ -533,6 +538,16 @@ pub(super) fn observed_synthesis_unavailable_reply(
         .with_messages(delivery_messages)
         .with_task_journal(journal)
         .with_failure(message)
+}
+
+pub(super) fn language_rendered_failed_step_finalizer_summary(
+    agent_run_context: Option<&AgentRunContext>,
+    loop_state: &crate::agent_engine::LoopState,
+    message: &str,
+) -> Option<crate::task_journal::TaskJournalFinalizerSummary> {
+    (route_prefers_language_rendered_execution_failed_step(agent_run_context)
+        && planned_delivery_identifies_failed_observed_step(message, loop_state))
+    .then(|| deterministic_observed_execution_status_summary(loop_state))
 }
 
 pub(super) fn observed_execution_without_publishable_delivery_outcome(

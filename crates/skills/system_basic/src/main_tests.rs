@@ -885,6 +885,36 @@ fn inventory_dir_accepts_limit_alias_for_max_entries() {
 }
 
 #[test]
+fn inventory_dir_sorts_names_descending() {
+    let root = temp_root("inventory_name_desc");
+    for name in ["a.log", "c.log", "b.log"] {
+        std::fs::write(root.join(name), name).expect("write file");
+    }
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!("."));
+    obj.insert("names_only".to_string(), json!(true));
+    obj.insert("files_only".to_string(), json!(true));
+    obj.insert("sort_by".to_string(), json!("name_desc"));
+    obj.insert("limit".to_string(), json!(2));
+
+    let out = inventory_dir(&root, &obj, true).expect("inventory");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    let names: Vec<_> = value
+        .get("names")
+        .and_then(Value::as_array)
+        .expect("names")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(names, vec!["c.log", "b.log"]);
+    assert_eq!(
+        value.get("sort_by").and_then(Value::as_str),
+        Some("name_desc")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn inventory_dir_reports_size_summary_for_matched_files() {
     let root = temp_root("inventory_size_summary");
     std::fs::write(root.join("a-small.json"), b"{}").expect("write small");

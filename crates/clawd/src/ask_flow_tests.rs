@@ -1,5 +1,5 @@
 use super::{
-    active_file_basename_direct_answer_candidate,
+    active_file_basename_direct_answer, active_file_basename_direct_answer_candidate,
     active_ordered_entries_count_direct_answer_candidate,
     active_task_factual_rewrite_review_needs_repair, active_task_factual_rewrite_review_prompt,
     apply_direct_answer_gate_outcome, ask_reply_with_chat_process,

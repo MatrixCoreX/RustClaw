@@ -59,6 +59,105 @@ pub(super) fn apply_respond_action_outcome(
     ActionLoopDecision::NextAction
 }
 
+fn is_discussion_only_action(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::Respond { .. }
+            | AgentAction::SynthesizeAnswer { .. }
+            | AgentAction::Think { .. }
+    )
+}
+
+fn active_recipe_terminal_discussion_should_replan(
+    actions: &[AgentAction],
+    loop_state: &LoopState,
+    policy: &AgentLoopGuardPolicy,
+    idx: usize,
+) -> bool {
+    if !loop_state.execution_recipe.is_active()
+        || matches!(
+            loop_state.execution_recipe.phase,
+            crate::execution_recipe::ExecutionRecipePhase::Done
+        )
+    {
+        return false;
+    }
+    if !loop_state.executed_step_results.iter().any(|step| {
+        !matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think"
+        )
+    }) {
+        return false;
+    }
+    !actions
+        .iter()
+        .take(policy.max_steps.max(1))
+        .skip(idx + 1)
+        .any(|action| !is_discussion_only_action(action))
+}
+
+fn record_active_recipe_terminal_discussion_replan(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    action_kind: &str,
+) {
+    let reason = "active_recipe_terminal_discussion_before_done";
+    loop_state.has_recoverable_failure_context = true;
+    crate::append_subtask_result(
+        &mut loop_state.subtask_results,
+        global_step,
+        action_kind,
+        false,
+        reason,
+    );
+    super::attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        action_kind,
+        reason,
+        crate::executor::StepExecutionStatus::Error,
+        reason,
+        Some("active_recipe_incomplete_terminal_discussion"),
+        reason,
+        Some("active_recipe_continue_required"),
+    );
+    append_progress_hint(
+        state,
+        task,
+        &mut loop_state.progress_messages,
+        encode_progress_i18n("telegram.progress.retry_replan", &[]),
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: format!("step_{global_step}"),
+            skill: action_kind.to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(reason.to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+    loop_state.history_compact.push(format!(
+        "round={} step={} {} active_recipe_terminal_discussion_before_done phase={}",
+        loop_state.round_no,
+        step_in_round,
+        action_kind,
+        loop_state.execution_recipe.phase.as_str()
+    ));
+    info!(
+        "active_recipe_terminal_discussion_replan task_id={} round={} step={} action={} phase={}",
+        task.task_id,
+        loop_state.round_no,
+        step_in_round,
+        action_kind,
+        loop_state.execution_recipe.phase.as_str()
+    );
+}
+
 fn deterministic_observed_execution_status_answer(
     state: &AppState,
     task: &ClaimedTask,
@@ -663,6 +762,22 @@ pub(super) fn handle_respond_action(
     )
     .trim()
     .to_string();
+
+    if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {
+        record_active_recipe_terminal_discussion_replan(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            "respond",
+        );
+        return RespondActionOutcome {
+            ended_with_user_visible_output: false,
+            stop_signal: Some("recoverable_failure_continue_round".to_string()),
+            should_stop: true,
+        };
+    }
 
     if route_requires_file_token_delivery(agent_run_context)
         && unresolved_file_token_delivery_artifact(&text)
@@ -1451,6 +1566,21 @@ pub(super) async fn dispatch_round_action(
             "unsupported capability `{capability}` was not resolved before execution"
         )),
         AgentAction::SynthesizeAnswer { evidence_refs } => {
+            if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {
+                record_active_recipe_terminal_discussion_replan(
+                    state,
+                    task,
+                    loop_state,
+                    global_step,
+                    step_in_round,
+                    "synthesize_answer",
+                );
+                *executed_actions += 1;
+                loop_state.total_steps_executed += 1;
+                return Ok(ActionLoopDecision::StopRound(
+                    "recoverable_failure_continue_round".to_string(),
+                ));
+            }
             handle_synthesize_answer_action(
                 state,
                 task,

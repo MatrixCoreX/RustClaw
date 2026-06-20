@@ -84,7 +84,7 @@ continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_t
 continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_turn2|turn_chain,client_like,aggregate|再数一下 document 目录直接有多少个子项
 continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_turn3|turn_chain,client_like,aggregate|上一个和上上个哪个更多，只回答目录名
 # source: scripts/nl_tests/cases/nl_case_fuzzy_top3_only.txt
-single|nl_case_fuzzy_top3_only_0001|single,client_like,aggregate|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd
+single|nl_case_fuzzy_top3_only_0001|single,client_like,aggregate,expect_max_lines:3|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd，最多输出前 3 个路径
 # source: scripts/nl_tests/cases/nl_case_health_check_brief.txt
 single|nl_case_health_check_brief_0001|single,client_like,aggregate|帮我做一次基础健康检查，只列最重要的结论
 # source: scripts/nl_tests/cases/nl_case_http_local_health_brief_only.txt
@@ -1611,7 +1611,7 @@ continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_r
 continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_repeat02_turn2|turn_chain,client_like,aggregate|再数一下 document 目录直接有多少个子项
 continuous|nl_case_followup_two_hops_dir_compare_followup_two_hops_dir_compare_repeat02_turn3|turn_chain,client_like,aggregate|上一个和上上个哪个更多，只回答目录名
 # source: scripts/nl_tests/cases/nl_case_fuzzy_top3_only.txt
-single|nl_case_fuzzy_top3_only_0001_repeat02|single,client_like,aggregate|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd
+single|nl_case_fuzzy_top3_only_0001_repeat02|single,client_like,aggregate,expect_max_lines:3|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd，最多输出前 3 个路径
 # source: scripts/nl_tests/cases/nl_case_health_check_brief.txt
 single|nl_case_health_check_brief_0001_repeat02|single,client_like,aggregate|帮我做一次基础健康检查，只列最重要的结论
 # source: scripts/nl_tests/cases/nl_case_http_local_health_brief_only.txt

@@ -120,6 +120,95 @@ fn generated_file_delivery_misclassified_as_path_without_hint_can_execute() {
 }
 
 #[test]
+fn existing_file_delivery_with_locator_hint_executes_for_runtime_not_found() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason =
+        "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"
+            .to_string();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "definitely_missing_named_file_rustclaw_001.txt".into();
+
+    let result = apply_post_route_policy(route, LocatorResolution::None);
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::planner_execute_plain()
+    );
+    assert!(!result.execution_route_result.needs_clarify);
+    assert!(!result.missing_locator_for_path_scoped_content);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_file_delivery_locator_hint_deferred_to_execution"
+    );
+    assert_eq!(result.gate_record.owner_layer, "boundary_delivery_gate");
+    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+}
+
+#[test]
+fn existing_file_delivery_without_locator_hint_stays_clarify() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason = "clarify_reason_code:missing_delivery_locator".to_string();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint.clear();
+
+    let result = apply_post_route_policy(route, LocatorResolution::None);
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::clarify()
+    );
+    assert!(result.execution_route_result.needs_clarify);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_missing_path_scoped_locator"
+    );
+}
+
+#[test]
+fn existing_file_delivery_with_fuzzy_candidates_stays_clarify() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason = "clarify_reason_code:missing_delivery_locator".to_string();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "report.txt".into();
+
+    let result = apply_post_route_policy(
+        route,
+        LocatorResolution::Fuzzy(vec!["/tmp/report-a.txt".into(), "/tmp/report-b.txt".into()]),
+    );
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::clarify()
+    );
+    assert!(result.execution_route_result.needs_clarify);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_fuzzy_locator_candidates"
+    );
+}
+
+#[test]
 fn generated_file_delivery_current_workspace_without_hint_can_execute() {
     let mut route = route_result();
     route.resolved_intent =
@@ -1243,5 +1332,33 @@ fn fuzzy_locator_candidates_set_structured_clarify_reason_kind() {
     assert_eq!(
         result.clarify_reason_kind,
         ClarifyReasonKind::FuzzyLocatorCandidates
+    );
+}
+
+#[test]
+fn clarify_reason_kind_dispatch_tokens_keep_boundary_and_legacy_semantic_separate() {
+    assert_eq!(
+        ClarifyReasonKind::RouteReasonText.dispatch_event(),
+        "legacy_semantic_clarify_compat"
+    );
+    assert_eq!(
+        ClarifyReasonKind::RouteReasonText.dispatch_new_owner(),
+        "agent_loop_terminal_clarify_pending"
+    );
+    assert_eq!(
+        ClarifyReasonKind::RouteReasonText.dispatch_chosen_path(),
+        "ask_pipeline_legacy_semantic_clarify_compat"
+    );
+    assert_eq!(
+        ClarifyReasonKind::MissingPathScopedLocator.dispatch_event(),
+        "clarify_boundary_shortcut"
+    );
+    assert_eq!(
+        ClarifyReasonKind::MissingPathScopedLocator.dispatch_new_owner(),
+        "boundary_clarify_gate"
+    );
+    assert_eq!(
+        ClarifyReasonKind::FuzzyLocatorCandidates.dispatch_chosen_path(),
+        "ask_pipeline_boundary_clarify_shortcut"
     );
 }

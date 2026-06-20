@@ -541,6 +541,7 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint = "clawd".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = service_status_deterministic_plan_result(
@@ -557,6 +558,80 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
     let args = expect_planned_call(&action, "process_basic", "ps");
     assert_eq!(args.get("filter").and_then(Value::as_str), Some("clawd"));
     assert_eq!(args.get("limit").and_then(Value::as_u64), Some(200));
+}
+
+#[test]
+fn service_status_process_request_without_machine_filter_does_not_use_ambient_process_table() {
+    let state = test_state_with_enabled_skills(&["process_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint.clear();
+    let loop_state = LoopState::new(1);
+
+    assert!(
+        process_status_filter_token("check whether the local clawd process is present").is_none()
+    );
+    assert!(service_status_deterministic_plan_result(
+        &state,
+        "check clawd process",
+        Some(&route),
+        &loop_state,
+        "check whether the local clawd process is present",
+    )
+    .is_none());
+}
+
+#[test]
+fn contract_hint_process_basic_does_not_use_resolved_intent_as_process_filter() {
+    let state = test_state_with_enabled_skills(&["process_basic"]);
+    let mut route = base_route_result();
+    route.route_reason = "contract_hint_fast_path".to_string();
+    route.resolved_intent = "telegramd".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_hint.clear();
+    let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=process_basic\n[/CONTRACT_TEST_HINT]";
+
+    let plan = contract_hint_preferred_action_deterministic_plan_result(
+        &state,
+        "check status",
+        Some(&route),
+        &LoopState::new(1),
+        request,
+        None,
+    )
+    .expect("service status contract hint should use process_basic fallback");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "process_basic", "ps");
+    assert_eq!(args.get("filter").and_then(Value::as_str), Some("clawd"));
+}
+
+#[test]
+fn run_cmd_service_status_does_not_use_resolved_intent_as_process_filter() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.resolved_intent = "telegramd".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_hint.clear();
+
+    let action = preferred_run_cmd_for_contract_hint(&state, &route, None)
+        .expect("service status contract can use run_cmd fallback");
+    let (skill, args) = planned_call(&action).expect("planned call");
+    assert_eq!(skill, "run_cmd");
+    let command = args
+        .get("command")
+        .and_then(Value::as_str)
+        .expect("run command");
+
+    assert!(command.contains("'clawd'"), "{command}");
+    assert!(!command.contains("telegramd"), "{command}");
 }
 
 #[test]
@@ -585,6 +660,65 @@ fn service_status_url_request_uses_http_basic_plan() {
         args.get("url").and_then(Value::as_str),
         Some("http://127.0.0.1:8787/v1/health")
     );
+}
+
+#[test]
+fn service_status_task_control_marker_uses_task_control_plan_before_health_check() {
+    let state = test_state_with_enabled_skills(&["health_check", "task_control"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.route_reason = "capability_ref=task_control.list".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "observe current task queue",
+        Some(&route),
+        &loop_state,
+        "status query",
+    )
+    .expect("task-control marker should use task_control before generic health_check");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "task_control", "list");
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
+}
+
+#[test]
+fn web_search_summary_contract_uses_web_search_extract_plan() {
+    let state = test_state_with_enabled_skills(&["web_search_extract"]);
+    let mut route = base_route_result();
+    route.resolved_intent = "rust async tutorial".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::WebSearchSummary;
+    route.output_contract.self_extension.list_selector.limit = Some(3);
+    let loop_state = LoopState::new(1);
+
+    let plan = web_search_summary_deterministic_plan_result(
+        &state,
+        "search web",
+        Some(&route),
+        &loop_state,
+        "fallback user text",
+    )
+    .expect("web search summary contract should use web_search_extract");
+
+    assert_eq!(plan.steps.len(), 3);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "web_search_extract", "search_extract");
+    assert_eq!(
+        args.get("query").and_then(Value::as_str),
+        Some("rust async tutorial")
+    );
+    assert_eq!(
+        args.get("backend").and_then(Value::as_str),
+        Some("bing_html")
+    );
+    assert_eq!(args.get("top_k").and_then(Value::as_u64), Some(3));
 }
 
 #[test]
@@ -773,7 +907,7 @@ fn service_status_process_ranking_count_is_not_port_filter() {
 }
 
 #[test]
-fn service_status_without_process_target_uses_system_basic_info_plan() {
+fn service_status_without_machine_target_does_not_use_system_basic_info_fallback() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -783,17 +917,16 @@ fn service_status_without_process_target_uses_system_basic_info_plan() {
 
     let plan = service_status_deterministic_plan_result(
         &state,
-        "observe local runtime identity",
+        "observe status",
         Some(&route),
         &loop_state,
-        "observe local runtime identity",
-    )
-    .expect("system status fallback should use system_basic info");
+        "generic status",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "system_basic", "info");
-    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
+    assert!(
+        plan.is_none(),
+        "generic service_status without machine target should leave system_basic choice to planner"
+    );
 }
 
 #[test]
@@ -822,7 +955,7 @@ fn service_status_identity_field_prefers_system_basic_info_over_health_check() {
 }
 
 #[test]
-fn service_status_generic_status_prefers_health_check_over_system_basic_info() {
+fn service_status_generic_status_without_machine_target_defers_to_planner() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic", "system_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -832,20 +965,16 @@ fn service_status_generic_status_prefers_health_check_over_system_basic_info() {
 
     let plan = service_status_deterministic_plan_result(
         &state,
-        "observe local runtime identity",
+        "observe status",
         Some(&route),
         &loop_state,
-        "observe local runtime identity",
-    )
-    .expect("generic system status should use health_check");
+        "generic status",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let AgentAction::CallSkill { skill, args } = action else {
-        panic!("expected health_check call, got {action:?}");
-    };
-    assert_eq!(skill, "health_check");
-    assert_eq!(args.as_object().map(|obj| obj.len()), Some(0));
+    assert!(
+        plan.is_none(),
+        "generic service_status without machine target should leave capability choice to planner"
+    );
 }
 
 #[test]

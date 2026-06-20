@@ -250,7 +250,13 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "fs_basic.grep_text",
         "fs_basic.grep_text.structured_json_v1",
-        &["candidates", "content_excerpt", "content_match", "path"],
+        &[
+            "candidates",
+            "command_output",
+            "content_excerpt",
+            "content_match",
+            "path",
+        ],
     ),
     step_json_extractor(
         "fs_basic.read_text_range",

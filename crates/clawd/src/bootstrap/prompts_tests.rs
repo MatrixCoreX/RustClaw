@@ -248,3 +248,31 @@ fn strict_prompt_validation_error_lists_missing_prompts() {
     assert!(message.contains("intent_normalizer (routing)"));
     assert!(message.contains("prompts/intent_normalizer_prompt.md"));
 }
+
+#[test]
+fn visible_response_prompts_keep_agent_identity_boundary() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for rel in [
+        "chat_response_prompt.md",
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt = std::fs::read_to_string(overlays.join(rel)).expect("read prompt overlay");
+        assert!(
+            prompt.contains("agent/runtime identity"),
+            "{rel} should keep the agent identity boundary"
+        );
+        assert!(
+            prompt.contains("provider/model"),
+            "{rel} should keep provider/model separated from identity"
+        );
+        assert!(
+            prompt.contains("backend metadata"),
+            "{rel} should describe provider/model as backend metadata"
+        );
+        assert!(
+            prompt.contains("__AGENT_RUNTIME_IDENTITY__"),
+            "{rel} should render the runtime identity machine fact"
+        );
+    }
+}

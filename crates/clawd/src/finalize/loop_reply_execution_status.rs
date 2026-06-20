@@ -4,10 +4,9 @@ use crate::agent_engine::{append_delivery_message, AgentRunContext};
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    deterministic_template_language_preference, log_deterministic_delivery_record,
-    missing_file_path_from_loop, output_excerpt_has_missing_file_evidence,
-    output_text_from_execution_result, plan_step_for_execution,
-    planned_delivery_is_publishable_model_language_answer, prefer_english_for_user_text,
+    log_deterministic_delivery_record, missing_file_path_from_loop,
+    output_excerpt_has_missing_file_evidence, output_text_from_execution_result,
+    plan_step_for_execution, planned_delivery_is_publishable_model_language_answer,
     raw_command_arg_from_plan_step, route_prefers_language_rendered_execution_failed_step,
     step_error_has_missing_file_evidence, structured_extra_string, truncate_with_ellipsis,
 };
@@ -103,11 +102,10 @@ pub(super) fn delivery_is_content_answer_candidate(
 }
 
 pub(super) fn deterministic_observed_execution_status_answer(
-    state: &AppState,
-    user_text: &str,
+    _state: &AppState,
+    _user_text: &str,
     loop_state: &crate::agent_engine::LoopState,
 ) -> Option<String> {
-    let prefer_english = prefer_english_for_user_text(state, user_text);
     let steps = observed_execution_status_steps(loop_state);
     if steps.len() < 2 || !steps.iter().any(|step| !step.is_ok()) {
         return None;
@@ -116,36 +114,63 @@ pub(super) fn deterministic_observed_execution_status_answer(
         return None;
     }
 
-    let lines = steps
-        .iter()
-        .take(6)
-        .enumerate()
-        .map(|(idx, step)| {
-            let skill = step.skill.trim();
-            if step.is_ok() {
-                if prefer_english {
-                    format!("Step {} `{skill}` succeeded.", idx + 1)
-                } else {
-                    format!("第 {} 步 `{skill}` 成功。", idx + 1)
-                }
-            } else {
-                let error = output_text_from_execution_result(step)
-                    .unwrap_or_else(|| "execution failed".to_string());
-                let error = truncate_with_ellipsis(&error.replace('\n', " "), 220);
-                if prefer_english {
-                    format!("Step {} `{skill}` failed: {error}.", idx + 1)
-                } else {
-                    format!("第 {} 步 `{skill}` 失败：{error}。", idx + 1)
-                }
+    let mut lines = vec![
+        "schema_version=1".to_string(),
+        "reason_code=observed_execution_status".to_string(),
+    ];
+    for (idx, step) in steps.iter().take(6).enumerate() {
+        let step_no = idx + 1;
+        lines.push(format!("step.{step_no}.skill={}", step.skill.trim()));
+        if step.is_ok() {
+            lines.push(format!("step.{step_no}.status=ok"));
+            continue;
+        }
+        lines.push(format!("step.{step_no}.status=error"));
+        if let Some(error) = output_text_from_execution_result(step) {
+            let error = truncate_with_ellipsis(&error.replace('\n', " "), 220);
+            lines.push(format!("step.{step_no}.error_summary={error}"));
+        }
+        push_structured_step_error_machine_facts(&mut lines, step_no, step);
+    }
+    Some(lines.join("\n"))
+}
+
+fn push_structured_step_error_machine_facts(
+    lines: &mut Vec<String>,
+    step_no: usize,
+    step: &crate::executor::StepExecutionResult,
+) {
+    let Some(error) = step.error.as_deref().map(str::trim) else {
+        return;
+    };
+    let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
+        return;
+    };
+    if !structured.error_kind.trim().is_empty() {
+        lines.push(format!(
+            "step.{step_no}.error_kind={}",
+            structured.error_kind.trim()
+        ));
+    }
+    if let Some(extra) = structured.extra.as_ref() {
+        for key in ["exit_code", "stderr", "stdout", "output_truncated"] {
+            if let Some(value) = extra.get(key) {
+                let value_text = value
+                    .as_str()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| value.to_string());
+                lines.push(format!(
+                    "step.{step_no}.{key}={}",
+                    truncate_with_ellipsis(&value_text.replace('\n', " "), 220)
+                ));
             }
-        })
-        .collect::<Vec<_>>();
-    Some(lines.join(if prefer_english { " " } else { "" }))
+        }
+    }
 }
 
 pub(super) fn deterministic_missing_observed_target_answer(
-    state: &AppState,
-    user_text: &str,
+    _state: &AppState,
+    _user_text: &str,
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
@@ -181,11 +206,10 @@ pub(super) fn deterministic_missing_observed_target_answer(
         return None;
     }
     let path = missing_file_path_from_loop(loop_state, agent_run_context)?;
-    let scalar_count = agent_run_context
+    let semantic_kind = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
-        });
+        .map(|route| route.output_contract.semantic_kind);
+    let scalar_count = semantic_kind == Some(crate::OutputSemanticKind::ScalarCount);
     let concise_existence = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
@@ -196,26 +220,23 @@ pub(super) fn deterministic_missing_observed_target_answer(
                     crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
                 )
         });
+    let mut lines = vec![
+        "schema_version=1".to_string(),
+        "reason_code=missing_observed_target".to_string(),
+        "exists=false".to_string(),
+        format!("path=`{path}`"),
+        "kind=missing".to_string(),
+    ];
+    if let Some(semantic_kind) = semantic_kind {
+        lines.push(format!("semantic_kind={}", semantic_kind.as_str()));
+    }
+    if scalar_count {
+        lines.push("count_available=false".to_string());
+    }
     if concise_existence {
-        return Some(format!("exists=false path={path} kind=missing"));
+        lines.push("response_shape=existence_with_path".to_string());
     }
-    let prefer_english =
-        deterministic_template_language_preference(state, user_text, agent_run_context)?;
-    if prefer_english {
-        if scalar_count {
-            Some(format!(
-                "`{path}` does not exist, so the matching item count cannot be computed."
-            ))
-        } else {
-            Some(format!(
-                "I could not find `{path}`, so this request cannot be completed until the path is corrected."
-            ))
-        }
-    } else if scalar_count {
-        Some(format!("`{path}` 不存在，无法统计匹配项数量。"))
-    } else {
-        Some(format!("未找到 `{path}`，请确认路径后再继续。"))
-    }
+    Some(lines.join("\n"))
 }
 
 fn route_requests_execution_failed_step_answer(
@@ -480,7 +501,7 @@ pub(super) fn replace_delivery_with_deterministic_execution_failed_step_answer(
     true
 }
 
-fn planned_delivery_identifies_failed_observed_step(
+pub(super) fn planned_delivery_identifies_failed_observed_step(
     delivery: &str,
     loop_state: &crate::agent_engine::LoopState,
 ) -> bool {

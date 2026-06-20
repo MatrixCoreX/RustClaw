@@ -89,6 +89,24 @@ fn rss_news_fetch_allows_rss_fetch_without_locator() {
 }
 
 #[test]
+fn execution_failed_step_contract_accepts_command_output_evidence() {
+    let matrix = load_workspace_matrix();
+    let contract = matrix
+        .semantic_contract(OutputSemanticKind::ExecutionFailedStep)
+        .expect("execution failed step contract");
+    let matched = MatchedContract::Semantic(contract);
+    let evidence_expression = matched.evidence_expression();
+
+    assert_eq!(matched.required_evidence(), vec!["command_output"]);
+    for token in ["command_output", "field_value"] {
+        assert!(
+            evidence_expression.any_of.contains(&token.to_string()),
+            "missing {token} in {evidence_expression:?}"
+        );
+    }
+}
+
+#[test]
 fn service_status_allows_system_basic_info_observation() {
     let matrix = load_workspace_matrix();
     let contract = matrix
@@ -512,6 +530,10 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
         Some("user_visible")
     );
     assert_eq!(
+        snapshot.get("evidence_profile").and_then(Value::as_str),
+        Some("generic")
+    );
+    assert_eq!(
         snapshot
             .get("evidence_expression")
             .and_then(|value| value.get("all_of"))
@@ -656,6 +678,10 @@ fn action_trace_records_contract_decision_and_shape() {
         Some("name_list")
     );
     assert_eq!(
+        trace.get("evidence_profile").and_then(Value::as_str),
+        Some("generic")
+    );
+    assert_eq!(
         trace
             .get("required_evidence")
             .and_then(Value::as_array)
@@ -749,6 +775,18 @@ failure_policy = "no_retry"
     .expect_err("invalid runtime field should fail shape validation");
 
     assert!(err.contains("invalid policy_mode"));
+}
+
+#[test]
+fn contract_runtime_rejects_natural_language_evidence_profile() {
+    let source = include_str!("../../../configs/task_contract_matrix.toml").replace(
+        "evidence_profile = \"workspace_user_docs_first\"",
+        "evidence_profile = \"read user setup docs first\"",
+    );
+    let err = parse_contract_matrix_source(&source)
+        .expect_err("natural-language evidence profile should fail shape validation");
+
+    assert!(err.contains("invalid evidence_profile"));
 }
 
 #[test]

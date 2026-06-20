@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde_json::json;
 
 use super::{
-    execution_evidence_prompt_block, local_compound_listing_answer_verifier_gap,
-    local_missing_evidence_verifier_gap, observed_scalar_values_from_evidence_map,
-    observed_scalar_values_from_evidence_map_for_route,
+    backend_identity_metadata_answer_verifier_guard, execution_evidence_prompt_block,
+    local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
+    observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
-    should_verify_answer, structural_satisfaction_can_skip_verifier,
+    output_contract_prompt_block, should_verify_answer, structural_satisfaction_can_skip_verifier,
     structurally_satisfies_answer_contract, AnswerVerifierOut,
 };
 
@@ -30,6 +31,107 @@ fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
         agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
     }
+}
+
+fn state_with_mimo_provider() -> crate::AppState {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.llm_providers = vec![Arc::new(crate::LlmProviderRuntime {
+        config: claw_core::config::LlmProviderConfig {
+            name: "vendor-mimo".to_string(),
+            provider_type: "openai_compat".to_string(),
+            base_url: "http://fixture.invalid".to_string(),
+            api_key: "fixture".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+            context_window_tokens: None,
+            priority: 1,
+            timeout_seconds: 5,
+            max_concurrency: 1,
+            params: claw_core::config::LlmProviderParams::default(),
+        },
+        client: reqwest::Client::new(),
+        semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+    })];
+    state
+}
+
+fn backend_identity_guard_route() -> crate::RouteResult {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason =
+        "agent_display_name_hint_backend_metadata_removed; pure_chat_agent_loop_submode"
+            .to_string();
+    route
+}
+
+fn backend_answer_candidate_guard_route() -> crate::RouteResult {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason =
+        "normalizer_answer_candidate_backend_metadata_removed; pure_chat_agent_loop_submode"
+            .to_string();
+    route
+}
+
+#[test]
+fn backend_identity_metadata_guard_accepts_runtime_identity_label() {
+    let state = state_with_mimo_provider();
+    let route = backend_identity_guard_route();
+
+    let guard = backend_identity_metadata_answer_verifier_guard(&state, &route, "RustClaw")
+        .expect("runtime identity should be handled without model verifier");
+
+    assert!(guard.pass);
+    assert!(guard.missing_evidence_fields.is_empty());
+    assert!(!guard.should_retry);
+}
+
+#[test]
+fn backend_identity_metadata_guard_rejects_provider_identity_leak() {
+    let state = state_with_mimo_provider();
+    let route = backend_identity_guard_route();
+
+    let guard = backend_identity_metadata_answer_verifier_guard(
+        &state,
+        &route,
+        "你好，我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。",
+    )
+    .expect("backend provider identity should be handled structurally");
+
+    assert!(!guard.pass);
+    assert_eq!(guard.missing_evidence_fields, vec!["identity"]);
+    assert_eq!(
+        guard.answer_incomplete_reason,
+        "backend_identity_metadata_in_final_answer"
+    );
+    assert!(guard.should_retry);
+}
+
+#[test]
+fn backend_identity_metadata_guard_accepts_answer_candidate_marker() {
+    let state = state_with_mimo_provider();
+    let route = backend_answer_candidate_guard_route();
+
+    let guard = backend_identity_metadata_answer_verifier_guard(
+        &state,
+        &route,
+        "你好，我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。",
+    )
+    .expect("backend identity marker from answer_candidate should be enforced");
+
+    assert!(!guard.pass);
+    assert_eq!(
+        guard.answer_incomplete_reason,
+        "backend_identity_metadata_in_final_answer"
+    );
+}
+
+#[test]
+fn backend_identity_metadata_guard_requires_route_marker() {
+    let state = state_with_mimo_provider();
+    let route = route_with_mode(crate::AskMode::planner_execute_plain());
+
+    assert!(
+        backend_identity_metadata_answer_verifier_guard(&state, &route, "MiMo-v2.5-pro",).is_none()
+    );
 }
 
 #[test]
@@ -125,6 +227,20 @@ fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
     assert!(PROMPT_RAW.contains("preserve the already required deliverable"));
     assert!(PROMPT_RAW.contains("combined final answer"));
     assert!(PROMPT_RAW.contains("include the observed listed items and the synthesis"));
+}
+
+#[test]
+fn answer_verifier_output_contract_exposes_evidence_profile() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+
+    let block = output_contract_prompt_block(&route);
+
+    assert!(block.contains("\"contract_matrix\""));
+    assert!(block.contains("\"evidence_profile\""));
+    assert!(block.contains("\"workspace_user_docs_first\""));
 }
 
 #[test]
@@ -427,6 +543,21 @@ fn direct_answer_route_skips_answer_verifier() {
 }
 
 #[test]
+fn pure_chat_agent_loop_submode_uses_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.wants_file_delivery = false;
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
+
+    assert!(should_verify_answer(&route, &journal, "candidate response"));
+}
+
+#[test]
 fn tool_discovery_context_only_route_skips_answer_verifier() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ToolDiscovery;
@@ -577,6 +708,111 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     });
 
     assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
+}
+
+#[test]
+fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-local-gap-not-found-answer",
+        "ask",
+        "read missing path",
+    );
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/rustclaw-missing.md".to_string()),
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route,
+        &journal,
+        "/tmp/rustclaw-missing.md"
+    ));
+}
+
+#[test]
+fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md | README.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-local-gap-stat-missing-answer",
+        "ask",
+        "stat missing path and summarize readme",
+    );
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "path_batch_facts",
+                "count": 1,
+                "facts": [
+                    {
+                        "exists": false,
+                        "kind": "missing",
+                        "path": "/tmp/rustclaw-missing.md"
+                    }
+                ],
+                "include_missing": true
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route,
+        &journal,
+        "exists=false path=/tmp/rustclaw-missing.md kind=missing"
+    ));
+}
+
+#[test]
+fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_hint = "/tmp/rustclaw-missing.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-local-gap-not-found-answer-no-path",
+        "ask",
+        "read missing path",
+    );
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/rustclaw-missing.md".to_string()),
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    assert!(!structural_satisfaction_can_skip_verifier(
+        &route, &journal, "missing"
+    ));
 }
 
 #[test]
@@ -1111,8 +1347,7 @@ fn unbounded_directory_purpose_summary_does_not_require_all_listing_names() {
         finished_at: 3,
     });
 
-    let answer =
-        "RustClaw is organized around a Rust core in crates, with UI, configs, and scripts around it.";
+    let answer = "RustClaw is organized around a Rust core in crates, with UI, configs, and scripts around it.";
 
     assert!(local_compound_listing_answer_verifier_gap(&route, &journal, answer).is_none());
     assert!(structurally_satisfies_answer_contract(
@@ -1169,8 +1404,7 @@ fn workspace_project_summary_inventory_names_do_not_skip_model_language_verifier
         finished_at: 3,
     });
 
-    let answer =
-        "RustClaw keeps the runtime under crates, the browser console in UI, and helper automation in scripts.";
+    let answer = "RustClaw keeps the runtime under crates, the browser console in UI, and helper automation in scripts.";
 
     assert!(structurally_satisfies_answer_contract(
         &route, &journal, answer
@@ -1437,6 +1671,56 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
 }
 
 #[test]
+fn confirmed_missing_file_delivery_skips_model_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-missing-delivery",
+        "ask",
+        "send definitely_missing_named_file_golden_001.txt",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                json!({
+                    "extra": {
+                        "action": "find_name",
+                        "count": 0,
+                        "exact": false,
+                        "patterns": ["definitely_missing_named_file_golden_001.txt"],
+                        "results": [],
+                        "root": ""
+                    },
+                    "text": "{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_named_file_golden_001.txt\"],\"results\":[],\"root\":\"\"}"
+                })
+                .to_string(),
+            ),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route,
+        &journal,
+        "definitely_missing_named_file_golden_001.txt"
+    ));
+    assert!(!structural_satisfaction_can_skip_verifier(
+        &route,
+        &journal,
+        "FILE:/tmp/definitely_missing_named_file_golden_001.txt"
+    ));
+}
+
+#[test]
 fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.wants_file_delivery = true;
@@ -1604,387 +1888,8 @@ fn quantity_comparison_size_answer_grounded_in_total_size_bytes_skips_llm_verifi
     ));
 }
 
-#[test]
-fn matrix_scalar_shape_requires_plain_scalar_answer() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-scalar", "ask", "count them");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "fs_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(json!({"count": 3, "items": ["a", "b", "c"]}).to_string()),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route, &journal, "3"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "The count is 3."
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route, &journal, "count: 3"
-    ));
-}
-
-#[test]
-fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-component-count", "ask", "count dirs");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "system_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "count_inventory",
-                    "counts": {
-                        "total": 66,
-                        "files": 40,
-                        "dirs": 26
-                    }
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "文件：40 个\n文件夹：26 个"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "总数：66 个"
-    ));
-}
-
-#[test]
-fn matrix_single_path_shape_accepts_root_prefixed_results() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-root-prefixed-path", "ask", "find it");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "fs_search".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "find_name",
-                    "count": 1,
-                    "root": "plan",
-                    "results": ["plan/agent_intelligence_architecture_plan_20260511.md"]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "plan/agent_intelligence_architecture_plan_20260511.md"
-    ));
-}
-
-#[test]
-fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-keys", "ask", "list keys");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "config_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "structured_keys",
-                    "exists": true,
-                    "container_type": "object",
-                    "count": 3,
-                    "keys": ["app", "features", "paths"]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app, features, paths"
-    ));
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app\nfeatures\npaths"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "app, features"
-    ));
-}
-
-#[test]
-fn matrix_strict_list_shape_rejects_unobserved_items() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-list", "ask", "list files");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "fs_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "inventory_dir",
-                    "names_only": true,
-                    "names": ["README.md", "Cargo.toml"],
-                    "entries": [
-                        {"name": "README.md", "kind": "file", "path": "/tmp/repo/README.md"},
-                        {"name": "Cargo.toml", "kind": "file", "path": "/tmp/repo/Cargo.toml"}
-                    ]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "- README.md\n- Cargo.toml"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "- README.md\n- missing.txt"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "The files are README.md and Cargo.toml."
-    ));
-}
-
-#[test]
-fn matrix_table_shape_requires_markdown_table_answer() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-table", "ask", "list tables");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "db_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "columns": ["name"],
-                    "rows": [
-                        {"name": "orders"},
-                        {"name": "users"}
-                    ]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| users |"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "orders, users"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "| name |\n| --- |\n| orders |\n| payments |"
-    ));
-}
-
-#[test]
-fn matrix_single_path_shape_requires_plain_grounded_path() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
-    let mut journal =
-        crate::task_journal::TaskJournal::for_task("task-matrix-path", "ask", "pack logs");
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace {
-            step_id: "step_1".to_string(),
-            skill: "archive_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(
-                json!({
-                    "action": "pack",
-                    "archive_path": "/tmp/rustclaw/report.zip",
-                    "source_paths": ["/tmp/rustclaw/report.md"]
-                })
-                .to_string(),
-            ),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        });
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "/tmp/rustclaw/report.zip"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "Archive: /tmp/rustclaw/report.zip"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "The archive is /tmp/rustclaw/report.zip"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "/tmp/rustclaw/missing.zip"
-    ));
-}
-
-#[test]
-fn matrix_scalar_shape_uses_observed_evidence_map_values() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-matrix-scalar-evidence",
-        "ask",
-        "count them",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "fs_basic",
-            json!({"count": 3, "items": ["a", "b", "c"]}).to_string(),
-        ));
-
-    assert!(observed_scalar_values_from_evidence_map(&journal).contains("3"));
-    assert!(structurally_satisfies_answer_contract(
-        &route, &journal, "3"
-    ));
-}
-
-#[test]
-fn recent_scalar_equality_answer_is_structurally_grounded() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    route.output_contract.requires_content_evidence = true;
-    let mut journal = crate::task_journal::TaskJournal::for_task(
-        "task-recent-scalar-equality",
-        "ask",
-        "compare two structured fields",
-    );
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_1",
-            "config_basic",
-            json!({
-                "action": "read_field",
-                "path": "UI/package.json",
-                "resolved_path": "/repo/UI/package.json",
-                "field_path": "name",
-                "exists": true,
-                "value_text": "react-example",
-                "value": "react-example",
-                "value_type": "string"
-            })
-            .to_string(),
-        ));
-    journal
-        .step_results
-        .push(crate::task_journal::TaskJournalStepTrace::ok(
-            "step_2",
-            "config_basic",
-            json!({
-                "action": "read_field",
-                "path": "crates/clawd/Cargo.toml",
-                "resolved_path": "/repo/crates/clawd/Cargo.toml",
-                "field_path": "package.name",
-                "exists": true,
-                "value_text": "clawd",
-                "value": "clawd",
-                "value_type": "string"
-            })
-            .to_string(),
-        ));
-
-    assert!(structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "react-example != clawd"
-    ));
-    assert!(!structurally_satisfies_answer_contract(
-        &route,
-        &journal,
-        "package.name: clawd"
-    ));
-}
+#[path = "answer_verifier_tests/matrix_shape_contracts.rs"]
+mod matrix_shape_contracts;
 
 #[path = "answer_verifier_tests/matrix_grounding.rs"]
 mod matrix_grounding;

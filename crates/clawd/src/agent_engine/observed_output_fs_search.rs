@@ -186,6 +186,36 @@ pub(super) fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) 
     Some(lines.join("\n"))
 }
 
+pub(super) fn fs_search_find_name_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    let (results, count, pattern) = fs_search_find_name_results(value)?;
+    let mut lines = vec![format!("find_name count={count}")];
+    if let Some(root) = value
+        .get("root")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("root={root}"));
+    }
+    if let Some(pattern) = pattern.as_deref().and_then(|value| {
+        normalized_find_name_pattern(Some(value)).filter(|value| !value.trim().is_empty())
+    }) {
+        lines.push(format!("pattern={pattern}"));
+    }
+    if results.is_empty() {
+        lines.push("matches: none".to_string());
+    } else {
+        lines.extend(
+            results
+                .into_iter()
+                .take(64)
+                .enumerate()
+                .map(|(idx, path)| format!("result.{}.path={path}", idx + 1)),
+        );
+    }
+    Some(lines.join("\n"))
+}
+
 fn path_matches_find_name_pattern(path: &str, pattern: &str) -> bool {
     let path = Path::new(path);
     let Some(file_name) = path.file_name().and_then(|v| v.to_str()) else {

@@ -83,6 +83,60 @@ pub(super) fn scalar_path_auto_locator_deterministic_plan_result(
     ))
 }
 
+pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+    {
+        return None;
+    }
+    let path = state.skill_rt.workspace_root.display().to_string();
+    if path.trim().is_empty() {
+        return None;
+    }
+    let action = AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "stat_paths",
+            "paths": [path],
+            "include_missing": true,
+        }),
+    };
+    let AgentAction::CallTool { tool, args } = &action else {
+        return None;
+    };
+    if crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        tool,
+        args,
+    )
+    .is_some_and(|policy| !policy.is_allowed())
+    {
+        return None;
+    }
+    let actions = vec![action];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 pub(super) fn scalar_path_directory_locator_search_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -581,6 +635,12 @@ pub(super) fn contract_hint_selector_case_insensitive(original_user_text: &str) 
         .find_map(|key| contract_hint_selector_bool(original_user_text, key))
 }
 
+pub(super) fn contract_hint_selector_include_metadata(original_user_text: &str) -> Option<bool> {
+    ["selector_include_metadata", "include_metadata"]
+        .iter()
+        .find_map(|key| contract_hint_selector_bool(original_user_text, key))
+}
+
 pub(super) fn contract_hint_selector_extension(original_user_text: &str) -> Option<String> {
     ["selector_extension", "file_extension"]
         .iter()
@@ -603,7 +663,7 @@ pub(super) fn contract_hint_selector_sort_by(original_user_text: &str) -> Option
         .filter(|value| {
             matches!(
                 value.as_str(),
-                "name" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+                "name" | "name_desc" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
             )
         })
 }
@@ -751,7 +811,7 @@ pub(super) fn preferred_run_cmd_for_contract_hint(
             "git branch --show-current | awk '{print \"field_value=\" $0}'".to_string()
         }
         crate::OutputSemanticKind::ServiceStatus => {
-            let filter = process_status_filter_token(&route.resolved_intent)
+            let filter = process_status_contract_filter_token(route)
                 .unwrap_or_else(|| "clawd".to_string());
             format!(
                 "ps -eo pid,comm,args | grep -F {} | grep -v grep || true",

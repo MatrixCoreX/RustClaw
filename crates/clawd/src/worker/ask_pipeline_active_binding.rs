@@ -374,6 +374,11 @@ fn scalar_count_workspace_root_prebind_has_semantic_authority(
     route_result: &crate::RouteResult,
 ) -> bool {
     super::route_reason_has_marker(route_result, "current_workspace_scope_from_current_request")
+        || (route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+            && !super::route_reason_has_marker(
+                route_result,
+                "model_rewrote_deictic_target_to_current_workspace",
+            ))
         || super::text_contains_workspace_root_locator(prompt, &state.skill_rt.workspace_root)
         || super::text_contains_workspace_root_locator(
             &route_result.resolved_intent,

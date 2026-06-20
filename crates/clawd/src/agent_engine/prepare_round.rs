@@ -38,50 +38,6 @@ fn verify_mode_for_state(state: &AppState) -> crate::verifier::VerifyMode {
     }
 }
 
-fn verifier_gate_default_response(
-    state: &AppState,
-    language_hint: &str,
-    verify_result: &crate::verifier::VerifyResult,
-) -> String {
-    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-    let first_detail = verify_result
-        .issues
-        .first()
-        .map(|issue| crate::truncate_for_log(&issue.detail))
-        .or_else(|| verify_result.blocked_reason.clone())
-        .unwrap_or_else(|| "plan failed verification".to_string());
-    let needs_confirmation = verifier_gate_needs_confirmation(verify_result);
-    let needs_clarify = verifier_gate_needs_clarification(verify_result);
-    if needs_confirmation {
-        crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.verify_gate_confirmation_required",
-            "这一步需要你先明确确认，我还不会直接执行。\n原因：{detail}",
-            "This step needs your explicit confirmation before I execute it.\nReason: {detail}",
-            prefer_english,
-            &[("detail", &first_detail)],
-        )
-    } else if needs_clarify {
-        crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.verify_gate_clarify_required",
-            "你的需求还需要先补充澄清，我先不执行。\n原因：{detail}",
-            "I need a clarification before executing this plan.\nReason: {detail}",
-            prefer_english,
-            &[("detail", &first_detail)],
-        )
-    } else {
-        crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.verify_gate_blocked",
-            "当前计划未通过执行前校验，已停止执行。\n原因：{detail}",
-            "The current plan did not pass pre-execution verification, so execution was stopped.\nReason: {detail}",
-            prefer_english,
-            &[("detail", &first_detail)],
-        )
-    }
-}
-
 async fn build_verifier_gate_response(
     state: &AppState,
     task: &ClaimedTask,
@@ -90,17 +46,11 @@ async fn build_verifier_gate_response(
     verify_result: &crate::verifier::VerifyResult,
 ) -> String {
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let first_detail = verify_result
+    let first_issue_kind = verify_result
         .issues
         .first()
-        .map(|issue| crate::truncate_for_agent_trace(&issue.detail))
-        .or_else(|| {
-            verify_result
-                .blocked_reason
-                .as_deref()
-                .map(crate::truncate_for_agent_trace)
-        })
-        .unwrap_or_else(|| "verification did not provide a detailed reason".to_string());
+        .map(|issue| issue.kind.as_str())
+        .unwrap_or("none");
     let needs_confirmation = verifier_gate_needs_confirmation(verify_result);
     let needs_clarify = verifier_gate_needs_clarification(verify_result);
     let (reason_code, missing_slots, response_shape, fallback_source) = if needs_confirmation {
@@ -126,20 +76,17 @@ async fn build_verifier_gate_response(
         )
     };
     let mut observed_facts = vec![
-        format!("verification_detail: {first_detail}"),
+        format!("verification_issue_kind: {first_issue_kind}"),
         format!("verification_issue_count: {}", verify_result.issues.len()),
         format!("needs_confirmation: {needs_confirmation}"),
+        format!("needs_clarification: {needs_clarify}"),
     ];
-    if let Some(reason) = verify_result
+    if verify_result
         .blocked_reason
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .is_some_and(|value| !value.trim().is_empty())
     {
-        observed_facts.push(format!(
-            "blocked_reason: {}",
-            crate::truncate_for_agent_trace(reason)
-        ));
+        observed_facts.push("blocked_reason_present: true".to_string());
     }
     let contract = crate::fallback::UserResponseContract::verifier_gate(
         reason_code,
@@ -150,15 +97,8 @@ async fn build_verifier_gate_response(
         response_shape,
         &language_hint,
     );
-    let fallback_text = verifier_gate_default_response(state, &language_hint, verify_result);
-    crate::fallback::compose_user_response_from_contract_with_default(
-        state,
-        task,
-        &contract,
-        fallback_source,
-        &fallback_text,
-    )
-    .await
+    crate::fallback::compose_user_response_from_contract(state, task, &contract, fallback_source)
+        .await
 }
 
 fn verifier_gate_needs_confirmation(verify_result: &crate::verifier::VerifyResult) -> bool {

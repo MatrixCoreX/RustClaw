@@ -200,7 +200,7 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
@@ -240,7 +240,7 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));

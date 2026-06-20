@@ -390,6 +390,11 @@ model_io_path = Path(root_dir) / 'logs' / 'model_io.log'
 
 data = raw.get('data') or {}
 result = data.get('result_json') or {}
+if isinstance(result, str):
+    try:
+        result = json.loads(result)
+    except Exception:
+        result = {}
 status = str(data.get('status') or '')
 error_text = str(data.get('error_text') or '')
 text = str(result.get('text') or '')
@@ -398,6 +403,69 @@ progress = result.get('progress_messages') or []
 resume_context = result.get('resume_context')
 joined_output = '\n'.join([str(x) for x in progress] + [str(x) for x in messages] + [text])
 combined_trace = joined_output
+task_journal = result.get('task_journal') if isinstance(result, dict) else None
+if not isinstance(task_journal, dict):
+    task_journal = {}
+summary = task_journal.get('summary') if isinstance(task_journal.get('summary'), dict) else {}
+trace = task_journal.get('trace') if isinstance(task_journal.get('trace'), dict) else {}
+route_result = (
+    summary.get('route_result')
+    if isinstance(summary.get('route_result'), dict)
+    else trace.get('route_result')
+    if isinstance(trace.get('route_result'), dict)
+    else {}
+)
+step_results = trace.get('step_results') if isinstance(trace.get('step_results'), list) else []
+
+def token_equals(value, expected):
+    return isinstance(value, str) and value.strip().lower() == expected.lower()
+
+def step_matches_action(step, expected):
+    if not isinstance(step, dict):
+        return False
+    for key in (
+        'skill',
+        'executed_skill',
+        'resolved_tool_or_skill',
+        'requested_action_ref',
+        'requested_capability',
+        'resolved_capability',
+    ):
+        if token_equals(step.get(key), expected):
+            return True
+    contract = step.get('contract') if isinstance(step.get('contract'), dict) else {}
+    policy = contract.get('action_policy') if isinstance(contract.get('action_policy'), dict) else {}
+    return token_equals(policy.get('action_ref'), expected)
+
+def step_observation_text(step):
+    if not isinstance(step, dict):
+        return ''
+    values = []
+    output_excerpt = step.get('output_excerpt')
+    if isinstance(output_excerpt, str) and output_excerpt.strip():
+        values.append(output_excerpt)
+    evidence = step.get('observed_evidence') if isinstance(step.get('observed_evidence'), dict) else {}
+    items = evidence.get('items') if isinstance(evidence.get('items'), list) else []
+    allowed_fields = {
+        'stdout',
+        'output',
+        'command_output',
+        'field_value',
+        'result',
+        'text',
+    }
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get('field') or '').strip()
+        if field not in allowed_fields:
+            continue
+        excerpt = item.get('excerpt')
+        if isinstance(excerpt, str) and excerpt.strip():
+            values.append(excerpt)
+    return '\n'.join(values)
+
+execution_observation_text = '\n'.join(step_observation_text(step) for step in step_results)
 
 clawd_lines = []
 if clawd_path.exists():
@@ -417,27 +485,54 @@ if model_io_path.exists():
         if str(row.get('task_id') or '') == task_id:
             model_rows.append(row)
 
-route_chat = any(
-    re.search(r'route_gate_kind=chat\b', line)
-    or re.search(r'derived_route_label=Chat\b', line)
-    for line in clawd_lines
+route_gate_kind = str(route_result.get('route_gate_kind') or '')
+legacy_route_label = str(route_result.get('legacy_route_label') or route_result.get('derived_route_label') or '')
+legacy_first_layer_decision = str(
+    route_result.get('legacy_first_layer_decision') or route_result.get('first_layer_decision') or ''
 )
-route_act = any(
-    re.search(r'route_gate_kind=execute\b', line)
-    or re.search(r'derived_route_label=Act\b', line)
-    for line in clawd_lines
+route_chat = (
+    route_gate_kind == 'chat'
+    or legacy_route_label == 'Chat'
+    or any(
+        re.search(r'route_gate_kind=chat\b', line)
+        or re.search(r'(?:legacy_route_label|derived_route_label)=Chat\b', line)
+        for line in clawd_lines
+    )
 )
-route_chat_act = any(
-    re.search(r'ask_mode=planner_execute_chat_wrapped\b', line)
-    or re.search(r'derived_route_label=ChatAct\b', line)
-    for line in clawd_lines
+route_act = (
+    route_gate_kind == 'execute'
+    or legacy_route_label == 'Act'
+    or any(
+        re.search(r'route_gate_kind=execute\b', line)
+        or re.search(r'(?:legacy_route_label|derived_route_label)=Act\b', line)
+        for line in clawd_lines
+    )
 )
-route_clarify = any(
-    re.search(r'route_gate_kind=clarify\b|first_layer_decision=clarify\b|derived_route_label=AskClarify\b', line)
-    for line in clawd_lines
+route_chat_act = (
+    legacy_route_label == 'ChatAct'
+    or any(
+        re.search(r'ask_mode=planner_execute_chat_wrapped\b', line)
+        or re.search(r'(?:legacy_route_label|derived_route_label)=ChatAct\b', line)
+        for line in clawd_lines
+    )
 )
-has_exec = any('executor_step_execute' in line for line in clawd_lines)
-has_write_file = any('tool=write_file' in line for line in clawd_lines) or bool(re.search(r'written \d+ bytes to ', combined_trace, re.I))
+route_clarify = (
+    route_gate_kind == 'clarify'
+    or legacy_first_layer_decision == 'clarify'
+    or legacy_route_label == 'AskClarify'
+    or any(
+        re.search(r'route_gate_kind=clarify\b|(?:legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b', line)
+        for line in clawd_lines
+    )
+)
+has_exec = any('executor_step_execute' in line for line in clawd_lines) or any(
+    step_matches_action(step, 'run_cmd') for step in step_results
+)
+has_write_file = (
+    any('tool=write_file' in line for line in clawd_lines)
+    or any(step_matches_action(step, 'write_file') for step in step_results)
+    or bool(re.search(r'written \d+ bytes to ', combined_trace, re.I))
+)
 used_crypto = any('tool=crypto' in line for line in clawd_lines) or bool(re.search(r'\btrade_preview\b|\btrade_submit\b|BTCUSDT|ETHUSDT|SMA|USDT|CoinDesk|CoinTelegraph|order_id|positions?|open orders?|cancel', combined_trace, re.I))
 final_delivery = bool(re.search(r'(?:FILE:|IMAGE_FILE:)\S+', text))
 not_found_text = bool(re.search('(\u6ca1\u627e\u5230|\u672a\u627e\u5230|not found|does not exist|no such file)', text, re.I))
@@ -445,7 +540,7 @@ trade_submit_detected = bool(re.search(r'trade_submit|trade_submitted', combined
 trade_preview_detected = bool(re.search('trade_preview|awaiting_confirmation|\u9884\u89c8|\u98ce\u9669\u63d0\u793a|\u786e\u8ba4\u540e\u6267\u884c', combined_trace, re.I))
 route_fallback = any('route_request_mode llm failed' in line or 'route_request_mode parse failed' in line for line in clawd_lines)
 duplicate_final = bool(progress) and text.strip() and str(progress[-1]).strip() == text.strip()
-response_mentions_remaining = bool(re.search('(\u5269\u4f59|remaining|\u8fd8\u5269|undone|pending)', text, re.I))
+response_mentions_remaining = bool(re.search('(\u5269\u4f59|remaining|\u8fd8\u5269|undone|pending|unfinished|unexecuted|never ran|never executed|did not execute|not execute)', text, re.I))
 response_mentions_failure = bool(re.search('(\u5931\u8d25|\u62a5\u9519|failed|error)', text, re.I))
 
 issues = {'prompt': [], 'guard': [], 'unresolved': []}
@@ -506,8 +601,8 @@ if 'followup_explain_only' in tags:
 if 'followup_resume_with_change' in tags:
     old_tokens = re.findall(r'AFTER_OLD_[A-Z0-9_]+', prompt)
     new_tokens = re.findall(r'AFTER_NEW_[A-Z0-9_]+', prompt)
-    response_mentions_old = any(token in combined_trace for token in old_tokens)
-    response_mentions_new = any(token in combined_trace for token in new_tokens)
+    response_mentions_old = any(token in joined_output or token in execution_observation_text for token in old_tokens)
+    response_mentions_new = any(token in joined_output or token in execution_observation_text for token in new_tokens)
     if not has_exec:
         add('prompt', 'resume-with-change follow-up did not execute the remaining step.')
     if not response_mentions_new:
@@ -519,7 +614,7 @@ if 'no_post_fail_steps' in tags:
     echo_tokens = re.findall(r'echo\s+([A-Za-z0-9_]+)', prompt)
     if len(echo_tokens) >= 2:
         tail_token = echo_tokens[-1]
-        if tail_token and tail_token in combined_trace:
+        if tail_token and tail_token in execution_observation_text:
             add('guard', f'post-failure step token {tail_token} still appeared after the break point.')
 
 allowed_failure = 'resume_context' in tags and status in {'failed', 'timeout', 'canceled'} and resume_context is not None
@@ -688,9 +783,9 @@ run_resume_suite() {
   local token="USER_OPS_${RUN_STAMP}"
   local fail_prompt explain_prompt continue_prompt
 
-  fail_prompt="??? echo BEFORE_${token}???? definitely_missing_command_${token}???? echo AFTER_OLD_${token}"
-  explain_prompt="????????????????????????????????????? AFTER_OLD_${token}?"
-  continue_prompt="?????????????? echo AFTER_NEW_${token}???????? AFTER_OLD_${token}?"
+  fail_prompt="Run \`echo BEFORE_${token} && definitely_missing_command_${token} && echo AFTER_OLD_${token}\`."
+  explain_prompt="Do not continue execution yet. Explain which step failed and which later step containing AFTER_OLD_${token} remains unfinished."
+  continue_prompt="Continue the previous failed command sequence, but replace the unfinished old step echo AFTER_OLD_${token} with echo AFTER_NEW_${token}. Execute only the remaining step after the failure."
 
   run_one_case "resume" "resume_seed_failure" "exec,resume_context,no_post_fail_steps" "$fail_prompt" "$base_resume_chat_id"
   run_one_case "resume" "resume_explain_only" "followup_explain_only" "$explain_prompt" "$base_resume_chat_id"

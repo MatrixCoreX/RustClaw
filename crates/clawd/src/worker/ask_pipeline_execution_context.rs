@@ -16,7 +16,7 @@ fn should_preserve_original_inline_structured_input(
     !resolved_trimmed.contains(inline_value.trim())
 }
 
-pub(super) fn execution_user_request<'a>(
+pub(in crate::worker) fn execution_user_request<'a>(
     prompt: &'a str,
     resolved_prompt_for_execution: &'a str,
 ) -> &'a str {
@@ -40,13 +40,37 @@ pub(super) fn sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_exe
     {
         return;
     }
+    let resolved_context_suffix = trusted_execution_context_suffix(resolved_prompt_for_execution);
+    let prompt_context_suffix = trusted_execution_context_suffix(prompt_with_memory_for_execution);
     route_result.resolved_intent = prompt.to_string();
-    *resolved_prompt_for_execution = prompt.to_string();
-    *prompt_with_memory_for_execution = prompt.to_string();
+    let mut resolved_with_context =
+        String::with_capacity(prompt.len() + resolved_context_suffix.len());
+    resolved_with_context.push_str(prompt);
+    resolved_with_context.push_str(&resolved_context_suffix);
+    *resolved_prompt_for_execution = resolved_with_context;
+    let mut prompt_with_context = String::with_capacity(prompt.len() + prompt_context_suffix.len());
+    prompt_with_context.push_str(prompt);
+    prompt_with_context.push_str(&prompt_context_suffix);
+    *prompt_with_memory_for_execution = prompt_with_context;
     super::append_route_reason(
         route_result,
         "untrusted_normalizer_freeform_rewrite_removed_from_execution_context",
     );
+}
+
+fn trusted_execution_context_suffix(text: &str) -> String {
+    const MARKERS: [&str; 4] = [
+        "\n\n### RUNTIME_CONTEXT",
+        "\n\n### SESSION_ALIAS_BINDINGS",
+        "\n\n### ACTIVE_EXECUTION_ANCHOR",
+        "\n\n### RECENT_EXECUTION_CONTEXT",
+    ];
+    MARKERS
+        .iter()
+        .filter_map(|marker| text.find(marker))
+        .min()
+        .map(|idx| text[idx..].to_string())
+        .unwrap_or_default()
 }
 
 fn pure_direct_chat_current_request_route(

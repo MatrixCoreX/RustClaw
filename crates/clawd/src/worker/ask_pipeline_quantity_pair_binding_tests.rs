@@ -381,7 +381,7 @@ fn directory_pair_prebinds_missing_locator_without_forcing_semantic_kind() {
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();

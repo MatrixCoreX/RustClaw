@@ -517,7 +517,8 @@ fn normalize_list_selector_contract_field(contract: &mut serde_json::Map<String,
                 .map(normalize_schema_token)
                 .unwrap_or_default();
             let sort_by = match normalized.as_str() {
-                "name" | "size_desc" | "size_asc" | "mtime_desc" | "mtime_asc" | "" => normalized,
+                "name" | "name_desc" | "size_desc" | "size_asc" | "mtime_desc" | "mtime_asc"
+                | "" => normalized,
                 _ => String::new(),
             };
             selector.insert("sort_by".to_string(), Value::String(sort_by));

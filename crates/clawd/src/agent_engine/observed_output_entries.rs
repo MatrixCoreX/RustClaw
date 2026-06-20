@@ -49,9 +49,11 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
 
 pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let output = observed_step_body(step)?;
-    if !normalized_structured_observed_fact_allows_artifact_filter_bypass(&step.skill, &output)
-        && crate::finalize::looks_like_planner_artifact(&output)
-        || crate::finalize::looks_like_internal_trace_artifact(&output)
+    let allows_artifact_filter_bypass =
+        normalized_structured_observed_fact_allows_artifact_filter_bypass(&step.skill, &output);
+    if !allows_artifact_filter_bypass
+        && (crate::finalize::looks_like_planner_artifact(&output)
+            || crate::finalize::looks_like_internal_trace_artifact(&output))
     {
         return None;
     }
@@ -67,7 +69,9 @@ pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
     skill: &str,
     output: &str,
 ) -> bool {
-    skill == "archive_basic" && output.trim_start().starts_with("archive_basic action=")
+    (skill == "archive_basic" && output.trim_start().starts_with("archive_basic action="))
+        || (matches!(skill, "fs_basic" | "system_basic")
+            && output.trim_start().starts_with("read_range "))
 }
 
 pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {

@@ -716,7 +716,7 @@ pub(super) fn structured_keys_deterministic_plan_result(
     if !enabled_skills.is_empty() && !enabled_skills.contains("config_basic") {
         return None;
     }
-    let field_path = structured_current_turn_field_selectors(route, user_text, Some(&path))
+    let field_path = structured_current_turn_field_selectors(route, user_text, true, Some(&path))
         .into_iter()
         .next();
     if let Some(field_path) = field_path.as_deref() {
@@ -880,6 +880,41 @@ pub(super) fn planned_bounded_file_read_path(action: &AgentAction) -> Option<&st
     }
 }
 
+fn planned_bounded_file_read_requests_raw_slice(action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.trim(), args)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return false,
+    };
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    if !is_read_range_action(skill, obj) {
+        return false;
+    }
+    if obj.get("start_line").is_some()
+        || obj.get("end_line").is_some()
+        || obj.get("line_start").is_some()
+        || obj.get("line_end").is_some()
+    {
+        return true;
+    }
+    obj.get("mode")
+        .or_else(|| obj.get("range"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .is_some_and(|mode| {
+            !mode.eq_ignore_ascii_case("head")
+                && !mode.eq_ignore_ascii_case("full")
+                && !mode.eq_ignore_ascii_case("all")
+        })
+}
+
 pub(super) fn planned_structured_config_observation_path(action: &AgentAction) -> Option<&str> {
     match action {
         AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. }
@@ -1008,6 +1043,10 @@ pub(super) fn prefer_log_analyze_for_single_log_synthesis(
     let mut rewritten = Vec::with_capacity(actions.len());
     let mut changed = false;
     for action in actions {
+        if planned_bounded_file_read_requests_raw_slice(&action) {
+            rewritten.push(action);
+            continue;
+        }
         if let Some(path) = planned_bounded_file_read_path(&action)
             .filter(|path| Path::new(path).is_file())
             .filter(|path| log_analyze_supported_path(path))
@@ -1046,6 +1085,7 @@ pub(super) fn existence_path_summary_target_path(
     auto_locator_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
+        .filter(|path| !Path::new(path).is_dir())
         .or_else(|| {
             let hint = route.output_contract.locator_hint.trim();
             (!hint.is_empty() && Path::new(hint).is_file()).then_some(hint)
@@ -1062,35 +1102,44 @@ pub(super) fn ensure_existence_path_summary_has_bounded_content(
     if loop_state.has_tool_or_skill_output {
         return actions;
     }
-    let Some(path) = existence_path_summary_target_path(route_result, auto_locator_path) else {
+    let should_handle = route_result.is_some_and(|route| {
+        !route.needs_clarify
+            && !route.output_contract.delivery_required
+            && route.output_contract.semantic_kind
+                == crate::OutputSemanticKind::ExistenceWithPathSummary
+    });
+    if !should_handle {
         return actions;
     };
+    let target_path = existence_path_summary_target_path(route_result, auto_locator_path);
     let mut rewritten = actions;
-    if !rewritten.iter().any(action_observes_bounded_file_content)
-        && !path_metadata_facts_response_is_sufficient(&rewritten)
-    {
-        let insert_at = rewritten
-            .iter()
-            .position(|action| {
-                matches!(
-                    action,
-                    AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
-                )
-            })
-            .unwrap_or(rewritten.len());
-        rewritten.insert(
-            insert_at,
-            AgentAction::CallTool {
-                tool: "fs_basic".to_string(),
-                args: serde_json::json!({
-                    "action": "read_text_range",
-                    "path": path,
-                    "mode": "head",
-                    "n": 30
-                }),
-            },
-        );
-        info!("plan_insert_existence_path_summary_read_range");
+    if let Some(path) = target_path.filter(|path| !Path::new(path).is_dir()) {
+        if !rewritten.iter().any(action_observes_bounded_file_content)
+            && !path_metadata_facts_response_is_sufficient(&rewritten)
+        {
+            let insert_at = rewritten
+                .iter()
+                .position(|action| {
+                    matches!(
+                        action,
+                        AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
+                    )
+                })
+                .unwrap_or(rewritten.len());
+            rewritten.insert(
+                insert_at,
+                AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "read_text_range",
+                        "path": path,
+                        "mode": "head",
+                        "n": 30
+                    }),
+                },
+            );
+            info!("plan_insert_existence_path_summary_read_range");
+        }
     }
     if !rewritten
         .iter()

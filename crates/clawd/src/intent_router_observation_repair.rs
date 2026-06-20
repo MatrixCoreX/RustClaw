@@ -61,11 +61,11 @@ pub(super) fn apply_answer_candidate_path_evidence_repair(
     state_patch: Option<&Value>,
     workspace_root: &Path,
     needs_clarify: bool,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if needs_clarify
-        || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
+        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
         || output_contract.requires_content_evidence
         || output_contract.delivery_required
         || output_contract.response_shape != OutputResponseShape::Scalar
@@ -87,7 +87,7 @@ pub(super) fn apply_answer_candidate_path_evidence_repair(
     output_contract.locator_kind = OutputLocatorKind::Path;
     output_contract.locator_hint = path;
     output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("answer_candidate_path_requires_evidence")
 }
@@ -134,7 +134,7 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify || is_bare_path_only_input_for_clarify(req, req_surface) {
@@ -209,7 +209,7 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
@@ -263,7 +263,7 @@ pub(super) fn apply_workspace_default_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
@@ -281,7 +281,7 @@ pub(super) fn apply_workspace_default_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
@@ -307,7 +307,7 @@ pub(super) fn apply_locatorless_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
@@ -325,7 +325,7 @@ pub(super) fn apply_locatorless_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));

@@ -24,3 +24,27 @@ pub(in crate::agent_engine) fn route_allows_structured_candidate_read_target_rep
     .iter()
     .any(|marker| route_reason_has_structural_marker(route, marker))
 }
+
+pub(in crate::agent_engine) fn route_has_unresolved_clarify_or_locator_marker(
+    route: &RouteResult,
+) -> bool {
+    if route.needs_clarify {
+        return true;
+    }
+    let has_unresolved_machine_token = route.route_reason.split(';').map(str::trim).any(|part| {
+        part.starts_with("clarify_reason_code:missing_")
+            || part.contains("needs_clarify=true")
+            || part.contains("missing_locator")
+    });
+    has_unresolved_machine_token
+        || [
+            "locator_required_for_path_scoped_content",
+            "deictic_bare_locator_requires_clarify",
+            "deictic_memory_only_requires_clarify",
+            "unbound_existing_file_delivery_requires_clarify",
+            "unbound_targeted_evidence_requires_clarify",
+            "locatorless_observation_requires_clarify",
+        ]
+        .iter()
+        .any(|marker| route_reason_has_structural_marker(route, marker))
+}
