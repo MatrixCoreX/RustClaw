@@ -361,7 +361,7 @@ gen-1778122040.png
 fn background_locator_clarify_downgrades_file_name_judgment_with_recent_results() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.clarify_question = "missing target".to_string();
     route.resolved_intent =
         "Compare two recently observed file excerpts and return the selected filename".to_string();
@@ -386,10 +386,7 @@ RustClaw test fixture service notes.";
         )
     );
     assert!(!route.needs_clarify);
-    assert_eq!(
-        route.ask_mode.first_layer_decision(),
-        crate::FirstLayerDecision::DirectAnswer
-    );
+    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Chat);
     assert_eq!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar

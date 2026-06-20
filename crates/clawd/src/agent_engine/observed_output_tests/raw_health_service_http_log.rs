@@ -1120,7 +1120,7 @@ fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
 }
 
 #[test]
-fn direct_answer_formats_process_basic_service_status_contract_without_json_passthrough() {
+fn direct_answer_defers_process_basic_service_status_to_synthesis() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -1159,15 +1159,10 @@ fn direct_answer_formats_process_basic_service_status_contract_without_json_pass
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("service_status should use process_basic evidence directly");
-
     assert!(
-        serde_json::from_str::<serde_json::Value>(&answer).is_err(),
-        "service_status must not expose raw structured JSON"
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none(),
+        "non-scalar service_status should be rendered by synthesis/finalizer, not a runtime reply template"
     );
-    assert!(answer.contains("clawd"));
-    assert!(answer.contains("process_basic"));
 }
 
 #[test]
@@ -1191,19 +1186,30 @@ fn direct_answer_formats_process_basic_multi_row_cpu_inventory() {
 }
 
 #[test]
-fn direct_answer_formats_process_basic_no_match_as_not_running() {
+fn direct_answer_defers_process_basic_no_match_to_synthesis() {
+    assert!(
+        super::process_basic_service_status_direct_answer_candidate(
+            None,
+            "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd",
+            Some(OutputResponseShape::OneSentence),
+            true,
+        )
+        .is_none(),
+        "process service no-match should not be turned into a fixed user-visible runtime template"
+    );
+}
+
+#[test]
+fn direct_answer_keeps_process_basic_no_match_scalar_status() {
     let answer = super::process_basic_service_status_direct_answer_candidate(
         None,
         "exit=0\nPID PPID %CPU %MEM COMM\nno matching processes for filter: telegramd",
-        Some(OutputResponseShape::OneSentence),
+        Some(OutputResponseShape::Scalar),
         true,
     )
-    .expect("no-match process output should produce a status answer");
+    .expect("scalar service status can return the observed machine status token");
 
-    assert!(answer.contains("telegramd"));
-    assert!(answer.contains("not running"));
-    assert!(!answer.contains("1 process record"));
-    assert!(!answer.contains("COMM=telegramd"));
+    assert_eq!(answer, "not_running");
 }
 
 #[test]
@@ -1266,13 +1272,8 @@ fn direct_answer_prefers_process_basic_status_over_later_system_info() {
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("process status should override generic system info");
     assert!(
-        serde_json::from_str::<serde_json::Value>(&answer).is_err(),
-        "one-sentence service status should not expose structured JSON"
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none(),
+        "one-sentence process status should not override synthesis with a fixed runtime template"
     );
-    assert!(answer.contains("telegramd"));
-    assert!(answer.contains("not running"));
-    assert!(answer.contains("process_basic"));
 }

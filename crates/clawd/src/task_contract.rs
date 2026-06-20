@@ -572,9 +572,11 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck
-        | OutputSemanticKind::ExecutionFailedStep
         | OutputSemanticKind::DockerContainerLifecycle => {
             fields.insert("field_value");
+        }
+        OutputSemanticKind::ExecutionFailedStep => {
+            fields.insert("command_output");
         }
         OutputSemanticKind::ConfigValidation => {
             fields.insert("valid");

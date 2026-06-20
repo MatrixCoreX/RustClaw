@@ -702,10 +702,15 @@ pub(super) fn enforce_file_names_inventory_args(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| "name".to_string());
-    if file_names_route_requires_size_metadata(route)
-        && !matches!(sort_by.as_str(), "size_desc" | "size_asc")
+    if let Some(selector_sort_by) = route
+        .output_contract
+        .self_extension
+        .list_selector
+        .sort_by
+        .clone()
+        .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
     {
-        sort_by = "size_desc".to_string();
+        sort_by = selector_sort_by;
         obj.insert("sort_by".to_string(), Value::String(sort_by.clone()));
     }
     let metadata_required = file_names_inventory_requires_metadata(route, &sort_by);
@@ -731,14 +736,9 @@ pub(super) fn requested_file_names_result_limit(
         .self_extension
         .list_selector
         .limit
-        .or_else(|| contract_hint_selector_limit(&route.resolved_intent))
-        .or_else(|| first_ascii_integer_limit(&route.resolved_intent))
         .or_else(|| contract_hint_selector_limit(user_text))
-        .or_else(|| first_ascii_integer_limit(user_text))
         .or_else(|| original_user_text.and_then(contract_hint_selector_limit))
-        .or_else(|| original_user_text.and_then(first_ascii_integer_limit))
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
-        .or_else(|| first_ascii_integer_limit(&route.route_reason))
 }
 
 pub(super) fn requested_file_names_inventory_sort_by(
@@ -755,11 +755,9 @@ pub(super) fn requested_file_names_inventory_sort_by(
         .filter(|sort_by| {
             file_names_sort_by_has_structural_support(route, sort_by, user_text, original_user_text)
         })
-        .or_else(|| contract_hint_selector_sort_by(&route.resolved_intent))
         .or_else(|| contract_hint_selector_sort_by(user_text))
         .or_else(|| original_user_text.and_then(contract_hint_selector_sort_by))
         .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
-        .or_else(|| file_names_route_requires_size_metadata(route).then(|| "size_desc".to_string()))
         .unwrap_or_else(|| "name".to_string())
 }
 
@@ -800,7 +798,6 @@ pub(super) fn file_names_sort_by_has_structural_support(
         return true;
     }
     [
-        Some(route.resolved_intent.as_str()),
         Some(user_text),
         original_user_text,
         Some(route.route_reason.as_str()),
@@ -812,9 +809,13 @@ pub(super) fn file_names_sort_by_has_structural_support(
 }
 
 pub(super) fn file_names_route_requires_size_metadata(route: &RouteResult) -> bool {
-    route.route_reason.contains(
-        "file_names_contract_preserves_bounded_ordered_files_only_listing_with_size_format",
-    )
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .include_metadata
+        .is_some_and(|value| value)
+        || contract_hint_selector_include_metadata(&route.route_reason) == Some(true)
 }
 
 pub(super) fn file_names_inventory_requires_metadata(route: &RouteResult, sort_by: &str) -> bool {
@@ -841,14 +842,14 @@ pub(super) fn requested_file_paths_result_limit(
     {
         return None;
     }
-    contract_hint_selector_limit(&route.resolved_intent)
-        .or_else(|| first_ascii_integer_limit(&route.resolved_intent))
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
         .or_else(|| contract_hint_selector_limit(user_text))
-        .or_else(|| first_ascii_integer_limit(user_text))
         .or_else(|| original_user_text.and_then(contract_hint_selector_limit))
-        .or_else(|| original_user_text.and_then(first_ascii_integer_limit))
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
-        .or_else(|| first_ascii_integer_limit(&route.route_reason))
 }
 
 pub(super) fn enforce_file_paths_result_limit(

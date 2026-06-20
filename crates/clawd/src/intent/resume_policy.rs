@@ -6,6 +6,7 @@ use crate::{AppState, ClaimedTask, RouteResult};
 #[derive(Clone)]
 pub(crate) enum ResumeContextSource {
     ExplicitContinue,
+    ActiveCheckpointCandidate,
     RecentFailedCandidate,
 }
 
@@ -61,6 +62,24 @@ pub(crate) fn recent_failed_resume_candidate(
     })
 }
 
+pub(crate) fn active_checkpoint_resume_candidate(
+    state: &AppState,
+    task: &ClaimedTask,
+    explicit_binding_present: bool,
+) -> Option<ResumeContextBinding> {
+    if explicit_binding_present {
+        return None;
+    }
+    let candidate =
+        crate::repo::find_active_checkpoint_resume_context(state, task.user_id, task.chat_id)?;
+    Some(ResumeContextBinding {
+        source: ResumeContextSource::ActiveCheckpointCandidate,
+        resume_context: candidate.resume_context,
+        failed_ts: None,
+        has_newer_successful_ask_after_failed_task: false,
+    })
+}
+
 pub(crate) fn binding_context_json(
     source: &str,
     is_resume_continue: bool,
@@ -74,6 +93,7 @@ pub(crate) fn binding_context_json(
         Some(binding) => (
             match binding.source {
                 ResumeContextSource::ExplicitContinue => "explicit_continue_source",
+                ResumeContextSource::ActiveCheckpointCandidate => "active_checkpoint_resume",
                 ResumeContextSource::RecentFailedCandidate => "recent_failed_resume_candidate",
             },
             binding.failed_ts.map(Value::from).unwrap_or(Value::Null),

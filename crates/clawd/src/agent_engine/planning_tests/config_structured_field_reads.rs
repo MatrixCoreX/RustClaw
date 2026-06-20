@@ -75,6 +75,45 @@ fn rustclaw_main_config_content_excerpt_tail_read_stays_bounded_read() {
 }
 
 #[test]
+fn schema_alias_normalization_uses_contract_field_selector_not_resolved_intent() {
+    let state = test_state();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "package.json".to_string();
+    route.resolved_intent = "read package.name from package.json".to_string();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: json!({
+            "action": "read_range",
+            "path": "package.json",
+            "mode": "head",
+            "n": 120,
+        }),
+    }];
+
+    let normalized =
+        normalize_action_schema_aliases(&state, Some(&route), "", None, actions.clone());
+    let args = expect_planned_call(&normalized[0], "system_basic", "read_range");
+    assert!(args.get("field_path").is_none());
+
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("package.name".to_string());
+    let normalized = normalize_action_schema_aliases(&state, Some(&route), "", None, actions);
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("package.name")
+    );
+}
+
+#[test]
 fn config_risk_assessment_rewrites_registry_head_read_to_guard_config() {
     let state = test_state();
     let mut route = route_result(
@@ -166,6 +205,58 @@ fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
         args.get("field_path").and_then(Value::as_str),
         Some("workspace.dependencies.toml")
     );
+}
+
+#[test]
+fn unresolved_locator_marker_preserves_terminal_respond_plan() {
+    let root = TempDirGuard::new("unresolved_locator_terminal_respond");
+    let package = root.path.join("package.json");
+    fs::write(&package, r#"{"name":"fixture","version":"0.1.0"}"#).expect("write package");
+    let docs = root.path.join("docs");
+    fs::create_dir_all(&docs).expect("create docs");
+    let service_notes = docs.join("service_notes.md");
+    let release_checklist = docs.join("release_checklist.md");
+    fs::write(&service_notes, "Service Notes\n").expect("write service notes");
+    fs::write(&release_checklist, "Release Checklist\n").expect("write release checklist");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FileBasename;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.route_reason =
+        "state_patch.deictic_reference=missing_locator; clarify_reason_code:missing_read_target"
+            .to_string();
+    route.resolved_intent =
+        "Return only the unresolved file target after confirmation.".to_string();
+    let answer = "confirm the target scope".to_string();
+    let actions = vec![AgentAction::Respond {
+        content: answer.clone(),
+    }];
+    let plan_context = format!(
+        "{}\n{}\n{}",
+        package.display(),
+        service_notes.display(),
+        release_checklist.display()
+    );
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "current request requires unresolved target confirmation",
+        Some(&plan_context),
+        actions,
+    );
+
+    assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
+    match &normalized[0] {
+        AgentAction::Respond { content } => assert_eq!(content, &answer),
+        other => panic!("expected terminal respond to be preserved, got {other:?}"),
+    }
 }
 
 #[test]
@@ -358,6 +449,7 @@ db_path = "data/test_contract.sqlite"
             structured_field_selectors(
                 &route,
                 "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+                true,
                 None,
                 Some(&config_path),
             ),
@@ -740,6 +832,77 @@ planner_kind = "tool"
         args.get("field_path").and_then(Value::as_str),
         Some("fs_basic.name")
     );
+}
+
+#[test]
+fn content_excerpt_structured_scalar_field_deterministic_plan_uses_read_field() {
+    let root = TempDirGuard::new("content_excerpt_structured_scalar_field_plan");
+    let registry = root.path.join("skills_registry.toml");
+    fs::write(
+        &registry,
+        r#"[[skills]]
+name = "run_cmd"
+group = "system"
+planner_kind = "tool"
+
+[[skills]]
+name = "fs_basic"
+group = "filesystem"
+planner_kind = "tool"
+"#,
+    )
+    .expect("write registry");
+    let registry_path = registry.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = registry_path.clone();
+    route.resolved_intent =
+        "Locate the run_cmd configuration in skills_registry.toml and report planner_kind."
+            .to_string();
+    let request =
+        "在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么";
+
+    let plan = structured_scalar_field_auto_locator_deterministic_plan_result(
+        &state,
+        request,
+        Some(&route),
+        &LoopState::new(1),
+        request,
+        Some(request),
+        Some(registry_path.as_str()),
+    )
+    .expect("structured scalar field should bypass broad content reads");
+
+    assert_eq!(plan.steps.len(), 3);
+    let first = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be an action");
+    let args = expect_planned_call(&first, "config_basic", "read_field");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(registry_path.as_str())
+    );
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("run_cmd.planner_kind")
+    );
+    assert!(matches!(
+        plan.steps[1].to_agent_action().as_ref(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == &vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action().as_ref(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
 }
 
 #[test]

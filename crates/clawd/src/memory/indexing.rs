@@ -8,6 +8,8 @@ use serde_json::json;
 
 use super::embedding::{embed_text_locally, local_hash_embedding_spec};
 use super::retrieval::{build_topic_tags, vector_to_json};
+#[cfg(test)]
+use super::RETRIEVAL_SOURCE_KNOWLEDGE_FACT;
 use super::{
     retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
     retrieval_source_ref_for_memory_fact, retrieval_source_ref_for_preference,
@@ -16,8 +18,8 @@ use super::{
     MEMORY_TYPE_UNFINISHED_GOAL, RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT,
     RETRIEVAL_KIND_KNOWLEDGE_DOC, RETRIEVAL_KIND_SEMANTIC_FACT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
     RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
-    RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_KNOWLEDGE_FACT, RETRIEVAL_SOURCE_MEMORY,
-    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+    RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_MEMORY, RETRIEVAL_SOURCE_MEMORY_FACT,
+    RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
     RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
 
@@ -630,7 +632,7 @@ fn build_kb_metadata(
     .to_string()
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn upsert_knowledge_fact(
     db: &Connection,
     user_id: i64,
@@ -746,7 +748,7 @@ pub(crate) fn delete_memory_fact_retrieval_rows(
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
     json!({
         "scope_kind": MEMORY_SCOPE_USER,

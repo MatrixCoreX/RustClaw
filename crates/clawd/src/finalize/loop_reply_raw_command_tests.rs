@@ -460,6 +460,103 @@ fn raw_command_projection_collapses_identical_repeated_outputs() {
 }
 
 #[test]
+fn raw_command_projection_uses_latest_contiguous_run_cmd_group() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(5);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "run_cmd", "guagua\n"));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "run_cmd", "ThinkPad-X1\n"));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_4",
+        "synthesize_answer",
+        "old synthesis",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_5",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_6", "run_cmd", "guagua\n"));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_7", "run_cmd", "ThinkPad-X1\n"));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_8",
+        "respond",
+        "/home/guagua/rustclaw\nguagua\nThinkPad-X1",
+    ));
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("raw command projection");
+
+    assert_eq!(answer, "/home/guagua/rustclaw\nguagua\nThinkPad-X1");
+    assert_eq!(summary.used_evidence_ids_count, 3);
+}
+
+#[test]
+fn raw_command_direct_structured_replacement_keeps_multi_step_projection() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(5);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "run_cmd", "guagua\n"));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "run_cmd", "ThinkPad-X1\n"));
+    loop_state.delivery_messages.push("ThinkPad-X1".to_string());
+    loop_state.last_user_visible_respond = Some("ThinkPad-X1".to_string());
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_direct_structured_observed_answer(
+        &state,
+        &claimed_task("task-raw-command-multi-step-replace"),
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["/home/guagua/rustclaw\nguagua\nThinkPad-X1".to_string()]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("/home/guagua/rustclaw\nguagua\nThinkPad-X1")
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn raw_command_projection_accepts_wrapped_read_range_output() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);

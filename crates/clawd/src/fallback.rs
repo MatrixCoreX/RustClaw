@@ -29,14 +29,15 @@ const USER_RESPONSE_CONTRACT_VALIDATOR_PROMPT_LOGICAL_PATH: &str =
 /// 用户可见回复的结构化意图类型。
 ///
 /// 代码负责填事实与边界；具体怎么对用户说，后续交给 LLM composer。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UserResponseKind {
     Clarify,
     PolicyBlock,
     ToolFailure,
+    #[allow(dead_code)]
     LlmUnavailable,
     SchemaInvalid,
+    #[allow(dead_code)]
     FinalAnswer,
 }
 
@@ -348,6 +349,16 @@ pub(crate) fn missing_file_delivery_default_payload(locator_hint: Option<&str>) 
     payload.to_string()
 }
 
+fn missing_file_delivery_default_machine_text(locator_hint: Option<&str>) -> String {
+    let locator = locator_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(locator) = locator {
+        return format!("delivery_required=true\nfile_found=false\nmissing_path=`{locator}`");
+    }
+    "delivery_required=true\nfile_found=false".to_string()
+}
+
 pub(crate) fn missing_file_delivery_default_text(
     state: &AppState,
     locator_hint: Option<&str>,
@@ -356,24 +367,22 @@ pub(crate) fn missing_file_delivery_default_text(
     let locator = locator_hint
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let prefer_english = fallback_prefers_english_for_language_hint(state, language_hint);
-    if let Some(locator) = locator {
-        return crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.delivery.file_not_found_path_next_step",
-            "未找到 `{missing_path}`，所以无法发送文件。请确认路径或文件名后再发一次。",
-            "I couldn't find `{missing_path}`, so I can't send the file. Please confirm the path or filename and send it again.",
-            prefer_english,
-            &[("missing_path", locator)],
-        );
-    }
+    let key = if locator.is_some() {
+        "clawd.msg.delivery.file_not_found_path_next_step"
+    } else {
+        "clawd.msg.delivery.file_not_found_next_step"
+    };
+    let default_text = missing_file_delivery_default_machine_text(locator);
+    let vars = locator
+        .map(|missing_path| vec![("missing_path", missing_path)])
+        .unwrap_or_default();
     crate::bilingual_t_with_default_vars(
         state,
-        "clawd.msg.delivery.file_not_found_next_step",
-        "未找到要发送的文件。请确认路径或文件名后再发一次。",
-        "I couldn't find the file to send. Please confirm the path or filename and send it again.",
-        prefer_english,
-        &[],
+        key,
+        &default_text,
+        &default_text,
+        fallback_prefers_english_for_language_hint(state, language_hint),
+        &vars,
     )
 }
 
@@ -812,12 +821,10 @@ pub(crate) enum ClarifyFallbackSource {
     #[allow(dead_code)]
     PlannerFailed,
     /// 预留：执行链中途失败但有部分有效 step 输出。
-    #[allow(dead_code)]
     ExecutionFailedPartial,
     /// finalize 判定 requires_clarify 或 delivery 全空，无法合成最终答案。
     SynthesisEmpty,
     /// 预留：§7.1 contract verifier 二次拒绝。
-    #[allow(dead_code)]
     VerifyRejected,
     /// 策略 / 权限阻断后，用户可见说明交给 composer 生成。
     PolicyBlock,
@@ -947,17 +954,6 @@ pub(crate) fn fallback_prefers_english_for_language_hint(
             .to_ascii_lowercase()
             .starts_with("en")
     }
-}
-
-/// 集合：当前可能出现在历史 task `result_json.text` 里的所有 fallback 文案
-/// （新 7 个 source + 老 super-fallback）。比对端用以判定"上一轮回答是不是 fallback
-/// 占位符"，决定要不要把它喂给 recent context / memory 上下文拼接。
-///
-/// 当前所有生产调用点都走更高层的 [`is_known_clarify_fallback_text`]，本函数留作
-/// 调试与未来 inspect 工具的入口（例如 `inspect_task.sh --fallback-set`）。
-#[allow(dead_code)]
-pub(crate) fn all_clarify_fallback_texts(state: &AppState) -> Vec<String> {
-    all_clarify_fallback_texts_from_dict(&state.policy.schedule.i18n_dict)
 }
 
 /// 底层 helper：直接接受 `i18n_dict`，不依赖 `AppState`，便于单测。

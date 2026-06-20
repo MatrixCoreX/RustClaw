@@ -1,6 +1,6 @@
 use super::{
-    plan_step_from_agent_action, AgentAction, AskMode, FirstLayerDecision, IntentOutputContract,
-    PlanStep, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, PlanStep,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
@@ -95,27 +95,21 @@ fn plan_step_round_trips_call_capability() {
 }
 
 #[test]
-fn route_result_gate_kind_uses_first_layer_decision() {
+fn route_result_gate_kind_uses_ask_mode() {
     let route = route_result_with_mode(crate::AskMode::direct_answer());
 
-    assert_eq!(
-        route.first_layer_decision(),
-        FirstLayerDecision::DirectAnswer
-    );
+    assert_eq!(route.gate_kind(), crate::RouteGateKind::Chat);
     assert!(route.is_chat_gate());
     assert!(!route.is_execute_gate());
 }
 
 #[test]
-fn route_result_set_first_layer_decision_updates_derived_label() {
+fn route_result_set_execute_gate_updates_legacy_trace_label() {
     let mut route = route_result_with_mode(crate::AskMode::direct_answer());
 
-    route.set_first_layer_decision(FirstLayerDecision::PlannerExecute);
+    route.set_execute_gate();
 
-    assert_eq!(
-        route.first_layer_decision(),
-        FirstLayerDecision::PlannerExecute
-    );
-    assert_eq!(route.derived_route_label(), "Act");
+    assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
+    assert_eq!(route.legacy_route_label_for_trace(), "Act");
     assert!(route.is_execute_gate());
 }

@@ -397,10 +397,12 @@ pub(super) fn content_excerpt_summary_target_path(
     let route = route_result?;
     if route.needs_clarify
         || route.output_contract.delivery_required
-        || !route
+        || !(route
             .output_contract
             .semantic_kind
             .is_content_excerpt_summary()
+            || route.output_contract.semantic_kind
+                == crate::OutputSemanticKind::ExcerptKindJudgment)
     {
         return None;
     }

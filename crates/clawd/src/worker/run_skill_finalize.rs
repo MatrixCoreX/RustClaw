@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use tracing::{error, info};
 
 use crate::{repo, AppState};
+use claw_core::skill_registry::{OutputKind, PlannerCapabilityEffect, SkillRiskLevel};
 
 async fn finalize_run_skill_canceled(task: &crate::ClaimedTask, skill_name: &str) -> Result<()> {
     info!(
@@ -30,10 +31,212 @@ fn build_run_skill_step_result(
     }
 }
 
+fn run_skill_action_from_payload(payload: &Value) -> Option<String> {
+    payload
+        .get("args")
+        .and_then(Value::as_object)
+        .and_then(|args| args.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase().replace(['-', ' ', '.'], "_"))
+}
+
+fn risk_level_token(value: Option<SkillRiskLevel>) -> &'static str {
+    match value.unwrap_or(SkillRiskLevel::Unknown) {
+        SkillRiskLevel::Unknown => "unknown",
+        SkillRiskLevel::Low => "low",
+        SkillRiskLevel::Medium => "medium",
+        SkillRiskLevel::High => "high",
+    }
+}
+
+fn output_kind_token(value: OutputKind) -> &'static str {
+    match value {
+        OutputKind::Text => "text",
+        OutputKind::File => "file",
+        OutputKind::Image => "image",
+        OutputKind::Mixed => "mixed",
+    }
+}
+
+fn json_required_fields(schema: Option<&Value>) -> Vec<String> {
+    schema
+        .and_then(|schema| schema.get("required"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn run_skill_sensitive_field_name(field: &str) -> bool {
+    let normalized = field.trim().to_ascii_lowercase().replace(['-', '.'], "_");
+    normalized == "key"
+        || normalized == "auth"
+        || normalized.ends_with("_key")
+        || normalized.contains("token")
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("cookie")
+        || normalized.contains("credential")
+        || normalized.contains("ticket")
+        || normalized.contains("signature")
+        || normalized.contains("authorization")
+}
+
+fn run_skill_trace_safe_json(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                let value = if run_skill_sensitive_field_name(key) {
+                    json!("[REDACTED]")
+                } else {
+                    run_skill_trace_safe_json(child)
+                };
+                out.insert(key.clone(), value);
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(run_skill_trace_safe_json).collect()),
+        Value::String(text) => Value::String(crate::visible_text::sanitize_user_visible_text(text)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
+    }
+}
+
+fn run_skill_capability_contract(state: &AppState, payload: &Value, skill_name: &str) -> Value {
+    let canonical = state.resolve_canonical_skill_name(skill_name);
+    let action = run_skill_action_from_payload(payload);
+    let args = payload
+        .get("args")
+        .map(run_skill_trace_safe_json)
+        .unwrap_or(Value::Null);
+    let registry = state.get_skills_registry();
+    let manifest = registry
+        .as_ref()
+        .and_then(|registry| registry.manifest(&canonical));
+    let planner_mapping = registry.as_ref().and_then(|registry| {
+        let mappings = registry.planner_capabilities(&canonical);
+        action
+            .as_deref()
+            .and_then(|action| {
+                mappings
+                    .iter()
+                    .find(|mapping| mapping.action.as_deref() == Some(action))
+            })
+            .or_else(|| {
+                (action.is_none() && mappings.len() == 1)
+                    .then(|| mappings.first())
+                    .flatten()
+            })
+    });
+    let effect = planner_mapping
+        .and_then(|mapping| mapping.effect)
+        .map(PlannerCapabilityEffect::as_token)
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|manifest| manifest.side_effect)
+                .map(|side_effect| if side_effect { "mutate" } else { "observe" })
+        })
+        .unwrap_or("unknown");
+    let risk_level = planner_mapping
+        .and_then(|mapping| mapping.risk_level)
+        .or_else(|| manifest.as_ref().and_then(|manifest| manifest.risk_level));
+    let required_args = planner_mapping
+        .map(|mapping| mapping.required.clone())
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(|| {
+            json_required_fields(
+                manifest
+                    .as_ref()
+                    .and_then(|manifest| manifest.input_schema.as_ref()),
+            )
+        });
+    let optional_args = planner_mapping
+        .map(|mapping| mapping.optional.clone())
+        .unwrap_or_default();
+    let expected_evidence = json_required_fields(
+        manifest
+            .as_ref()
+            .and_then(|manifest| manifest.output_schema.as_ref()),
+    );
+    json!({
+        "schema_version": 1,
+        "source": "run_skill",
+        "skill_name": skill_name,
+        "canonical_skill_name": canonical,
+        "action": action.as_deref().unwrap_or("_default"),
+        "effect": effect,
+        "risk_level": risk_level_token(risk_level),
+        "required_args": required_args,
+        "optional_args": optional_args,
+        "expected_evidence": if expected_evidence.is_empty() { vec!["text".to_string()] } else { expected_evidence },
+        "delivery_shape": manifest
+            .as_ref()
+            .map(|manifest| output_kind_token(manifest.output_kind))
+            .unwrap_or("text"),
+        "capability_ref": planner_mapping.map(|mapping| mapping.name.as_str()),
+        "planner_kind": manifest
+            .as_ref()
+            .map(|manifest| manifest.planner_kind.as_token()),
+        "idempotent": registry
+            .as_ref()
+            .map(|registry| registry.resolved_idempotent(&canonical, action.as_deref())),
+        "dedup_scope": registry
+            .as_ref()
+            .map(|registry| registry.resolved_dedup_scope(&canonical, action.as_deref()).as_token()),
+        "args_shape": args,
+    })
+}
+
+fn run_skill_success_machine_payload() -> Value {
+    json!({
+        "status_code": "ok",
+        "message_key": "clawd.run_skill.ok",
+        "failure_attribution": null,
+        "retryable": false,
+    })
+}
+
+fn run_skill_failure_machine_payload(err_text: &str) -> Value {
+    let structured = crate::skills::parse_structured_skill_error(err_text);
+    let error_code = structured
+        .as_ref()
+        .map(|error| error.error_kind.as_str())
+        .unwrap_or("skill_execution_failed");
+    let message_key = structured
+        .as_ref()
+        .and_then(|error| error.extra.as_ref())
+        .and_then(|extra| extra.get("message_key"))
+        .and_then(Value::as_str)
+        .unwrap_or("clawd.run_skill.execution_failed");
+    let failure_attribution = crate::task_journal::failure_attribution_for_error_text(err_text)
+        .map(|value| value.as_str())
+        .unwrap_or("tool_gap");
+    json!({
+        "error_code": error_code,
+        "status_code": error_code,
+        "message_key": message_key,
+        "failure_attribution": failure_attribution,
+        "retryable": false,
+    })
+}
+
 fn record_run_skill_task_observation(
     journal: &mut crate::task_journal::TaskJournal,
     skill_name: &str,
     status: &str,
+    task_contract: &Value,
+    machine_payload: &Value,
     text: Option<&str>,
     error_text: Option<&str>,
     validation: Option<&Value>,
@@ -42,11 +245,32 @@ fn record_run_skill_task_observation(
     external_skill_admission: Option<&Value>,
 ) {
     let mut payload = json!({
-        "source": "direct_run_skill",
+        "source": "run_skill",
+        "legacy_source": "direct_run_skill",
+        "execution_surface": "worker/run_skill_finalize",
+        "execution_surface_owner": "single_step_skill_compat",
         "skill_name": skill_name,
         "status": status,
+        "status_code": machine_payload
+            .get("status_code")
+            .and_then(Value::as_str)
+            .unwrap_or(status),
+        "message_key": machine_payload.get("message_key").and_then(Value::as_str),
+        "task_contract": task_contract,
     });
     if let Some(obj) = payload.as_object_mut() {
+        if let Some(error_code) = machine_payload.get("error_code") {
+            obj.insert("error_code".to_string(), error_code.clone());
+        }
+        if let Some(failure_attribution) = machine_payload.get("failure_attribution") {
+            obj.insert(
+                "failure_attribution".to_string(),
+                failure_attribution.clone(),
+            );
+        }
+        if let Some(retryable) = machine_payload.get("retryable") {
+            obj.insert("retryable".to_string(), retryable.clone());
+        }
         if let Some(text) = text {
             obj.insert("text".to_string(), json!(text));
         }
@@ -68,9 +292,22 @@ fn record_run_skill_task_observation(
         crate::task_journal::observed_evidence_from_output(Some(&payload_text))
     {
         journal.push_task_observation(json!({
-            "source": "direct_run_skill",
+            "source": "run_skill",
+            "legacy_source": "direct_run_skill",
+            "execution_surface": "worker/run_skill_finalize",
+            "execution_surface_owner": "single_step_skill_compat",
             "skill": skill_name,
             "status": status,
+            "status_code": machine_payload
+                .get("status_code")
+                .and_then(Value::as_str)
+                .unwrap_or(status),
+            "message_key": machine_payload.get("message_key").and_then(Value::as_str),
+            "error_code": machine_payload.get("error_code").cloned(),
+            "failure_attribution": machine_payload.get("failure_attribution").cloned(),
+            "retryable": machine_payload.get("retryable").cloned(),
+            "task_contract": task_contract,
+            "capability_ref": task_contract.get("capability_ref").cloned(),
             "external_skill_admission": external_skill_admission,
             "observed_evidence": observed_evidence,
         }));
@@ -143,11 +380,15 @@ async fn finalize_run_skill_success(
         Some(clean_text.clone()),
         None,
     ));
+    let task_contract = run_skill_capability_contract(state, payload, skill_name);
+    let machine_payload = run_skill_success_machine_payload();
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
         "ok",
+        &task_contract,
+        &machine_payload,
         Some(&clean_text),
         None,
         outcome.validation.as_ref(),
@@ -251,11 +492,15 @@ async fn finalize_run_skill_failure(
         None,
         Some(err_text.to_string()),
     ));
+    let task_contract = run_skill_capability_contract(state, payload, skill_name);
+    let machine_payload = run_skill_failure_machine_payload(err_text);
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
         "error",
+        &task_contract,
+        &machine_payload,
         None,
         Some(err_text),
         None,

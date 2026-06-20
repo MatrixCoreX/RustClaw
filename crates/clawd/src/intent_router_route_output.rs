@@ -5,7 +5,23 @@ use super::{
     first_layer_decision_gate_record, route_has_structured_execution_signal,
     IntentNormalizerOutput, RouteDecision, TurnAnalysis,
 };
-use crate::{AppState, ClaimedTask, FirstLayerDecision, ResumeBehavior, RiskCeiling, RouteResult};
+use crate::{
+    ActFinalizeStyle, AppState, AskMode, ClaimedTask, FirstLayerDecision, ResumeBehavior,
+    RiskCeiling, RouteResult,
+};
+
+fn ask_mode_from_legacy_normalizer_decision(
+    legacy_normalizer_decision: FirstLayerDecision,
+    finalize_style: ActFinalizeStyle,
+) -> AskMode {
+    match legacy_normalizer_decision {
+        FirstLayerDecision::Clarify => AskMode::clarify(),
+        FirstLayerDecision::DirectAnswer => AskMode::direct_answer(),
+        FirstLayerDecision::PlannerExecute => AskMode::Act {
+            finalize: finalize_style,
+        },
+    }
+}
 
 pub(super) fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
     let auth_role = task
@@ -37,6 +53,23 @@ pub(crate) fn route_result_from_normalizer(
 ) -> RouteResult {
     let _turn_analysis_present = normalizer_out.turn_analysis.is_some();
     let mut output_contract = normalizer_out.output_contract.clone();
+    let (agent_display_name_hint, sanitized_agent_display_name_hint) =
+        sanitize_normalizer_agent_display_name_hint(state, task, normalizer_out);
+    let sanitized_answer_candidate =
+        normalizer_answer_candidate_matches_backend_metadata(state, task, normalizer_out);
+    let mut route_reason = normalizer_out.reason.clone();
+    if sanitized_agent_display_name_hint {
+        super::append_route_reason(
+            &mut route_reason,
+            "agent_display_name_hint_backend_metadata_removed",
+        );
+    }
+    if sanitized_answer_candidate {
+        super::append_route_reason(
+            &mut route_reason,
+            "normalizer_answer_candidate_backend_metadata_removed",
+        );
+    }
     apply_state_patch_structured_field_selector(
         &mut output_contract,
         normalizer_out
@@ -45,14 +78,14 @@ pub(crate) fn route_result_from_normalizer(
             .and_then(|analysis| analysis.state_patch.as_ref()),
     );
     RouteResult {
-        ask_mode: crate::AskMode::from_first_layer_decision_with_finalize(
-            normalizer_out.first_layer_decision,
+        ask_mode: ask_mode_from_legacy_normalizer_decision(
+            normalizer_out.legacy_first_layer_decision,
             normalizer_out.execution_finalize_style,
         ),
         resolved_intent: normalizer_out.resolved_user_intent.clone(),
         needs_clarify: normalizer_out.needs_clarify,
         clarify_question: normalizer_out.clarify_question.clone(),
-        route_reason: normalizer_out.reason.clone(),
+        route_reason,
         route_confidence: Some(normalizer_out.confidence),
         visible_skill_candidates: state.planner_available_skills_for_task(task),
         risk_ceiling: RiskCeiling::Unknown,
@@ -61,9 +94,79 @@ pub(crate) fn route_result_from_normalizer(
         schedule_intent: normalizer_out.schedule_intent.clone(),
         wants_file_delivery: normalizer_out.wants_file_delivery,
         should_refresh_long_term_memory: normalizer_out.should_refresh_long_term_memory,
-        agent_display_name_hint: normalizer_out.agent_display_name_hint.clone(),
+        agent_display_name_hint,
         output_contract,
     }
+}
+
+fn normalizer_answer_candidate_matches_backend_metadata(
+    state: &AppState,
+    task: &ClaimedTask,
+    normalizer_out: &IntentNormalizerOutput,
+) -> bool {
+    normalizer_answer_candidate_from_resolved_intent(&normalizer_out.resolved_user_intent)
+        .is_some_and(|candidate| normalizer_text_matches_backend_metadata(state, task, candidate))
+}
+
+fn normalizer_answer_candidate_from_resolved_intent(resolved_intent: &str) -> Option<&str> {
+    let (_intent, candidate) = resolved_intent.rsplit_once("\nanswer_candidate:")?;
+    let candidate = candidate.trim();
+    (!candidate.is_empty()).then_some(candidate)
+}
+
+fn sanitize_normalizer_agent_display_name_hint(
+    state: &AppState,
+    task: &ClaimedTask,
+    normalizer_out: &IntentNormalizerOutput,
+) -> (String, bool) {
+    let hint = normalizer_out.agent_display_name_hint.trim();
+    if hint.is_empty() || normalizer_out.should_refresh_long_term_memory {
+        return (hint.to_string(), false);
+    }
+    if normalizer_text_matches_backend_metadata(state, task, hint) {
+        (String::new(), true)
+    } else {
+        (hint.to_string(), false)
+    }
+}
+
+fn normalizer_text_matches_backend_metadata(
+    state: &AppState,
+    task: &ClaimedTask,
+    text: &str,
+) -> bool {
+    let normalized_text = normalize_backend_identity_token(text);
+    if normalized_text.is_empty() {
+        return false;
+    }
+    state.task_llm_providers(task).iter().any(|provider| {
+        provider
+            .config
+            .name
+            .trim()
+            .strip_prefix("vendor-")
+            .into_iter()
+            .chain([
+                provider.config.name.trim(),
+                provider.config.model.trim(),
+                provider.config.provider_type.trim(),
+            ])
+            .map(normalize_backend_identity_token)
+            .filter(|token| token.len() >= 4)
+            .any(|token| {
+                normalized_text == token
+                    || normalized_text.contains(&token)
+                    || token.contains(&normalized_text)
+            })
+    })
+}
+
+fn normalize_backend_identity_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 pub(super) fn render_self_extension_runtime(state: &AppState) -> String {
@@ -101,7 +204,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     turn_analysis: Option<TurnAnalysis>,
 ) -> IntentNormalizerOutput {
-    let first_layer_decision = if decision.needs_clarify {
+    let legacy_normalizer_decision = if decision.needs_clarify {
         FirstLayerDecision::Clarify
     } else if route_has_structured_execution_signal(
         &decision.output_contract,
@@ -113,7 +216,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     } else {
         FirstLayerDecision::DirectAnswer
     };
-    let mut first_layer_decision = first_layer_decision;
+    let mut legacy_normalizer_decision = legacy_normalizer_decision;
     let mut execution_finalize_style =
         execution_finalize_style_for_contract(&decision.output_contract);
     if let Some(finalize_style) =
@@ -122,7 +225,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
             decision.needs_clarify,
         )
     {
-        first_layer_decision = FirstLayerDecision::PlannerExecute;
+        legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         execution_finalize_style = finalize_style;
     }
     let reason = if decision.reason.trim().is_empty() {
@@ -137,7 +240,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     };
     let first_layer_gate_record = first_layer_decision_gate_record(
         None,
-        first_layer_decision,
+        legacy_normalizer_decision,
         decision.needs_clarify,
         &decision.output_contract,
         vec![fallback_reason_prefix.to_string()],
@@ -156,7 +259,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         confidence: decision.confidence.unwrap_or(0.0),
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
-        first_layer_decision,
+        legacy_first_layer_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,
         fallback_source,

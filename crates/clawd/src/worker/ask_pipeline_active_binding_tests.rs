@@ -205,7 +205,7 @@ fn active_bound_target_prebinds_locatorless_content_summary() {
 fn active_listing_target_prebinds_locatorless_scalar_count_clarify() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
@@ -255,7 +255,7 @@ fn current_workspace_scope_marker_prebinds_locatorless_scalar_count_clarify() {
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.route_reason =
         "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
             .to_string();
@@ -291,7 +291,7 @@ fn current_workspace_scope_marker_prebinds_scalar_count_despite_deictic_surface(
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.route_reason =
         "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
             .to_string();
@@ -326,7 +326,7 @@ fn locatorless_scalar_count_clarify_without_workspace_authority_is_not_prebound(
     let state = test_state_with_root(make_temp_root("workspace_scalar_count_no_authority"));
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.route_reason = "semantic_contract_requires_evidence".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();

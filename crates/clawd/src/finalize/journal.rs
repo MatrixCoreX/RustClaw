@@ -101,6 +101,12 @@ pub(crate) fn build_from_loop_state(
     if let Some(stop_signal) = loop_state.last_stop_signal.as_deref() {
         journal.record_final_stop_signal(stop_signal.to_string());
     }
+    if let Some(lifecycle) = loop_state.task_lifecycle.clone() {
+        journal.record_task_lifecycle(lifecycle);
+    }
+    if let Some(checkpoint) = loop_state.task_checkpoint.clone() {
+        journal.record_task_checkpoint(checkpoint);
+    }
     journal.record_delivery_consistent(delivery_consistent);
     journal.record_final_answer(final_text.to_string());
     journal.record_final_status(final_status);

@@ -37,42 +37,6 @@ fn effective_user_key(task: &ClaimedTask) -> String {
         .unwrap_or_else(|| format!("anon:{}:{}", task.user_id, task.chat_id))
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
-fn persist_clarify_state(
-    state: &AppState,
-    task: &ClaimedTask,
-    clarify_state: &ClarifyState,
-) -> Result<()> {
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|err| anyhow::anyhow!("acquire db for clarify state persist: {err}"))?;
-    let user_key = effective_user_key(task);
-    let state_json = serde_json::to_string(clarify_state)?;
-    db.execute(
-        "INSERT INTO clarify_states (
-            user_id, chat_id, user_key, state_json, source_task_id, updated_at_ts, expires_at_ts
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(user_id, chat_id, user_key) DO UPDATE SET
-            state_json = excluded.state_json,
-            source_task_id = excluded.source_task_id,
-            updated_at_ts = excluded.updated_at_ts,
-            expires_at_ts = excluded.expires_at_ts",
-        params![
-            task.user_id,
-            task.chat_id,
-            user_key,
-            state_json,
-            clarify_state.source_task_id,
-            clarify_state.updated_at_ts as i64,
-            clarify_state.expires_at_ts as i64,
-        ],
-    )?;
-    Ok(())
-}
-
 fn persist_clarify_state_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
@@ -127,7 +91,6 @@ fn clear_active_clarify_state_tx(tx: &rusqlite::Transaction<'_>, task: &ClaimedT
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(crate) fn load_active_clarify_state(
     state: &AppState,
     task: &ClaimedTask,
@@ -366,49 +329,6 @@ fn derive_clarify_candidate_targets(
     let mut candidates = deduped;
     candidates.truncate(crate::followup_frame::MAX_ORDERED_ENTRIES);
     candidates
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn replace_active_clarify_state_from_ask_outcome(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-    answer_messages: &[String],
-    semantic_clarify: bool,
-    fuzzy_locator_suggestions: &[String],
-    prior_session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-) -> Option<String> {
-    let Some(clarify_state) = derive_clarify_state_for_ask_outcome(
-        &task.task_id,
-        prompt,
-        route_result,
-        answer_text,
-        answer_messages,
-        semantic_clarify,
-        fuzzy_locator_suggestions,
-        prior_session_snapshot,
-    ) else {
-        if let Err(err) = clear_active_clarify_state(state, task) {
-            tracing::warn!(
-                "clarify_state clear failed task_id={} err={}",
-                task.task_id,
-                err
-            );
-        }
-        return None;
-    };
-    if let Err(err) = persist_clarify_state(state, task, &clarify_state) {
-        tracing::warn!(
-            "clarify_state persist failed task_id={} err={}",
-            task.task_id,
-            err
-        );
-        return None;
-    }
-    Some(clarify_state.source_task_id)
 }
 
 pub(crate) fn sync_active_clarify_state_from_ask_outcome_tx(

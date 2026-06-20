@@ -42,6 +42,8 @@ pub(crate) fn classify_route_risk_ceiling(
                 ExecutionRecipeProfile::ConfigChange
                 | ExecutionRecipeProfile::CodeChange
                 | ExecutionRecipeProfile::SkillAuthoring
+                | ExecutionRecipeProfile::PackageChange
+                | ExecutionRecipeProfile::DatabaseChange
                 | ExecutionRecipeProfile::OpsService => RiskCeiling::Medium,
                 ExecutionRecipeProfile::None => RiskCeiling::Unknown,
             },

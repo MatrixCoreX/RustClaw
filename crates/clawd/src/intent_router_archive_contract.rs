@@ -368,7 +368,7 @@ pub(super) fn apply_archive_unpack_missing_archive_locator_clarify(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    first_layer_decision: &mut FirstLayerDecision,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !matches!(
@@ -385,7 +385,7 @@ pub(super) fn apply_archive_unpack_missing_archive_locator_clarify(
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *first_layer_decision = FirstLayerDecision::Clarify;
+    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();

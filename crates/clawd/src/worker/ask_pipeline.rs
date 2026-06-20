@@ -6,6 +6,8 @@ use super::*;
 
 #[path = "ask_pipeline_active_binding.rs"]
 mod active_binding;
+#[path = "ask_pipeline_agent_context.rs"]
+mod agent_context;
 #[path = "ask_pipeline_auto_locator_binding.rs"]
 mod auto_locator_binding;
 #[path = "ask_pipeline_background_locator_guard.rs"]
@@ -54,6 +56,7 @@ use active_binding::{
     repair_service_status_file_locator_to_content_excerpt, single_component_locator_hint,
     SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
 };
+pub(super) use agent_context::build_agent_run_context_from_prepared_flow;
 use background_locator_guard::{
     background_only_locator_route_should_force_clarify,
     downgrade_background_locator_clarify_to_recent_observed_chat, locator_identity_candidates,
@@ -87,8 +90,9 @@ use deictic_guard::{
     mark_deictic_missing_locator_clarify, route_locator_hint_matches_active_ordered_entry,
     state_patch_allows_deictic_locator_guard_bypass, state_patch_requires_deictic_locator_clarify,
 };
+pub(super) use execution_context::execution_user_request;
 use execution_context::{
-    execution_user_request, sanitize_untrusted_normalizer_answer_candidate_for_execution,
+    sanitize_untrusted_normalizer_answer_candidate_for_execution,
     sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_execution,
 };
 use file_delivery::{
@@ -100,6 +104,7 @@ use file_delivery::{
     prebind_file_delivery_locator_from_recent_ordered_resolved_prompt,
     prebind_file_delivery_locator_from_resolved_prompt_path,
     prebind_file_delivery_missing_locator_from_resolved_prompt_path,
+    promote_unresolved_file_delivery_with_current_request_locator,
     unbound_existing_file_delivery_route_should_force_clarify,
 };
 use locator_hint_binding::{
@@ -291,6 +296,46 @@ fn with_agent_decides_shadow_snapshot(
     journal.record_route_result(route_result);
     journal.record_rollout_attribution(attribution);
     reply
+}
+
+fn with_dispatch_boundary_attribution(
+    task: &crate::ClaimedTask,
+    prompt: &str,
+    mut reply: crate::AskReply,
+    route_result: &crate::RouteResult,
+    event: &str,
+    old_owner: &str,
+    new_owner: &str,
+    chosen_path: &str,
+    rollback_token: &str,
+) -> crate::AskReply {
+    let journal = reply.task_journal.get_or_insert_with(|| {
+        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt)
+    });
+    journal.record_route_result(route_result);
+    journal.record_rollout_attribution(
+        crate::task_journal::TaskJournalRolloutAttribution::dispatch_boundary_attribution(
+            route_result,
+            event,
+            old_owner,
+            new_owner,
+            chosen_path,
+            rollback_token,
+        ),
+    );
+    reply
+}
+
+fn resume_discussion_uses_direct_chat_renderer(route_result: &crate::RouteResult) -> bool {
+    crate::ask_flow::route_allows_agent_loop_pure_chat_submode(route_result)
+}
+
+fn ordinary_clarify_should_enter_agent_loop(
+    state: &crate::AppState,
+    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
+) -> bool {
+    !clarify_reason_kind.is_boundary_clarify()
+        && crate::agent_engine::agent_loop_semantic_authority_enabled(state)
 }
 
 fn apply_ask_post_route(
@@ -845,6 +890,13 @@ fn apply_ask_post_route(
         locator_resolution,
         post_route_options,
     );
+    if promote_unresolved_file_delivery_with_current_request_locator(prompt, &mut post_route) {
+        info!(
+            "{} worker_once: ask file_delivery_current_request_locator_to_planner task_id={}",
+            crate::highlight_tag("routing"),
+            task.task_id
+        );
+    }
     if auto_locator_scalar_file_without_current_locator_should_force_clarify(
         state,
         prompt,
@@ -929,9 +981,10 @@ fn apply_ask_post_route(
             task.task_id
         );
     }
-    if super::ask_prepare::repair_structural_file_delivery_resolution(
+    if super::ask_prepare::repair_structural_file_delivery_resolution_for_turn(
         &mut post_route.execution_route_result,
         &session_snapshot,
+        turn_analysis,
     ) && !post_route.execution_route_result.needs_clarify
     {
         let target = post_route
@@ -1027,13 +1080,15 @@ fn apply_ask_post_route(
         );
     } else if post_route.execution_route_result.ask_mode != route_result.ask_mode {
         info!(
-            "{} worker_once: ask ask_mode_refined_by_auto_locator task_id={} ask_mode={} -> {} derived_route_label={} -> {}",
+            "{} worker_once: ask ask_mode_refined_by_auto_locator task_id={} ask_mode={} -> {} legacy_route_label={} -> {}",
             crate::highlight_tag("routing"),
             task.task_id,
             route_result.ask_mode.as_str(),
             post_route.execution_route_result.ask_mode.as_str(),
-            route_result.derived_route_label(),
-            post_route.execution_route_result.derived_route_label()
+            route_result.legacy_route_label_for_trace(),
+            post_route
+                .execution_route_result
+                .legacy_route_label_for_trace()
         );
     }
     sanitize_untrusted_normalizer_answer_candidate_for_execution(
@@ -1255,6 +1310,8 @@ pub(super) async fn execute_ask_dispatch(
                 output_excerpt: Some(
                     serde_json::json!({
                         "action": "direct_file_delivery",
+                        "execution_surface": "worker/ask_pipeline::direct_existing_file_delivery",
+                        "execution_surface_owner": "delivery_boundary",
                         "path": path.clone(),
                         "resolved_path": path,
                     })
@@ -1274,6 +1331,31 @@ pub(super) async fn execute_ask_dispatch(
         ))));
     }
     if route_result.ask_mode.is_clarify_only() {
+        if ordinary_clarify_should_enter_agent_loop(state, clarify_reason_kind) {
+            crate::log_ask_transition(
+                state,
+                &task.task_id,
+                Some(crate::AskState::Routing),
+                crate::AskState::Executing,
+                "ordinary_clarify_deferred_to_agent_loop",
+                None,
+            );
+            let mut loop_ctx = agent_run_context.clone();
+            if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
+                route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+                append_route_reason(route, "ordinary_clarify_deferred_to_agent_loop");
+            }
+            return Ok(Some(
+                crate::agent_engine::run_agent_with_tools(
+                    state,
+                    task,
+                    prompt_with_memory_for_execution,
+                    execution_user_request,
+                    loop_ctx,
+                )
+                .await,
+            ));
+        }
         crate::log_ask_transition(
             state,
             &task.task_id,
@@ -1343,16 +1425,52 @@ pub(super) async fn execute_ask_dispatch(
             },
         )
         .await;
+        let reply = with_dispatch_boundary_attribution(
+            task,
+            prompt,
+            ask_reply_with_visible_process(state, task, prompt, clarify),
+            route_result,
+            clarify_reason_kind.dispatch_event(),
+            clarify_reason_kind.dispatch_old_owner(),
+            clarify_reason_kind.dispatch_new_owner(),
+            clarify_reason_kind.dispatch_chosen_path(),
+            "semantic_route_authority:legacy_pre_agent",
+        );
         return Ok(Some(Ok(with_agent_decides_shadow_snapshot(
             state,
             task,
             prompt,
-            ask_reply_with_visible_process(state, task, prompt, clarify),
+            reply,
             route_result,
             agent_run_context.as_ref(),
         ))));
     }
     if ask_mode.is_resume_discussion() {
+        if !resume_discussion_uses_direct_chat_renderer(route_result) {
+            crate::log_ask_transition(
+                state,
+                &task.task_id,
+                Some(crate::AskState::Routing),
+                crate::AskState::Executing,
+                "resume_discussion_requires_agent_loop",
+                None,
+            );
+            let mut loop_ctx = agent_run_context.clone();
+            if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
+                route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+                append_route_reason(route, "resume_discussion_requires_agent_loop");
+            }
+            return Ok(Some(
+                crate::agent_engine::run_agent_with_tools(
+                    state,
+                    task,
+                    prompt_with_memory_for_execution,
+                    execution_user_request,
+                    loop_ctx,
+                )
+                .await,
+            ));
+        }
         crate::log_ask_transition(
             state,
             &task.task_id,
@@ -1489,6 +1607,21 @@ pub(super) async fn execute_ask_dispatch(
     ))
 }
 
+#[cfg(test)]
+#[path = "ask_pipeline_agent_context_tests.rs"]
+mod agent_context_tests;
+#[cfg(test)]
+#[path = "ask_pipeline_clarify_tests.rs"]
+mod clarify_tests;
+#[cfg(test)]
+#[path = "ask_pipeline_resume_tests.rs"]
+mod resume_tests;
+#[cfg(test)]
+#[path = "ask_pipeline_scalar_count_tests.rs"]
+mod scalar_count_tests;
+#[cfg(test)]
+#[path = "ask_pipeline_test_support.rs"]
+mod test_support;
 #[cfg(test)]
 #[path = "ask_pipeline_tests.rs"]
 mod tests;

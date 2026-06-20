@@ -116,7 +116,7 @@ pub(crate) fn resolve_clarify_followup_from_session_with_surface(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn prompt_can_fill_active_clarify_target(
     prompt: &str,
     active_clarify_state: Option<&crate::clarify_state::ClarifyState>,
@@ -147,15 +147,6 @@ fn clarify_state_has_structural_binding_contract(
         || clarify_state.output_shape.is_some()
         || clarify_state.semantic_kind.is_some()
         || !clarify_state.candidate_targets.is_empty()
-}
-
-#[allow(dead_code)]
-fn synthesize_clarify_state_reply_resolution(
-    clarify_state: &crate::clarify_state::ClarifyState,
-    prompt: &str,
-) -> Option<ClarifyFollowupResolution> {
-    let surface = super::surface_signals::analyze_prompt_surface(prompt.trim());
-    synthesize_clarify_state_reply_resolution_with_surface(clarify_state, prompt, &surface)
 }
 
 fn synthesize_clarify_state_reply_resolution_with_surface(

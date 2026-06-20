@@ -157,6 +157,45 @@ fn standalone_task_request_freeform_rewrite_uses_current_user_request() {
 }
 
 #[test]
+fn standalone_task_request_freeform_rewrite_preserves_active_anchor_context() {
+    let mut route = base_route(
+        crate::AskMode::direct_answer(),
+        "Read the second active ordered entry.",
+    );
+    let anchor = "\n\n### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/logs\nfollowup_ordered_entries: 1:a.log | 2:b.log";
+    let mut resolved = format!("{}{}", route.resolved_intent, anchor);
+    let mut prompt_with_memory = format!(
+        "{}\n\n### RUNTIME_CONTEXT\nworkspace_root: /tmp{}",
+        route.resolved_intent, anchor
+    );
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_execution(
+        &mut route,
+        "show the second one",
+        Some(&turn_analysis),
+        &mut resolved,
+        &mut prompt_with_memory,
+    );
+
+    assert_eq!(route.resolved_intent, "show the second one");
+    assert!(resolved.starts_with("show the second one\n\n### ACTIVE_EXECUTION_ANCHOR"));
+    assert!(resolved.contains("followup_ordered_entries: 1:a.log | 2:b.log"));
+    assert!(prompt_with_memory.starts_with("show the second one\n\n### RUNTIME_CONTEXT"));
+    assert!(prompt_with_memory.contains("followup_bound_target: /tmp/logs"));
+    assert!(route_reason_has_marker(
+        &route,
+        "untrusted_normalizer_freeform_rewrite_removed_from_execution_context"
+    ));
+}
+
+#[test]
 fn active_task_correction_keeps_resolved_context_rewrite() {
     let mut route = base_route(
         crate::AskMode::direct_answer(),

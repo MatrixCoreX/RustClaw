@@ -207,7 +207,14 @@ pub(super) fn route_label_from_first_layer_decision(
     decision: FirstLayerDecision,
     finalize_style: ActFinalizeStyle,
 ) -> &'static str {
-    crate::AskMode::from_first_layer_decision_with_finalize(decision, finalize_style).route_label()
+    match decision {
+        FirstLayerDecision::Clarify => "AskClarify",
+        FirstLayerDecision::DirectAnswer => "Chat",
+        FirstLayerDecision::PlannerExecute => match finalize_style {
+            ActFinalizeStyle::ChatWrapped => "ChatAct",
+            ActFinalizeStyle::Plain | ActFinalizeStyle::ResumeContinue => "Act",
+        },
+    }
 }
 
 pub(super) fn execution_finalize_style_for_contract(

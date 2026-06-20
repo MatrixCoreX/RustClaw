@@ -10,7 +10,9 @@ use super::{
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
     AgentLoopGuardPolicy, LoopState,
 };
-use crate::agent_engine::support::SemanticRouteAuthority;
+use crate::agent_engine::support::{
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+};
 use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
@@ -123,10 +125,10 @@ fn test_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
-        answer_verifier_enforce_required: false,
+        answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
         agent_loop_canary_bucket: "none".to_string(),
-        registry_idempotency_guard: false,
+        registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
@@ -164,6 +166,7 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
 
 #[test]
 fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
+    let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
@@ -172,7 +175,7 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
     });
     let args = serde_json::json!({"command": "ls"});
 
-    let err = contract_matrix_action_policy_error(&loop_state, "run_cmd", &args)
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
         .expect("contract matrix should reject run_cmd for file_names");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
@@ -213,6 +216,7 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
 
 #[test]
 fn contract_matrix_preflight_allows_user_named_output_path_marker() {
+    let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
@@ -227,13 +231,43 @@ fn contract_matrix_preflight_allows_user_named_output_path_marker() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&loop_state, "write_file", &args).is_none(),
+        contract_matrix_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
         "planner-marked user named output writes must survive execution preflight"
     );
 }
 
 #[test]
+fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+        requires_content_evidence: true,
+        response_shape: crate::OutputResponseShape::Scalar,
+        ..crate::IntentOutputContract::default()
+    });
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+        validation_required: true,
+        saw_inspect: true,
+        ..Default::default()
+    };
+    let args = serde_json::json!({
+        "path": "document/ops-repair/index.html",
+        "content": "ops-repair-ok\n"
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
+        "active ops recipe mutations must not be rejected after virtual tool rewrite"
+    );
+}
+
+#[test]
 fn contract_matrix_preflight_allows_internal_synthesis_actions() {
+    let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::RecentArtifactsJudgment,
@@ -243,11 +277,12 @@ fn contract_matrix_preflight_allows_internal_synthesis_actions() {
     let args = serde_json::json!({"evidence_refs": ["last_output"]});
 
     assert!(
-        contract_matrix_action_policy_error(&loop_state, "synthesize_answer", &args).is_none(),
+        contract_matrix_action_policy_error(&state, &loop_state, "synthesize_answer", &args)
+            .is_none(),
         "internal synthesis must not be rejected by observation allowed_actions"
     );
     assert!(
-        contract_matrix_action_policy_error(&loop_state, "respond", &serde_json::json!({}))
+        contract_matrix_action_policy_error(&state, &loop_state, "respond", &serde_json::json!({}))
             .is_none(),
         "internal respond must not be rejected by observation allowed_actions"
     );
@@ -255,6 +290,7 @@ fn contract_matrix_preflight_allows_internal_synthesis_actions() {
 
 #[test]
 fn contract_matrix_preflight_allows_virtual_find_entries_backing_action() {
+    let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::None,
@@ -269,7 +305,7 @@ fn contract_matrix_preflight_allows_virtual_find_entries_backing_action() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&loop_state, "fs_search", &args).is_none(),
+        contract_matrix_action_policy_error(&state, &loop_state, "fs_search", &args).is_none(),
         "runtime backing fs_search calls should be admitted through their planner-facing fs_basic.find_entries contract"
     );
 }
@@ -986,6 +1022,66 @@ async fn successful_skill_user_input_signal_finalizes_as_clarify_delivery() {
     assert!(outcome.ended_with_user_visible_output);
     assert!(loop_state.pending_user_input_required);
     assert_eq!(loop_state.delivery_messages, vec![output.to_string()]);
+}
+
+#[tokio::test]
+async fn successful_validation_step_records_machine_result_for_closeout() {
+    let state = test_state();
+    let task = test_task();
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Validate,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        saw_mutation: true,
+        ..Default::default()
+    };
+
+    handle_skill_step_success(
+        &state,
+        &task,
+        &mut loop_state,
+        "skill:run_cmd:{\"command\":\"cargo check -p clawd\"}",
+        &ok_step("step_3", "run_cmd", "validation ok"),
+        3,
+        2,
+        "run_cmd",
+        "skill",
+        "command=cargo check -p clawd",
+        &serde_json::json!({ "command": "cargo check -p clawd" }),
+        "validation ok",
+        crate::execution_recipe::ActionEffect::validate(),
+        crate::execution_recipe::ValidationObservation::Passed,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("skill step outcome");
+
+    let validation = loop_state
+        .latest_validation_result
+        .as_ref()
+        .expect("validation result");
+    assert_eq!(
+        validation
+            .get("status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("validation_passed")
+    );
+    assert_eq!(
+        validation.get("skill").and_then(serde_json::Value::as_str),
+        Some("run_cmd")
+    );
+    assert_eq!(
+        validation
+            .get("global_step")
+            .and_then(serde_json::Value::as_u64),
+        Some(3)
+    );
 }
 
 #[tokio::test]

@@ -510,6 +510,9 @@ pub(super) fn inferred_missing_workspace_locator_hint_should_force_clarify(
     {
         return false;
     }
+    if current_request_file_delivery_locator_hint_can_defer_to_execution(prompt, route_result) {
+        return false;
+    }
     let Some(path) = direct_workspace_child_locator_hint_path(
         &state.skill_rt.workspace_root,
         route_result.output_contract.locator_hint.trim(),
@@ -517,6 +520,21 @@ pub(super) fn inferred_missing_workspace_locator_hint_should_force_clarify(
         return false;
     };
     !path.exists()
+}
+
+fn current_request_file_delivery_locator_hint_can_defer_to_execution(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    (route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.response_shape == crate::OutputResponseShape::FileToken
+        || route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle)
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::Filename
+        && locator_hint_full_file_name_token_present_in_prompt(
+            prompt,
+            route_result.output_contract.locator_hint.trim(),
+        )
 }
 
 fn direct_workspace_child_locator_hint_path(

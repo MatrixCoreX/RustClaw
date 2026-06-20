@@ -90,7 +90,6 @@ pub(crate) enum PromptSchemaId {
     DeliveryTextClassifier,
     ScheduleIntent,
     LongTermSummary,
-    #[allow(dead_code)]
     MemoryIntent,
     RunCmdSuggestion,
 }

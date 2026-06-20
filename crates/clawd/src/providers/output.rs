@@ -286,17 +286,6 @@ fn cleanup_model_io_log_archives(file_path: &Path, keep_days: u64) -> anyhow::Re
     Ok(())
 }
 
-/// 旧 API 的薄壳：保留向后兼容的入口，以默认 keep_days 调用新的轮转函数。
-/// 新代码请直接调 [`rotate_model_io_log_daily`]。
-#[deprecated(
-    since = "0.1.6",
-    note = "use rotate_model_io_log_daily; this wrapper exists only for legacy callers"
-)]
-#[allow(dead_code)]
-pub(crate) fn prune_model_io_log_to_today(file_path: &Path) -> anyhow::Result<()> {
-    rotate_model_io_log_daily(file_path, MODEL_IO_LOG_KEEP_DAYS)
-}
-
 pub(crate) fn log_color_enabled() -> bool {
     let is_tty = std::io::stdout().is_terminal() || std::io::stderr().is_terminal();
     if let Ok(v) = std::env::var("RUSTCLAW_LOG_COLOR") {

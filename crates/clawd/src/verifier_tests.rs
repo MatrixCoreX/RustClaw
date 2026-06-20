@@ -84,6 +84,48 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "system_basic"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", properties = { action = { type = "string" }, kind = { type = "string" } } }
+planner_capabilities = [
+  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true },
+]
+
+[[skills]]
+name = "package_manager"
+enabled = true
+kind = "builtin"
+planner_kind = "skill"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", properties = { action = { type = "string" }, package = { type = "string" }, dry_run = { type = "boolean" } } }
+planner_capabilities = [
+  { name = "package.detect_manager", action = "detect", effect = "observe" },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package"], risk_level = "high" },
+]
+
+[[skills]]
+name = "db_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "skill"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, sql = { type = "string" }, confirm = { type = "boolean" } } }
+planner_capabilities = [
+  { name = "database.query", action = "sqlite_query", effect = "observe", required = ["sql"] },
+  { name = "database.schema_version", action = "schema_version", effect = "observe" },
+  { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], risk_level = "high" },
+]
+
+[[skills]]
 name = "primary_reader"
 enabled = true
 kind = "runner"
@@ -135,6 +177,9 @@ fn test_state() -> AppState {
             "write_file",
             "make_dir",
             "fs_basic",
+            "system_basic",
+            "package_manager",
+            "db_basic",
             "primary_reader",
             "fallback_reader",
             "photo_organize",
@@ -263,6 +308,43 @@ fn observe_mode_keeps_route_clarify_as_shadow_only() {
         Some(VerifyIssueKind::RouteClarifyRequired)
     ));
     assert!(result.shadow_blocked_reason.is_some());
+}
+
+#[test]
+fn locatorless_runtime_status_plan_does_not_trip_route_clarify_block() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(true);
+    route.route_reason = "locatorless_observation_requires_clarify".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: Some("runtime status scalar"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "system_basic".to_string(),
+                args: json!({ "action": "runtime_status", "kind": "current_user" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| !matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
 }
 
 #[test]
@@ -1528,7 +1610,7 @@ fn code_change_recipe_accepts_structured_cargo_check_verification() {
 }
 
 #[test]
-fn code_change_recipe_rejects_unstructured_cargo_check_verification() {
+fn code_change_recipe_accepts_run_cmd_cargo_check_verification() {
     let state = test_state();
     let task = test_task();
     let result = verify_plan(
@@ -1577,7 +1659,8 @@ fn code_change_recipe_rejects_unstructured_cargo_check_verification() {
         },
         VerifyMode::ObserveOnly,
     );
-    assert!(result.issues.iter().any(|issue| matches!(
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result.issues.iter().all(|issue| !matches!(
         issue.kind,
         VerifyIssueKind::RecipeValidationAfterMutateRequired
     )));
@@ -1838,110 +1921,8 @@ fn external_workspace_scope_accepts_explicit_external_path_plan() {
     }));
 }
 
-#[test]
-fn external_workspace_scope_persisted_target_allows_followup_validation_plan() {
-    let state = test_state();
-    let task = test_task();
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            route_result: Some(&route_result(false)),
-            request_text: Some("继续修外部工作区里的项目，并验证通过。"),
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![PlanStep {
-                step_id: "s1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "run_cmd".to_string(),
-                args: json!({
-                    "command": "cargo check",
-                    "_clawd_validation": {
-                        "profile": "code_change",
-                        "validator_type": "build",
-                        "validated_target": "external_workspace"
-                    }
-                }),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState {
-                kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-                profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
-                target_scope:
-                    crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace,
-                phase: crate::execution_recipe::ExecutionRecipePhase::Validate,
-                inspect_first: true,
-                validation_required: true,
-                max_repairs: 2,
-                saw_inspect: true,
-                saw_mutation: true,
-                saw_external_target: true,
-                ..Default::default()
-            },
-        },
-        VerifyMode::ObserveOnly,
-    );
-    assert!(result.issues.iter().all(|issue| {
-        !matches!(
-            issue.kind,
-            VerifyIssueKind::RecipeTargetScopeRequired
-                | VerifyIssueKind::RecipeValidationAfterMutateRequired
-                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
-        )
-    }));
-}
-
-#[test]
-fn greenfield_scope_persisted_creation_allows_followup_validation_plan() {
-    let state = test_state();
-    let task = test_task();
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            route_result: Some(&route_result(false)),
-            request_text: Some("继续验证刚创建的新项目。"),
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![PlanStep {
-                step_id: "s1".to_string(),
-                action_type: "call_skill".to_string(),
-                skill: "run_cmd".to_string(),
-                args: json!({
-                    "command": "cargo check -p clawd",
-                    "_clawd_validation": {
-                        "profile": "code_change",
-                        "validator_type": "build",
-                        "validated_target": "greenfield_project"
-                    }
-                }),
-                depends_on: Vec::new(),
-                why: String::new(),
-            }]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState {
-                kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-                profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
-                target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield,
-                phase: crate::execution_recipe::ExecutionRecipePhase::Validate,
-                inspect_first: true,
-                validation_required: true,
-                max_repairs: 2,
-                saw_inspect: true,
-                saw_mutation: true,
-                saw_greenfield_creation: true,
-                ..Default::default()
-            },
-        },
-        VerifyMode::ObserveOnly,
-    );
-    assert!(result.issues.iter().all(|issue| {
-        !matches!(
-            issue.kind,
-            VerifyIssueKind::RecipeTargetScopeRequired
-                | VerifyIssueKind::RecipeValidationAfterMutateRequired
-                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
-        )
-    }));
-}
+#[path = "verifier_tests/scope_persistence.rs"]
+mod scope_persistence;
 
 #[path = "verifier_tests/ops_recipe_repair.rs"]
 mod ops_recipe_repair;

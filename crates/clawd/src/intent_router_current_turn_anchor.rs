@@ -15,7 +15,7 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
     let active_delivery_frame = session_snapshot
@@ -37,7 +37,10 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
         );
     if active_delivery_frame
         && file_delivery_contract
-        && matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        )
     {
         return true;
     }
@@ -75,9 +78,11 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
         turn_type.is_none() && target_task_policy.is_none() && executable_observation_contract;
 
     let decision_can_fill_active_task =
-        matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-            || (matches!(first_layer_decision, FirstLayerDecision::Clarify)
-                && executable_observation_contract);
+        matches!(
+            legacy_normalizer_decision,
+            FirstLayerDecision::PlannerExecute
+        ) || (matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+            && executable_observation_contract);
 
     if active_observable_task_prompt(session_snapshot).is_none()
         || !decision_can_fill_active_task
@@ -270,7 +275,7 @@ pub(super) fn current_request_mentions_session_alias(
 }
 
 pub(super) fn current_turn_anchor_drift_repair_allowed(
-    first_layer_decision: FirstLayerDecision,
+    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
@@ -299,11 +304,13 @@ pub(super) fn current_turn_anchor_drift_repair_allowed(
             return false;
         }
     }
-    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
-        || route_has_structured_execution_signal(
-            output_contract,
-            wants_file_delivery,
-            schedule_kind,
-            execution_recipe_hint,
-        )
+    matches!(
+        legacy_normalizer_decision,
+        FirstLayerDecision::PlannerExecute
+    ) || route_has_structured_execution_signal(
+        output_contract,
+        wants_file_delivery,
+        schedule_kind,
+        execution_recipe_hint,
+    )
 }

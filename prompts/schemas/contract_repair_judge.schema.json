@@ -172,7 +172,7 @@
             },
             "sort_by": {
               "type": "string",
-              "enum": ["name", "size_desc", "size_asc", "mtime_desc", "mtime_asc", ""]
+              "enum": ["name", "name_desc", "size_desc", "size_asc", "mtime_desc", "mtime_asc", ""]
             },
             "include_metadata": {
               "type": ["boolean", "null"]
@@ -217,7 +217,11 @@
             "code_change",
             "problem_resolution",
             "skill_authoring",
-            "extension_build"
+            "extension_build",
+            "package_change",
+            "dependency_change",
+            "database_change",
+            "schema_change"
           ]
         },
         "target_scope": {

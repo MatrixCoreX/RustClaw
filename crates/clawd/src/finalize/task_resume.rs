@@ -199,16 +199,25 @@ pub(super) fn direct_chat_answer_verifier_retry_applicable(
     journal: &crate::task_journal::TaskJournal,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
 ) -> bool {
-    verifier.high_confidence_gap()
-        && verifier.should_retry
-        && route_result.is_chat_gate()
+    if !verifier.high_confidence_gap() || !verifier.should_retry {
+        return false;
+    }
+    let active_text_rewrite = route_result.is_chat_gate()
         && route_result
             .route_reason
             .contains("active_text_followup_route_repair")
         && journal
             .context_bundle_summary
             .as_deref()
-            .is_some_and(|summary| summary.contains("Most recent generated output:"))
+            .is_some_and(|summary| summary.contains("Most recent generated output:"));
+    let pure_chat_agent_loop = route_result
+        .route_reason
+        .contains("pure_chat_agent_loop_submode")
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && !route_result.wants_file_delivery
+        && journal.step_results.is_empty();
+    active_text_rewrite || pure_chat_agent_loop
 }
 
 pub(super) async fn retry_direct_chat_answer_after_verifier(
@@ -395,7 +404,7 @@ fn resume_context_user_visible_step_error(error: &str) -> String {
 
 pub(super) fn resume_context_execution_summary_messages(
     resume_ctx: &Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Vec<String> {
     let body = resume_context_body(resume_ctx);
     let Some(failed_step) = body.get("failed_step") else {
@@ -414,19 +423,12 @@ pub(super) fn resume_context_execution_summary_messages(
         .filter(|value| !value.is_empty())
         .unwrap_or("Execution failed.");
     let error = resume_context_user_visible_step_error(error);
-    let prefix = if prefer_english {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
-    } else {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
-    };
-    let label = if prefer_english { "Error" } else { "错误" };
-    let line = if prefer_english {
-        format!("1. Called `{action}`")
-    } else {
-        format!("1. 调用 `{action}`")
-    };
-    vec![format!(
-        "{prefix}\n{line}\n   {label}：\n```text\n{}\n```",
-        crate::truncate_for_agent_trace(&error).replace("```", "'''")
-    )]
+    vec![serde_json::json!({
+        "message_key": "clawd.msg.execution.summary",
+        "reason_code": "resume_failed_step_summary",
+        "step_index": 1,
+        "action": action,
+        "error": crate::truncate_for_agent_trace(&error).replace("```", "'''"),
+    })
+    .to_string()]
 }

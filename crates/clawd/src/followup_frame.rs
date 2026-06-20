@@ -87,7 +87,6 @@ fn effective_user_key(task: &ClaimedTask) -> String {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 fn persist_frame(state: &AppState, task: &ClaimedTask, frame: &FollowupFrame) -> Result<()> {
     let db = state
         .core
@@ -408,6 +407,10 @@ fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
     if trimmed.is_empty() || Path::new(trimmed).is_absolute() {
         return trimmed.to_string();
     }
+    let entry_path = Path::new(trimmed);
+    if entry_path.components().count() > 1 && entry_path.exists() {
+        return trimmed.to_string();
+    }
     let base = frame
         .bound_target
         .as_deref()
@@ -423,6 +426,19 @@ fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
     } else {
         base_path
     };
+    if let Some(entry_parent) = entry_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        let parent_already_in_base = if join_root.is_absolute() {
+            absolute_path_has_suffix(join_root, entry_parent)
+        } else {
+            join_root.ends_with(entry_parent)
+        };
+        if parent_already_in_base {
+            return trimmed.to_string();
+        }
+    }
     join_root.join(trimmed).display().to_string()
 }
 
@@ -1130,7 +1146,6 @@ fn derive_frame_for_ask_outcome(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn replace_active_frame_from_ask_outcome(
     state: &AppState,
     task: &ClaimedTask,

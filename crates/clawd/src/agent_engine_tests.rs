@@ -187,6 +187,178 @@ fn loop_state_does_not_count_alias_block_lines_as_current_mentions() {
     );
 }
 
+#[test]
+fn loop_state_checkpoint_seed_restores_machine_resume_state() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+    loop_state.total_steps_executed = 2;
+    loop_state.tool_calls_total = 1;
+    loop_state
+        .successful_action_fingerprints
+        .insert("existing:ok".to_string(), 2);
+    let checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "ckpt-loop-1".to_string(),
+        boundary_context: json!({"source": "test"}),
+        last_successful_round: Some(3),
+        last_successful_step: Some("step_4".to_string()),
+        pending_action: None,
+        observations: vec![json!({"step_id": "step_4", "status": "ok"})],
+        evidence_refs: vec!["step_4".to_string()],
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: vec![
+            "write_file:document/report.md".to_string(),
+            "".to_string(),
+            "existing:ok".to_string(),
+        ],
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 3,
+            step: 5,
+            llm_calls: 7,
+            tool_calls: 2,
+            elapsed_ms: 1234,
+        },
+        pending_async_job: None,
+        repair_signal: Some(json!({"kind": "agent_loop_stop_signal"})),
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+    };
+
+    let report = seed_loop_state_from_task_checkpoint(&mut loop_state, &checkpoint);
+
+    assert_eq!(report.checkpoint_id, "ckpt-loop-1");
+    assert_eq!(
+        report.resume_entrypoint,
+        crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound
+    );
+    assert_eq!(report.restored_round, 3);
+    assert_eq!(report.restored_step, 5);
+    assert_eq!(report.restored_tool_calls, 2);
+    assert_eq!(report.completed_side_effect_count, 2);
+    assert_eq!(report.observation_count, 1);
+    assert_eq!(loop_state.round_no, 3);
+    assert_eq!(loop_state.total_steps_executed, 5);
+    assert_eq!(loop_state.tool_calls_total, 2);
+    assert!(loop_state.has_tool_or_skill_output);
+    assert_eq!(
+        loop_state
+            .successful_action_fingerprints
+            .get("write_file:document/report.md"),
+        Some(&1)
+    );
+    assert_eq!(
+        loop_state.successful_action_fingerprints.get("existing:ok"),
+        Some(&2),
+        "checkpoint seeding must not reset an already tracked fingerprint count"
+    );
+    assert!(!loop_state.successful_action_fingerprints.contains_key(""));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_checkpoint_id")
+            .map(String::as_str),
+        Some("ckpt-loop-1")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_entrypoint")
+            .map(String::as_str),
+        Some("next_planner_round")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_completed_side_effect_count")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|value| value.get("checkpoint_id"))
+            .and_then(serde_json::Value::as_str),
+        Some("ckpt-loop-1")
+    );
+    assert!(
+        loop_state
+            .history_compact
+            .iter()
+            .any(|line| line.contains("checkpoint_resume")
+                && line.contains("entrypoint=next_planner_round")),
+        "resume history must be machine-token compact state"
+    );
+}
+
+#[test]
+fn loop_state_agent_run_seed_combines_resume_checkpoint_and_context() {
+    let mut loop_state = LoopState::new(4);
+    let checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "ckpt-agent-run".to_string(),
+        boundary_context: json!({"source": "test"}),
+        last_successful_round: Some(2),
+        last_successful_step: Some("step_2".to_string()),
+        pending_action: None,
+        observations: Vec::new(),
+        evidence_refs: Vec::new(),
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: vec!["external_call:job-42".to_string()],
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 2,
+            step: 3,
+            llm_calls: 4,
+            tool_calls: 1,
+            elapsed_ms: 500,
+        },
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+    };
+    let ctx = AgentRunContext {
+        auto_locator_path: Some("/tmp/workspace".to_string()),
+        session_alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
+            alias: "alpha".to_string(),
+            target: "/tmp/workspace/report.md".to_string(),
+            updated_at_ts: 1,
+        }],
+        user_request: Some("inspect alpha".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let report = seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), Some(&checkpoint))
+        .expect("checkpoint seed report");
+
+    assert_eq!(report.checkpoint_id, "ckpt-agent-run");
+    assert_eq!(loop_state.round_no, 2);
+    assert_eq!(loop_state.total_steps_executed, 3);
+    assert_eq!(loop_state.tool_calls_total, 1);
+    assert_eq!(
+        loop_state
+            .successful_action_fingerprints
+            .get("external_call:job-42"),
+        Some(&1)
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("auto_locator_path")
+            .map(String::as_str),
+        Some("/tmp/workspace")
+    );
+    let required_targets: Vec<String> = serde_json::from_str(
+        loop_state
+            .output_vars
+            .get("required_session_alias_targets")
+            .expect("alias target should be seeded"),
+    )
+    .expect("required targets must decode");
+    assert_eq!(
+        required_targets,
+        vec!["/tmp/workspace/report.md".to_string()]
+    );
+}
+
 // --- build_safe_skill_args_summary: progress hint args must be whitelisted and safe ---
 #[test]
 fn test_build_safe_skill_args_summary_whitelist_order() {

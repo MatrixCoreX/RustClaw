@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use tracing::{error, info, warn};
 
 use crate::{repo, AppState};
@@ -34,6 +35,32 @@ fn ask_result_payload(
         Some(journal) => journal.attach_to_result(base_result),
         None => base_result,
     }
+}
+
+fn failed_task_lifecycle_payload(err_text: &str) -> Value {
+    let failure_attribution = crate::task_journal::failure_attribution_for_error_text(err_text)
+        .map(|kind| kind.as_str().to_string())
+        .unwrap_or_else(|| "runtime_error".to_string());
+    let mut payload = json!({
+        "schema_version": 1,
+        "state": "failed",
+        "source": "ask_failure_finalize",
+        "can_poll": true,
+        "can_cancel": false,
+        "failure_attribution": failure_attribution,
+    });
+    if let Some(terminal_reason) = match failure_attribution.as_str() {
+        "provider_error" => Some(
+            crate::task_lifecycle::TerminalFailureReason::ProviderWindowExhausted.status_code(),
+        ),
+        "answer_verifier_gap" | "contract_gap" => {
+            Some(crate::task_lifecycle::TerminalFailureReason::VerifierUnrecoverable.status_code())
+        }
+        _ => None,
+    } {
+        payload["terminal_reason"] = json!(terminal_reason);
+    }
+    payload
 }
 
 fn should_skip_ask_memory_pair(
@@ -77,6 +104,37 @@ fn answer_verifier_should_force_task_failure(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     enforce_required && answer_verifier_forces_task_failure(semantic_clarify, journal)
+}
+
+fn normalize_existing_file_delivery_token_answer(
+    state: &AppState,
+    answer_text: &str,
+) -> Option<String> {
+    let trimmed = answer_text.trim();
+    if trimmed.is_empty() || trimmed.lines().count() != 1 {
+        return None;
+    }
+    let (kind, payload) = crate::finalize::parse_delivery_file_token(trimmed)?;
+    let payload = payload.trim();
+    if payload.is_empty()
+        || payload.contains('\n')
+        || payload.contains('\r')
+        || payload.contains("{{")
+        || payload.contains("}}")
+    {
+        return None;
+    }
+    let path = Path::new(payload);
+    let candidate: PathBuf = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        state.skill_rt.workspace_root.join(path)
+    };
+    if !candidate.is_file() {
+        return None;
+    }
+    let resolved = candidate.canonicalize().unwrap_or(candidate);
+    Some(format!("{}{}", kind.canonical_prefix(), resolved.display()))
 }
 
 fn record_answer_verifier_required_evidence_rollout_attribution(
@@ -648,6 +706,10 @@ async fn finalize_ask_resume_failure(
     let mut result = ask_result_payload(user_error, answer_messages, None);
     if let Some(obj) = result.as_object_mut() {
         obj.insert("resume_context".to_string(), resume_payload);
+        obj.insert(
+            "task_lifecycle".to_string(),
+            failed_task_lifecycle_payload(user_error),
+        );
     }
     let result = journal.attach_to_result(result);
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), user_error)?;
@@ -678,7 +740,14 @@ async fn finalize_ask_failure(
     let notify_outcome =
         crate::worker::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
     crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
-    let result = journal.attach_to_result(ask_result_payload(answer_text, answer_messages, None));
+    let mut result = ask_result_payload(answer_text, answer_messages, None);
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert(
+            "task_lifecycle".to_string(),
+            failed_task_lifecycle_payload(err_text),
+        );
+    }
+    let result = journal.attach_to_result(result);
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
@@ -698,15 +767,8 @@ async fn compose_ask_failure_user_message(
 ) -> String {
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let mut observed_facts = Vec::new();
-    let err = err_text.trim();
-    if !err.is_empty() {
-        observed_facts.push(format!(
-            "error_summary: {}",
-            crate::truncate_for_agent_trace(err)
-        ));
-    }
-    let fallback_text = ask_runtime_failure_machine_payload(err);
+    let fallback_payload = ask_runtime_failure_machine_payload(err_text);
+    let observed_facts = machine_payload_observed_facts(&fallback_payload);
     let contract = crate::fallback::UserResponseContract::tool_failure(
         "ask_runtime_failure",
         user_request,
@@ -720,12 +782,13 @@ async fn compose_ask_failure_user_message(
         "brief_failure_with_next_step",
         &language_hint,
     );
+    let default_text = ask_runtime_failure_default_text(state, &language_hint);
     crate::fallback::compose_user_response_from_contract_with_default(
         state,
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-        &fallback_text,
+        &default_text,
     )
     .await
 }
@@ -738,14 +801,7 @@ async fn compose_answer_verifier_failure_user_message(
 ) -> String {
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let mut observed_facts = Vec::new();
-    let err = err_text.trim();
-    if !err.is_empty() {
-        observed_facts.push(format!(
-            "verifier_block: {}",
-            crate::truncate_for_agent_trace(err)
-        ));
-    }
+    let observed_facts = answer_verifier_failure_observed_facts(err_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
         "answer_verifier_required_evidence_block",
         user_request,
@@ -766,6 +822,110 @@ async fn compose_answer_verifier_failure_user_message(
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
     )
     .await
+}
+
+fn machine_payload_observed_facts(payload_text: &str) -> Vec<String> {
+    let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(payload_text.trim()) else {
+        return Vec::new();
+    };
+    let mut facts = Vec::new();
+    push_json_scalar_fact(&mut facts, &obj, "message_key");
+    push_json_scalar_fact(&mut facts, &obj, "reason_code");
+    push_json_scalar_fact(&mut facts, &obj, "status_code");
+    push_json_scalar_fact(&mut facts, &obj, "failure_attribution");
+    push_json_scalar_fact(&mut facts, &obj, "retryable");
+    push_json_scalar_fact(&mut facts, &obj, "provider_error_class");
+    push_json_scalar_fact(&mut facts, &obj, "raw_error_present");
+    push_json_array_fact(&mut facts, &obj, "missing_evidence_fields");
+    push_json_scalar_fact(&mut facts, &obj, "answer_incomplete_reason");
+    push_json_scalar_fact(&mut facts, &obj, "confidence");
+    facts
+}
+
+fn push_json_scalar_fact(facts: &mut Vec<String>, obj: &serde_json::Map<String, Value>, key: &str) {
+    let Some(value) = obj.get(key) else {
+        return;
+    };
+    let value = match value {
+        Value::String(value) => value.trim().to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        _ => String::new(),
+    };
+    if !value.is_empty() {
+        facts.push(format!(
+            "{key}: {}",
+            crate::truncate_for_agent_trace(&value)
+        ));
+    }
+}
+
+fn push_json_array_fact(facts: &mut Vec<String>, obj: &serde_json::Map<String, Value>, key: &str) {
+    let Some(values) = obj.get(key).and_then(Value::as_array) else {
+        return;
+    };
+    let joined = values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
+    if !joined.is_empty() {
+        facts.push(format!(
+            "{key}: {}",
+            crate::truncate_for_agent_trace(&joined)
+        ));
+    }
+}
+
+fn answer_verifier_failure_observed_facts(err_text: &str) -> Vec<String> {
+    let err = err_text.trim();
+    let mut facts = machine_payload_observed_facts(err);
+    if facts.is_empty() {
+        facts = answer_verifier_machine_line_observed_facts(err);
+    }
+    if !facts.iter().any(|fact| fact.starts_with("message_key: ")) {
+        facts.push("message_key: answer_verifier_required_evidence_block".to_string());
+    }
+    if !facts.iter().any(|fact| fact.starts_with("reason_code: ")) {
+        facts.push("reason_code: answer_verifier_required_evidence_block".to_string());
+    }
+    if !facts.iter().any(|fact| fact.starts_with("status_code: ")) {
+        facts.push("status_code: answer_verifier_required_evidence_block".to_string());
+    }
+    if !facts
+        .iter()
+        .any(|fact| fact.starts_with("failure_attribution: "))
+    {
+        facts.push("failure_attribution: answer_verifier_gap".to_string());
+    }
+    if !facts.iter().any(|fact| fact.starts_with("retryable: ")) {
+        facts.push("retryable: false".to_string());
+    }
+    facts
+}
+
+fn answer_verifier_machine_line_observed_facts(line: &str) -> Vec<String> {
+    line.split_whitespace()
+        .filter_map(|token| {
+            let (key, value) = token.split_once('=')?;
+            let key = key.trim();
+            let value = value.trim();
+            (!key.is_empty()
+                && !value.is_empty()
+                && matches!(
+                    key,
+                    "message_key"
+                        | "reason_code"
+                        | "status_code"
+                        | "failure_attribution"
+                        | "retryable"
+                        | "missing_evidence_fields"
+                ))
+            .then(|| format!("{key}: {}", crate::truncate_for_agent_trace(value)))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -826,13 +986,43 @@ fn answer_verifier_failure_needs_user_message(answer_text: &str, err_text: &str)
 fn ask_runtime_failure_machine_payload(err: &str) -> String {
     let err = err.trim();
     let mut payload = serde_json::json!({
+        "schema_version": 1,
         "message_key": "clawd.msg.ask_runtime_failure",
         "reason_code": "ask_runtime_failure",
+        "status_code": "ask_runtime_failure",
+        "failure_attribution": "provider_gap",
+        "retryable": false,
     });
     if !err.is_empty() {
-        payload["error_summary"] = serde_json::json!(crate::truncate_for_agent_trace(err));
+        payload["raw_error_present"] = serde_json::json!(true);
+        payload["provider_error_class"] = serde_json::json!(ask_runtime_failure_error_class(err));
     }
     payload.to_string()
+}
+
+fn ask_runtime_failure_error_class(err: &str) -> &'static str {
+    let lower = err.to_ascii_lowercase();
+    if lower.contains("429") || lower.contains("rate_limit") {
+        "rate_limited"
+    } else if lower.contains("401") || lower.contains("403") || lower.contains("unauthorized") {
+        "auth_or_permission_failed"
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "timeout"
+    } else {
+        "provider_error"
+    }
+}
+
+fn ask_runtime_failure_default_text(state: &AppState, language_hint: &str) -> String {
+    let default_payload = ask_runtime_failure_machine_payload("");
+    crate::bilingual_t_with_default_vars(
+        state,
+        "clawd.msg.ask_runtime_failure",
+        &default_payload,
+        &default_payload,
+        crate::fallback::fallback_prefers_english_for_language_hint(state, language_hint),
+        &[],
+    )
 }
 
 pub(crate) async fn finalize_ask_direct_success(
@@ -1127,17 +1317,35 @@ pub(crate) async fn finalize_ask_result(
                     );
                 }
             }
+            let answer_is_existing_file_delivery_token = if let Some(token) =
+                normalize_existing_file_delivery_token_answer(state, &answer_text)
+            {
+                if answer_text.trim() != token {
+                    answer_text = token;
+                    answer_messages
+                        .retain(|message| crate::finalize::is_execution_summary_message(message));
+                    answer_messages.push(answer_text.clone());
+                    journal.record_final_answer(&answer_text);
+                }
+                true
+            } else {
+                false
+            };
             if !failure_reply && !semantic_clarify && journal.answer_verifier_summary.is_none() {
-                if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
-                    state,
-                    task,
-                    prompt,
-                    route_result,
-                    &journal,
-                    &answer_text,
-                )
-                .await
-                {
+                let answer_verifier = if answer_is_existing_file_delivery_token {
+                    None
+                } else {
+                    crate::answer_verifier::verify_answer_observe_only(
+                        state,
+                        task,
+                        prompt,
+                        route_result,
+                        &journal,
+                        &answer_text,
+                    )
+                    .await
+                };
+                if let Some(answer_verifier) = answer_verifier {
                     let direct_chat_retry = direct_chat_answer_verifier_retry_applicable(
                         route_result,
                         &journal,
@@ -1246,7 +1454,10 @@ pub(crate) async fn finalize_ask_result(
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
                 }
             } else if answer_verifier_should_force_task_failure(
-                crate::agent_engine::answer_verifier_enforce_required_enabled(state),
+                crate::agent_engine::answer_verifier_enforce_required_enabled_for_route(
+                    state,
+                    Some(route_result),
+                ),
                 semantic_clarify,
                 &journal,
             ) {
@@ -1260,6 +1471,9 @@ pub(crate) async fn finalize_ask_result(
                             "schema_version": 1,
                             "message_key": "answer_verifier_required_evidence_block",
                             "reason_code": "answer_verifier_required_evidence_block",
+                            "status_code": "answer_verifier_required_evidence_block",
+                            "failure_attribution": "answer_verifier_gap",
+                            "retryable": false,
                         })
                         .to_string()
                     });

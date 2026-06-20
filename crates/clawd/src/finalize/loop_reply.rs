@@ -25,11 +25,9 @@ use service_status::service_status_system_basic_info_answer;
 #[path = "loop_reply_quantity.rs"]
 mod quantity;
 #[cfg(test)]
-#[allow(unused_imports)]
 use quantity::{
     compare_paths_size_ratio_answer, latest_delivery_preserves_observed_quantity_size_facts,
-    observed_quantity_size_facts, path_batch_size_comparison_answer,
-    structured_quantity_json_preserves_observed_size_facts,
+    path_batch_size_comparison_answer,
 };
 use quantity::{
     direct_quantity_comparison_from_compare_paths, inventory_ranked_size_list_answer,
@@ -39,7 +37,6 @@ use quantity::{
 #[path = "loop_reply_directory_purpose.rs"]
 mod directory_purpose;
 #[cfg(test)]
-#[allow(unused_imports)]
 use directory_purpose::direct_directory_purpose_summary_from_size_facts;
 use directory_purpose::{
     direct_current_workspace_top_level_dirs_overview_answer,
@@ -56,7 +53,6 @@ use config_edit::{delivery_matches_config_guard_answer, direct_rustclaw_config_r
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
 #[cfg(test)]
-#[allow(unused_imports)]
 use structured_observation::deterministic_structured_file_validation_from_read_range;
 use structured_observation::{
     attach_deterministic_structured_file_validation_from_read_range,
@@ -74,6 +70,7 @@ use execution_status::{
     deterministic_execution_failed_step_answer, deterministic_missing_observed_target_answer,
     deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary, path_display_label,
+    planned_delivery_identifies_failed_observed_step,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
     successful_content_observation_should_precede_status_summary,
@@ -82,7 +79,6 @@ use execution_status::{
 #[path = "loop_reply_markdown_scalar.rs"]
 mod markdown_scalar;
 #[cfg(test)]
-#[allow(unused_imports)]
 use markdown_scalar::markdown_heading_from_read_output;
 use markdown_scalar::{
     deterministic_scalar_markdown_heading_answer_from_loop,
@@ -105,13 +101,11 @@ use execution_summary::{
     plan_step_for_execution, raw_command_arg_from_plan_step, truncate_with_ellipsis,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
 use execution_summary::{build_execution_summary_message, should_attach_execution_summary};
 
 #[path = "loop_reply_raw_command.rs"]
 mod raw_command;
 #[cfg(test)]
-#[allow(unused_imports)]
 use raw_command::shell_stdout_redirect_target_path;
 use raw_command::{
     direct_raw_command_output_projection, looks_like_raw_command_snapshot,
@@ -122,7 +116,6 @@ use raw_command::{
 #[path = "loop_reply_file_delivery.rs"]
 mod file_delivery;
 #[cfg(test)]
-#[allow(unused_imports)]
 use file_delivery::resolve_file_token_from_auto_locator_answer;
 use file_delivery::{
     direct_created_archive_path_from_observed_archive_pack,
@@ -147,7 +140,6 @@ use file_missing::{
     step_error_has_missing_file_evidence,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
 use file_missing::{
     has_missing_file_search_evidence, latest_file_delivery_observation_is_missing,
     missing_file_path_from_output,
@@ -166,7 +158,6 @@ use tail_read::{
 mod matrix_shape;
 pub(crate) use matrix_shape::deterministic_matrix_observed_shape_answer;
 #[cfg(test)]
-#[allow(unused_imports)]
 use matrix_shape::{
     agent_context_allows_observed_output_language_fallback, matrix_strict_list_observed_answer,
 };
@@ -182,18 +173,18 @@ use matrix_shape::{
 #[path = "loop_reply_delivery_backfill.rs"]
 mod delivery_backfill;
 use delivery_backfill::{
-    backfill_delivery_from_last_outputs, current_delivery_is_latest_publishable_synthesis,
-    delivery_is_raw_read_observation, last_respond_matches_single_line_observation,
-    latest_contractual_synthesis_output, replace_placeholder_delivery_with_synthesis,
-    replace_raw_observation_delivery_with_synthesis, replace_raw_read_delivery_with_synthesis,
-    route_expects_synthesis_over_raw_observation, step_output_is_read_range,
-    strict_raw_command_output_exact_observation_answer, valid_publishable_synthesis_output,
+    backfill_delivery_from_last_outputs, candidate_matches_successful_external_observation,
+    current_delivery_is_latest_publishable_synthesis, delivery_is_raw_read_observation,
+    last_respond_matches_single_line_observation, latest_contractual_synthesis_output,
+    replace_placeholder_delivery_with_synthesis, replace_raw_observation_delivery_with_synthesis,
+    replace_raw_read_delivery_with_synthesis, route_expects_synthesis_over_raw_observation,
+    step_output_is_read_range, strict_raw_command_output_exact_observation_answer,
+    valid_publishable_synthesis_output,
 };
 
 #[path = "loop_reply_contract_enforce.rs"]
 mod contract_enforce;
 #[cfg(test)]
-#[allow(unused_imports)]
 use contract_enforce::{
     content_evidence_terminal_respond_is_contractual_answer,
     should_drop_passthrough_delivery_for_content_evidence,
@@ -229,18 +220,15 @@ use git_state::replace_git_repository_state_machine_delivery_with_observed_synth
 
 #[path = "loop_reply_language_closeout.rs"]
 mod language_closeout;
-#[cfg(test)]
-#[allow(unused_imports)]
-use language_closeout::execution_recipe_closeout_note;
 use language_closeout::{
     attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
-    deterministic_template_language_preference, ensure_requested_success_marker_visible,
-    execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
+    ensure_requested_success_marker_visible, execution_recipe_budget_exhausted_message,
+    execution_recipe_closeout_note, execution_recipe_missing_success_marker_message,
     execution_summary_language, execution_summary_prefix, execution_summary_status_label,
     final_reply_language_hint, missing_requested_success_marker,
     planned_delivery_is_publishable_model_language_answer,
-    prefer_english_for_agent_contextual_user_text, prefer_english_for_final_reply,
-    prefer_english_for_user_text, route_allows_model_language_final_answer,
+    prefer_english_for_agent_contextual_user_text, prefer_english_for_user_text,
+    route_allows_model_language_final_answer,
     route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
     ExecutionSummaryLanguage,
 };
@@ -254,8 +242,8 @@ use missing_delivery::{
     pending_confirmation_resume_payload, successful_delivery_final_status,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
 use missing_delivery::{
+    language_rendered_failed_step_finalizer_summary,
     observed_execution_without_publishable_delivery_outcome,
     verify_summary_requires_resume_confirmation,
 };
@@ -271,7 +259,6 @@ use route_helpers::{
 #[path = "loop_reply_content_evidence_failure.rs"]
 mod content_evidence_failure;
 #[cfg(test)]
-#[allow(unused_imports)]
 use content_evidence_failure::{
     content_evidence_failure_suppresses_execution_summary, content_evidence_missing_target_answer,
     content_evidence_step_failure_answer,
@@ -283,6 +270,158 @@ use content_evidence_failure::{
 // Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
 // 行为零变化。本文件保留 thin alias 以最小化 diff。
 use crate::finalize::build_from_loop_state as build_loop_journal;
+
+fn attach_execution_recipe_done_machine_closeout(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    if !loop_state.delivery_messages.is_empty()
+        || !matches!(
+            loop_state.execution_recipe.phase,
+            crate::execution_recipe::ExecutionRecipePhase::Done
+        )
+    {
+        return false;
+    }
+    let Some(answer) = execution_recipe_closeout_note(None, user_text, loop_state) else {
+        return false;
+    };
+    *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "execution_recipe_done_machine_closeout",
+        "attached",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
+
+fn replace_delivery_with_service_status_observed_answer(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    let Some(answer) = service_status_system_basic_info_answer(route, loop_state) else {
+        return false;
+    };
+    if answer.trim().is_empty() {
+        return false;
+    }
+    let summary = crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    };
+    if loop_state
+        .delivery_messages
+        .last()
+        .is_some_and(|message| message.trim() == answer.trim())
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    loop_state.delivery_messages.clear();
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    *finalizer_summary = Some(summary);
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "service_status_observed_fields",
+        "replaced",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
+
+fn replace_raw_passthrough_delivery_with_publishable_synthesis(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route_expects_synthesis_over_raw_observation(route) {
+        return false;
+    }
+    let Some(synthesis) = valid_publishable_synthesis_output(loop_state)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    if crate::finalize::looks_like_planner_artifact(&synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(&synthesis)
+        || crate::finalize::parse_delivery_token(&synthesis).is_some()
+    {
+        return false;
+    }
+    let has_raw_passthrough = delivery_messages.iter().any(|message| {
+        let candidate = message.trim();
+        !candidate.is_empty()
+            && candidate != synthesis
+            && (crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+                candidate, loop_state,
+            ) || candidate_matches_successful_external_observation(loop_state, candidate))
+    });
+    if !has_raw_passthrough {
+        return false;
+    }
+    info!(
+        "final_result_replace_raw_passthrough_delivery_with_synthesis task_id={} synthesis={}",
+        task.task_id,
+        crate::truncate_for_log(&synthesis)
+    );
+    delivery_messages.clear();
+    delivery_messages.push(synthesis.clone());
+    loop_state.delivery_messages.clear();
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        synthesis.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(synthesis);
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "final_result_replace_raw_passthrough_delivery_with_synthesis",
+        "replaced",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
 
 pub(crate) async fn finalize_loop_reply(
     state: &AppState,
@@ -681,14 +820,22 @@ pub(crate) async fn finalize_loop_reply(
             }
             Ok(None) => {}
             Err(err) => {
-                return Ok(observed_synthesis_unavailable_reply(
-                    state,
+                if !attach_execution_recipe_done_machine_closeout(
                     task,
                     user_text,
-                    &loop_state,
+                    &mut loop_state,
                     agent_run_context,
-                    &err,
-                ));
+                    &mut finalizer_summary,
+                ) {
+                    return Ok(observed_synthesis_unavailable_reply(
+                        state,
+                        task,
+                        user_text,
+                        &loop_state,
+                        agent_run_context,
+                        &err,
+                    ));
+                }
             }
         }
     }
@@ -722,6 +869,14 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
+    attach_execution_recipe_done_machine_closeout(
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    );
+
     if let Some(marker) = auto_requested_success_marker(
         agent_run_context,
         &loop_state,
@@ -750,18 +905,28 @@ pub(crate) async fn finalize_loop_reply(
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
     replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
-    let replaced_grounded_answer = replace_structured_delivery_with_grounded_synthesis(
-        task,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    ) || replace_structured_delivery_with_grounded_terminal_respond(
+    let replaced_service_status = replace_delivery_with_service_status_observed_answer(
         task,
         &mut loop_state,
         agent_run_context,
         &mut finalizer_summary,
     );
-    let replaced_quantity_comparison = if !replaced_grounded_answer {
+    let replaced_grounded_answer = if !replaced_service_status {
+        replace_structured_delivery_with_grounded_synthesis(
+            task,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        ) || replace_structured_delivery_with_grounded_terminal_respond(
+            task,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    } else {
+        false
+    };
+    let replaced_quantity_comparison = if !replaced_grounded_answer && !replaced_service_status {
         replace_delivery_with_deterministic_quantity_comparison_answer(
             state,
             task,
@@ -773,19 +938,21 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_directory_purpose = if !replaced_grounded_answer && !replaced_quantity_comparison {
-        replace_delivery_with_deterministic_directory_purpose_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
+    let replaced_directory_purpose =
+        if !replaced_grounded_answer && !replaced_service_status && !replaced_quantity_comparison {
+            replace_delivery_with_deterministic_directory_purpose_answer(
+                state,
+                task,
+                user_text,
+                &mut loop_state,
+                agent_run_context,
+                &mut finalizer_summary,
+            )
+        } else {
+            false
+        };
     let replaced_current_workspace_dirs = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
     {
@@ -801,6 +968,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_recent_artifacts = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -815,6 +983,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_direct_scalar = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -831,6 +1000,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_direct_structured = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -848,6 +1018,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_contract_answer = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -865,6 +1036,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_failed_step = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -885,6 +1057,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     let replaced_matrix_observed_shape = if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -911,6 +1084,7 @@ pub(crate) async fn finalize_loop_reply(
         false
     };
     if !replaced_grounded_answer
+        && !replaced_service_status
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
         && !replaced_current_workspace_dirs
@@ -1135,6 +1309,13 @@ pub(crate) async fn finalize_loop_reply(
             .with_messages(delivery_messages)
             .with_task_journal(journal));
     }
+
+    replace_raw_passthrough_delivery_with_publishable_synthesis(
+        task,
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+    );
 
     if let Some(marker) =
         missing_requested_success_marker(agent_run_context, &loop_state, &delivery_deduped)

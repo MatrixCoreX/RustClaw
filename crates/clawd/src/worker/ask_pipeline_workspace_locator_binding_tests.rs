@@ -424,7 +424,7 @@ fn clarify_observation_binds_existing_workspace_child_from_current_request() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -461,7 +461,7 @@ fn clarify_path_contract_binds_existing_workspace_child_from_current_request() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -498,7 +498,7 @@ fn clarify_path_contract_binds_directory_scope_with_child_filename_token() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -531,7 +531,7 @@ fn archive_unpack_clarify_does_not_bind_destination_directory_as_source_locator(
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.route_reason = "archive_unpack_missing_archive_locator_clarify".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -588,7 +588,7 @@ fn clarify_observation_does_not_bind_bare_workspace_child_topic() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -614,7 +614,7 @@ fn clarify_observation_binds_workspace_child_when_semantic_kind_is_generic() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -655,7 +655,7 @@ fn clarify_observation_binds_existing_workspace_file_from_current_request_path()
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -692,7 +692,7 @@ fn clarify_observation_binds_existing_workspace_child_from_resolved_prompt() {
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -731,7 +731,7 @@ fn clarify_observation_binds_existing_workspace_file_from_resolved_prompt_path()
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -853,7 +853,7 @@ fn clarify_bare_readme_content_summary_binds_root_readme_from_current_request() 
     let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.resolved_intent = "读取 README 并用恰好三句话总结。".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
@@ -901,7 +901,7 @@ fn current_project_root_name_prebinds_workspace_root_before_same_name_child() {
     let prompt = "把 RustClaw 当成当前项目来介绍，先查证项目 README 和工作区配置，再写三句话";
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.resolved_intent =
         "介绍 RustClaw 项目，先查证 README.md 和工作区配置文件，基于查证内容撰写三句介绍语"
             .to_string();

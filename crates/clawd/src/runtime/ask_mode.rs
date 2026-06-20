@@ -2,8 +2,9 @@
 //!
 //! `AskMode` is the runtime ask-flow state: chat/clarify entries and planner
 //! execution entries carry the information needed for dispatch. Legacy
-//! `FirstLayerDecision` values are still accepted as compatibility input and
-//! emitted as log/journal hints, but dispatch should use `AskMode` directly.
+//! `FirstLayerDecision` values are converted at compatibility
+//! boundaries and may still be emitted as log/journal hints, but dispatch uses
+//! `AskMode` directly.
 
 use super::types::FirstLayerDecision;
 use super::types::RouteGateKind;
@@ -20,9 +21,9 @@ pub(crate) enum AskMode {
 /// Entry strategy for user-facing text paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ChatEntryStrategy {
-    /// Direct answer selected by the first-layer gate.
+    /// Chat response selected by the compatibility normalizer gate.
     NormalizerThenChat,
-    /// Clarification selected by the first-layer gate.
+    /// Clarification selected by the compatibility normalizer gate.
     NormalizerThenClarify,
     /// Resume context and continue discussion.
     ResumeFollowupDiscussion,
@@ -41,46 +42,26 @@ pub(crate) enum ActFinalizeStyle {
 
 impl AskMode {
     pub(crate) fn direct_answer() -> Self {
-        Self::from_first_layer_decision(FirstLayerDecision::DirectAnswer)
+        AskMode::ClarifyOrChat {
+            entry: ChatEntryStrategy::NormalizerThenChat,
+        }
     }
 
     pub(crate) fn clarify() -> Self {
-        Self::from_first_layer_decision(FirstLayerDecision::Clarify)
+        AskMode::ClarifyOrChat {
+            entry: ChatEntryStrategy::NormalizerThenClarify,
+        }
     }
 
-    #[cfg(test)]
     pub(crate) fn planner_execute_plain() -> Self {
-        Self::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::PlannerExecute,
-            ActFinalizeStyle::Plain,
-        )
+        AskMode::Act {
+            finalize: ActFinalizeStyle::Plain,
+        }
     }
 
     pub(crate) fn planner_execute_chat_wrapped() -> Self {
-        Self::from_first_layer_decision_with_finalize(
-            FirstLayerDecision::PlannerExecute,
-            ActFinalizeStyle::ChatWrapped,
-        )
-    }
-
-    pub(crate) fn from_first_layer_decision(decision: FirstLayerDecision) -> Self {
-        Self::from_first_layer_decision_with_finalize(decision, ActFinalizeStyle::Plain)
-    }
-
-    pub(crate) fn from_first_layer_decision_with_finalize(
-        decision: FirstLayerDecision,
-        finalize_style: ActFinalizeStyle,
-    ) -> Self {
-        match decision {
-            FirstLayerDecision::Clarify => AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
-            },
-            FirstLayerDecision::DirectAnswer => AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenChat,
-            },
-            FirstLayerDecision::PlannerExecute => AskMode::Act {
-                finalize: finalize_style,
-            },
+        AskMode::Act {
+            finalize: ActFinalizeStyle::ChatWrapped,
         }
     }
 
@@ -103,8 +84,8 @@ impl AskMode {
         self
     }
 
-    /// Derived route label for logs/journals. Do not use this for semantics.
-    pub(crate) fn route_label(&self) -> &'static str {
+    /// Legacy route label for logs/journals. Do not use this for semantics.
+    pub(crate) fn legacy_route_label_for_trace(&self) -> &'static str {
         match self {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::NormalizerThenChat,
@@ -127,7 +108,7 @@ impl AskMode {
         }
     }
 
-    pub(crate) fn first_layer_decision(&self) -> FirstLayerDecision {
+    pub(crate) fn legacy_first_layer_decision_for_trace(&self) -> FirstLayerDecision {
         match self {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::NormalizerThenClarify,

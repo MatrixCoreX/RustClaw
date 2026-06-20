@@ -53,7 +53,7 @@
 | `inventory_dir` | `dirs_only` | no | bool | `false` | Keep only directories. |
 | `inventory_dir` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `inventory_dir` | `names_only` | no | bool | `false` | Return names array and suppress detailed `entries`. |
-| `inventory_dir` | `sort_by` | no | string | `name` | `name|mtime_desc|mtime_asc|size_desc|size_asc`. |
+| `inventory_dir` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`. |
 | `inventory_dir` | `ext_filter` | no | string/string[] | - | File extension filter such as `md` or `[\"md\",\"txt\"]`. |
 | `inventory_dir` | `max_entries` | no | integer | `200` | Output cap, clamped to `1..1000`. |
 | `count_inventory` | `path` | no | string(path) | `.` | Target directory inside workspace. |

@@ -44,9 +44,13 @@ pub(super) fn try_recover_recent_artifacts_answer_verifier_gap(
     {
         return false;
     }
-    let Some(inventory) = observed_recent_artifact_inventory(reply) else {
+    let Some(mut inventory) = observed_recent_artifact_inventory(reply) else {
         return false;
     };
+    apply_recent_artifact_route_selector(route, &mut inventory);
+    if inventory.entries.is_empty() {
+        return false;
+    }
     let answer = deterministic_recent_artifact_fields(&inventory);
     if let Some(journal) = reply.task_journal.as_mut() {
         journal.answer_verifier_summary = None;
@@ -77,6 +81,68 @@ fn observed_recent_artifact_inventory(reply: &AskReply) -> Option<RecentArtifact
         .filter_map(|step| step.output_excerpt.as_deref())
         .filter_map(recent_artifact_inventory_from_output)
         .next()
+}
+
+fn apply_recent_artifact_route_selector(
+    route: &crate::RouteResult,
+    inventory: &mut RecentArtifactInventory,
+) {
+    match recent_artifact_selector_target_kind(route) {
+        crate::OutputScalarCountTargetKind::Any => {}
+        crate::OutputScalarCountTargetKind::File => {
+            inventory.entries.retain(|entry| entry.kind == "file");
+        }
+        crate::OutputScalarCountTargetKind::Dir => {
+            inventory
+                .entries
+                .retain(|entry| matches!(entry.kind.as_str(), "dir" | "directory"));
+        }
+    }
+    if let Some(limit) = recent_artifact_selector_limit(route) {
+        inventory.entries.truncate(limit);
+    }
+}
+
+fn recent_artifact_selector_target_kind(
+    route: &crate::RouteResult,
+) -> crate::OutputScalarCountTargetKind {
+    let selector = &route.output_contract.self_extension.list_selector;
+    if selector.target_kind_specified {
+        return selector.target_kind;
+    }
+    selector_target_kind_machine_token(route.resolved_intent.as_str())
+        .or_else(|| selector_target_kind_machine_token(route.route_reason.as_str()))
+        .unwrap_or_default()
+}
+
+fn selector_target_kind_machine_token(text: &str) -> Option<crate::OutputScalarCountTargetKind> {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | ')' | '('))
+        .filter_map(|part| part.trim().strip_prefix("selector_target_kind="))
+        .find_map(|raw| match raw.trim() {
+            "file" => Some(crate::OutputScalarCountTargetKind::File),
+            "dir" => Some(crate::OutputScalarCountTargetKind::Dir),
+            "any" => Some(crate::OutputScalarCountTargetKind::Any),
+            _ => None,
+        })
+}
+
+fn recent_artifact_selector_limit(route: &crate::RouteResult) -> Option<usize> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|limit| usize::try_from(limit).ok())
+        .filter(|limit| *limit > 0)
+        .or_else(|| selector_limit_machine_token(route.resolved_intent.as_str()))
+        .or_else(|| selector_limit_machine_token(route.route_reason.as_str()))
+}
+
+fn selector_limit_machine_token(text: &str) -> Option<usize> {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | ')' | '('))
+        .filter_map(|part| part.trim().strip_prefix("selector_limit="))
+        .filter_map(|raw| raw.trim().parse::<usize>().ok())
+        .find(|limit| *limit > 0)
 }
 
 fn recent_artifact_inventory_from_output(output: &str) -> Option<RecentArtifactInventory> {

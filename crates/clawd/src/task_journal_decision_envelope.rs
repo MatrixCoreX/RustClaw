@@ -169,7 +169,7 @@ pub(super) fn agent_loop_decision_envelope_json(
     json!({
         "schema_version": 1,
         "source": source,
-        "initial_hint_ref": route.first_layer_decision().as_str(),
+        "initial_hint_ref": route.legacy_first_layer_decision_for_trace().as_str(),
         "initial_gate_ref": route.gate_kind().as_str(),
         "semantic_authority": semantic_authority,
         "fallback_gate_policy": "fallback_safety_check_only",

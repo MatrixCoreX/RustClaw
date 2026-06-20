@@ -111,6 +111,45 @@ fn get_auth_key_value_by_id_returns_full_key() {
 }
 
 #[test]
+fn ensure_bootstrap_admin_key_creates_default_webd_login_for_empty_db() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+        .expect("create auth schema");
+    db.execute_batch(crate::WEBD_LOGIN_SQL)
+        .expect("create webd login schema");
+
+    let created_key = ensure_bootstrap_admin_key(&db)
+        .expect("bootstrap admin key")
+        .expect("created key");
+
+    let login_key =
+        verify_webd_password_login(&db, "rustclaw", "123456").expect("verify default webd login");
+    assert_eq!(login_key.as_deref(), Some(created_key.as_str()));
+}
+
+#[test]
+fn ensure_bootstrap_admin_key_backfills_default_webd_login_for_existing_admin() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+        .expect("create auth schema");
+    db.execute_batch(crate::WEBD_LOGIN_SQL)
+        .expect("create webd login schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'admin', 1, '123', NULL)",
+        params!["rk-existing-admin"],
+    )
+    .expect("insert existing admin key");
+
+    let created_key = ensure_bootstrap_admin_key(&db).expect("bootstrap admin key");
+
+    assert_eq!(created_key, None);
+    let login_key =
+        verify_webd_password_login(&db, "rustclaw", "123456").expect("verify default webd login");
+    assert_eq!(login_key.as_deref(), Some("rk-existing-admin"));
+}
+
+#[test]
 fn normalize_auth_key_role_supports_builtin_and_custom_values() {
     assert_eq!(normalize_auth_key_role("admin").expect("admin"), "admin");
     assert_eq!(normalize_auth_key_role("USER").expect("user"), "user");

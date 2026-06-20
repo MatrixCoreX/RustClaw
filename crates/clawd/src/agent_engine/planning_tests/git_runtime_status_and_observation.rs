@@ -340,7 +340,7 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
 }
 
 #[test]
-fn runtime_status_scalar_patch_prefers_run_cmd_when_available() {
+fn runtime_status_scalar_patch_prefers_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
@@ -367,21 +367,129 @@ fn runtime_status_scalar_patch_prefers_run_cmd_when_available() {
         &loop_state,
         Some(&analysis),
     )
-    .expect("runtime status patch should prefer command evidence when run_cmd is available");
+    .expect("runtime status patch should prefer dedicated runtime status capability");
 
     assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("id -un")
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0]
-            .args
-            .get(CLAWD_LITERAL_COMMAND_ARG)
-            .and_then(Value::as_bool),
-        Some(true)
+        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        Some("current_user")
     );
+}
+
+#[test]
+fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "runtime_status_query": {"kind": "host_name", "scope": "system"}
+        })),
+        attachment_processing_required: false,
+    };
+
+    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+        &state,
+        "return current hostname",
+        Some(&route),
+        &loop_state,
+        Some(&analysis),
+    )
+    .expect("runtime status patch should plan hostname status query");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "system_basic");
+    assert_eq!(
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
+    );
+    assert_eq!(
+        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        Some("host_name")
+    );
+}
+
+#[tokio::test]
+async fn runtime_status_query_preempts_explicit_hostname_command_fast_path() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    state.policy.command_intent.standalone_commands = vec!["hostname".to_string()];
+    let prompt = "只输出当前机器 hostname，不要解释";
+    let task = ClaimedTask {
+        task_id: "runtime-hostname-fast-path".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.resolved_intent = "return current hostname".to_string();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "runtime_status_query": {"kind": "host_name", "scope": "system"}
+        })),
+        attachment_processing_required: false,
+    };
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
+
+    let plan = super::super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        prompt,
+        &policy,
+        &loop_state,
+        Some(&analysis),
+        Some(&route),
+        None,
+    )
+    .await
+    .expect("runtime status query should preempt explicit command fast path");
+
+    assert!(plan
+        .planner_notes
+        .split_whitespace()
+        .any(|note| { note == "fallback_reason_code=plan_deterministic_runtime_status_scalar" }));
+    let actions = plan
+        .steps
+        .iter()
+        .filter_map(|step| step.to_agent_action())
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        actions.first(),
+        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
+            if tool == "system_basic"
+                && args.get("action").and_then(Value::as_str) == Some("runtime_status")
+                && args.get("kind").and_then(Value::as_str) == Some("host_name")
+    ));
 }
 
 #[test]
@@ -412,26 +520,67 @@ fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
         &loop_state,
         Some(&analysis),
     )
-    .expect("runtime status patch should plan kernel release command");
+    .expect("runtime status patch should plan kernel release status query");
 
     assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("uname -r")
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0]
-            .args
-            .get(CLAWD_LITERAL_COMMAND_ARG)
-            .and_then(Value::as_bool),
-        Some(true)
+        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        Some("kernel_release")
     );
 }
 
 #[test]
-fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd() {
+fn raw_command_output_runtime_status_plan_keeps_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "runtime scalar",
+        None,
+        vec![AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "runtime_status",
+                "kind": "current_user"
+            }),
+        }],
+    );
+
+    assert_eq!(normalized.len(), 1);
+    match &normalized[0] {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "system_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("runtime_status")
+            );
+            assert_eq!(
+                args.get("kind").and_then(Value::as_str),
+                Some("current_user")
+            );
+        }
+        other => panic!("expected system_basic runtime_status, got {other:?}"),
+    }
+}
+
+#[test]
+fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd_only_without_system_basic() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
@@ -746,6 +895,145 @@ fn code_change_profile_requires_verification_not_readback_only() {
 }
 
 #[test]
+fn code_change_profile_done_allows_terminal_response_without_extra_validation_step() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Done,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        saw_mutation: true,
+        saw_validation: true,
+        ..Default::default()
+    };
+    loop_state.latest_validation_result = Some(serde_json::json!({
+        "schema_version": 1,
+        "source": "agent_loop_step_validation",
+        "status": "passed",
+        "status_code": "validation_passed",
+        "skill": "http_basic",
+        "global_step": 8,
+        "step_in_round": 2
+    }));
+    let actions = vec![AgentAction::Respond {
+        content: "VALIDATION_PASSED".to_string(),
+    }];
+
+    assert!(!should_force_plan_repair(
+        Some(&route_result(
+            crate::AskMode::planner_execute_plain(),
+            false,
+            OutputResponseShape::Free,
+        )),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn package_change_profile_without_post_install_validation_forces_repair() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::PackageChange,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::System,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        ..Default::default()
+    };
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "package_manager".to_string(),
+            args: serde_json::json!({ "action": "detect" }),
+        },
+        AgentAction::CallSkill {
+            skill: "package_manager".to_string(),
+            args: serde_json::json!({ "action": "install", "package": "jq", "dry_run": false }),
+        },
+    ];
+    assert!(should_force_plan_repair(
+        Some(&route_result(
+            crate::AskMode::planner_execute_plain(),
+            false,
+            OutputResponseShape::Free,
+        )),
+        &loop_state,
+        &actions,
+    ));
+    assert_eq!(
+        repair_reason(
+            Some(&route_result(
+                crate::AskMode::planner_execute_plain(),
+                false,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            Some(&actions),
+        ),
+        "package_change_requires_validation"
+    );
+}
+
+#[test]
+fn database_change_profile_keeps_schema_validation_after_execute() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::DatabaseChange,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        ..Default::default()
+    };
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: serde_json::json!({
+                "action": "sqlite_execute",
+                "db_path": "data/app.db",
+                "sql": "UPDATE users SET active=1",
+                "confirm": true
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: serde_json::json!({
+                "action": "schema_version",
+                "db_path": "data/app.db"
+            }),
+        },
+    ];
+    assert!(
+        !should_force_plan_repair(
+            Some(&route_result(
+                crate::AskMode::planner_execute_plain(),
+                false,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            &actions,
+        ),
+        "unexpected repair reason: {}",
+        repair_reason(
+            Some(&route_result(
+                crate::AskMode::planner_execute_plain(),
+                false,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            Some(&actions),
+        )
+    );
+}
+
+#[test]
 fn code_change_profile_with_structured_cargo_check_keeps_plan() {
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
@@ -786,7 +1074,7 @@ fn code_change_profile_with_structured_cargo_check_keeps_plan() {
 }
 
 #[test]
-fn code_change_profile_with_unstructured_cargo_check_forces_repair() {
+fn code_change_profile_with_run_cmd_cargo_check_keeps_plan() {
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
         kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -807,7 +1095,7 @@ fn code_change_profile_with_unstructured_cargo_check_forces_repair() {
             args: serde_json::json!({ "command": "cargo check -p clawd" }),
         },
     ];
-    assert!(should_force_plan_repair(
+    assert!(!should_force_plan_repair(
         Some(&route_result(
             crate::AskMode::planner_execute_plain(),
             false,
@@ -816,18 +1104,6 @@ fn code_change_profile_with_unstructured_cargo_check_forces_repair() {
         &loop_state,
         &actions,
     ));
-    assert_eq!(
-        repair_reason(
-            Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
-                false,
-                OutputResponseShape::Scalar,
-            )),
-            &loop_state,
-            Some(&actions),
-        ),
-        "code_change_requires_verification"
-    );
 }
 
 #[test]

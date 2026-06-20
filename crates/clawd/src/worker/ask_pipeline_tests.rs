@@ -1,3 +1,6 @@
+use super::test_support::{
+    executable_filename_route, make_temp_root, test_state_with_root, unresolved_deictic_analysis,
+};
 use super::{
     apply_ask_post_route, background_only_locator_route_should_force_clarify,
     clarify_fallback_source_or_default, current_request_resolves_workspace_child_locator,
@@ -11,99 +14,6 @@ use super::{
     unbound_targeted_evidence_route_should_force_clarify,
     WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
 };
-use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
-use claw_core::config::{AgentConfig, ToolsConfig};
-use std::collections::{HashMap, HashSet};
-use std::{
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-fn make_temp_root(label: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "rustclaw_ask_pipeline_{label}_{}_{}",
-        std::process::id(),
-        nonce
-    ));
-    std::fs::create_dir_all(&path).expect("temp root");
-    path
-}
-
-fn test_state_with_root(root: PathBuf) -> AppState {
-    let agents_by_id = HashMap::from([(
-        crate::DEFAULT_AGENT_ID.to_string(),
-        AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
-    )]);
-    AppState {
-        core: crate::CoreServices {
-            agents_by_id: Arc::new(agents_by_id),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: None,
-                skills_list: Arc::new(HashSet::new()),
-            }))),
-            ..crate::CoreServices::test_default()
-        },
-        skill_rt: crate::SkillRuntime {
-            workspace_root: root.clone(),
-            default_locator_search_dir: root,
-            locator_scan_max_depth: 2,
-            locator_scan_max_files: 100,
-            tools_policy: Arc::new(
-                crate::ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            ..crate::SkillRuntime::test_default()
-        },
-        policy: crate::PolicyConfig::test_default(),
-        worker: crate::WorkerConfig::test_default(),
-        metrics: crate::TaskMetricsRegistry::default(),
-        channels: crate::ChannelConfig::default(),
-        reload_ctx: crate::ReloadContext::default(),
-        ask_states: crate::AskStateRegistry::default(),
-    }
-}
-
-fn executable_filename_route() -> crate::RouteResult {
-    crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
-        resolved_intent: "读取 README 开头并总结".to_string(),
-        needs_clarify: false,
-        route_reason: String::new(),
-        route_confidence: Some(0.9),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        clarify_question: String::new(),
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            locator_kind: crate::OutputLocatorKind::Filename,
-            locator_hint: "README.md".to_string(),
-            requires_content_evidence: true,
-            ..Default::default()
-        },
-    }
-}
-
-fn unresolved_deictic_analysis() -> crate::intent_router::TurnAnalysis {
-    crate::intent_router::TurnAnalysis {
-        turn_type: None,
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(serde_json::json!({
-            "deictic_reference": {"target": "unresolved_prior_object"}
-        })),
-        attachment_processing_required: false,
-    }
-}
 
 #[test]
 fn compound_file_paths_summary_repair_runs_before_unbound_context_guard() {
@@ -209,10 +119,7 @@ fn bare_stem_workspace_file_locator_executes_when_current_request_resolves_same_
         "{}",
         applied.execution_route_result.route_reason
     );
-    assert_eq!(
-        applied.execution_route_result.first_layer_decision(),
-        crate::FirstLayerDecision::PlannerExecute
-    );
+    assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::Path
@@ -332,8 +239,8 @@ fn inferred_missing_workspace_locator_hint_requires_clarify() {
         applied.execution_route_result.route_reason
     );
     assert_eq!(
-        applied.execution_route_result.first_layer_decision(),
-        crate::FirstLayerDecision::Clarify
+        applied.execution_route_result.gate_kind(),
+        crate::RouteGateKind::Clarify
     );
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
@@ -839,7 +746,7 @@ fn path_scoped_locator_guard_defers_to_prompt_filename_targets() {
 fn clarify_path_scoped_filename_targets_promote_to_workspace_execution() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -866,7 +773,7 @@ fn clarify_path_scoped_filename_targets_promote_to_workspace_execution() {
 fn clarify_current_workspace_filename_targets_promote_to_workspace_execution() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/tmp/workspace".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -896,7 +803,7 @@ fn clarify_current_workspace_filename_targets_promote_to_workspace_execution() {
 fn clarify_current_workspace_mixed_multifile_targets_promote_to_workspace_execution() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -931,7 +838,7 @@ fn clarify_resolved_multifile_targets_promote_to_workspace_execution_even_withou
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -967,7 +874,7 @@ fn clarify_resolved_bare_readme_agents_targets_promote_to_workspace_execution() 
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -1000,7 +907,7 @@ fn clarify_resolved_multifile_targets_promote_from_semantic_evidence_marker() {
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -1204,7 +1111,7 @@ name = "clawd"
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
@@ -1266,7 +1173,7 @@ name = "clawd"
     let mut route = executable_filename_route();
     route.resolved_intent = resolved_intent.to_string();
     route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.set_clarify_gate();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
@@ -1547,323 +1454,6 @@ fn unbound_model_context_allows_file_surface_with_structured_reference() {
         &route,
         None,
         &snapshot,
-    ));
-}
-
-#[test]
-fn unbound_targeted_evidence_allows_current_workspace_scalar_count_scope() {
-    let mut route = executable_filename_route();
-    route.resolved_intent = "count top-level workspace directories".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "/tmp/rustclaw".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
-    };
-
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
-        "count top-level repository directories",
-        &route,
-        &snapshot,
-        "<none>",
-    ));
-}
-
-#[test]
-fn current_workspace_scalar_count_empty_hint_prebinds_root_before_unbound_guard() {
-    let root = make_temp_root("current_workspace_scalar_count_root_hint");
-    let state = test_state_with_root(root.clone());
-    let task = crate::ClaimedTask {
-        task_id: "current-workspace-scalar-count-root-hint".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    let mut route = executable_filename_route();
-    route.resolved_intent =
-        "Count top-level workspace directories and return the scalar count.".to_string();
-    route.route_reason =
-        "normalizer supplied current workspace scope。current_workspace_scope_from_current_request; semantic_contract_requires_evidence"
-            .to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let resolved_intent = route.resolved_intent.clone();
-
-    let applied = apply_ask_post_route(
-        &state,
-        &task,
-        "count top-level workspace directories and return only the number",
-        &resolved_intent,
-        "",
-        None,
-        route,
-        String::new(),
-        String::new(),
-    );
-
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
-    );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
-        &applied.execution_route_result,
-        "current_workspace_root_hint_prebound_for_scalar_count"
-    ));
-    assert!(!route_reason_has_marker(
-        &applied.execution_route_result,
-        "unbound_targeted_evidence_requires_clarify"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn current_workspace_scalar_count_marker_from_clarify_route_executes_before_unbound_guard() {
-    let root = make_temp_root("current_workspace_scalar_count_marker_clarify_route");
-    let state = test_state_with_root(root.clone());
-    let task = crate::ClaimedTask {
-        task_id: "current-workspace-scalar-count-marker-clarify-route".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
-    route.resolved_intent =
-        "Count current workspace top-level entries excluding the VCS control directory and return only the number."
-            .to_string();
-    route.route_reason =
-        "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
-            .to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let resolved_intent = route.resolved_intent.clone();
-
-    let applied = apply_ask_post_route(
-        &state,
-        &task,
-        "列出仓库顶层目录，但不要把 .git 算进去，只告诉我其它的有几个",
-        &resolved_intent,
-        "",
-        None,
-        route,
-        String::new(),
-        String::new(),
-    );
-
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
-    );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
-        &applied.execution_route_result,
-        "current_workspace_root_hint_prebound_for_scalar_count"
-    ));
-    assert!(!route_reason_has_marker(
-        &applied.execution_route_result,
-        "unbound_targeted_evidence_requires_clarify"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn current_workspace_scalar_count_one_sentence_prebinds_root_before_unbound_guard() {
-    let root = make_temp_root("current_workspace_scalar_count_one_sentence_root_hint");
-    let state = test_state_with_root(root.clone());
-    let task = crate::ClaimedTask {
-        task_id: "current-workspace-scalar-count-one-sentence-root-hint".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    let mut route = executable_filename_route();
-    route.resolved_intent = "Count top-level workspace files and return one sentence.".to_string();
-    route.route_reason =
-        "semantic_contract_requires_evidence; current_workspace_scope_from_current_request"
-            .to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.exact_sentence_count = Some(1);
-    let resolved_intent = route.resolved_intent.clone();
-
-    let applied = apply_ask_post_route(
-        &state,
-        &task,
-        "count top-level workspace files and return one sentence",
-        &resolved_intent,
-        "",
-        None,
-        route,
-        String::new(),
-        String::new(),
-    );
-
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
-    );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
-        &applied.execution_route_result,
-        "current_workspace_root_hint_prebound_for_scalar_count"
-    ));
-    assert!(!route_reason_has_marker(
-        &applied.execution_route_result,
-        "unbound_targeted_evidence_requires_clarify"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn clarify_current_workspace_scalar_count_with_resolved_root_promotes_to_execute() {
-    let root = make_temp_root("clarify_current_workspace_scalar_count_resolved_root");
-    let state = test_state_with_root(root.clone());
-    let task = crate::ClaimedTask {
-        task_id: "clarify-current-workspace-scalar-count-resolved-root".to_string(),
-        user_id: 1,
-        chat_id: 1,
-        user_key: None,
-        channel: "test".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
-    route.resolved_intent = format!(
-        "Count regular files directly under the current directory {} and provide one short explanation",
-        root.display()
-    );
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.exact_sentence_count = Some(1);
-    let resolved_intent = route.resolved_intent.clone();
-
-    let applied = apply_ask_post_route(
-        &state,
-        &task,
-        "Count how many regular files are directly under the current directory, and reply with just the number plus one short explanation.",
-        &resolved_intent,
-        "",
-        None,
-        route,
-        String::new(),
-        String::new(),
-    );
-
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
-    );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
-        &applied.execution_route_result,
-        "current_workspace_root_hint_prebound_for_scalar_count"
-    ));
-    assert!(!route_reason_has_marker(
-        &applied.execution_route_result,
-        "unbound_targeted_evidence_requires_clarify"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn current_workspace_scalar_count_with_unmentioned_root_path_requires_clarify() {
-    let root = make_temp_root("workspace_injected_root");
-    let mut route = executable_filename_route();
-    route.resolved_intent = format!(
-        "Count the number of direct child entries in {} and output only the number",
-        root.display()
-    );
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = root.display().to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
-    };
-
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
-        "count that directory's direct children and output only the number",
-        &route,
-        &snapshot,
-        "<none>",
     ));
 }
 

@@ -1,5 +1,8 @@
 use super::{boundary_context_snapshot_json, AgentLoopGuardPolicy};
-use crate::agent_engine::support::{LoopRecipeOverrides, SemanticRouteAuthority};
+use crate::agent_engine::support::{
+    AnswerVerifierRequiredEvidenceScope, LoopRecipeOverrides, RegistryIdempotencyGuardScope,
+    SemanticRouteAuthority,
+};
 use crate::agent_engine::AgentRunContext;
 use crate::{
     ClaimedTask, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
@@ -17,10 +20,10 @@ fn test_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
-        answer_verifier_enforce_required: false,
+        answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
         agent_loop_canary_bucket: "none".to_string(),
-        registry_idempotency_guard: false,
+        registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides::default(),
         grounded_summary: LoopRecipeOverrides::default(),
@@ -155,6 +158,41 @@ fn agent_loop_default_selects_generic_low_risk_bucket_without_canary_token() {
             .pointer("/budget/agent_loop_eligibility_bucket")
             .and_then(serde_json::Value::as_str),
         Some("low_risk_status_observation")
+    );
+
+    let mut delivery = structured_field_route();
+    delivery.wants_file_delivery = true;
+    delivery.output_contract.response_shape = OutputResponseShape::FileToken;
+    delivery.output_contract.delivery_required = true;
+    delivery.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    delivery.output_contract.semantic_kind = OutputSemanticKind::None;
+    delivery.output_contract.locator_kind = OutputLocatorKind::Path;
+    delivery.output_contract.locator_hint = "README.md".to_string();
+
+    assert_eq!(
+        crate::agent_engine::agent_loop_authority_selected_migration_class_for_policy(
+            &policy, &delivery
+        ),
+        Some("low_risk_single_file_delivery")
+    );
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&delivery),
+        super::LoopBudgetProfile::FastRead,
+    );
+    assert_eq!(
+        boundary
+            .pointer("/budget/agent_loop_eligibility_bucket")
+            .and_then(serde_json::Value::as_str),
+        Some("low_risk_single_file_delivery")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/semantic_routing/chosen_authority")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_loop_default")
     );
 }
 

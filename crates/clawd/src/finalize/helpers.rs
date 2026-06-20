@@ -72,6 +72,16 @@ pub(crate) fn is_execution_summary_message(message: &str) -> bool {
         || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_EN)
         || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_JA)
         || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_KO)
+        || serde_json::from_str::<Value>(trimmed)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message_key")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .map(str::to_string)
+            })
+            .is_some_and(|message_key| message_key == "clawd.msg.execution.summary")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

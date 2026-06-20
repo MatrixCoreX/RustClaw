@@ -631,6 +631,9 @@ pub(super) fn inventory_ranked_size_list_answer(
     } else {
         entries.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
     }
+    if let Some(limit) = route_list_selector_limit(route) {
+        entries.truncate(limit.min(entries.len()));
+    }
     Some(
         entries
             .into_iter()
@@ -638,6 +641,16 @@ pub(super) fn inventory_ranked_size_list_answer(
             .collect::<Vec<_>>()
             .join("\n"),
     )
+}
+
+fn route_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
 }
 
 #[cfg(test)]

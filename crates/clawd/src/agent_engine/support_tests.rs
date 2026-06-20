@@ -1,8 +1,9 @@
 use super::{
     action_fingerprint, action_fingerprint_for_policy, append_delivery_message,
-    collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
-    load_agent_loop_guard_policy, AgentLoopGuardPolicy, LoopBudgetProfile, LoopRecipeOverrides,
-    SemanticRouteAuthority,
+    build_agent_loop_checkpoint_progress_payload, collect_execution_recipe_progress_hints,
+    execution_recipe_phase_progress_key, load_agent_loop_guard_policy, AgentLoopGuardPolicy,
+    AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile, LoopRecipeOverrides,
+    RegistryIdempotencyGuardScope, SemanticRouteAuthority,
 };
 use crate::agent_engine::LoopState;
 use crate::execution_recipe::{
@@ -26,10 +27,10 @@ fn base_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
-        answer_verifier_enforce_required: false,
+        answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         semantic_route_authority: SemanticRouteAuthority::Legacy,
         agent_loop_canary_bucket: "none".to_string(),
-        registry_idempotency_guard: false,
+        registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides {
             max_steps: Some(16),
@@ -101,6 +102,20 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     state
 }
 
+fn support_test_task() -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: "task-support".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
 fn registry_governance_fixture() -> &'static str {
     r#"
 [[skills]]
@@ -118,7 +133,85 @@ kind = "runner"
 planner_capabilities = [
   { name = "filesystem.list_entries", action = "list_dir", effect = "observe", idempotent = true, dedup_scope = "args" },
 ]
+
+[[skills]]
+name = "config_basic"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "config.validate", action = "validate_config", effect = "validate" },
+]
+
+[[skills]]
+name = "system_basic"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "system.run_command", action = "run_cmd", effect = "external", once_per_task = true, dedup_scope = "action", idempotent = false },
+]
 "#
+}
+
+#[test]
+fn soft_budget_checkpoint_payload_records_machine_resume_state() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 2;
+    loop_state.total_steps_executed = 3;
+    loop_state.tool_calls_total = 2;
+    loop_state
+        .progress_messages
+        .push("I18N:telegram.progress.step_completed:{}".to_string());
+    loop_state.successful_action_fingerprints.insert(
+        "skill:config_edit:action:apply_config_change".to_string(),
+        1,
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_edit".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("{\"status\":\"ok\"}".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    loop_state.last_stop_signal = Some("max_rounds".to_string());
+
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "agent_loop_max_rounds",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    assert_eq!(payload["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        payload["task_lifecycle"]["resume_reason"],
+        "agent_loop_max_rounds"
+    );
+    assert_eq!(payload["task_lifecycle"]["next_check_after"], 1_781_800_060);
+    assert_eq!(
+        payload["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(payload["task_checkpoint"]["budget"]["round"], 2);
+    assert_eq!(payload["task_checkpoint"]["budget"]["step"], 3);
+    assert_eq!(payload["task_checkpoint"]["budget"]["tool_calls"], 2);
+    assert_eq!(
+        payload["task_checkpoint"]["completed_side_effect_refs"][0],
+        "skill:config_edit:action:apply_config_change"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["observations"][0]["step_id"],
+        "step_1"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["signal"],
+        "max_rounds"
+    );
 }
 
 #[test]
@@ -129,14 +222,16 @@ fn rollout_switches_default_to_false_when_config_missing() {
 
     let policy = load_agent_loop_guard_policy(&state);
 
-    assert!(!policy.answer_verifier_enforce_required);
+    assert_eq!(
+        policy.effective_answer_verifier_required_evidence_scope(),
+        AnswerVerifierRequiredEvidenceScope::Off
+    );
     assert_eq!(
         policy.semantic_route_authority,
         SemanticRouteAuthority::Legacy
     );
     assert!(!policy.records_agent_decides_attribution());
     assert_eq!(policy.agent_loop_canary_bucket, "none");
-    assert!(!policy.registry_idempotency_guard);
     assert!(!policy.structured_evidence_required_for_selected_contracts);
 
     let _ = std::fs::remove_dir_all(root);
@@ -164,18 +259,18 @@ fn registry_idempotency_guard_switches_mutate_capability_to_action_fingerprint()
     };
 
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left),
-        action_fingerprint_for_policy(&state, &policy, &right)
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
     );
 
-    policy.registry_idempotency_guard = true;
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &left, None),
         "skill:config_edit:action:apply_config_change"
     );
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left),
-        action_fingerprint_for_policy(&state, &policy, &right)
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
     );
 }
 
@@ -183,7 +278,7 @@ fn registry_idempotency_guard_switches_mutate_capability_to_action_fingerprint()
 fn registry_idempotency_guard_keeps_observe_capability_args_fingerprint() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit", "fs_basic"]);
     let mut policy = base_policy();
-    policy.registry_idempotency_guard = true;
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
     let left = crate::AgentAction::CallSkill {
         skill: "fs_basic".to_string(),
         args: serde_json::json!({"action": "list_dir", "path": "/tmp/a"}),
@@ -194,13 +289,139 @@ fn registry_idempotency_guard_keeps_observe_capability_args_fingerprint() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &left, None),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left),
-        action_fingerprint_for_policy(&state, &policy, &right)
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
     );
+}
+
+#[test]
+fn registry_idempotency_guard_keeps_validate_capability_args_fingerprint() {
+    let state = state_with_registry(registry_governance_fixture(), &["config_basic"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let left = crate::AgentAction::CallSkill {
+        skill: "config_basic".to_string(),
+        args: serde_json::json!({"action": "validate_config", "path": "/tmp/a.toml"}),
+    };
+    let right = crate::AgentAction::CallSkill {
+        skill: "config_basic".to_string(),
+        args: serde_json::json!({"action": "validate_config", "path": "/tmp/b.toml"}),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint(&state, &left)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
+    );
+}
+
+#[test]
+fn registry_idempotency_guard_switches_external_capability_to_action_fingerprint() {
+    let state = state_with_registry(registry_governance_fixture(), &["system_basic"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let left = crate::AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({"action": "run_cmd", "command": "true"}),
+    };
+    let right = crate::AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({"action": "run_cmd", "command": "false"}),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        "skill:system_basic:action:run_cmd"
+    );
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
+    );
+}
+
+#[test]
+fn registry_idempotency_guard_keeps_literal_execution_failed_step_run_cmd_args_fingerprint() {
+    let state = state_with_registry(registry_governance_fixture(), &["system_basic"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let route = route_with_contract(
+        OutputSemanticKind::ExecutionFailedStep,
+        OutputLocatorKind::None,
+    );
+    let left = crate::AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "run_cmd",
+            "command": "echo RC_STEP_ONE",
+            super::super::CLAWD_LITERAL_COMMAND_ARG: true
+        }),
+    };
+    let right = crate::AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "run_cmd",
+            "command": "definitely_missing_command_rc_step_two",
+            super::super::CLAWD_LITERAL_COMMAND_ARG: true
+        }),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
+        action_fingerprint(&state, &left)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
+        action_fingerprint_for_policy(&state, &policy, &right, Some(&route))
+    );
+    assert!(super::registry_idempotency_guard_attribution(
+        &state,
+        &policy,
+        &left,
+        Some(&route),
+        &action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
+        "registry_idempotency_repeat_completed_action",
+        Some(1),
+        None,
+    )
+    .is_none());
+
+    let non_failed_step_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::None);
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&non_failed_step_route)),
+        "skill:system_basic:action:run_cmd"
+    );
+}
+
+#[test]
+fn registry_idempotency_guard_does_not_attribute_idempotent_read_repeats() {
+    let state = state_with_registry(registry_governance_fixture(), &["fs_basic"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let action = crate::AgentAction::CallSkill {
+        skill: "fs_basic".to_string(),
+        args: serde_json::json!({"action": "list_dir", "path": "/tmp/a"}),
+    };
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action, None);
+
+    assert!(super::registry_idempotency_guard_attribution(
+        &state,
+        &policy,
+        &action,
+        None,
+        &fingerprint,
+        "registry_idempotency_repeat_completed_action",
+        Some(1),
+        None,
+    )
+    .is_none());
 }
 
 #[test]
@@ -212,10 +433,10 @@ fn rollout_switches_are_read_from_agent_guard_config() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-answer_verifier_enforce_required = true
-agent_decides_semantic_route = true
-agent_decides_migration_class = "structured_field_read"
-registry_idempotency_guard = true
+answer_verifier_enforce_required_scope = "all"
+semantic_route_authority = "agent_loop_canary"
+agent_loop_canary_bucket = "structured_field_read"
+registry_idempotency_guard_scope = "all"
 structured_evidence_required_for_selected_contracts = true
 "#,
     )
@@ -225,17 +446,240 @@ structured_evidence_required_for_selected_contracts = true
 
     let policy = load_agent_loop_guard_policy(&state);
 
-    assert!(policy.answer_verifier_enforce_required);
+    assert_eq!(
+        policy.effective_answer_verifier_required_evidence_scope(),
+        AnswerVerifierRequiredEvidenceScope::All
+    );
     assert_eq!(
         policy.semantic_route_authority,
-        SemanticRouteAuthority::Shadow
+        SemanticRouteAuthority::AgentLoopCanary
     );
     assert!(policy.records_agent_decides_attribution());
     assert_eq!(policy.agent_loop_canary_bucket, "structured_field_read");
-    assert!(policy.registry_idempotency_guard);
+    assert_eq!(
+        policy.effective_registry_idempotency_guard_scope(),
+        RegistryIdempotencyGuardScope::All
+    );
     assert!(policy.structured_evidence_required_for_selected_contracts);
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn answer_verifier_required_scope_accepts_selected_agent_loop_token() {
+    let root = temp_support_workspace("answer-verifier-scope-config");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        r#"
+[agent.loop_guard]
+semantic_route_authority = "agent_loop_default"
+answer_verifier_enforce_required_scope = "selected_agent_loop"
+"#,
+    )
+    .expect("write agent guard config");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let policy = load_agent_loop_guard_policy(&state);
+
+    assert_eq!(
+        policy.effective_answer_verifier_required_evidence_scope(),
+        AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop
+    );
+    assert!(policy
+        .enabled_rollout_switches()
+        .contains(&"answer_verifier_enforce_required_scope"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn answer_verifier_required_scope_accepts_all_token() {
+    let root = temp_support_workspace("answer-verifier-scope-all-config");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        r#"
+[agent.loop_guard]
+semantic_route_authority = "agent_loop_default"
+answer_verifier_enforce_required_scope = "all"
+"#,
+    )
+    .expect("write agent guard config");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let policy = load_agent_loop_guard_policy(&state);
+
+    assert_eq!(
+        policy.effective_answer_verifier_required_evidence_scope(),
+        AnswerVerifierRequiredEvidenceScope::All
+    );
+    assert!(policy
+        .enabled_rollout_switches()
+        .contains(&"answer_verifier_enforce_required_scope"));
+    assert!(!policy
+        .enabled_rollout_switches()
+        .contains(&"answer_verifier_enforce_required"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn answer_verifier_required_scope_only_enables_selected_agent_loop_routes() {
+    let mut policy = base_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    policy.answer_verifier_enforce_required_scope =
+        AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop;
+    let selected_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    let mut blocked_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    blocked_route.risk_ceiling = RiskCeiling::High;
+
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&selected_route)));
+    assert!(!policy.answer_verifier_required_evidence_enabled_for_route(Some(&blocked_route)));
+    assert!(!policy.answer_verifier_required_evidence_enabled_for_route(None));
+}
+
+#[test]
+fn answer_verifier_required_scope_all_enables_all_routes() {
+    let mut policy = base_policy();
+    policy.answer_verifier_enforce_required_scope = AnswerVerifierRequiredEvidenceScope::All;
+    let selected_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    let mut high_risk_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    high_risk_route.risk_ceiling = RiskCeiling::High;
+
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&selected_route)));
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&high_risk_route)));
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
+}
+
+#[test]
+fn registry_idempotency_guard_scope_accepts_selected_agent_loop_token() {
+    let root = temp_support_workspace("registry-scope-config");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        r#"
+[agent.loop_guard]
+semantic_route_authority = "agent_loop_default"
+registry_idempotency_guard_scope = "selected_agent_loop"
+"#,
+    )
+    .expect("write agent guard config");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let policy = load_agent_loop_guard_policy(&state);
+
+    assert_eq!(
+        policy.effective_registry_idempotency_guard_scope(),
+        RegistryIdempotencyGuardScope::SelectedAgentLoop
+    );
+    assert!(policy
+        .enabled_rollout_switches()
+        .contains(&"registry_idempotency_guard_scope"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn registry_idempotency_guard_scope_accepts_all_token() {
+    let root = temp_support_workspace("registry-scope-all-config");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        r#"
+[agent.loop_guard]
+semantic_route_authority = "agent_loop_default"
+registry_idempotency_guard_scope = "all"
+"#,
+    )
+    .expect("write agent guard config");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let policy = load_agent_loop_guard_policy(&state);
+
+    assert_eq!(
+        policy.effective_registry_idempotency_guard_scope(),
+        RegistryIdempotencyGuardScope::All
+    );
+    assert!(policy
+        .enabled_rollout_switches()
+        .contains(&"registry_idempotency_guard_scope"));
+    assert!(!policy
+        .enabled_rollout_switches()
+        .contains(&"registry_idempotency_guard"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn registry_idempotency_guard_scope_only_changes_selected_agent_loop_routes() {
+    let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
+    let mut policy = base_policy();
+    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::SelectedAgentLoop;
+    let selected_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    let mut blocked_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    blocked_route.risk_ceiling = RiskCeiling::High;
+    let left = crate::AgentAction::CallSkill {
+        skill: "config_edit".to_string(),
+        args: serde_json::json!({
+            "action": "apply_config_change",
+            "field_path": "skills.a",
+            "value": true
+        }),
+    };
+    let right = crate::AgentAction::CallSkill {
+        skill: "config_edit".to_string(),
+        args: serde_json::json!({
+            "action": "apply_config_change",
+            "field_path": "skills.b",
+            "value": true
+        }),
+    };
+
+    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&selected_route)));
+    assert!(!policy.registry_idempotency_guard_enabled_for_route(Some(&blocked_route)));
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
+        "skill:config_edit:action:apply_config_change"
+    );
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
+        action_fingerprint_for_policy(&state, &policy, &right, Some(&selected_route))
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&blocked_route)),
+        action_fingerprint_for_policy(&state, &policy, &right, Some(&blocked_route))
+    );
+}
+
+#[test]
+fn registry_idempotency_guard_scope_all_enables_all_routes() {
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let selected_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    let mut high_risk_route =
+        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
+    high_risk_route.risk_ceiling = RiskCeiling::High;
+
+    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&selected_route)));
+    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&high_risk_route)));
+    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
 }
 
 #[test]
@@ -308,7 +752,7 @@ semantic_route_authority = "let the agent decide from user text"
 }
 
 #[test]
-fn legacy_agent_decides_migration_class_rejects_unknown_tokens() {
+fn agent_loop_canary_bucket_rejects_unknown_tokens() {
     let root = temp_support_workspace("agent-loop-canary-bucket-invalid");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("create config dir");
@@ -316,7 +760,7 @@ fn legacy_agent_decides_migration_class_rejects_unknown_tokens() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-agent_decides_migration_class = "freeform_user_phrase"
+agent_loop_canary_bucket = "freeform_user_phrase"
 "#,
     )
     .expect("write agent guard config");
@@ -326,6 +770,35 @@ agent_decides_migration_class = "freeform_user_phrase"
     let policy = load_agent_loop_guard_policy(&state);
 
     assert_eq!(policy.agent_loop_canary_bucket, "none");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_agent_decides_config_keys_are_ignored() {
+    let root = temp_support_workspace("legacy-agent-decides-config-ignored");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        r#"
+[agent.loop_guard]
+agent_decides_semantic_route = true
+agent_decides_migration_class = "structured_field_read"
+"#,
+    )
+    .expect("write agent guard config");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let policy = load_agent_loop_guard_policy(&state);
+
+    assert_eq!(
+        policy.semantic_route_authority,
+        SemanticRouteAuthority::Legacy
+    );
+    assert_eq!(policy.agent_loop_canary_bucket, "none");
+    assert!(!policy.records_agent_decides_attribution());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -344,6 +817,7 @@ fn agent_loop_canary_bucket_accepts_low_risk_tokens_only() {
         "low_risk_log_observation",
         "low_risk_workspace_question",
         "low_risk_tool_discovery",
+        "low_risk_single_file_delivery",
     ] {
         let root = temp_support_workspace(&format!("agent-decides-class-{token}"));
         let config_dir = root.join("configs");
@@ -399,7 +873,10 @@ image_edit_skills = ["legacy_image_edit"]
     assert_eq!(policy.max_rounds, 2);
     assert_eq!(policy.max_steps, 32);
     assert_eq!(policy.max_tool_calls, 12);
-    assert!(!policy.registry_idempotency_guard);
+    assert_eq!(
+        policy.effective_registry_idempotency_guard_scope(),
+        RegistryIdempotencyGuardScope::Off
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

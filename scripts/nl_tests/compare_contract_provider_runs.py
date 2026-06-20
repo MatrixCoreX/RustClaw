@@ -276,7 +276,7 @@ def write_minimal_run_case(
                     "summary": {
                         "input_text": "count fixture",
                         "route_result": {
-                            "first_layer_decision": "planner_execute",
+                            "legacy_first_layer_decision": "planner_execute",
                             "route_gate_kind": "execute",
                         },
                         "finalizer_summary": {

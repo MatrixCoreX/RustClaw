@@ -21,23 +21,26 @@ use runtime::{
     observation_extractors_stable_key, validate_artifact_shape_contract,
     validate_contract_runtime_fields, validate_observation_extractors,
 };
-#[allow(unused_imports)]
 pub(crate) use runtime::{
     action_matches_policy_tokens, action_policy_for_output_contract,
     action_trace_for_output_contract, allowed_action_refs_for_output_contract, arg_policy_decision,
-    bundled_contract_matrix, bundled_contract_matrix_result,
-    compact_prompt_line_for_output_contract, compact_prompt_line_for_route,
+    bundled_contract_matrix, compact_prompt_line_for_route,
     contract_trace_action_key_for_output_contract, final_answer_shape_for_output_contract,
     fnv1a_hex, preferred_action_refs_for_output_contract, required_evidence_for_output_contract,
-    runtime_contract_snapshot_for_output_contract, runtime_contract_snapshot_for_route,
-    trace_snapshot_for_output_contract, trace_snapshot_for_route, ContractActionPolicy,
-    ContractArgPolicy,
+    runtime_contract_snapshot_for_route, trace_snapshot_for_output_contract,
+    trace_snapshot_for_route,
+};
+// Keep policy return types nameable outside the private runtime module.
+#[cfg(test)]
+pub(crate) use runtime::{
+    available_action_refs_from_registry, bundled_contract_matrix_result,
+    compact_prompt_line_for_output_contract, parse_contract_matrix_source,
+    runtime_contract_snapshot_for_output_contract,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
-pub(crate) use runtime::{available_action_refs_from_registry, parse_contract_matrix_source};
-#[cfg(test)]
 use runtime::{collect_action_tokens, collect_external_observation_admission_errors};
+#[allow(unused_imports)]
+pub(crate) use runtime::{ContractActionPolicy, ContractArgPolicy};
 #[cfg(test)]
 pub(crate) const CONTRACT_MATRIX_REL_PATH: &str = "configs/task_contract_matrix.toml";
 static BUNDLED_CONTRACT_MATRIX: OnceLock<Result<ContractMatrix, String>> = OnceLock::new();
@@ -333,6 +336,7 @@ pub(crate) struct MatrixContract {
     pub(crate) freshness: String,
     pub(crate) artifact_kind: String,
     pub(crate) channel_visibility: String,
+    pub(crate) evidence_profile: String,
     pub(crate) allowed_actions: Vec<String>,
     pub(crate) preferred_actions: Vec<String>,
     pub(crate) forbidden_actions: Vec<String>,
@@ -395,6 +399,10 @@ impl MatrixContract {
     fn channel_visibility(&self) -> String {
         normalized_contract_field(&self.channel_visibility, "user_visible")
     }
+
+    fn evidence_profile(&self) -> String {
+        normalized_contract_field(&self.evidence_profile, "generic")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -411,6 +419,7 @@ pub(crate) struct GenericProfile {
     pub(crate) freshness: String,
     pub(crate) artifact_kind: String,
     pub(crate) channel_visibility: String,
+    pub(crate) evidence_profile: String,
     pub(crate) allowed_actions: Vec<String>,
     pub(crate) preferred_actions: Vec<String>,
     pub(crate) forbidden_actions: Vec<String>,
@@ -500,6 +509,10 @@ impl GenericProfile {
 
     fn channel_visibility(&self) -> String {
         normalized_contract_field(&self.channel_visibility, "user_visible")
+    }
+
+    fn evidence_profile(&self) -> String {
+        normalized_contract_field(&self.evidence_profile, "generic")
     }
 }
 
@@ -996,6 +1009,13 @@ impl<'a> MatchedContract<'a> {
         }
     }
 
+    pub(crate) fn evidence_profile(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.evidence_profile(),
+            Self::Generic(profile) => profile.evidence_profile(),
+        }
+    }
+
     fn match_name(&self) -> &str {
         match self {
             Self::Semantic(contract) => contract.semantic_kind.as_str(),
@@ -1182,6 +1202,7 @@ impl ContractMatrix {
                         &contract.freshness,
                         &contract.artifact_kind,
                         &contract.channel_visibility,
+                        &contract.evidence_profile,
                     );
                     validate_artifact_shape_contract(
                         &mut errors,
@@ -1264,6 +1285,7 @@ impl ContractMatrix {
                 &profile.freshness,
                 &profile.artifact_kind,
                 &profile.channel_visibility,
+                &profile.evidence_profile,
             );
             validate_artifact_shape_contract(
                 &mut errors,
@@ -1322,6 +1344,8 @@ impl ContractMatrix {
             input.push(':');
             input.push_str(&contract.channel_visibility());
             input.push(':');
+            input.push_str(&contract.evidence_profile());
+            input.push(':');
             input.push_str(&observation_extractors_stable_key(
                 &contract.observation_extractors(),
             ));
@@ -1356,6 +1380,8 @@ impl ContractMatrix {
             input.push_str(&profile.artifact_kind());
             input.push(':');
             input.push_str(&profile.channel_visibility());
+            input.push(':');
+            input.push_str(&profile.evidence_profile());
             input.push(':');
             input.push_str(&observation_extractors_stable_key(
                 &profile.observation_extractors(),
