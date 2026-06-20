@@ -527,3 +527,6 @@ llm_max_calls_per_task = 40
 # 单任务 LLM 累计耗时预算（秒）/ Per-task cumulative LLM wall-clock budget in seconds.
 # Mimo 等慢模型 normalizer + planner + synthesis + verifier 可能接近 8-10 分钟，默认给 15 分钟。
 llm_total_timeout_seconds = 900
+
+[nni]
+remote_nodes = ["https://api.matrixai.one"]
