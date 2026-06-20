@@ -1,6 +1,8 @@
 const NNI_REMOTE_JOIN_TIMEOUT_SECONDS: u64 = 20;
 const NNI_HEARTBEAT_INTERVAL_SECONDS: u64 = 15 * 60;
 const NNI_HEARTBEAT_POLL_SECONDS: u64 = 60;
+const NNI_HEARTBEAT_NETWORK_RETRY_LIMIT: usize = 3;
+const NNI_HEARTBEAT_NETWORK_RETRY_DELAY_SECONDS: u64 = 2;
 const NNI_HEARTBEAT_USER_KEY: &str = "clawd-nni-heartbeat";
 
 #[derive(Debug, Serialize)]
@@ -8,8 +10,11 @@ struct NniConfigResponse {
     remote_nodes: Vec<String>,
     joined: bool,
     heartbeat_interval_seconds: u64,
+    heartbeat_network_retry_limit: usize,
+    heartbeat_request_count: u64,
     last_heartbeat_at_ts: Option<u64>,
     last_heartbeat_error: Option<String>,
+    last_heartbeat_network_failures: u64,
     config_path: String,
 }
 
@@ -57,6 +62,36 @@ struct NniRemoteHeartbeatVerifyRequest {
     task_id: String,
     signature: String,
 }
+
+#[derive(Debug)]
+struct NniHeartbeatError {
+    message: String,
+    network: bool,
+}
+
+impl NniHeartbeatError {
+    fn network(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            network: true,
+        }
+    }
+
+    fn non_network(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            network: false,
+        }
+    }
+}
+
+impl std::fmt::Display for NniHeartbeatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for NniHeartbeatError {}
 
 async fn get_nni_config(
     State(state): State<AppState>,
@@ -410,6 +445,18 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
         .and_then(|value| value.get("last_heartbeat_at_ts"))
         .and_then(toml::Value::as_integer)
         .and_then(|value| u64::try_from(value).ok());
+    let heartbeat_request_count = parsed
+        .get("nni")
+        .and_then(|value| value.get("heartbeat_request_count"))
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or(0);
+    let last_heartbeat_network_failures = parsed
+        .get("nni")
+        .and_then(|value| value.get("last_heartbeat_network_failures"))
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or(0);
     let last_heartbeat_error = parsed
         .get("nni")
         .and_then(|value| value.get("last_heartbeat_error"))
@@ -421,8 +468,11 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
         remote_nodes,
         joined,
         heartbeat_interval_seconds: NNI_HEARTBEAT_INTERVAL_SECONDS,
+        heartbeat_network_retry_limit: NNI_HEARTBEAT_NETWORK_RETRY_LIMIT,
+        heartbeat_request_count,
         last_heartbeat_at_ts,
         last_heartbeat_error,
+        last_heartbeat_network_failures,
         config_path: path.display().to_string(),
     })
 }
@@ -461,12 +511,30 @@ fn write_nni_heartbeat_status(
     state: &AppState,
     heartbeat_at_ts: Option<u64>,
     error: Option<&str>,
+    request_count: Option<u64>,
+    network_failures: Option<u64>,
 ) -> anyhow::Result<NniConfigResponse> {
     let path = state.skill_rt.workspace_root.join("configs/config.toml");
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
     let mut output = raw;
     if let Some(ts) = heartbeat_at_ts {
         output = upsert_section_key_line(&output, "nni", "last_heartbeat_at_ts", &ts.to_string());
+    }
+    if let Some(count) = request_count {
+        output = upsert_section_key_line(
+            &output,
+            "nni",
+            "heartbeat_request_count",
+            &count.to_string(),
+        );
+    }
+    if let Some(count) = network_failures {
+        output = upsert_section_key_line(
+            &output,
+            "nni",
+            "last_heartbeat_network_failures",
+            &count.to_string(),
+        );
     }
     let rendered_error = toml::Value::String(error.unwrap_or_default().to_string()).to_string();
     output = upsert_section_key_line(&output, "nni", "last_heartbeat_error", &rendered_error);
@@ -498,34 +566,87 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    match run_nni_heartbeat_once(state, &config.remote_nodes).await {
+    match run_nni_heartbeat_with_network_retries(state, &config.remote_nodes).await {
         Ok(data) => {
             let heartbeat_ts = data
                 .get("request_time_ts")
                 .and_then(|value| value.as_u64())
                 .unwrap_or(now);
-            write_nni_heartbeat_status(state, Some(heartbeat_ts), None)?;
+            let heartbeat_count = data
+                .get("heartbeat_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_else(|| config.heartbeat_request_count.saturating_add(1));
+            write_nni_heartbeat_status(
+                state,
+                Some(heartbeat_ts),
+                None,
+                Some(heartbeat_count),
+                Some(0),
+            )?;
             tracing::info!(
-                "nni heartbeat accepted: ts={} node={}",
+                "nni heartbeat accepted: ts={} count={} node={}",
                 heartbeat_ts,
+                heartbeat_count,
                 data.get("node_url")
                     .and_then(|value| value.as_str())
                     .unwrap_or("")
             );
         }
         Err(err) => {
-            write_nni_heartbeat_status(state, None, Some(&err.to_string()))?;
-            return Err(err);
+            let heartbeat_at_ts = err.network.then_some(now);
+            let network_failures = Some(if err.network {
+                u64::try_from(NNI_HEARTBEAT_NETWORK_RETRY_LIMIT).unwrap_or(3)
+            } else {
+                0
+            });
+            write_nni_heartbeat_status(
+                state,
+                heartbeat_at_ts,
+                Some(&err.to_string()),
+                None,
+                network_failures,
+            )?;
+            return Err(err.into());
         }
     }
     Ok(())
 }
 
-async fn run_nni_heartbeat_once(state: &AppState, node_urls: &[String]) -> anyhow::Result<Value> {
+async fn run_nni_heartbeat_with_network_retries(
+    state: &AppState,
+    node_urls: &[String],
+) -> Result<Value, NniHeartbeatError> {
+    let mut last_error: Option<NniHeartbeatError> = None;
+    for attempt in 1..=NNI_HEARTBEAT_NETWORK_RETRY_LIMIT {
+        match run_nni_heartbeat_once(state, node_urls).await {
+            Ok(data) => return Ok(data),
+            Err(err) if err.network && attempt < NNI_HEARTBEAT_NETWORK_RETRY_LIMIT => {
+                tracing::warn!(
+                    "nni heartbeat network attempt {attempt}/{} failed: {err}",
+                    NNI_HEARTBEAT_NETWORK_RETRY_LIMIT
+                );
+                last_error = Some(err);
+                tokio::time::sleep(Duration::from_secs(
+                    NNI_HEARTBEAT_NETWORK_RETRY_DELAY_SECONDS,
+                ))
+                .await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| NniHeartbeatError::network("nni_heartbeat_network_retries_exhausted")))
+}
+
+async fn run_nni_heartbeat_once(
+    state: &AppState,
+    node_urls: &[String],
+) -> Result<Value, NniHeartbeatError> {
     let device_pubkey = nni_device_pubkey(state)
         .await
-        .map_err(|(_, error, data)| anyhow::anyhow!("{error}: {data}"))?;
+        .map_err(|(_, error, data)| NniHeartbeatError::non_network(format!("{error}: {data}")))?;
     let mut attempts = Vec::new();
+    let mut network_only = true;
     for node_url in node_urls {
         match run_nni_heartbeat_once_for_node(state, node_url, &device_pubkey).await {
             Ok(mut data) => {
@@ -538,23 +659,29 @@ async fn run_nni_heartbeat_once(state: &AppState, node_urls: &[String]) -> anyho
                 }
                 return Ok(data);
             }
-            Err(err) => attempts.push(json!({
-                "node_url": node_url,
-                "error": err.to_string(),
-            })),
+            Err(err) => {
+                if !err.network {
+                    network_only = false;
+                }
+                attempts.push(json!({
+                    "node_url": node_url,
+                    "network": err.network,
+                    "error": err.to_string(),
+                }));
+            }
         }
     }
-    Err(anyhow::anyhow!(
-        "nni_heartbeat_all_nodes_failed: {}",
-        Value::Array(attempts)
-    ))
+    Err(NniHeartbeatError {
+        message: format!("nni_heartbeat_all_nodes_failed: {}", Value::Array(attempts)),
+        network: network_only,
+    })
 }
 
 async fn run_nni_heartbeat_once_for_node(
     state: &AppState,
     node_url: &str,
     device_pubkey: &str,
-) -> anyhow::Result<Value> {
+) -> Result<Value, NniHeartbeatError> {
     let request_endpoint = format!("{}/v1/nni/server/heartbeat/request", node_url);
     let request_resp = state
         .core
@@ -566,51 +693,59 @@ async fn run_nni_heartbeat_once_for_node(
             client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
         })
         .send()
-        .await?;
+        .await
+        .map_err(|err| {
+            NniHeartbeatError::network(format!("heartbeat_request_network_failed: {err}"))
+        })?;
     let request_status = request_resp.status();
-    let request_body = request_resp.json::<ApiResponse<Value>>().await?;
+    let request_body = request_resp
+        .json::<ApiResponse<Value>>()
+        .await
+        .map_err(|err| {
+            NniHeartbeatError::non_network(format!("heartbeat_request_body_failed: {err}"))
+        })?;
     if !request_status.is_success() || !request_body.ok {
-        return Err(anyhow::anyhow!(
+        return Err(NniHeartbeatError::non_network(format!(
             "heartbeat_request_failed: status={} error={:?} data={:?}",
-            request_status,
-            request_body.error,
-            request_body.data
-        ));
+            request_status, request_body.error, request_body.data
+        )));
     }
     let request_data = request_body
         .data
-        .ok_or_else(|| anyhow::anyhow!("heartbeat_request_missing_data"))?;
+        .ok_or_else(|| NniHeartbeatError::non_network("heartbeat_request_missing_data"))?;
     let task_id = request_data
         .get("task_id")
         .and_then(|value| value.as_str())
         .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("heartbeat_task_id_missing"))?;
+        .ok_or_else(|| NniHeartbeatError::non_network("heartbeat_task_id_missing"))?;
     let challenge = request_data
         .get("challenge")
         .and_then(|value| value.as_str())
         .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("heartbeat_challenge_missing"))?;
+        .ok_or_else(|| NniHeartbeatError::non_network("heartbeat_challenge_missing"))?;
 
     let sign_output = run_nni_signature_helper(state, &[String::from("sign_challenge"), challenge])
         .await
-        .map_err(|err| anyhow::anyhow!("heartbeat_signature_helper_failed: {err}"))?;
+        .map_err(|err| {
+            NniHeartbeatError::non_network(format!("heartbeat_signature_helper_failed: {err}"))
+        })?;
     if !sign_output.ok {
-        return Err(anyhow::anyhow!(
-                "heartbeat_signature_failed: {}",
-                sign_output
-                    .error
-                    .or_else(
-                        || (!sign_output.stderr_tail.is_empty()).then_some(sign_output.stderr_tail)
-                    )
-                    .unwrap_or_else(|| "signature helper returned error".to_string())
-            ));
+        return Err(NniHeartbeatError::non_network(format!(
+            "heartbeat_signature_failed: {}",
+            sign_output
+                .error
+                .or_else(
+                    || (!sign_output.stderr_tail.is_empty()).then_some(sign_output.stderr_tail),
+                )
+                .unwrap_or_else(|| "signature helper returned error".to_string())
+        )));
     }
     let signature = sign_output
         .payload
         .get("signature")
         .and_then(|value| value.as_str())
         .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("heartbeat_signature_missing"))?;
+        .ok_or_else(|| NniHeartbeatError::non_network("heartbeat_signature_missing"))?;
 
     let verify_endpoint = format!("{}/v1/nni/server/heartbeat/verify", node_url);
     let verify_resp = state
@@ -620,20 +755,26 @@ async fn run_nni_heartbeat_once_for_node(
         .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
         .json(&NniRemoteHeartbeatVerifyRequest { task_id, signature })
         .send()
-        .await?;
+        .await
+        .map_err(|err| {
+            NniHeartbeatError::network(format!("heartbeat_verify_network_failed: {err}"))
+        })?;
     let verify_status = verify_resp.status();
-    let verify_body = verify_resp.json::<ApiResponse<Value>>().await?;
+    let verify_body = verify_resp
+        .json::<ApiResponse<Value>>()
+        .await
+        .map_err(|err| {
+            NniHeartbeatError::non_network(format!("heartbeat_verify_body_failed: {err}"))
+        })?;
     if !verify_status.is_success() || !verify_body.ok {
-        return Err(anyhow::anyhow!(
+        return Err(NniHeartbeatError::non_network(format!(
             "heartbeat_verify_failed: status={} error={:?} data={:?}",
-            verify_status,
-            verify_body.error,
-            verify_body.data
-        ));
+            verify_status, verify_body.error, verify_body.data
+        )));
     }
     verify_body
         .data
-        .ok_or_else(|| anyhow::anyhow!("heartbeat_verify_missing_data"))
+        .ok_or_else(|| NniHeartbeatError::non_network("heartbeat_verify_missing_data"))
 }
 
 fn toml_value_string_list(value: &toml::Value) -> Option<Vec<String>> {
