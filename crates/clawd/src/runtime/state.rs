@@ -1416,7 +1416,7 @@ impl AppState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClaimedTask {
     pub(crate) task_id: String,
     pub(crate) user_id: i64,
