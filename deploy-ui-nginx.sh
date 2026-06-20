@@ -340,6 +340,27 @@ openrc_available() {
   command -v rc-service >/dev/null 2>&1
 }
 
+find_nginx_bin() {
+  local candidate=""
+  if candidate="$(command -v nginx 2>/dev/null)"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  for candidate in /usr/sbin/nginx /sbin/nginx /usr/local/sbin/nginx /usr/local/bin/nginx /opt/homebrew/bin/nginx; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+nginx_available() {
+  find_nginx_bin >/dev/null 2>&1
+}
+
 nginx_ui_config_matches() {
   local conf_path="$1"
   local ui_root="$2"
@@ -355,7 +376,7 @@ nginx_ui_config_matches() {
 }
 
 ensure_nginx() {
-  if command -v nginx >/dev/null 2>&1; then
+  if nginx_available; then
     return 0
   fi
 
@@ -379,7 +400,7 @@ ensure_nginx() {
     exit 1
   fi
 
-  if ! command -v nginx >/dev/null 2>&1; then
+  if ! nginx_available; then
     echo "nginx still not found after install attempt."
     exit 1
   fi
@@ -434,17 +455,24 @@ NGX
 }
 
 reload_nginx() {
+  local nginx_bin=""
+  nginx_bin="$(find_nginx_bin || true)"
+
   echo "Reloading nginx..."
+  if [[ -z "$nginx_bin" ]]; then
+    echo "Warning: nginx reload skipped. Please install or reload nginx manually."
+    return
+  fi
 
   if systemctl_available; then
-    sudo nginx -t
+    sudo "$nginx_bin" -t
     sudo systemctl reload nginx
     echo "Nginx reloaded via systemctl."
     return
   fi
 
   if service_available; then
-    sudo nginx -t
+    sudo "$nginx_bin" -t
     if sudo service nginx reload >/dev/null 2>&1; then
       echo "Nginx reloaded via service."
       return
@@ -456,7 +484,7 @@ reload_nginx() {
   fi
 
   if openrc_available; then
-    sudo nginx -t
+    sudo "$nginx_bin" -t
     if sudo rc-service nginx reload >/dev/null 2>&1; then
       echo "Nginx reloaded via rc-service."
       return
@@ -468,15 +496,15 @@ reload_nginx() {
   fi
 
   if [[ "$HOST_OS" == "macos" ]] && command -v brew >/dev/null 2>&1; then
-    if nginx -t >/dev/null 2>&1 && brew services restart nginx >/dev/null 2>&1; then
+    if [[ -n "$nginx_bin" ]] && "$nginx_bin" -t >/dev/null 2>&1 && brew services restart nginx >/dev/null 2>&1; then
       echo "Nginx restarted via brew services."
       return
     fi
   fi
 
-  if command -v nginx >/dev/null 2>&1; then
-    sudo nginx -t
-    sudo nginx -s reload
+  if [[ -n "$nginx_bin" ]]; then
+    sudo "$nginx_bin" -t
+    sudo "$nginx_bin" -s reload
     echo "Nginx reloaded via nginx -s reload."
     return
   fi
