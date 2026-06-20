@@ -588,7 +588,10 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
     let one_sentence_synthesis = route.is_some_and(|route| {
         route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
     });
+    let current_is_recent_artifact_machine_fields =
+        recent_artifacts_delivery_is_machine_field_dump(current_delivery);
     if current_is_publishable_synthesis
+        && !current_is_recent_artifact_machine_fields
         && (one_sentence_synthesis
             || recent_artifacts_delivery_mentions_all_entries(current_delivery, answer.as_str()))
     {
@@ -613,6 +616,28 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn recent_artifacts_delivery_is_machine_field_dump(delivery: &str) -> bool {
+    let mut nonempty_lines = 0usize;
+    let mut machine_field_lines = 0usize;
+    for line in delivery.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        nonempty_lines += 1;
+        if line
+            .split_once('=')
+            .is_some_and(|(key, _)| recent_artifacts_machine_field_key(key.trim()))
+        {
+            machine_field_lines += 1;
+        }
+    }
+    nonempty_lines > 0 && machine_field_lines == nonempty_lines
+}
+
+fn recent_artifacts_machine_field_key(key: &str) -> bool {
+    key == "classification"
+        || key.starts_with("classification.")
+        || key.starts_with("recent_entries.")
+        || (key.starts_with("recent_entries[") && key.contains("]."))
 }
 
 fn recent_artifacts_delivery_mentions_all_entries(
