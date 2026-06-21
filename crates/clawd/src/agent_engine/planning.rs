@@ -514,6 +514,18 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_content_excerpt_summary_directory_log_slice"
         );
         return_deterministic_plan!(
+            content_excerpt_explicit_file_targets_deterministic_plan_result(
+                state,
+                goal,
+                route_result,
+                loop_state,
+                user_text,
+                Some(&original_user_text_for_policy),
+                auto_locator_path,
+            ),
+            "plan_deterministic_content_excerpt_explicit_file_targets"
+        );
+        return_deterministic_plan!(
             generic_path_content_log_analyze_deterministic_plan_result(
                 goal,
                 state,
