@@ -285,6 +285,16 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_web_search_summary"
     );
     return_deterministic_plan!(
+        task_control_get_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_task_control_get"
+    );
+    return_deterministic_plan!(
         service_status_deterministic_plan_result(
             state,
             goal,

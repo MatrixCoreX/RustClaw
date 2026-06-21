@@ -714,6 +714,32 @@ fn service_status_task_id_token_uses_task_control_get_plan() {
 }
 
 #[test]
+fn command_output_summary_task_id_token_uses_task_control_get_plan() {
+    let state = test_state_with_enabled_skills(&["git_basic", "task_control"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    let task_id = "00000000-0000-4000-8000-000000000001";
+    route.resolved_intent = format!("task_id={task_id} data.lifecycle.state");
+    let loop_state = LoopState::new(1);
+
+    let plan = task_control_get_deterministic_plan_result(
+        &state,
+        "observe task lifecycle fields",
+        Some(&route),
+        &loop_state,
+        &format!("task_id={task_id} data.lifecycle.can_poll"),
+    )
+    .expect("uuid task locator should use task_control.get before command summary tools");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "task_control", "get");
+    assert_eq!(args.get("task_id").and_then(Value::as_str), Some(task_id));
+}
+
+#[test]
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();

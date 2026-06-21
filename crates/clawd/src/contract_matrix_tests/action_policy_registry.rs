@@ -722,6 +722,28 @@ fn service_status_allows_task_control_list_observation() {
 }
 
 #[test]
+fn command_output_summary_allows_task_control_get_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::CommandOutputSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "task_control",
+        &serde_json::json!({
+            "action": "get",
+            "task_id": "00000000-0000-4000-8000-000000000001",
+        }),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "task_control.get");
+    assert_eq!(policy.contract_match, "command_output_summary");
+}
+
+#[test]
 fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
