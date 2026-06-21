@@ -44,7 +44,7 @@ codex_task_resume_release_smoke|logs_doc_transform_fixture_zh|covers:log_analyze
 
 codex_task_resume_release_smoke|archive_db_fixture_zh|covers:archive_basic,db_basic;requires_tool_call=true;local_readonly|列出 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 的成员并读取 notes.txt；再查看 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的表列表。|expect=notes.txt
 
-codex_task_resume_release_smoke|package_docker_safe_probe_zh|covers:package_manager,docker_basic;requires_tool_call=true;local_conditional|检测系统包管理器类型；再用只读方式检查 Docker 版本和容器列表；如果 Docker 不可用，返回结构化 unavailable，不要重试启动 Docker。|expect=Docker
+codex_task_resume_release_smoke|package_docker_safe_probe_zh|covers:package_manager,docker_basic;requires_tool_call=true;local_conditional|检测系统包管理器类型；再用只读方式检查 Docker 版本和容器列表；如果 Docker 不可用，返回结构化 unavailable，不要重试启动 Docker。|expect=docker
 
 codex_task_resume_release_smoke|kb_local_cycle_zh|covers:kb,doc_parse,fs_basic;requires_tool_call=true;local_side_effect|把 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 导入知识库 namespace=nl_codex_resume_smoke；搜索 service status；再查看这个 namespace 的统计信息。|expect=nl_codex_resume_smoke
 
