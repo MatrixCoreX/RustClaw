@@ -126,6 +126,45 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "audio_synthesize"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" } } }
+planner_capabilities = [
+  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path"], risk_level = "high" },
+]
+
+[[skills]]
+name = "image_generate"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "image"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, output_path = { type = "string" } } }
+planner_capabilities = [
+  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["output_path"], risk_level = "high" },
+]
+
+[[skills]]
+name = "image_edit"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "image"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["instruction"], properties = { instruction = { type = "string" }, image = { type = "string" }, output_path = { type = "string" } } }
+planner_capabilities = [
+  { name = "image.edit", action = "edit", effect = "external", required = ["instruction"], optional = ["image", "output_path"], risk_level = "high" },
+]
+
+[[skills]]
 name = "primary_reader"
 enabled = true
 kind = "runner"
@@ -180,6 +219,9 @@ fn test_state() -> AppState {
             "system_basic",
             "package_manager",
             "db_basic",
+            "audio_synthesize",
+            "image_generate",
+            "image_edit",
             "primary_reader",
             "fallback_reader",
             "photo_organize",
@@ -1926,3 +1968,6 @@ mod scope_persistence;
 
 #[path = "verifier_tests/ops_recipe_repair.rs"]
 mod ops_recipe_repair;
+
+#[path = "verifier_tests/media_artifact.rs"]
+mod media_artifact;

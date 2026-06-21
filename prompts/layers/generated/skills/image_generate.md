@@ -13,6 +13,12 @@
 - It also supports optional vendor/model routing and response language selection for the human-readable success text.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, and `outputs`.
 
+## Planner Selection Notes (from interface)
+- For requests that create a new image from text/style requirements and save or return the result, use `image_generate` / planner capability `image.generate`.
+- Do not synthesize images through shell drawing commands or local CLI fallbacks unless the user explicitly requests shell/CLI execution or configured image providers are unavailable and an explicit local fallback is enabled.
+- Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.outputs`.
+
+
 ## Config Entry Points (from interface)
 - `configs/image.toml` -> `[image_generation]` controls provider routing, model defaults, output limits, and `local_fallback_enabled`.
 - `IMAGE_GENERATION_LOCAL_FALLBACK=1|true|on|yes` overrides `local_fallback_enabled` for explicit smoke/NL-test continuity when all configured providers fail.

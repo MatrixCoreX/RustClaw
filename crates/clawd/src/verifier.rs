@@ -460,6 +460,31 @@ fn plan_has_generated_file_path_write_step(state: &AppState, plan_result: &PlanR
     })
 }
 
+fn media_artifact_step_writes_own_output(state: &AppState, step: &PlanStep) -> bool {
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return false;
+    }
+    let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+    if !matches!(
+        normalized_skill.as_str(),
+        "audio_synthesize" | "image_generate" | "image_edit" | "video_generate" | "music_generate"
+    ) {
+        return false;
+    }
+    step.args
+        .get("output_path")
+        .or_else(|| step.args.get("path"))
+        .and_then(|value| value.as_str())
+        .is_some_and(|path| !path.trim().is_empty())
+}
+
+fn plan_has_media_artifact_output_step(state: &AppState, plan_result: &PlanResult) -> bool {
+    plan_result
+        .steps
+        .iter()
+        .any(|step| media_artifact_step_writes_own_output(state, step))
+}
+
 fn generated_file_path_report_target_path(
     state: &AppState,
     route: &crate::RouteResult,
@@ -516,6 +541,7 @@ fn apply_generated_file_path_report_write_repair(
 ) {
     if !route_requires_generated_file_path_write(route)
         || plan_has_generated_file_path_write_step(state, plan_result)
+        || plan_has_media_artifact_output_step(state, plan_result)
     {
         return;
     }
@@ -525,6 +551,9 @@ fn apply_generated_file_path_report_write_repair(
     let Some(target_path) = generated_file_path_report_target_path(state, route) else {
         return;
     };
+    if crate::media_artifact_paths::is_media_artifact_path(&target_path) {
+        return;
+    }
     let Some((insert_idx, dependency)) = generated_file_path_report_insert_index(plan_result)
     else {
         return;

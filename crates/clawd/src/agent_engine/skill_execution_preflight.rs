@@ -59,18 +59,16 @@ pub(super) fn validate_skill_output_contract(
     let Some((output_kind, schema)) = state.skill_output_contract(normalized_skill) else {
         return Ok(());
     };
-    let candidate = if output_kind == claw_core::skill_registry::OutputKind::Text {
-        if schema.get("type").and_then(|v| v.as_str()) == Some("object")
-            && schema
-                .get("properties")
-                .and_then(|v| v.as_object())
-                .map(|props| props.contains_key("text"))
-                .unwrap_or(false)
-        {
-            json!({ "text": output })
-        } else {
-            Value::String(output.to_string())
-        }
+    let schema_accepts_text_object = schema.get("type").and_then(|v| v.as_str()) == Some("object")
+        && schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .map(|props| props.contains_key("text"))
+            .unwrap_or(false);
+    let candidate = if schema_accepts_text_object {
+        json!({ "text": output })
+    } else if output_kind == claw_core::skill_registry::OutputKind::Text {
+        Value::String(output.to_string())
     } else {
         crate::parse_llm_json_raw_or_any::<Value>(output)
             .unwrap_or_else(|| Value::String(output.to_string()))
@@ -158,6 +156,11 @@ pub(super) fn contract_matrix_action_policy_error(
     ) {
         return None;
     }
+    if let Some(err) =
+        generated_media_path_run_cmd_policy_error(loop_state, normalized_skill, classification_args)
+    {
+        return Some(err);
+    }
     let policy = crate::contract_matrix::action_policy_for_output_contract(
         loop_state.output_contract.as_ref(),
         normalized_skill,
@@ -221,6 +224,49 @@ pub(super) fn contract_matrix_action_policy_error(
             "artifact_kind": policy.artifact_kind,
             "channel_visibility": policy.channel_visibility,
             "evidence_profile": policy.evidence_profile,
+        })),
+    ))
+}
+
+fn generated_media_path_run_cmd_policy_error(
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    classification_args: &Value,
+) -> Option<String> {
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
+        || run_cmd_is_literal_user_command(classification_args)
+    {
+        return None;
+    }
+    let output_contract = loop_state.output_contract.as_ref()?;
+    if output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFilePathReport
+        || !crate::media_artifact_paths::is_media_artifact_path(&output_contract.locator_hint)
+    {
+        return None;
+    }
+    let preferred_actions = [
+        "image_edit",
+        "image_generate",
+        "audio_synthesize",
+        "video_generate",
+        "music_generate",
+    ];
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_action_rejected",
+        "media_artifact_requires_media_skill",
+        None,
+        Some(json!({
+            "reason_code": "media_artifact_requires_media_skill",
+            "message_key": "clawd.contract.media_artifact_requires_media_skill",
+            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
+            "decision": crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed.as_str(),
+            "action": "run_cmd",
+            "contract_match": crate::OutputSemanticKind::GeneratedFilePathReport.as_str(),
+            "preferred_actions": preferred_actions,
+            "target_path": output_contract.locator_hint,
+            "final_answer_shape": "single_path",
+            "policy_mode": "enforce",
         })),
     ))
 }

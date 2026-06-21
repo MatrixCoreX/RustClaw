@@ -49,6 +49,7 @@ mod intent_router;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
+mod media_artifact_paths;
 mod memory;
 mod observed_facts;
 mod output_contract_verifier;

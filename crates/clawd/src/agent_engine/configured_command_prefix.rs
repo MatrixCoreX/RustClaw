@@ -1202,6 +1202,7 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         auto_locator_path,
         actions,
     );
+    let actions = strip_media_artifact_text_overwrites(&state.skill_rt.workspace_root, actions);
     let actions =
         strip_unrequested_config_edit_actions(route_result, user_text, original_user_text, actions);
     let actions = normalize_terminal_delivery_actions(

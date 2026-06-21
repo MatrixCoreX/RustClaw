@@ -1392,6 +1392,56 @@ fn generated_file_path_report_allows_command_then_write_and_returns_single_path_
 }
 
 #[test]
+fn generated_file_path_report_allows_image_generation_path_output() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Scalar,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "document/skill_generate_smoke.png".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "image_generate",
+        &serde_json::json!({
+            "prompt": "minimal RustClaw smoke test card",
+            "output_path": "document/skill_generate_smoke.png"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "image_generate");
+    assert_eq!(policy.contract_match, "generated_file_path_report");
+    assert_eq!(policy.final_answer_shape, "single_path");
+}
+
+#[test]
+fn generated_file_path_report_allows_audio_synthesis_path_output() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GeneratedFilePathReport,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Scalar,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "document/skill_audio_smoke.mp3".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "audio_synthesize",
+        &serde_json::json!({
+            "text": "RustClaw skill test passed",
+            "output_path": "document/skill_audio_smoke.mp3"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "audio_synthesize");
+    assert_eq!(policy.contract_match, "generated_file_path_report");
+    assert_eq!(policy.final_answer_shape, "single_path");
+}
+
+#[test]
 fn filesystem_mutation_result_allows_directory_creation_status() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

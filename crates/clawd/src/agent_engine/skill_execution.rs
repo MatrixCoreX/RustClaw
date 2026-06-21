@@ -155,6 +155,50 @@ fn structured_extra_evidence_output(out: &str, structured_extra: Option<&Value>)
     )
 }
 
+fn register_structured_extra_file_path_outputs(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    normalized_skill: &str,
+    structured_extra: Option<&Value>,
+) {
+    let Some(extra) = structured_extra.and_then(Value::as_object) else {
+        return;
+    };
+    let mut paths = Vec::new();
+    if let Some(path) = extra
+        .get("output_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        paths.push(path.to_string());
+    }
+    if let Some(outputs) = extra.get("outputs").and_then(Value::as_array) {
+        for item in outputs {
+            let Some(path) = item
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if !paths.iter().any(|existing| existing == path) {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    for path in paths {
+        let mut source = String::from("skill");
+        source.push('.');
+        source.push_str(normalized_skill);
+        source.push('.');
+        source.push_str("extra");
+        register_file_path_output(loop_state, global_step, step_in_round, &source, &path);
+    }
+}
+
 fn admitted_extra_field_exists(extra: &Value, field: &str) -> bool {
     let mut field = field.trim();
     if field.is_empty() {
@@ -718,6 +762,13 @@ async fn handle_skill_step_success(
             path,
         );
     }
+    register_structured_extra_file_path_outputs(
+        loop_state,
+        global_step,
+        step_in_round,
+        normalized_skill,
+        structured_extra,
+    );
     crate::append_subtask_result(
         &mut loop_state.subtask_results,
         global_step,
