@@ -511,6 +511,38 @@ async fn nni_heartbeat_errors(
     }
 }
 
+async fn nni_clear_heartbeat_errors(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    };
+
+    match clear_nni_heartbeat_error_records(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => nni_join_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nni_heartbeat_errors_clear_failed",
+            json!({"status": "heartbeat_errors_clear_failed", "error": err.to_string()}),
+        ),
+    }
+}
+
 async fn nni_device_pubkey(state: &AppState) -> Result<String, (StatusCode, &'static str, Value)> {
     let pubkey_output = match run_nni_signature_helper(state, &[String::from("pubkey")]).await {
         Ok(output) if output.ok => output,
@@ -690,6 +722,28 @@ fn read_nni_heartbeat_error_records(
         }
     }
     Ok(records)
+}
+
+fn clear_nni_heartbeat_error_records(state: &AppState) -> anyhow::Result<Value> {
+    let existing_count = read_nni_heartbeat_error_records(state)?.len();
+    let path = state.skill_rt.workspace_root.join("configs/config.toml");
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+    let mut output = raw;
+    output = upsert_section_key_line(
+        &output,
+        "nni",
+        "last_heartbeat_error",
+        &toml::Value::String(String::new()).to_string(),
+    );
+    output = upsert_section_key_line(&output, "nni", "last_heartbeat_error_at_ts", "0");
+    output = upsert_section_key_line(&output, "nni", "last_heartbeat_network_failures", "0");
+    output = upsert_section_key_line(&output, "nni", "heartbeat_error_records", "[]");
+    write_runtime_config_file(state, &output)?;
+    Ok(json!({
+        "status": "nni_heartbeat_errors_cleared",
+        "deleted_records": existing_count,
+        "config_path": path.display().to_string(),
+    }))
 }
 
 fn parse_nni_heartbeat_error_records(parsed: &toml::Value) -> Vec<NniHeartbeatErrorRecord> {

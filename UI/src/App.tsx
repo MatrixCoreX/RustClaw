@@ -1201,7 +1201,9 @@ export default function App() {
   const [nniHeartbeatErrorsTotal, setNniHeartbeatErrorsTotal] = useState(0);
   const [nniHeartbeatErrorsTotalPages, setNniHeartbeatErrorsTotalPages] = useState(1);
   const [nniHeartbeatErrorsLoading, setNniHeartbeatErrorsLoading] = useState(false);
+  const [nniHeartbeatErrorsClearing, setNniHeartbeatErrorsClearing] = useState(false);
   const [nniHeartbeatErrorsError, setNniHeartbeatErrorsError] = useState<string | null>(null);
+  const [nniHeartbeatErrorsMessage, setNniHeartbeatErrorsMessage] = useState<string | null>(null);
   const [nniConfigLoading, setNniConfigLoading] = useState(false);
   const [nniConfigSaving, setNniConfigSaving] = useState(false);
   const [nniConfigError, setNniConfigError] = useState<string | null>(null);
@@ -2960,6 +2962,7 @@ export default function App() {
     if (!silent) {
       setNniHeartbeatErrorsLoading(true);
       setNniHeartbeatErrorsError(null);
+      setNniHeartbeatErrorsMessage(null);
     }
     try {
       const params = new URLSearchParams({
@@ -2996,6 +2999,53 @@ export default function App() {
       if (!silent) setNniHeartbeatErrorsError(message);
     } finally {
       if (!silent) setNniHeartbeatErrorsLoading(false);
+    }
+  };
+
+  const clearNniHeartbeatErrors = async () => {
+    const confirmed = window.confirm(
+      t(
+        "确定清理本机心跳错误记录吗？这只会清理本机页面里的错误历史，不会修改远程 NNI 服务端请求记录。",
+        "Clear local heartbeat error history? This only clears the local error history shown here and will not change remote NNI server request records.",
+      ),
+    );
+    if (!confirmed) return;
+    setNniHeartbeatErrorsClearing(true);
+    setNniHeartbeatErrorsError(null);
+    setNniHeartbeatErrorsMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/heartbeat/errors/clear`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const rawText = await res.text();
+      let body: ApiResponse<{ deleted_records?: number }>;
+      try {
+        body = JSON.parse(rawText) as ApiResponse<{ deleted_records?: number }>;
+      } catch {
+        throw new Error(t("NNI 心跳错误清理接口返回了非 JSON 内容。", "The NNI heartbeat error clear endpoint returned non-JSON content."));
+      }
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `NNI heartbeat errors clear failed (${res.status})`);
+      }
+      const deletedRecords = body.data?.deleted_records ?? 0;
+      setNniHeartbeatErrors([]);
+      setNniHeartbeatErrorsPage(1);
+      setNniHeartbeatErrorsTotal(0);
+      setNniHeartbeatErrorsTotalPages(1);
+      setNniHeartbeatErrorsMessage(
+        t(
+          `已清理 ${deletedRecords} 条本机心跳错误记录。`,
+          `${deletedRecords} local heartbeat error records cleared.`,
+        ),
+      );
+      await fetchNniConfig(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniHeartbeatErrorsError(message);
+    } finally {
+      setNniHeartbeatErrorsClearing(false);
     }
   };
 
@@ -6770,21 +6820,41 @@ export default function App() {
                       )}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage)}
-                    disabled={nniHeartbeatErrorsLoading}
-                    className="theme-secondary-btn px-3 py-2 text-xs"
-                  >
-                    {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    {t("刷新错误", "Refresh errors")}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage)}
+                      disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing}
+                      className="theme-secondary-btn px-3 py-2 text-xs"
+                    >
+                      {nniHeartbeatErrorsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("刷新错误", "Refresh errors")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void clearNniHeartbeatErrors()}
+                      disabled={nniHeartbeatErrorsLoading || nniHeartbeatErrorsClearing || nniHeartbeatErrorsTotal === 0}
+                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      title={t(
+                        "只清理本机保存的心跳错误历史，不会修改远程服务端请求记录。",
+                        "Only clears local heartbeat error history. Remote server request records are not changed.",
+                      )}
+                    >
+                      {nniHeartbeatErrorsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {t("清理错误", "Clear errors")}
+                    </button>
+                  </div>
                 </div>
 
                 {nniHeartbeatErrorsError ? (
                   <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
                     {t("NNI 心跳错误暂时无法载入：", "NNI heartbeat errors could not be loaded: ")}
                     {nniHeartbeatErrorsError}
+                  </p>
+                ) : null}
+                {nniHeartbeatErrorsMessage ? (
+                  <p className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
+                    {nniHeartbeatErrorsMessage}
                   </p>
                 ) : null}
 
