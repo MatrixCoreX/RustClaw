@@ -187,11 +187,21 @@ timeout_seconds = 60
 # top_p               = 0.9
 
 # 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
-# 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
+# 建议修改/Recommended change: 默认使用官方最新 `MiniMax-M3`；模型池按
+# MiniMax 当前 M-series 兼容列表维护.
 # api_format：省略或空则默认 openai_compat（/chat/completions + Bearer）；设为 anthropic_claude 则 /messages + x-api-key（clawd 合成 vendor-minimax）.
-# 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
+# 能力/Capabilities: MiniMax-M3 是 1M context 的原生多模态语言模型；
+# OpenAI-compatible / Anthropic-compatible 文本接口支持 text、image、video
+# 输入（M2.x 仅 text/tool-call）。音频输入不由 M3 文本接口支持；语音合成
+# 仍走 configs/audio.toml 的 speech-2.8-*，图片生成/编辑仍走 configs/image.toml
+# 的 image-01。
+# 风险/Risk: M3 图片/视频理解走 chat-compatible content parts；本仓库文生图、
+# 图像编辑不是 M3 能力，不能把 M3 填到 image_generation/image_edit 模型.
 [llm.minimax]
 api_key = ""
+# Endpoint note: MiniMax global docs show https://api.minimax.io/v1; this
+# deployment keeps the user-provided https://api.minimaxi.com/v1 endpoint.
+# Switch only when the account region / gateway requires the global endpoint.
 base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 2
 model = "MiniMax-M3"
@@ -203,9 +213,12 @@ context_window_tokens = 1000000
 models = [
     "MiniMax-M3",
     "MiniMax-M2.7",
+    "MiniMax-M2.7-highspeed",
     "MiniMax-M2.5",
-    "MiniMax-M2.5-thinking",
-    "MiniMax-M2.5-coder",
+    "MiniMax-M2.5-highspeed",
+    "MiniMax-M2.1",
+    "MiniMax-M2.1-highspeed",
+    "MiniMax-M2",
 ]
 # MiniMax text routing/model calls can be slow under load; keep the per-request
 # window aligned with worker.llm_total_timeout_seconds instead of cutting off
