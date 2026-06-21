@@ -701,6 +701,9 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
         || !route_expects_terminal_user_answer(route)
         || route_requests_path_metadata_compare(route)
         || route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
+        || route.output_contract.semantic_kind
+            == crate::OutputSemanticKind::FilesystemMutationResult
     {
         return None;
     }

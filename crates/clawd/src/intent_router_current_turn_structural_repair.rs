@@ -373,6 +373,12 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("config_mutation_structural_contract_repair");
     }
 
+    if let Some(repair_reason) =
+        apply_fs_basic_lifecycle_machine_contract_repair(output_contract, req)
+    {
+        reason = Some(repair_reason);
+    }
+
     if let Some(locator_hint) = structured_config_keys_contract_from_surface(output_contract, req) {
         output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
         output_contract.requires_content_evidence = true;
@@ -621,6 +627,41 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+pub(super) fn apply_fs_basic_lifecycle_machine_contract_repair(
+    output_contract: &mut IntentOutputContract,
+    machine_context: &str,
+) -> Option<&'static str> {
+    if !command_summary_declares_fs_basic_lifecycle(output_contract, machine_context) {
+        return None;
+    }
+    output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    if matches!(
+        output_contract.response_shape,
+        OutputResponseShape::Free | OutputResponseShape::Scalar
+    ) {
+        output_contract.response_shape = OutputResponseShape::Strict;
+    }
+    Some("fs_basic_lifecycle_contract_repair")
+}
+
+fn command_summary_declares_fs_basic_lifecycle(
+    output_contract: &IntentOutputContract,
+    machine_context: &str,
+) -> bool {
+    output_contract.semantic_kind == OutputSemanticKind::CommandOutputSummary
+        && output_contract.requires_content_evidence
+        && matches!(output_contract.locator_kind, OutputLocatorKind::Path)
+        && !output_contract.locator_hint.trim().is_empty()
+        && machine_context.contains("fs_basic.make_dir")
+        && machine_context.contains("write_text")
+        && machine_context.contains("append_text")
+        && machine_context.contains("read_text_range")
+        && machine_context.contains("remove_path")
 }
 
 fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -> bool {

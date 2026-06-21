@@ -740,6 +740,80 @@ fn command_output_summary_task_id_token_uses_task_control_get_plan() {
 }
 
 #[test]
+fn command_output_summary_does_not_shortcut_to_explicit_file_read_plan() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke/note.txt".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "filesystem mutation result should not be read-only shortcut",
+        Some(&route),
+        &loop_state,
+        "tmp/nl_codex_resume_smoke/note.txt",
+        None,
+        None,
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = filesystem_mutation_deterministic_plan_result(
+        &state,
+        "scratch filesystem lifecycle",
+        Some(&route),
+        &loop_state,
+        "在 tmp/nl_codex_resume_smoke 创建目录，写 note.txt 内容 alpha，再追加 beta，读取确认两行都存在，然后删除这个临时目录；只汇总结构化结果。",
+    )
+    .expect("scratch path mutation should get a bounded fs_basic lifecycle plan");
+
+    assert_eq!(plan.steps.len(), 7);
+    let make_dir = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&make_dir, "fs_basic", "make_dir");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("tmp/nl_codex_resume_smoke")
+    );
+    let write = plan.steps[1].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&write, "fs_basic", "write_text");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("tmp/nl_codex_resume_smoke/note.txt")
+    );
+    assert_eq!(args.get("content").and_then(Value::as_str), Some("alpha\n"));
+    let append = plan.steps[2].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&append, "fs_basic", "append_text");
+    assert_eq!(args.get("content").and_then(Value::as_str), Some("beta\n"));
+    let remove = plan.steps[4].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&remove, "fs_basic", "remove_path");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("tmp/nl_codex_resume_smoke")
+    );
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("directory")
+    );
+    assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();

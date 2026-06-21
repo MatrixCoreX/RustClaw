@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[test]
 fn archive_read_contract_recovers_explicit_archive_path_when_locator_hint_is_empty() {
@@ -509,8 +510,8 @@ fn lightweight_prompt_mentions_archive_basic_for_archive_contracts() {
     ])
     .with_prompt_layers_installed();
     let task = test_task();
-    let quick_index = build_lightweight_skill_quick_index_text(&state, &task);
-    let playbooks = build_lightweight_skill_playbooks_text(&state, &task);
+    let quick_index = build_lightweight_skill_quick_index_text(&state, &task, None);
+    let playbooks = build_lightweight_skill_playbooks_text(&state, &task, None);
     assert!(quick_index.contains("archive_basic"));
     assert!(playbooks.contains("archive_basic"));
     assert!(playbooks.contains("`pack`") || playbooks.contains("packing"));
@@ -543,8 +544,8 @@ fn lightweight_prompt_includes_registry_planner_metadata() {
     });
     let state = state.with_prompt_layers_installed();
     let task = test_task();
-    let quick_index = build_lightweight_skill_quick_index_text(&state, &task);
-    let playbooks = build_lightweight_skill_playbooks_text(&state, &task);
+    let quick_index = build_lightweight_skill_quick_index_text(&state, &task, None);
+    let playbooks = build_lightweight_skill_playbooks_text(&state, &task, None);
     assert!(quick_index.contains("archive_basic"));
     assert!(quick_index.contains("planner_kind: tool"));
     assert!(quick_index.contains("semantic_tags: archive_list"));
@@ -557,6 +558,24 @@ fn lightweight_prompt_includes_registry_planner_metadata() {
     assert!(playbooks.contains("validation_actions: list"));
     assert!(playbooks.contains("### service_control"));
     assert!(playbooks.contains("semantic_tags: service_status"));
+}
+
+#[test]
+fn lightweight_prompt_respects_contract_skill_scope() {
+    let state = test_state_with_enabled_skills(&["fs_basic", "archive_basic", "docker_basic"])
+        .with_prompt_layers_installed();
+    let task = test_task();
+    let scope = BTreeSet::from(["fs_basic".to_string()]);
+
+    let quick_index = build_lightweight_skill_quick_index_text(&state, &task, Some(&scope));
+    let playbooks = build_lightweight_skill_playbooks_text(&state, &task, Some(&scope));
+
+    assert!(quick_index.contains("fs_basic"));
+    assert!(playbooks.contains("fs_basic"));
+    assert!(!quick_index.contains("archive_basic"));
+    assert!(!playbooks.contains("archive_basic"));
+    assert!(!quick_index.contains("docker_basic"));
+    assert!(!playbooks.contains("docker_basic"));
 }
 
 #[test]

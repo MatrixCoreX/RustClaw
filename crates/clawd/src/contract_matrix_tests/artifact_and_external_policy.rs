@@ -122,6 +122,48 @@ fn filesystem_mutation_result_allows_directory_creation_status() {
 }
 
 #[test]
+fn filesystem_mutation_result_allows_path_removal_status() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "tmp/nl_skill_tmp".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "fs_basic",
+        &serde_json::json!({"action":"remove_path","path":"tmp/nl_skill_tmp"}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "fs_basic.remove_path");
+    assert_eq!(policy.contract_match, "filesystem_mutation_result");
+    assert_eq!(policy.final_answer_shape, "lifecycle_result");
+}
+
+#[test]
+fn filesystem_mutation_result_allows_readback_evidence() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "tmp/nl_skill_tmp/note.txt".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "fs_basic",
+        &serde_json::json!({"action":"read_text_range","path":"tmp/nl_skill_tmp/note.txt","mode":"head","n":20}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "fs_basic.read_text_range");
+    assert_eq!(policy.contract_match, "filesystem_mutation_result");
+    assert_eq!(policy.final_answer_shape, "lifecycle_result");
+}
+
+#[test]
 fn generated_file_delivery_allows_existing_file_path_facts() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
