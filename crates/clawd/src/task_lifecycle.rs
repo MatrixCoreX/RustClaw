@@ -81,12 +81,19 @@ pub(crate) fn task_query_lifecycle_projection(
     result_json: Option<&Value>,
     updated_at_ts: Option<i64>,
 ) -> Value {
-    let mut lifecycle = result_json
-        .and_then(extract_task_lifecycle_payload)
+    let extracted_lifecycle = result_json.and_then(extract_task_lifecycle_payload_with_source);
+    let state_source = extracted_lifecycle
+        .as_ref()
+        .map(|(_, source)| *source)
+        .unwrap_or("db_status_projection");
+    let mut lifecycle = extracted_lifecycle
+        .map(|(payload, _)| payload)
         .unwrap_or_else(|| fallback_task_lifecycle_payload(db_status));
     if let Some(obj) = lifecycle.as_object_mut() {
         obj.entry("schema_version".to_string()).or_insert(json!(1));
         obj.insert("db_status".to_string(), json!(db_status.trim()));
+        obj.entry("state_source".to_string())
+            .or_insert(json!(state_source));
         obj.entry("can_poll".to_string()).or_insert(json!(true));
         let state = obj
             .get("state")
@@ -100,6 +107,7 @@ pub(crate) fn task_query_lifecycle_projection(
         if let Some(result_json) = result_json {
             append_lifecycle_product_contract_fields(obj, result_json, &state);
         }
+        append_lifecycle_next_action_fields(obj, &state);
         if active_state {
             if let Some(updated_at_ts) = updated_at_ts.filter(|ts| *ts > 0) {
                 obj.entry("last_heartbeat_ts".to_string())
@@ -560,16 +568,20 @@ fn active_resume_lease_expires_at(
     (expires_at > now_ts).then_some(expires_at)
 }
 
-fn extract_task_lifecycle_payload(result_json: &Value) -> Option<Value> {
+fn extract_task_lifecycle_payload_with_source(
+    result_json: &Value,
+) -> Option<(Value, &'static str)> {
     result_json
         .get("task_lifecycle")
         .filter(|value| value.is_object())
         .cloned()
+        .map(|payload| (payload, "task_lifecycle_payload"))
         .or_else(|| {
             result_json
                 .pointer("/task_journal/summary/task_lifecycle")
                 .filter(|value| value.is_object())
                 .cloned()
+                .map(|payload| (payload, "task_journal_summary"))
         })
 }
 
@@ -712,6 +724,37 @@ fn append_lifecycle_product_contract_fields(
             .or_insert(json!(job.expires_at));
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
+    }
+}
+
+fn append_lifecycle_next_action_fields(obj: &mut serde_json::Map<String, Value>, state: &str) {
+    let state = state.trim();
+    let next_action_kind =
+        if matches!(state, "waiting" | "background") && obj.get("poll_ref").is_some() {
+            Some("poll_async_job")
+        } else if matches!(state, "waiting" | "background") && obj.get("checkpoint_id").is_some() {
+            Some("resume_checkpoint")
+        } else if state == "needs_user" {
+            Some("await_user_input")
+        } else if matches!(state, "queued" | "running") {
+            Some("poll_task")
+        } else if matches!(state, "succeeded" | "failed" | "cancelled") {
+            Some("inspect_result")
+        } else {
+            None
+        };
+    if let Some(kind) = next_action_kind {
+        obj.entry("next_action_kind".to_string())
+            .or_insert(json!(kind));
+    }
+    let next_action_ref = obj
+        .get("poll_ref")
+        .or_else(|| obj.get("checkpoint_id"))
+        .or_else(|| obj.get("db_status"))
+        .cloned();
+    if let Some(next_action_ref) = next_action_ref {
+        obj.entry("next_action_ref".to_string())
+            .or_insert(next_action_ref);
     }
 }
 
