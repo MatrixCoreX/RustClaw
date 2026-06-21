@@ -15,7 +15,6 @@ use templates::{
     TemplatePlaceholderScope,
 };
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerifyMode {
     ObserveOnly,
@@ -201,7 +200,6 @@ pub(crate) struct VerifyInput<'a> {
     pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct VerifyResult {
     pub(crate) mode: VerifyMode,

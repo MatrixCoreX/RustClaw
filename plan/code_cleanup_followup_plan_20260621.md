@@ -17,8 +17,8 @@
 
 - `plan/` 根目录当前仅剩本计划，归档目录下计划不计入当前未完成项。
 - 新增 `video_generate` / `music_generate` 后已完成真实 dry-run 验证：直接 skill 进程、`skill-runner`、`clawd /v1/tasks kind=run_skill` 均通过；registry reload 曾暴露 `output_kind = "video" / "audio"` 不属于当前 `OutputKind` 枚举，已修为 `file` 并提交 `058314a0`。
-- 当前 `#[allow(dead_code)]` 仍集中在 trace / journal / compatibility enum、部分 skill 协议字段和少量历史 fallback 边界；先推进可独立验证、低风险的协议字段清理，再处理 clawd trace/journal 结构。
-- 当前 `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills | wc -l` 在本轮 A0 清理后为 `44`。
+- 当前 `#[allow(dead_code)]` 清理已完成：skill 协议字段、trace / journal、runtime reload 兼容快照、contract 旧占位、fallback 旧占位均已改为实际读取、字段收窄、测试专用或物理删除。
+- 当前 `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills` 返回空结果；`RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets` 通过。
 
 清理目标不是扩大重构面，而是减少旧迁移残留、兼容命名、dead-code allow 和 planner 后处理补丁。所有改动必须继续满足多语言 agent 约束：不新增自然语言硬匹配，不新增硬编码用户可见回复模板。
 
@@ -40,11 +40,18 @@
   - 2026-06-21：`browser_web`、`extension_manager`、`photo_organize` 的未读协议字段改为 `_field` + `serde(rename=...)`，保持 JSON 协议不变；`photo_organize.context` 保留原名，因为语言解析仍读取它。
   - 2026-06-21：`extension_manager` 生成外部 skill 模板同步改为 `_context/_user_id/_chat_id`，避免新生成代码继续带 dead-code allow。
   - 验证：`cargo fmt --check`、`cargo test -p browser-web-skill`、`cargo check -p extension-manager-skill -p photo-organize-skill`、`python3 scripts/check_long_files.py` 通过。
-- [ ] 审核 `crates/clawd/src/task_context_builder.rs`
+- [x] A1：清理 clawd 生产代码剩余 `#[allow(dead_code)]`。
+  - 2026-06-21：`task_context_builder.rs`、`pipeline_types.rs`、`post_route_policy.rs`、`verifier.rs` 的整块 dead-code 放行已移除；`PlanStep.why` 改为进入 journal plan trace，执行仍只消费机器字段。
+  - 2026-06-21：`task_journal.rs` 的 trace / summary 结构整块放行已移除；未构造的旧 finalizer stage / fallback 枚举值和旧 helper 方法已删除；fallback 维持真实 `null` 边界。
+  - 2026-06-21：`runtime/state.rs` 中未读 reload 快照字段改为 `_field`，旧 `note_task_llm_call` / `note_task_llm_elapsed` 无调用方，已删除。
+  - 2026-06-21：`rss_fetch` 测试 helper 改为 `#[cfg(test)]`；`crypto.require_explicit_send` 配置兼容字段改为 `_require_explicit_send + serde(rename=...)`；`photo_organize` 平台枚举改为目标平台 `cfg`；`finalize/helpers.rs` 测试 schema 未读字段改为 `_field + serde(rename=...)`；`output_contract_verifier.reason_code()` 限定为测试；未使用的 `OutputContractVerdict::label()`、`RepairSignalSource` 占位、`UserResponseKind::LlmUnavailable`、TaskContract 无构造占位已删除。
+  - 2026-06-21：`bootstrap/prompts.rs` 的 `PromptReloadReport` 改为运行期 SIGHUP summary 日志实际读取，不再需要 dead-code 放行。
+  - 验证：`cargo fmt --check`、`RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`、`RUSTFLAGS="-D warnings" cargo check -p rss-fetch-skill -p crypto-skill -p photo-organize-skill --all-targets` 通过。
+- [x] 审核 `crates/clawd/src/task_context_builder.rs`
   - `PlannerContextView`
   - `TaskContextBundle`
   - 判断是否可以通过实际调用消除 `allow(dead_code)`，或拆出只供 journal summary 使用的轻量结构。
-- [ ] 审核 `crates/clawd/src/task_journal.rs`
+- [x] 审核 `crates/clawd/src/task_journal.rs`
   - `TaskJournalFinalizerStage`
   - `TaskJournalFinalizerFallback`
   - `TaskJournalVerifyIssue`
@@ -56,11 +63,11 @@
   - `TaskJournalTaskMetrics`
   - `TaskJournal`
   - 对确实只用于 JSON trace 的结构，保留但补充机器用途说明；对不再写入的字段删除。
-- [ ] 审核 `crates/clawd/src/runtime/state.rs`
+- [x] 审核 `crates/clawd/src/runtime/state.rs`
   - `ReloadContext` 中只为历史 reload 保留的字段。
   - `note_task_llm_call` / `note_task_llm_elapsed` 旧兼容入口。
   - 若没有调用方，优先删除旧入口；若测试或历史日志需要，改名为 trace/backcompat 明确边界。
-- [ ] 审核其他生产 `#[allow(dead_code)]`
+- [x] 审核其他生产 `#[allow(dead_code)]`
   - `crates/skills/rss_fetch/src/main.rs`
   - `crates/skills/photo_organize/src/main.rs` 剩余一处历史辅助函数。
   - `crates/skills/crypto/src/main.rs` 配置兼容字段。
@@ -77,8 +84,8 @@
 
 验收：
 
-- [ ] `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills` 数量减少，剩余项有明确边界说明。
-- [ ] `RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets` 通过。
+- [x] `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills` 返回空结果。
+- [x] `RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets` 通过。
 
 ## Track B: planner 旧兼容 rewrite 收敛
 
