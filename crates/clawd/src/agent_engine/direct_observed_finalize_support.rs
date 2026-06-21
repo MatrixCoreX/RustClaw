@@ -268,6 +268,7 @@ pub(super) fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteRe
             | crate::OutputSemanticKind::ScalarPathOnly
             | crate::OutputSemanticKind::ExistenceWithPath
             | crate::OutputSemanticKind::RecentScalarEqualityCheck
+            | crate::OutputSemanticKind::RecentArtifactsJudgment
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys

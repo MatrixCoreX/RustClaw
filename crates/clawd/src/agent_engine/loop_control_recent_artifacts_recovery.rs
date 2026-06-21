@@ -83,6 +83,34 @@ fn observed_recent_artifact_inventory(reply: &AskReply) -> Option<RecentArtifact
         .next()
 }
 
+pub(super) fn recent_artifacts_inventory_observation_can_finalize(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    if !route_allows_recent_artifacts_recovery(route) {
+        return false;
+    }
+    let Some(mut inventory) = observed_recent_artifact_inventory_from_loop_state(loop_state) else {
+        return false;
+    };
+    apply_recent_artifact_route_selector(route, &mut inventory);
+    !inventory.entries.is_empty()
+}
+
+fn observed_recent_artifact_inventory_from_loop_state(
+    loop_state: &LoopState,
+) -> Option<RecentArtifactInventory> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter(|step| matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(recent_artifact_inventory_from_output)
+        .next()
+}
+
 fn apply_recent_artifact_route_selector(
     route: &crate::RouteResult,
     inventory: &mut RecentArtifactInventory,
@@ -147,7 +175,22 @@ fn selector_limit_machine_token(text: &str) -> Option<usize> {
 
 fn recent_artifact_inventory_from_output(output: &str) -> Option<RecentArtifactInventory> {
     let value = serde_json::from_str::<Value>(output).ok()?;
-    let payload = value.get("extra").unwrap_or(&value);
+    recent_artifact_inventory_from_value(&value)
+        .or_else(|| {
+            value
+                .get("extra")
+                .and_then(recent_artifact_inventory_from_value)
+        })
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .and_then(|inner| recent_artifact_inventory_from_value(&inner))
+        })
+}
+
+fn recent_artifact_inventory_from_value(payload: &Value) -> Option<RecentArtifactInventory> {
     if payload.get("action").and_then(Value::as_str) != Some("inventory_dir") {
         return None;
     }
