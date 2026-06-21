@@ -1263,6 +1263,52 @@ fn trace_json_matches_repeated_round_step_ids_by_execution_order_and_skill() {
 }
 
 #[test]
+fn trace_json_includes_pollable_machine_event_stream() {
+    let mut journal = TaskJournal::for_task("task-events", "ask", "inspect");
+    journal.record_task_lifecycle(json!({
+        "state": "background",
+        "next_action_kind": "poll_async_job",
+        "next_action_ref": "job-1"
+    }));
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "inspect".to_string(),
+        ..Default::default()
+    });
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_1", "fs_basic", "ok"));
+    journal.push_task_observation(json!({"source": "fs_basic", "status": "ok"}));
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event_types = events
+        .iter()
+        .filter_map(|event| event.get("event_type").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        event_types,
+        vec![
+            "task_lifecycle",
+            "agent_round",
+            "tool_step",
+            "task_observation",
+            "task_final"
+        ]
+    );
+    assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        events[2].pointer("/payload/status").and_then(Value::as_str),
+        Some("ok")
+    );
+}
+
+#[test]
 fn trace_json_includes_memory_trace() {
     let mut journal = TaskJournal::for_task("task-memory", "ask", "根据记忆回复");
     journal.record_memory_trace(json!({
