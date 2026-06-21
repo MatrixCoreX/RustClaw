@@ -302,6 +302,7 @@ pub(super) fn resolve_existing_file_target_from_token(
         && !token.starts_with("./")
         && !token.starts_with("../")
         && !(path.components().count() > 1 && path.extension().is_some())
+        && !filename_candidate_has_document_extension(token)
     {
         return None;
     }
@@ -679,6 +680,96 @@ pub(super) fn ensure_explicit_multi_file_targets_have_content_reads(
         evidence_refs.join(",")
     );
     observations
+}
+
+pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if route_has_unresolved_clarify_or_locator_marker(route)
+        || !route.is_execute_gate()
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || !route_expects_terminal_user_answer(route)
+        || route_requests_path_metadata_compare(route)
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+    {
+        return None;
+    }
+
+    let mut targets = collect_file_targets_from_route_scope(state, route, user_text);
+    if let Some(original_user_text) = original_user_text {
+        for path in collect_file_targets_from_route_scope(state, route, original_user_text) {
+            if !targets.iter().any(|existing| existing == &path) {
+                targets.push(path);
+            }
+        }
+    }
+    seed_authoritative_current_file_target(state, route, auto_locator_path, &mut targets);
+    let targets = targets
+        .into_iter()
+        .filter(|path| explicit_content_read_supported_target(path))
+        .take(4)
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        return None;
+    }
+
+    let mut actions = Vec::new();
+    for path in &targets {
+        actions.push(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": path,
+                "mode": "head",
+                "n": 120,
+            }),
+        });
+    }
+    let evidence_refs = (1..=actions.len())
+        .map(|idx| format!("step_{idx}"))
+        .collect::<Vec<_>>();
+    actions.push(AgentAction::SynthesizeAnswer {
+        evidence_refs: evidence_refs.clone(),
+    });
+    actions.push(AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    });
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    info!(
+        "plan_deterministic_content_excerpt_explicit_file_targets targets={} refs={}",
+        targets.join(","),
+        evidence_refs.join(",")
+    );
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn explicit_content_read_supported_target(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.trim().to_ascii_lowercase().as_str(),
+                "md" | "txt" | "json" | "toml" | "yaml" | "yml" | "rs" | "csv"
+            )
+        })
+        .unwrap_or(false)
 }
 
 pub(super) fn strip_unresolved_template_reads_after_inventory_dir(

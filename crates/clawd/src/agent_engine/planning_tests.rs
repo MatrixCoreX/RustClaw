@@ -16,6 +16,7 @@ use super::{
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
     compact_skill_playbook_from_prompt,
+    content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     content_excerpt_summary_directory_log_slice_deterministic_plan_result,
     contract_hint_preferred_action_deterministic_plan_result, contract_scoped_planner_skill_scope,
