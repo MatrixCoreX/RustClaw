@@ -16,6 +16,53 @@ fn memory_tasks_db() -> rusqlite::Connection {
     db
 }
 
+fn state_with_runtime_tasks_table() -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let db = state.core.db.get().expect("get db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            user_key TEXT,
+            channel TEXT NOT NULL,
+            external_user_id TEXT,
+            external_chat_id TEXT,
+            message_id INTEGER,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            error_text TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+    )
+    .expect("create runtime tasks table");
+    drop(db);
+    state
+}
+
+fn valid_checkpoint_json(checkpoint_id: &str, resume_entrypoint: &str) -> serde_json::Value {
+    json!({
+        "schema_version": 1,
+        "checkpoint_id": checkpoint_id,
+        "boundary_context": {"route_gate_kind": "execute"},
+        "observations": [],
+        "evidence_refs": [],
+        "artifact_refs": [],
+        "completed_side_effect_refs": [],
+        "budget": {
+            "round": 1,
+            "step": 1,
+            "llm_calls": 1,
+            "tool_calls": 0,
+            "elapsed_ms": 10
+        },
+        "resume_entrypoint": resume_entrypoint
+    })
+}
+
 #[test]
 fn wechat_payload_shape_keeps_context_token_available() {
     let payload = json!({
@@ -149,6 +196,95 @@ fn startup_recovery_preserves_paused_checkpoints_before_or_after_next_check() {
         })
         .collect::<Vec<_>>();
     assert_eq!(statuses, vec!["timeout", "running", "running"]);
+}
+
+#[tokio::test]
+async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
+    let state = state_with_runtime_tasks_table();
+    let due = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "agent_loop_soft_budget",
+            "resume_reason": "await_user_input",
+            "next_check_after": 1,
+            "checkpoint_id": "ckpt-runtime"
+        },
+        "task_checkpoint": valid_checkpoint_json("ckpt-runtime", "await_user_input")
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES ('runtime-due', 42, 7, 'test-key', 'ui', 'ask', ?1, 'running', ?2, NULL, '1', '1')",
+        rusqlite::params![
+            json!({"text": "checkpoint task"}).to_string(),
+            due.to_string()
+        ],
+    )
+    .expect("insert runtime due task");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES ('runtime-stale', 42, 7, 'test-key', 'ui', 'ask', ?1, 'running', NULL, NULL, '1', '1')",
+        rusqlite::params![json!({"text": "stale task"}).to_string()],
+    )
+    .expect("insert runtime stale task");
+    drop(db);
+
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&state)
+        .await
+        .expect("runtime recovery tick");
+
+    let db = state.core.db.get().expect("get db");
+    let (stale_status, stale_error): (String, Option<String>) = db
+        .query_row(
+            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-stale'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query runtime stale task");
+    assert_eq!(stale_status, "timeout");
+    assert!(stale_error
+        .as_deref()
+        .is_some_and(|text| !text.trim().is_empty()));
+
+    let (status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = 'runtime-due'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query runtime due task");
+    let result: serde_json::Value = serde_json::from_str(&raw_result).expect("parse result");
+    let lifecycle = result
+        .get("task_lifecycle")
+        .and_then(serde_json::Value::as_object)
+        .expect("task_lifecycle object");
+
+    assert_eq!(status, "running");
+    assert_eq!(lifecycle["state"], "needs_user");
+    assert_eq!(lifecycle["checkpoint_id"], "ckpt-runtime");
+    assert_eq!(
+        lifecycle["resume_work_item"]["resume_directive"],
+        "await_user_input"
+    );
+    assert_eq!(
+        lifecycle["resume_executor"]["executor_state"],
+        "awaiting_user"
+    );
+    assert_eq!(
+        lifecycle["resume_executor"]["resume_directive"],
+        "await_user_input"
+    );
+    assert!(lifecycle["resume_work_item"].get("text").is_none());
+    assert!(lifecycle["resume_work_item"].get("error_text").is_none());
+    assert!(lifecycle["resume_executor"].get("text").is_none());
+    assert!(lifecycle["resume_executor"].get("error_text").is_none());
 }
 
 #[test]

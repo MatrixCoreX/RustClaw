@@ -5,7 +5,7 @@ use super::{
     AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile, LoopRecipeOverrides,
     RegistryIdempotencyGuardScope, SemanticRouteAuthority,
 };
-use crate::agent_engine::LoopState;
+use crate::agent_engine::{seed_loop_state_for_agent_run, LoopState};
 use crate::execution_recipe::{
     ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
     ExecutionRecipeSpec, ExecutionRecipeTargetScope,
@@ -211,6 +211,79 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["signal"],
         "max_rounds"
+    );
+}
+
+#[test]
+fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
+    let checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: "ckpt-seed-state".to_string(),
+        boundary_context: serde_json::json!({"route_gate_kind": "execute"}),
+        last_successful_round: Some(3),
+        last_successful_step: Some("step_4".to_string()),
+        pending_action: None,
+        observations: vec![serde_json::json!({
+            "step_id": "step_4",
+            "status": "ok"
+        })],
+        evidence_refs: vec!["step_4".to_string()],
+        artifact_refs: vec!["artifact:report".to_string()],
+        completed_side_effect_refs: vec![
+            "skill:config_edit:action:apply_config_change".to_string(),
+            " ".to_string(),
+        ],
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 3,
+            step: 4,
+            llm_calls: 5,
+            tool_calls: 2,
+            elapsed_ms: 900,
+        },
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+    };
+    let mut loop_state = LoopState::new(8);
+
+    let report = seed_loop_state_for_agent_run(&mut loop_state, None, Some(&checkpoint))
+        .expect("checkpoint seed report");
+
+    assert_eq!(report.checkpoint_id, "ckpt-seed-state");
+    assert_eq!(report.restored_round, 3);
+    assert_eq!(report.restored_step, 4);
+    assert_eq!(report.restored_tool_calls, 2);
+    assert_eq!(report.completed_side_effect_count, 1);
+    assert_eq!(report.observation_count, 1);
+    assert_eq!(loop_state.round_no, 3);
+    assert_eq!(loop_state.total_steps_executed, 4);
+    assert_eq!(loop_state.tool_calls_total, 2);
+    assert!(loop_state.has_tool_or_skill_output);
+    assert_eq!(
+        loop_state
+            .successful_action_fingerprints
+            .get("skill:config_edit:action:apply_config_change"),
+        Some(&1)
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_checkpoint_id"),
+        Some(&"ckpt-seed-state".to_string())
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_completed_side_effect_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|value| value.get("checkpoint_id"))
+            .and_then(serde_json::Value::as_str),
+        Some("ckpt-seed-state")
     );
 }
 

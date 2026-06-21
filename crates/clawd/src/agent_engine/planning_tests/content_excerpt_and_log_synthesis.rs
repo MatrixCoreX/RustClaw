@@ -1169,6 +1169,38 @@ fn scalar_content_auto_locator_does_not_read_path_only_contract() {
 }
 
 #[test]
+fn scalar_content_auto_locator_does_not_read_generated_file_path_report_target() {
+    let root = TempDirGuard::new("scalar_content_auto_locator_generated_path");
+    let image = root.path.join("document").join("skill_audio_smoke.mp3");
+    fs::create_dir_all(image.parent().expect("image parent")).expect("create document dir");
+    fs::write(&image, b"existing media bytes").expect("write existing media");
+    let image_path = image.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFilePathReport;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_hint = image_path.clone();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let state = test_state();
+
+    assert!(scalar_content_auto_locator_deterministic_plan_result(
+        &state,
+        "generate a media artifact and return the saved path",
+        Some(&route),
+        &loop_state,
+        "generate a media artifact and return the saved path",
+        Some("generate a media artifact and return the saved path"),
+        Some(&image_path),
+    )
+    .is_none());
+}
+
+#[test]
 fn scalar_content_auto_locator_does_not_read_existence_contract() {
     let root = TempDirGuard::new("scalar_content_auto_locator_existence");
     let note = root.path.join("package.json");
