@@ -17,6 +17,7 @@ fn build_round_verify_summary(
         approved: verify_result.approved,
         blocked_reason: verify_result.blocked_reason.clone(),
         shadow_blocked_reason: verify_result.shadow_blocked_reason.clone(),
+        permission_decision: verify_result.permission_decision.clone(),
         needs_confirmation: verify_result.needs_confirmation,
         issues: verify_result
             .issues

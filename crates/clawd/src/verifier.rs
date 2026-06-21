@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
 use claw_core::skill_registry::{PrimaryFallbackRole, SkillRiskLevel};
+use serde_json::{json, Value};
 
 use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
 
@@ -206,6 +207,7 @@ pub(crate) struct VerifyResult {
     pub(crate) approved: bool,
     pub(crate) blocked_reason: Option<String>,
     pub(crate) shadow_blocked_reason: Option<String>,
+    pub(crate) permission_decision: Value,
     pub(crate) approved_steps: Vec<PlanStep>,
     pub(crate) needs_confirmation: bool,
     pub(crate) rewritten_steps: Vec<PlanStep>,
@@ -726,6 +728,141 @@ fn effective_step_risk_level(
     } else {
         SkillRiskLevel::Low
     }
+}
+
+fn risk_level_token(risk_level: SkillRiskLevel) -> &'static str {
+    match risk_level {
+        SkillRiskLevel::Unknown => "unknown",
+        SkillRiskLevel::Low => "low",
+        SkillRiskLevel::Medium => "medium",
+        SkillRiskLevel::High => "high",
+    }
+}
+
+fn issue_is_policy_denial(kind: VerifyIssueKind) -> bool {
+    matches!(
+        kind,
+        VerifyIssueKind::SkillNotVisible
+            | VerifyIssueKind::CapabilityUnavailable
+            | VerifyIssueKind::ConfirmationRequired
+            | VerifyIssueKind::RiskBudgetExceeded
+            | VerifyIssueKind::ContractActionRejected
+            | VerifyIssueKind::ContractMissing
+            | VerifyIssueKind::ContractPolicyViolation
+            | VerifyIssueKind::ContractPreferredActionAvailable
+    )
+}
+
+fn first_blocking_issue(issues: &[VerifyIssue]) -> Option<&VerifyIssue> {
+    issues
+        .iter()
+        .find(|issue| issue_blocks_in_enforce(issue.kind))
+        .or_else(|| issues.first())
+}
+
+fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return json!({
+            "step_id": step.step_id,
+            "action_type": step.action_type,
+            "executable": false,
+        });
+    }
+
+    let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, &normalized_skill, &step.args);
+    let risk_level = effective_step_risk_level(state, &normalized_skill, &step.args);
+    let requires_confirmation = state
+        .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
+        || is_confirmation_like_skill(&normalized_skill);
+    let action = step
+        .args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token);
+    let registry_policy = action.as_deref().and_then(|action| {
+        state
+            .skill_manifest(&normalized_skill)
+            .and_then(|manifest| {
+                manifest
+                    .planner_capabilities
+                    .into_iter()
+                    .find(|mapping| mapping.action.as_deref() == Some(action))
+                    .map(|mapping| {
+                        json!({
+                            "capability": mapping.name,
+                            "effect": mapping.effect.map(|effect| effect.as_token()),
+                            "risk_level": mapping.risk_level.map(risk_level_token),
+                            "once_per_task": mapping.once_per_task,
+                            "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
+                            "idempotent": mapping.idempotent,
+                        })
+                    })
+            })
+    });
+
+    json!({
+        "step_id": step.step_id,
+        "action_type": step.action_type,
+        "executable": true,
+        "skill": normalized_skill,
+        "action": action,
+        "action_effect": {
+            "observes": effect.observes,
+            "mutates": effect.mutates,
+            "validates": effect.validates,
+        },
+        "risk_level": risk_level_token(risk_level),
+        "requires_confirmation": requires_confirmation,
+        "registry_policy": registry_policy,
+    })
+}
+
+fn verify_permission_decision_json(
+    state: &AppState,
+    plan_result: &PlanResult,
+    mode: VerifyMode,
+    approved: bool,
+    needs_confirmation: bool,
+    blocked_reason: Option<&str>,
+    shadow_blocked_reason: Option<&str>,
+    issues: &[VerifyIssue],
+) -> Value {
+    let first_issue = first_blocking_issue(issues);
+    json!({
+        "schema_version": 1,
+        "owner_layer": "plan_verifier",
+        "mode": mode.as_str(),
+        "allowed": approved && !needs_confirmation,
+        "approved": approved,
+        "needs_confirmation": needs_confirmation,
+        "denied_by_policy": issues.iter().any(|issue| issue_is_policy_denial(issue.kind)),
+        "dry_run_required": false,
+        "external_provider_blocked": false,
+        "reason_code": first_issue
+            .map(|issue| issue.kind.reason_code())
+            .unwrap_or("verify_allowed"),
+        "status_code": first_issue
+            .map(|issue| issue.kind.status_code())
+            .unwrap_or("allowed"),
+        "message_key": first_issue
+            .map(|issue| issue.kind.message_key())
+            .unwrap_or("clawd.verify.allowed"),
+        "issue_count": issues.len(),
+        "blocked_reason_present": blocked_reason
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        "shadow_blocked_reason_present": shadow_blocked_reason
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        "steps": plan_result
+            .steps
+            .iter()
+            .map(|step| step_permission_decision_json(state, step))
+            .collect::<Vec<_>>(),
+    })
 }
 
 fn risk_exceeds_ceiling(risk: SkillRiskLevel, risk_ceiling: crate::RiskCeiling) -> bool {
@@ -1526,6 +1663,16 @@ pub(crate) fn verify_plan(
 
     let approved = blocked_reason.is_none();
     let approved_steps = effective_plan_result.steps.clone();
+    let permission_decision = verify_permission_decision_json(
+        state,
+        &effective_plan_result,
+        mode,
+        approved,
+        needs_confirmation,
+        blocked_reason.as_deref(),
+        shadow_blocked_reason.as_deref(),
+        &issues,
+    );
     let rewritten_steps = if issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg))
@@ -1559,6 +1706,7 @@ pub(crate) fn verify_plan(
         approved,
         blocked_reason,
         shadow_blocked_reason,
+        permission_decision,
         approved_steps,
         needs_confirmation,
         rewritten_steps,
