@@ -10,6 +10,14 @@ fn default_telegram_access_mode() -> String {
 struct ModelConfigItem {
     vendor: String,
     model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_key_configured: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_key_masked: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -20,6 +28,8 @@ struct ModelConfigResponse {
     image_vision: ModelConfigItem,
     audio_transcribe: ModelConfigItem,
     audio_synthesize: ModelConfigItem,
+    video_generation: ModelConfigItem,
+    music_generation: ModelConfigItem,
     restart_required: bool,
 }
 
@@ -31,6 +41,8 @@ struct ModelConfigUpdateRequest {
     image_vision: Option<ModelConfigItem>,
     audio_transcribe: Option<ModelConfigItem>,
     audio_synthesize: Option<ModelConfigItem>,
+    video_generation: Option<ModelConfigItem>,
+    music_generation: Option<ModelConfigItem>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -41,13 +53,153 @@ struct ProviderKeysResponse {
     image: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     audio: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    video: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    music: HashMap<String, HashMap<String, String>>,
 }
 
 fn default_model_item() -> ModelConfigItem {
     ModelConfigItem {
         vendor: String::new(),
         model: String::new(),
+        base_url: None,
+        api_key: None,
+        api_key_configured: None,
+        api_key_masked: None,
     }
+}
+
+fn read_toml_value(path: &Path) -> toml::Value {
+    let raw = std::fs::read_to_string(path).unwrap_or_else(|_| String::new());
+    toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()))
+}
+
+fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
+    let Some(table) = value.get(section).and_then(|t| t.as_table()) else {
+        return default_model_item();
+    };
+    let vendor = table
+        .get("default_vendor")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let model = table
+        .get("default_model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let provider = table
+        .get("providers")
+        .and_then(|v| v.as_table())
+        .and_then(|providers| providers.get(&vendor))
+        .and_then(|v| v.as_table());
+    let base_url = provider
+        .and_then(|p| p.get("base_url"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+    let api_key = provider
+        .and_then(|p| p.get("api_key"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    ModelConfigItem {
+        vendor,
+        model,
+        base_url,
+        api_key: None,
+        api_key_configured: Some(api_key.is_some()),
+        api_key_masked: api_key.map(mask_secret),
+    }
+}
+
+fn upsert_model_section(
+    value: &mut toml::Value,
+    section: &str,
+    item: &ModelConfigItem,
+) -> anyhow::Result<()> {
+    let root = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("model_config_root_not_table"))?;
+    let section_value = root
+        .entry(section.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let section_table = section_value
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("model_config_section_not_table"))?;
+    section_table.insert(
+        "default_vendor".to_string(),
+        toml::Value::String(item.vendor.clone()),
+    );
+    section_table.insert(
+        "default_model".to_string(),
+        toml::Value::String(item.model.clone()),
+    );
+
+    let vendor = item.vendor.trim();
+    if vendor.is_empty() {
+        return Ok(());
+    }
+    let should_update_provider = item
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some()
+        || item
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some()
+        || !item.model.trim().is_empty();
+    if !should_update_provider {
+        return Ok(());
+    }
+
+    let providers_value = section_table
+        .entry("providers".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let providers = providers_value
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("model_config_providers_not_table"))?;
+    let provider_value = providers
+        .entry(vendor.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let provider = provider_value
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("model_config_provider_not_table"))?;
+    if let Some(base_url) = item
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        provider.insert(
+            "base_url".to_string(),
+            toml::Value::String(base_url.to_string()),
+        );
+    }
+    if !item.model.trim().is_empty() {
+        provider.insert(
+            "model".to_string(),
+            toml::Value::String(item.model.trim().to_string()),
+        );
+    }
+    if let Some(api_key) = item
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        provider.insert("api_key".to_string(), toml::Value::String(api_key.to_string()));
+    }
+    Ok(())
 }
 
 fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
@@ -71,74 +223,27 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
+            base_url: None,
+            api_key: None,
+            api_key_configured: None,
+            api_key_masked: None,
         })
         .unwrap_or_else(default_model_item);
 
-    let image_path = root.join("configs/image.toml");
-    let image_raw = std::fs::read_to_string(&image_path).unwrap_or_else(|_| String::new());
-    let image: toml::Value =
-        toml::from_str(&image_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let image = read_toml_value(&root.join("configs/image.toml"));
+    let image_edit = read_model_section(&image, "image_edit");
+    let image_generation = read_model_section(&image, "image_generation");
+    let image_vision = read_model_section(&image, "image_vision");
 
-    let read_image_section = |section: &str| -> ModelConfigItem {
-        image
-            .get(section)
-            .and_then(|t| t.as_table())
-            .map(|t| ModelConfigItem {
-                vendor: t
-                    .get("default_vendor")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                model: t
-                    .get("default_model")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
-            .unwrap_or_else(default_model_item)
-    };
-    let image_edit = read_image_section("image_edit");
-    let image_generation = read_image_section("image_generation");
-    let image_vision = read_image_section("image_vision");
+    let audio = read_toml_value(&root.join("configs/audio.toml"));
+    let audio_transcribe = read_model_section(&audio, "audio_transcribe");
+    let audio_synthesize = read_model_section(&audio, "audio_synthesize");
 
-    let audio_path = root.join("configs/audio.toml");
-    let audio_raw = std::fs::read_to_string(&audio_path).unwrap_or_else(|_| String::new());
-    let audio: toml::Value =
-        toml::from_str(&audio_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let video = read_toml_value(&root.join("configs/video.toml"));
+    let video_generation = read_model_section(&video, "video_generation");
 
-    let audio_transcribe = audio
-        .get("audio_transcribe")
-        .and_then(|t| t.as_table())
-        .map(|t| ModelConfigItem {
-            vendor: t
-                .get("default_vendor")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            model: t
-                .get("default_model")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-        .unwrap_or_else(default_model_item);
-
-    let audio_synthesize = audio
-        .get("audio_synthesize")
-        .and_then(|t| t.as_table())
-        .map(|t| ModelConfigItem {
-            vendor: t
-                .get("default_vendor")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            model: t
-                .get("default_model")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-        .unwrap_or_else(default_model_item);
+    let music = read_toml_value(&root.join("configs/music.toml"));
+    let music_generation = read_model_section(&music, "music_generation");
 
     Ok(ModelConfigResponse {
         llm,
@@ -147,6 +252,8 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
         image_vision,
         audio_transcribe,
         audio_synthesize,
+        video_generation,
+        music_generation,
         restart_required: true,
     })
 }
@@ -198,21 +305,7 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
     ] {
         if let Some(it) = item {
             image_modified = true;
-            let tbl = image
-                .as_table_mut()
-                .ok_or_else(|| anyhow::anyhow!("image.toml root is not a table"))?
-                .entry(section.to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let Some(t) = tbl.as_table_mut() {
-                t.insert(
-                    "default_vendor".to_string(),
-                    toml::Value::String(it.vendor.clone()),
-                );
-                t.insert(
-                    "default_model".to_string(),
-                    toml::Value::String(it.model.clone()),
-                );
-            }
+            upsert_model_section(&mut image, section, it)?;
         }
     }
     if image_modified {
@@ -225,44 +318,35 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
     let mut audio: toml::Value =
         toml::from_str(&audio_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
 
-    if let Some(ref it) = req.audio_transcribe {
-        audio_modified = true;
-        let tbl = audio
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("audio.toml root is not a table"))?
-            .entry("audio_transcribe".to_string())
-            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-        if let Some(t) = tbl.as_table_mut() {
-            t.insert(
-                "default_vendor".to_string(),
-                toml::Value::String(it.vendor.clone()),
-            );
-            t.insert(
-                "default_model".to_string(),
-                toml::Value::String(it.model.clone()),
-            );
-        }
-    }
-    if let Some(ref it) = req.audio_synthesize {
-        audio_modified = true;
-        let tbl = audio
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("audio.toml root is not a table"))?
-            .entry("audio_synthesize".to_string())
-            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-        if let Some(t) = tbl.as_table_mut() {
-            t.insert(
-                "default_vendor".to_string(),
-                toml::Value::String(it.vendor.clone()),
-            );
-            t.insert(
-                "default_model".to_string(),
-                toml::Value::String(it.model.clone()),
-            );
+    for (section, item) in [
+        ("audio_transcribe", req.audio_transcribe.as_ref()),
+        ("audio_synthesize", req.audio_synthesize.as_ref()),
+    ] {
+        if let Some(it) = item {
+            audio_modified = true;
+            upsert_model_section(&mut audio, section, it)?;
         }
     }
     if audio_modified {
         std::fs::write(&audio_path, toml::to_string_pretty(&audio)?)?;
+    }
+
+    if let Some(ref it) = req.video_generation {
+        let video_path = root.join("configs/video.toml");
+        let video_raw = std::fs::read_to_string(&video_path).unwrap_or_else(|_| String::new());
+        let mut video: toml::Value = toml::from_str(&video_raw)
+            .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        upsert_model_section(&mut video, "video_generation", it)?;
+        std::fs::write(&video_path, toml::to_string_pretty(&video)?)?;
+    }
+
+    if let Some(ref it) = req.music_generation {
+        let music_path = root.join("configs/music.toml");
+        let music_raw = std::fs::read_to_string(&music_path).unwrap_or_else(|_| String::new());
+        let mut music: toml::Value = toml::from_str(&music_raw)
+            .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        upsert_model_section(&mut music, "music_generation", it)?;
+        std::fs::write(&music_path, toml::to_string_pretty(&music)?)?;
     }
 
     Ok(())
@@ -283,11 +367,14 @@ fn read_llm_provider_keys(config: &toml::Value) -> HashMap<String, String> {
     out
 }
 
-fn read_image_provider_keys(image: &toml::Value) -> HashMap<String, HashMap<String, String>> {
+fn read_module_provider_keys(
+    config: &toml::Value,
+    sections: &[&str],
+) -> HashMap<String, HashMap<String, String>> {
     let mut out = HashMap::new();
-    for section in ["image_edit", "image_generation", "image_vision"] {
+    for section in sections {
         let mut vendors = HashMap::new();
-        if let Some(providers) = image
+        if let Some(providers) = config
             .get(section)
             .and_then(|v| v.get("providers"))
             .and_then(|v| v.as_table())
@@ -300,31 +387,17 @@ fn read_image_provider_keys(image: &toml::Value) -> HashMap<String, HashMap<Stri
                 }
             }
         }
-        out.insert(section.to_string(), vendors);
+        out.insert((*section).to_string(), vendors);
     }
     out
 }
 
+fn read_image_provider_keys(image: &toml::Value) -> HashMap<String, HashMap<String, String>> {
+    read_module_provider_keys(image, &["image_edit", "image_generation", "image_vision"])
+}
+
 fn read_audio_provider_keys(audio: &toml::Value) -> HashMap<String, HashMap<String, String>> {
-    let mut out = HashMap::new();
-    for section in ["audio_synthesize", "audio_transcribe"] {
-        let mut vendors = HashMap::new();
-        if let Some(providers) = audio
-            .get(section)
-            .and_then(|v| v.get("providers"))
-            .and_then(|v| v.as_table())
-        {
-            for (vendor, tbl) in providers {
-                if let Some(t) = tbl.as_table() {
-                    if let Some(ak) = t.get("api_key").and_then(|a| a.as_str()) {
-                        vendors.insert(vendor.clone(), mask_secret(ak));
-                    }
-                }
-            }
-        }
-        out.insert(section.to_string(), vendors);
-    }
-    out
+    read_module_provider_keys(audio, &["audio_synthesize", "audio_transcribe"])
 }
 
 fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> {
@@ -348,10 +421,24 @@ fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> 
         toml::from_str(&audio_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
     let audio_keys = read_audio_provider_keys(&audio);
 
+    let video_path = root.join("configs/video.toml");
+    let video_raw = std::fs::read_to_string(&video_path).unwrap_or_else(|_| String::new());
+    let video: toml::Value =
+        toml::from_str(&video_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let video_keys = read_module_provider_keys(&video, &["video_generation"]);
+
+    let music_path = root.join("configs/music.toml");
+    let music_raw = std::fs::read_to_string(&music_path).unwrap_or_else(|_| String::new());
+    let music: toml::Value =
+        toml::from_str(&music_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+    let music_keys = read_module_provider_keys(&music, &["music_generation"]);
+
     Ok(ProviderKeysResponse {
         llm,
         image: image_keys,
         audio: audio_keys,
+        video: video_keys,
+        music: music_keys,
     })
 }
 
@@ -454,6 +541,82 @@ fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::
             }
         }
         std::fs::write(&path, toml::to_string_pretty(&audio)?)?;
+    }
+
+    if !req.video.is_empty() {
+        let path = root.join("configs/video.toml");
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let mut video: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        let root_t = video
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("video_toml_root_not_table"))?;
+        for (section, vendors) in &req.video {
+            if vendors.is_empty() {
+                continue;
+            }
+            let section_t = root_t
+                .entry(section.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let providers = section_t
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("video_toml_section_not_table"))?
+                .entry("providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let prov_t = providers
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("providers not a table"))?;
+            for (vendor, new_key) in vendors {
+                if new_key.is_empty() {
+                    continue;
+                }
+                let entry = prov_t
+                    .entry(vendor.clone())
+                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+                if let Some(t) = entry.as_table_mut() {
+                    t.insert("api_key".to_string(), toml::Value::String(new_key.clone()));
+                }
+            }
+        }
+        std::fs::write(&path, toml::to_string_pretty(&video)?)?;
+    }
+
+    if !req.music.is_empty() {
+        let path = root.join("configs/music.toml");
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let mut music: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        let root_t = music
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("music_toml_root_not_table"))?;
+        for (section, vendors) in &req.music {
+            if vendors.is_empty() {
+                continue;
+            }
+            let section_t = root_t
+                .entry(section.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let providers = section_t
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("music_toml_section_not_table"))?
+                .entry("providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let prov_t = providers
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("providers not a table"))?;
+            for (vendor, new_key) in vendors {
+                if new_key.is_empty() {
+                    continue;
+                }
+                let entry = prov_t
+                    .entry(vendor.clone())
+                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+                if let Some(t) = entry.as_table_mut() {
+                    t.insert("api_key".to_string(), toml::Value::String(new_key.clone()));
+                }
+            }
+        }
+        std::fs::write(&path, toml::to_string_pretty(&music)?)?;
     }
 
     Ok(())

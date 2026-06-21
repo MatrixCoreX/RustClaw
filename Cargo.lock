@@ -2089,6 +2089,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
+name = "music-generate-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "claw-core",
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "mutate_once"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4251,6 +4264,19 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "video-generate-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "claw-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
 
 [[package]]
 name = "walkdir"
