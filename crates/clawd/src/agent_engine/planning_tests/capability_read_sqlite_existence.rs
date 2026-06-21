@@ -130,6 +130,62 @@ fn compound_capability_plan_preserves_stat_paths_supporting_content_read() {
 }
 
 #[test]
+fn command_output_summary_preserves_fs_stat_paths_observation() {
+    let state = test_state_with_registry();
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/configs/config.toml".to_string();
+
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "stat_paths",
+                "paths": ["README.md"],
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "runtime_status",
+                "kind": "current_working_directory",
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized =
+        normalize_planned_actions(&state, Some(&route), &LoopState::new(2), "", None, actions);
+
+    let first = normalized
+        .first()
+        .unwrap_or_else(|| panic!("expected actions, got {normalized:#?}"));
+    let stat_args = expect_planned_call(first, "fs_basic", "stat_paths");
+    assert_eq!(
+        stat_args
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert!(
+        !normalized
+            .iter()
+            .any(|action| planned_call_is(action, "git_basic", "status")),
+        "fs path observation must not be replaced by git status: {normalized:#?}"
+    );
+}
+
+#[test]
 fn normalize_planned_actions_keeps_unresolved_call_capability_for_verifier() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallCapability {

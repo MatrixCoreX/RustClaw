@@ -552,3 +552,75 @@ version = "0.1.8"
         .route_reason
         .contains("scalar_field_pair_contract_repair"));
 }
+
+#[test]
+fn multi_locator_structured_field_preserves_summary_contract() {
+    let root = TempDirGuard::new("structured_field_summary_bundle");
+    let readme = root.path.join("README.md");
+    let config = root.path.join("config.toml");
+    fs::write(&readme, "# RustClaw\n").expect("write readme");
+    fs::write(&config, "[llm]\nselected_vendor = \"minimax\"\n").expect("write config");
+
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent:
+            "Combine file existence, config field, working directory, and clock observations."
+                .to_string(),
+        needs_clarify: false,
+        route_reason: concat!(
+            "compound local observation summary semantic_kind=command_output_summary ",
+            "command_result_synthesis with structured_field_selector=llm.selected_vendor; ",
+            "structured_field_target_from_prompt_repair"
+        )
+        .to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: config.display().to_string(),
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("llm.selected_vendor".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+        },
+    };
+    let prompt = format!(
+        "Check whether {} exists; read llm.selected_vendor from {}; also include cwd and current time in one table.",
+        readme.display(),
+        config.display()
+    );
+
+    repair_scalar_field_value_contract_for_locator_reply(&mut route, &prompt);
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Strict
+    );
+    assert!(route
+        .route_reason
+        .contains("multi_locator_structured_field_preserves_summary_contract"));
+    assert!(!route
+        .route_reason
+        .contains("scalar_field_value_contract_repair"));
+    assert!(!route
+        .route_reason
+        .contains("scalar_field_pair_contract_repair"));
+}

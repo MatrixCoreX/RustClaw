@@ -98,6 +98,50 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     );
     let structured_refinement_present =
         surface.has_structured_target_refinement() || selector_declares_field_value_request;
+    if target_count >= 2
+        && structured_refinement_present
+        && route_preserves_heterogeneous_observation_summary_contract(route_result)
+    {
+        route_result.output_contract.semantic_kind =
+            crate::OutputSemanticKind::CommandOutputSummary;
+        if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+            route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        }
+        route_result
+            .route_reason
+            .push_str("; multi_locator_structured_field_preserves_summary_contract");
+        return;
+    }
+    if marker_matches_field_value_request
+        && route_result.output_contract.semantic_kind
+            == crate::OutputSemanticKind::RecentScalarEqualityCheck
+    {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route_result
+            .route_reason
+            .push_str("; scalar_field_value_contract_repair");
+        return;
+    }
+    if target_count >= 2
+        && structured_refinement_present
+        && !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::StructuredKeys
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::DocumentHeading
+                | crate::OutputSemanticKind::RecentScalarEqualityCheck
+        )
+    {
+        if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+            route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        }
+        route_result
+            .route_reason
+            .push_str("; multi_locator_structured_field_preserves_summary_contract");
+        return;
+    }
     if (marker_matches_field_value_request || selector_declares_field_value_request)
         && target_count >= 2
         && structured_refinement_present
@@ -146,7 +190,29 @@ fn explicit_locator_target_count_excluding_structured_selector(
         }
         push_unique_raw_candidate(&mut candidates, candidate.to_string());
     }
+    for candidate in crate::intent::surface_signals::analyze_prompt_surface(prompt)
+        .filename_candidates_excluding_field_selectors()
+    {
+        if selector
+            .is_some_and(|selector| candidate_matches_structured_selector(&candidate, selector))
+        {
+            continue;
+        }
+        push_unique_raw_candidate(&mut candidates, candidate);
+    }
     candidates.len()
+}
+
+fn route_preserves_heterogeneous_observation_summary_contract(
+    route_result: &crate::RouteResult,
+) -> bool {
+    let route_reason = route_result.route_reason.as_str();
+    route_reason.contains("semantic_kind=command_output_summary")
+        || route_reason.contains("command_result_synthesis")
+        || super::route_reason_has_structural_marker(
+            route_result,
+            "multi_locator_structured_field_preserves_summary_contract",
+        )
 }
 
 fn candidate_matches_structured_selector(candidate: &str, selector: &str) -> bool {
@@ -286,15 +352,43 @@ fn structured_file_candidates_from_prompt(
 }
 
 fn push_unique_raw_candidate(candidates: &mut Vec<String>, candidate: String) {
-    let candidate = candidate.trim();
+    let candidate = normalize_raw_locator_candidate_token(&candidate);
     if candidate.is_empty() || candidate.contains('\n') || candidate.contains('\r') {
         return;
     }
-    if !candidates
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(candidate))
-    {
-        candidates.push(candidate.to_string());
+    if !candidates.iter().any(|existing| {
+        existing.eq_ignore_ascii_case(&candidate)
+            || raw_locator_candidates_equivalent(existing, &candidate)
+    }) {
+        candidates.push(candidate);
+    }
+}
+
+fn normalize_raw_locator_candidate_token(candidate: &str) -> String {
+    candidate
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
+        .trim_end_matches(|ch| {
+            matches!(
+                ch,
+                '.' | ',' | ';' | ':' | ')' | ']' | '}' | '。' | '，' | '；' | '：'
+            )
+        })
+        .trim()
+        .to_string()
+}
+
+fn raw_locator_candidates_equivalent(left: &str, right: &str) -> bool {
+    let left = normalize_raw_locator_candidate_token(left);
+    let right = normalize_raw_locator_candidate_token(right);
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+    let left_name = Path::new(&left).file_name().and_then(|name| name.to_str());
+    let right_name = Path::new(&right).file_name().and_then(|name| name.to_str());
+    match (left_name, right_name) {
+        (Some(left_name), Some(right_name)) => left_name.eq_ignore_ascii_case(right_name),
+        _ => false,
     }
 }
 

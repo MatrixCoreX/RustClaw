@@ -1403,6 +1403,7 @@ pub(super) fn runtime_status_query_system_basic_kind(kind: &str) -> Option<&'sta
         "current_user" => Some("current_user"),
         "host_name" => Some("host_name"),
         "kernel_release" => Some("kernel_release"),
+        "current_time" | "system_time" => Some("current_time"),
         "current_working_directory" | "current_process_cwd" | "process_cwd" => {
             Some("current_working_directory")
         }
@@ -1415,6 +1416,7 @@ pub(super) fn runtime_status_query_run_cmd_command(kind: &str) -> Option<&'stati
         "current_user" => Some("id -un"),
         "host_name" => Some("hostname"),
         "kernel_release" => Some("uname -r"),
+        "current_time" | "system_time" => Some("date"),
         "current_working_directory" | "current_process_cwd" | "process_cwd" => Some("pwd"),
         _ => None,
     }

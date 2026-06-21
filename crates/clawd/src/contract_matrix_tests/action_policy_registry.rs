@@ -609,6 +609,34 @@ fn command_output_summary_allows_structured_config_validation_observation() {
 }
 
 #[test]
+fn command_output_summary_allows_structured_config_field_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::CommandOutputSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "configs/config.toml".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "config_basic",
+        &serde_json::json!({
+            "action": "read_field",
+            "path": "configs/config.toml",
+            "field_path": "llm.selected_vendor",
+        }),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "config_basic.read_field");
+    assert_eq!(policy.contract_match, "command_output_summary");
+    assert!(policy
+        .evidence_expression
+        .any_of
+        .contains(&"field_value".to_string()));
+}
+
+#[test]
 fn service_status_allows_task_control_list_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

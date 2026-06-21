@@ -12,6 +12,7 @@ DEFAULT_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_manual.txt"
 DEFAULT_LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/manual"
 
 CASE_FILE="$DEFAULT_CASE_FILE"
+CASE_NAME_FILTER=""
 LOG_ROOT="$DEFAULT_LOG_ROOT"
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR=""
@@ -55,6 +56,7 @@ Usage:
 
 Options:
   --case-file PATH      Case file to run. Default: scripts/nl_tests/cases/nl_cases_manual.txt
+  --case-name NAME      Run only the matching case_name from the case file
   --log-root PATH       Root log dir. Default: scripts/nl_suite_logs/manual
   --resume-dir PATH     Existing run dir to append logs/results into
   --resume-line N       Continue after this tested source line number
@@ -926,6 +928,10 @@ while [[ $# -gt 0 ]]; do
       CASE_FILE="$2"
       shift 2
       ;;
+    --case-name)
+      CASE_NAME_FILTER="$2"
+      shift 2
+      ;;
     --log-root)
       LOG_ROOT="$2"
       shift 2
@@ -1120,6 +1126,10 @@ for row in "${CASE_ROWS[@]}"; do
     continue
   fi
 
+  if [[ -n "$CASE_NAME_FILTER" && "$case_name" != "$CASE_NAME_FILTER" ]]; then
+    continue
+  fi
+
   if (( ABORTED_FAIL_FAST == 1 )); then
     SKIPPED_AFTER_ABORT=$((SKIPPED_AFTER_ABORT + 1))
     continue
@@ -1139,7 +1149,11 @@ done
 
 if (( run_count == 0 )); then
   if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
-    echo "No remaining cases after --resume-line ${RESUME_LINE}."
+    if [[ -n "$CASE_NAME_FILTER" ]]; then
+      echo "No matching remaining cases for --case-name ${CASE_NAME_FILTER} after --resume-line ${RESUME_LINE}."
+    else
+      echo "No remaining cases after --resume-line ${RESUME_LINE}."
+    fi
   fi
 fi
 
