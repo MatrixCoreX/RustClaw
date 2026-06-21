@@ -545,6 +545,8 @@ Use the smallest affected NL set while code is still moving, then widen coverage
 3. Canary: 500 client-like cases before changing default authority or deleting old gates.
 4. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
 
+Current `configs/agent_guard.toml` defaults use `semantic_route_authority = "agent_loop_default"`, `answer_verifier_enforce_required_scope = "all"`, and `registry_idempotency_guard_scope = "all"`. The older `agent_decides_semantic_route` and `agent_decides_migration_class` names are ignored historical config keys; use `semantic_route_authority` and `agent_loop_canary_bucket` for route-authority rollback/debug. The 500 / 2100+ gates still matter before physically deleting the remaining compatibility or rollback code paths.
+
 Focused long-tail closed-loop entries:
 
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
