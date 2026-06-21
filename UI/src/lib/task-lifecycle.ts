@@ -12,8 +12,18 @@ export interface TaskLifecycleProjection {
   resume_due?: boolean;
   resume_wait_seconds?: number;
   resume_reason?: string;
+  waiting_reason_code?: string;
   checkpoint_id?: string;
   pending_job_ref?: string;
+  poll_ref?: string;
+  cancel_ref?: string;
+  next_action_kind?: string;
+  next_action_ref?: string | number | boolean;
+  next_poll_after?: number;
+  resume_owner?: string;
+  resume_entrypoint?: string;
+  last_safe_step_id?: string;
+  state_source?: string;
   terminal_reason?: string;
 }
 
@@ -83,11 +93,22 @@ export function buildTaskLifecycleView(
   ];
   if (heartbeat) meta.push(`${t(lang, "最近心跳", "Last heartbeat")}: ${heartbeat}`);
   if (nextCheck) meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
+  if (lifecycle?.state_source) meta.push(`${t(lang, "状态来源", "State source")}: ${lifecycle.state_source}`);
+  if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
+  if (lifecycle?.next_action_kind) meta.push(`${t(lang, "下一步", "Next action")}: ${lifecycle.next_action_kind}`);
+  if (lifecycle?.next_action_ref !== undefined && lifecycle?.next_action_ref !== null) {
+    meta.push(`${t(lang, "下一步引用", "Next action ref")}: ${String(lifecycle.next_action_ref)}`);
+  }
   if (Number.isFinite(lifecycle?.resume_wait_seconds)) {
     meta.push(`${t(lang, "恢复等待", "Resume wait")}: ${Math.max(0, Number(lifecycle?.resume_wait_seconds))}s`);
   }
   if (lifecycle?.checkpoint_id) meta.push(`${t(lang, "检查点", "Checkpoint")}: ${lifecycle.checkpoint_id}`);
   if (lifecycle?.pending_job_ref) meta.push(`${t(lang, "后台任务", "Background job")}: ${lifecycle.pending_job_ref}`);
+  if (lifecycle?.poll_ref) meta.push(`${t(lang, "轮询引用", "Poll ref")}: ${lifecycle.poll_ref}`);
+  if (lifecycle?.cancel_ref) meta.push(`${t(lang, "取消引用", "Cancel ref")}: ${lifecycle.cancel_ref}`);
+  if (lifecycle?.resume_owner) meta.push(`${t(lang, "恢复执行者", "Resume owner")}: ${lifecycle.resume_owner}`);
+  if (lifecycle?.resume_entrypoint) meta.push(`${t(lang, "恢复入口", "Resume entrypoint")}: ${lifecycle.resume_entrypoint}`);
+  if (lifecycle?.last_safe_step_id) meta.push(`${t(lang, "安全步骤", "Safe step")}: ${lifecycle.last_safe_step_id}`);
   if (lifecycle?.terminal_reason) meta.push(`${t(lang, "结束原因", "Terminal reason")}: ${lifecycle.terminal_reason}`);
 
   let detail = t(lang, "任务状态来自当前任务记录。", "Status comes from the current task record.");

@@ -908,6 +908,12 @@ interface TaskOutcomeView {
   failureLabel?: string;
 }
 
+interface TaskPermissionView {
+  tone: "ok" | "attention" | "failed";
+  title: string;
+  meta: string[];
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -933,12 +939,25 @@ function stringArrayAt(root: unknown, path: string[]): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function boolAt(root: unknown, path: string[]): boolean | undefined {
+  const value = getPathValue(root, path);
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function taskTraceRoot(result: TaskQueryResponse): unknown {
   return getPathValue(result.result_json, ["task_journal", "trace"]);
 }
 
 function taskSummaryRoot(result: TaskQueryResponse): unknown {
   return getPathValue(result.result_json, ["task_journal", "summary"]);
+}
+
+function taskPermissionRoot(result: TaskQueryResponse): unknown {
+  return (
+    getPathValue(taskSummaryRoot(result), ["verify_result", "permission_decision"]) ??
+    getPathValue(taskTraceRoot(result), ["verify_result", "permission_decision"]) ??
+    getPathValue(result.result_json, ["permission_decision"])
+  );
 }
 
 function humanFailureLabel(kind: string | undefined, lang: UiLang): string | undefined {
@@ -1022,6 +1041,40 @@ function buildTaskOutcome(result: TaskQueryResponse, lang: UiLang): TaskOutcomeV
     finalShape,
     missingEvidence,
     failureLabel: humanFailureLabel(failureKind, lang),
+  };
+}
+
+function buildTaskPermissionView(result: TaskQueryResponse, lang: UiLang): TaskPermissionView | null {
+  const permission = taskPermissionRoot(result);
+  if (!asRecord(permission)) return null;
+  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const allowed = boolAt(permission, ["allowed"]);
+  const needsConfirmation = boolAt(permission, ["needs_confirmation"]);
+  const deniedByPolicy = boolAt(permission, ["denied_by_policy"]);
+  const dryRunRequired = boolAt(permission, ["dry_run_required"]);
+  const externalProviderBlocked = boolAt(permission, ["external_provider_blocked"]);
+  const riskLevel = stringAt(permission, ["risk_level"]);
+  const actionEffect = stringAt(permission, ["action_effect"]);
+  const ownerLayer = stringAt(permission, ["owner_layer"]);
+  const statusCode = stringAt(permission, ["status_code"]);
+  const messageKey = stringAt(permission, ["message_key"]);
+  const meta = [
+    `allowed=${allowed ?? "--"}`,
+    `needs_confirmation=${needsConfirmation ?? "--"}`,
+    `denied_by_policy=${deniedByPolicy ?? "--"}`,
+  ];
+  if (dryRunRequired !== undefined) meta.push(`dry_run_required=${dryRunRequired}`);
+  if (externalProviderBlocked !== undefined) meta.push(`external_provider_blocked=${externalProviderBlocked}`);
+  if (riskLevel) meta.push(`risk=${riskLevel}`);
+  if (actionEffect) meta.push(`effect=${actionEffect}`);
+  if (ownerLayer) meta.push(`owner=${ownerLayer}`);
+  if (statusCode) meta.push(`status=${statusCode}`);
+  if (messageKey) meta.push(`message_key=${messageKey}`);
+  const tone = deniedByPolicy || externalProviderBlocked ? "failed" : needsConfirmation || dryRunRequired ? "attention" : "ok";
+  return {
+    tone,
+    title: tLocal("权限决策", "Permission decision"),
+    meta,
   };
 }
 
@@ -5472,6 +5525,7 @@ export default function App() {
   })();
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
+  const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
   const isDashboardPage = currentPage === "dashboard";
   const factoryResetCanConfirm =
     factoryResetCountdown <= 0 &&
@@ -9240,6 +9294,26 @@ export default function App() {
                         <p className="mt-1 text-sm opacity-80">{taskLifecycleView.detail}</p>
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
                           {taskLifecycleView.meta.map((item) => (
+                            <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {taskPermissionView ? (
+                      <div
+                        className={`mt-4 rounded-xl border px-3 py-3 ${
+                          taskPermissionView.tone === "ok"
+                            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-50"
+                            : taskPermissionView.tone === "attention"
+                              ? "border-amber-400/25 bg-amber-500/10 text-amber-50"
+                              : "border-red-400/25 bg-red-500/10 text-red-50"
+                        }`}
+                      >
+                        <p className="font-semibold">{taskPermissionView.title}</p>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {taskPermissionView.meta.map((item) => (
                             <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
                               {item}
                             </span>
