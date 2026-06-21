@@ -59,6 +59,20 @@ fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
             "package_manager.detect",
             "docker_container_lifecycle",
         ),
+        (
+            OutputSemanticKind::CommandOutputSummary,
+            "package_manager",
+            serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
+            "package_manager.smart_install",
+            "command_output_summary",
+        ),
+        (
+            OutputSemanticKind::ContentExcerptSummary,
+            "package_manager",
+            serde_json::json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
+            "package_manager.smart_install",
+            "content_excerpt_summary",
+        ),
     ];
 
     for (semantic_kind, skill, args, expected_action, expected_contract) in cases {

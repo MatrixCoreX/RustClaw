@@ -396,6 +396,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["field_value"],
     ),
     step_json_extractor(
+        "package_manager.smart_install",
+        "package_manager.smart_install.structured_json_v1",
+        &["command_output", "field_value", "status"],
+    ),
+    step_json_extractor(
         "process_basic",
         "process_basic.structured_json_v1",
         &[

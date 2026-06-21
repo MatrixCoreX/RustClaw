@@ -1174,6 +1174,44 @@ fn package_manager_dry_run_falls_back_to_current_request_package_token() {
 }
 
 #[test]
+fn package_manager_dry_run_ignores_auto_locator_path_when_package_token_is_structured() {
+    let state = test_state_with_enabled_skills(&["package_manager"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/run".to_string();
+    route.resolved_intent =
+        "package dry-run preview; current package token is jq; do not execute install".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = package_manager_dry_run_deterministic_plan_result(
+        &state,
+        "dry-run package install",
+        Some(&route),
+        &loop_state,
+        "假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装。",
+    )
+    .expect("package manager dry-run should not be blocked by auto locator");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "package_manager", "smart_install");
+    assert_eq!(
+        args.get("packages")
+            .and_then(Value::as_array)
+            .map(|packages| {
+                packages
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+            }),
+        Some(vec!["jq"])
+    );
+    assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
 fn archive_basic_unknown_readonly_action_normalizes_to_list_for_archive_contract() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();

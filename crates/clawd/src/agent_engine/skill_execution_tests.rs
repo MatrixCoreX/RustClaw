@@ -419,6 +419,60 @@ planner_capabilities = [
 }
 
 #[test]
+fn contract_matrix_preflight_marks_package_dry_run_as_low_risk_observe() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "package_manager"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+confirmation_exempt_when = [
+  { action = "smart_install", dry_run = true },
+]
+planner_capabilities = [
+  { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages"], optional = ["dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+"#,
+        &["package_manager"],
+    );
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::FileNames,
+        requires_content_evidence: true,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "action": "smart_install",
+        "packages": ["jq"],
+        "dry_run": true
+    });
+
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "package_manager", &args)
+        .expect("file_names contract should reject package dry-run and expose permission");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("contract policy error should be structured");
+    let permission = parsed
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("permission_decision"))
+        .expect("permission_decision");
+
+    assert_eq!(permission["risk_level"], serde_json::json!("low"));
+    assert_eq!(permission["needs_confirmation"], false);
+    assert_eq!(permission["action_effect"], serde_json::json!("observe"));
+    assert_eq!(
+        permission["canonical_skill"],
+        serde_json::json!("package_manager")
+    );
+}
+
+#[test]
 fn contract_matrix_preflight_allows_user_named_output_path_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);

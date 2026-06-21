@@ -378,6 +378,19 @@ fn action_scoped_risk_level(
     })
 }
 
+fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -> bool {
+    if canonical_skill != "package_manager" {
+        return false;
+    }
+    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    matches!(
+        normalized_action_arg(args).as_deref(),
+        Some("install" | "uninstall" | "smart_install")
+    )
+}
+
 fn preflight_permission_decision(
     state: &AppState,
     normalized_skill: &str,
@@ -390,8 +403,12 @@ fn preflight_permission_decision(
     let effect =
         crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args);
     let manifest = state.skill_manifest(&canonical_skill);
-    let risk_level = action_scoped_risk_level(state, &canonical_skill, action.as_deref())
-        .or_else(|| manifest.as_ref().and_then(|value| value.risk_level));
+    let risk_level = if package_manager_dry_run_install_action(&canonical_skill, args) {
+        Some(SkillRiskLevel::Low)
+    } else {
+        action_scoped_risk_level(state, &canonical_skill, action.as_deref())
+            .or_else(|| manifest.as_ref().and_then(|value| value.risk_level))
+    };
     let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
     let registry = state.get_skills_registry();
     let registry_policy = registry.as_ref().map(|registry| {
