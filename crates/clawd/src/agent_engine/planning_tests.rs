@@ -45,6 +45,7 @@ use super::{
     normalize_planned_actions, normalize_planned_actions_with_original,
     normalize_planned_actions_with_original_and_context, normalize_system_basic_schema_aliases,
     normalize_transform_schema_aliases, observation_only_plan_can_finalize_from_direct_output,
+    package_docker_readonly_probe_deterministic_plan_result,
     package_manager_detect_deterministic_plan_result,
     package_manager_dry_run_deterministic_plan_result, plan_repair_reason,
     plan_result_with_fallback_reason, planner_notes_for_initial_fallback,
