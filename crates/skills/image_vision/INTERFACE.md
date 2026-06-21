@@ -6,6 +6,7 @@
 ## Capability Summary
 - `image_vision` analyzes one or more images for description, extraction, comparison, and screenshot summaries.
 - It returns textual understanding without mutating source images.
+- It supports MiniMax image understanding through MiniMax-M3 compatible chat content parts; MiniMax image generation/editing remains `image-01` and is not part of this skill.
 - It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
 - **Output language is owned by this skill end-to-end.** The host (`clawd`) does **not** rewrite `image_vision` result text after the skill returns.
 
@@ -29,7 +30,7 @@
 
 ## Config Entry Points
 - Default vision provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`.
-- Current default: `minimax` + MiniMax MCP image understanding, with `MiniMax-M2.7` as the OpenAI-compatible fallback label.
+- Current default: `minimax` + `MiniMax-M3` for multimodal image understanding; MiniMax MCP may handle the request first, with OpenAI-compatible chat completion as fallback.
 - Recommended shared key: `configs/config.toml` -> `[llm.minimax].api_key`, or environment `MINIMAX_API_KEY`.
 - Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.minimax].api_key`, or environment `IMAGE_VISION_MINIMAX_API_KEY`.
 - MiniMax image understanding uses the `pi-minimax-mcp` / `minimax-coding-plan-mcp` path when available, then falls back to OpenAI-compatible chat completion.
