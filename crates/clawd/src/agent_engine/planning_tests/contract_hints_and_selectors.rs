@@ -1229,6 +1229,43 @@ fn process_ps_run_cmd_preserves_literal_flag() {
 }
 
 #[test]
+fn date_run_cmd_rewrites_to_system_basic_current_time() {
+    let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({"command": "date '+%Y-%m-%d %H:%M:%S %Z'"}),
+    }];
+
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+    let args = expect_planned_call(&rewritten[0], "system_basic", "runtime_status");
+
+    assert_eq!(
+        args.get("kind").and_then(Value::as_str),
+        Some("current_time")
+    );
+}
+
+#[test]
+fn runtime_status_run_cmd_rewrite_rejects_shell_control_commands() {
+    let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+    let command = "date; rm -rf /tmp/rustclaw-noop";
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({"command": command}),
+    }];
+
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+
+    match &rewritten[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "run_cmd");
+            assert_eq!(args.get("command").and_then(Value::as_str), Some(command));
+        }
+        other => panic!("expected unchanged run_cmd action, got {other:?}"),
+    }
+}
+
+#[test]
 fn docker_ps_run_cmd_rewrites_to_docker_basic() {
     let state = test_state_with_enabled_skills(&["docker_basic", "run_cmd"]);
     let actions = vec![AgentAction::CallSkill {

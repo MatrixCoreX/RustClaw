@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -217,6 +218,7 @@ fn system_info(workspace_root: &Path) -> SkillResult<String> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    let now_rfc3339 = current_time_rfc3339();
     let uptime = uptime_seconds_platform().unwrap_or_else(|| "-".to_string());
     let mem = memory_rss_bytes().unwrap_or(0);
     let cwd = std::env::current_dir()
@@ -232,6 +234,7 @@ fn system_info(workspace_root: &Path) -> SkillResult<String> {
         "current_user": current_user,
         "kernel_release": kernel_release,
         "now_ts": now,
+        "now_rfc3339": now_rfc3339,
         "uptime_seconds": uptime,
         "process_rss_bytes": mem,
         "pid": pid,
@@ -256,12 +259,13 @@ fn runtime_status(obj: &Map<String, Value>) -> SkillResult<String> {
         "current_user" => detect_current_user().unwrap_or_else(|| "-".to_string()),
         "host_name" => detect_hostname(),
         "kernel_release" => detect_kernel_release().unwrap_or_else(|| "-".to_string()),
+        "current_time" => current_time_rfc3339(),
         "current_working_directory" => std::env::current_dir()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "-".to_string()),
         _ => {
             return Err(SkillError::invalid_input(
-                "unsupported runtime_status kind; use current_user|host_name|kernel_release|current_working_directory",
+                "unsupported runtime_status kind; use current_user|host_name|kernel_release|current_time|current_working_directory",
             ));
         }
     };
@@ -289,6 +293,14 @@ fn normalize_runtime_status_kind(raw: &str) -> String {
         }
         "kernel" | "kernel_name" | "kernel_release" | "os_kernel" | "system_kernel" | "uname"
         | "uname_r" => "kernel_release".to_string(),
+        "now"
+        | "time"
+        | "date"
+        | "datetime"
+        | "timestamp"
+        | "current_time"
+        | "system_time"
+        | "current_system_time" => "current_time".to_string(),
         "pwd"
         | "cwd"
         | "current_working_directory"
@@ -297,6 +309,10 @@ fn normalize_runtime_status_kind(raw: &str) -> String {
         | "current_process_cwd" => "current_working_directory".to_string(),
         other => other.to_string(),
     }
+}
+
+fn current_time_rfc3339() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn detect_current_user() -> Option<String> {

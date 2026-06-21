@@ -40,7 +40,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | `info` | none | no | - | - | Return host/runtime introspection as JSON: hostname, current_user, kernel_release, timestamps, uptime, process RSS, pid, cwd, workspace root, executable path, OS and arch. |
-| `runtime_status` | `kind` | no | string | - | Runtime scalar to return. Supported: `current_user`, `host_name`, `kernel_release`, `current_working_directory`. Aliases such as `whoami`, `hostname`, `uname_r`, and `pwd` are normalized. |
+| `runtime_status` | `kind` | no | string | - | Runtime scalar to return. Supported: `current_user`, `host_name`, `kernel_release`, `current_time`, `current_working_directory`. Aliases such as `whoami`, `hostname`, `uname_r`, `system_time`, and `pwd` are normalized. |
 | `inventory_dir` | `path` | no | string(path) | `.` | Target directory inside workspace. |
 | `inventory_dir` | `files_only` | no | bool | `false` | Keep only files. |
 | `inventory_dir` | `dirs_only` | no | bool | `false` | Keep only directories. |
@@ -117,7 +117,7 @@
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; strict filesystem/config/runtime evidence must come from `extra` fields.
 - `info` success `extra` fields:
-  - `hostname`, `current_user`, `kernel_release`, `pid`, `cwd`, `workspace_root`, `os`, `arch`, timestamps, uptime, RSS, and executable path; evidence roles `field_value`, `count`, and `path`.
+  - `hostname`, `current_user`, `kernel_release`, `now_ts`, `now_rfc3339`, `pid`, `cwd`, `workspace_root`, `os`, `arch`, timestamps, uptime, RSS, and executable path; evidence roles `field_value`, `count`, and `path`.
 - `runtime_status` success `extra` fields:
   - `action`, `kind`, `value`, `field_value`, and `command_output`; evidence roles `field_value` and `command_output`.
 - `inventory_dir` success `extra` fields:
@@ -165,6 +165,14 @@ Runtime scalar example:
 
 ```json
 {"request_id":"demo-1b","status":"ok","text":"{\"action\":\"runtime_status\",\"kind\":\"current_user\",\"value\":\"runner\",\"field_value\":\"runner\",\"command_output\":\"runner\"}","extra":{"action":"runtime_status","kind":"current_user","value":"runner","field_value":"runner","command_output":"runner"},"error_text":null}
+```
+
+```json
+{"request_id":"demo-1c","args":{"action":"runtime_status","kind":"current_time"}}
+```
+
+```json
+{"request_id":"demo-1c","status":"ok","text":"{\"action\":\"runtime_status\",\"kind\":\"current_time\",\"value\":\"2026-06-21T08:00:00Z\",\"field_value\":\"2026-06-21T08:00:00Z\",\"command_output\":\"2026-06-21T08:00:00Z\"}","extra":{"action":"runtime_status","kind":"current_time","value":"2026-06-21T08:00:00Z","field_value":"2026-06-21T08:00:00Z","command_output":"2026-06-21T08:00:00Z"},"error_text":null}
 ```
 
 ### Example 2

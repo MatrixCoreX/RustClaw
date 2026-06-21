@@ -127,15 +127,15 @@ semantic_kind = "command_output_summary"
 operation = "summarize"
 target_object = "system"
 delivery_shape = "summary"
-allowed_actions = ["run_cmd", "log_analyze", "http_basic", "process_basic", "git_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "config_basic.validate"]
-preferred_actions = ["run_cmd", "log_analyze", "git_basic", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "config_basic.validate", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries"]
+allowed_actions = ["run_cmd", "log_analyze", "http_basic", "process_basic", "git_basic", "system_basic.runtime_status", "system_basic.info", "system_basic.extract_field", "system_basic.extract_fields", "system_basic.path_batch_facts", "fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "config_basic.read_field", "config_basic.read_fields", "config_basic.validate"]
+preferred_actions = ["run_cmd", "log_analyze", "git_basic", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "config_basic.read_field", "config_basic.read_fields", "config_basic.validate", "fs_basic.stat_paths", "system_basic.path_batch_facts", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries"]
 forbidden_actions = []
 required_evidence = ["command_output"]
 final_answer_shape = "summary_with_evidence"
 failure_policy = "retry_with_alternatives"
 
 [contracts.command_output_summary.evidence_expression]
-any_of = ["command_output", "field_value", "content_excerpt", "count"]
+any_of = ["command_output", "field_value", "content_excerpt", "count", "exists", "path"]
 
 [contracts.service_status]
 semantic_kind = "service_status"

@@ -31,6 +31,33 @@ fn recent_scalar_equality_allows_structured_field_extractors() {
 }
 
 #[test]
+fn command_output_summary_allows_structured_field_extractors() {
+    let matrix = load_workspace_matrix();
+    let contract = matrix
+        .semantic_contract(OutputSemanticKind::CommandOutputSummary)
+        .expect("command output summary contract");
+    let matched = MatchedContract::Semantic(contract);
+    for action in [
+        "config_basic.read_field",
+        "config_basic.read_fields",
+        "system_basic.extract_field",
+        "system_basic.extract_fields",
+        "fs_basic.stat_paths",
+        "system_basic.path_batch_facts",
+    ] {
+        let action_ref = ActionRef::parse(action).expect("action parses");
+        assert_eq!(
+            matched.action_policy(&action_ref),
+            ActionPolicyDecision::Allowed,
+            "{action} should be allowed for mixed evidence summaries"
+        );
+    }
+    let evidence = matched.evidence_expression();
+    assert!(evidence.any_of.contains(&"exists".to_string()));
+    assert!(evidence.any_of.contains(&"path".to_string()));
+}
+
+#[test]
 fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

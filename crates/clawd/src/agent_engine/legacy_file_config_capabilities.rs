@@ -269,6 +269,7 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = normalize_transform_schema_aliases(actions);
     let actions = normalize_fs_basic_schema_aliases(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
+    let actions = rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, actions);
     let actions = rewrite_raw_runtime_status_to_run_cmd(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
@@ -307,6 +308,70 @@ pub(super) fn normalize_action_schema_aliases(
     let actions =
         enforce_output_contract_tool_args(route_result, user_text, original_user_text, actions);
     prune_file_paths_contract_disallowed_actions(route_result, actions)
+}
+
+pub(super) fn rewrite_readonly_runtime_status_run_cmd_to_system_basic(
+    state: &AppState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !system_basic_available_for_plan(state) {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| {
+            let Some((skill, args)) = (match &action {
+                AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
+                AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
+                _ => None,
+            }) else {
+                return action;
+            };
+            if state.resolve_canonical_skill_name(skill) != "run_cmd" {
+                return action;
+            }
+            let Some(kind) = args
+                .get("command")
+                .and_then(Value::as_str)
+                .and_then(runtime_status_kind_for_single_command)
+            else {
+                return action;
+            };
+            info!("plan_rewrite_run_cmd_to_system_basic_runtime_status kind={kind}");
+            AgentAction::CallTool {
+                tool: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "runtime_status",
+                    "kind": kind,
+                }),
+            }
+        })
+        .collect()
+}
+
+fn runtime_status_kind_for_single_command(command: &str) -> Option<&'static str> {
+    let command = command.trim();
+    if command.is_empty()
+        || command.contains([';', '|', '&', '>', '<', '\n', '\r'])
+        || command.contains('`')
+        || command.contains("$(")
+    {
+        return None;
+    }
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let first = tokens
+        .first()
+        .and_then(|token| token.rsplit('/').next())
+        .unwrap_or_default();
+    match first {
+        "date" => Some("current_time"),
+        "pwd" => Some("current_working_directory"),
+        "hostname" => Some("host_name"),
+        "whoami" => Some("current_user"),
+        "id" if tokens.get(1) == Some(&"-un") => Some("current_user"),
+        "uname" if tokens.get(1) == Some(&"-r") => Some("kernel_release"),
+        _ => None,
+    }
 }
 
 pub(super) fn rewrite_raw_runtime_status_to_run_cmd(

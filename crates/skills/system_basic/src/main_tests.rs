@@ -35,6 +35,30 @@ fn runtime_status_returns_kernel_release_scalar() {
 }
 
 #[test]
+fn runtime_status_returns_current_time_scalar() {
+    let mut obj = Map::new();
+    obj.insert("kind".to_string(), json!("system_time"));
+
+    let out = runtime_status(&obj).expect("current time runtime status");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(
+        value.get("kind").and_then(Value::as_str),
+        Some("current_time")
+    );
+    let field_value = value
+        .get("field_value")
+        .and_then(Value::as_str)
+        .expect("field value");
+    assert!(field_value.contains('T'));
+    assert!(field_value.ends_with('Z'));
+    assert_eq!(
+        value.get("command_output").and_then(Value::as_str),
+        Some(field_value)
+    );
+}
+
+#[test]
 fn resolve_path_blocks_absolute_outside_workspace_without_permission() {
     let root = temp_root("deny_abs");
     let denied = resolve_path(&root, "/etc/passwd", false).expect_err("should deny");
