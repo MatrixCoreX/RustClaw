@@ -804,8 +804,7 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
         | crate::task_contract::TaskDeliveryShape::List
         | crate::task_contract::TaskDeliveryShape::File => true,
         crate::task_contract::TaskDeliveryShape::OneSentence
-        | crate::task_contract::TaskDeliveryShape::Summary
-        | crate::task_contract::TaskDeliveryShape::Table => matches!(
+        | crate::task_contract::TaskDeliveryShape::Summary => matches!(
             contract.operation,
             crate::task_contract::TaskOperation::Inspect
                 | crate::task_contract::TaskOperation::List

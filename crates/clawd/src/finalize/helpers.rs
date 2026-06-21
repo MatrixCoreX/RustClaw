@@ -19,12 +19,10 @@ pub(crate) struct FinalizerSchemaOut {
     pub(crate) format_ok: bool,
     #[serde(default)]
     pub(crate) needs_clarify: bool,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub(crate) confidence: f64,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub(crate) used_evidence_ids: Vec<String>,
+    #[serde(default, rename = "confidence")]
+    pub(crate) _confidence: f64,
+    #[serde(default, rename = "used_evidence_ids")]
+    pub(crate) _used_evidence_ids: Vec<String>,
     #[serde(default)]
     pub(crate) evidence_quotes: Vec<String>,
 }

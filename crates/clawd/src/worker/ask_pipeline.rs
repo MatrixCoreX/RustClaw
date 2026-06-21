@@ -218,7 +218,7 @@ pub(super) struct PreparedAskFlow {
 struct AppliedAskPostRoute {
     execution_route_result: crate::RouteResult,
     auto_locator_path: Option<String>,
-    #[allow(dead_code)]
+    #[cfg(test)]
     gate_record: crate::post_route_policy::PostRouteGateRecord,
     has_authoritative_deictic_anchor: bool,
     resolved_prompt_for_execution: String,
@@ -1109,6 +1109,7 @@ fn apply_ask_post_route(
     AppliedAskPostRoute {
         execution_route_result: post_route.execution_route_result,
         auto_locator_path: post_route.auto_locator_path,
+        #[cfg(test)]
         gate_record: post_route.gate_record,
         has_authoritative_deictic_anchor,
         resolved_prompt_for_execution,

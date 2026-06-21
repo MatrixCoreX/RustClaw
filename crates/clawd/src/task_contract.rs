@@ -53,7 +53,6 @@ impl TaskTargetObject {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum TaskOperation {
     Inspect,
     List,
@@ -62,7 +61,6 @@ pub(crate) enum TaskOperation {
     Write,
     Modify,
     Run,
-    Configure,
     Validate,
     Summarize,
     Unknown,
@@ -78,7 +76,6 @@ impl TaskOperation {
             Self::Write => "write",
             Self::Modify => "modify",
             Self::Run => "run",
-            Self::Configure => "configure",
             Self::Validate => "validate",
             Self::Summarize => "summarize",
             Self::Unknown => "unknown",
@@ -87,11 +84,9 @@ impl TaskOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum TaskDeliveryShape {
     OneSentence,
     List,
-    Table,
     Raw,
     File,
     Summary,
@@ -102,7 +97,6 @@ impl TaskDeliveryShape {
         match self {
             Self::OneSentence => "one_sentence",
             Self::List => "list",
-            Self::Table => "table",
             Self::Raw => "raw",
             Self::File => "file",
             Self::Summary => "summary",
@@ -128,11 +122,9 @@ impl TaskFailurePolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum TaskTargetRole {
     Primary,
     Delivery,
-    Context,
 }
 
 impl TaskTargetRole {
@@ -140,7 +132,6 @@ impl TaskTargetRole {
         match self {
             Self::Primary => "primary",
             Self::Delivery => "delivery",
-            Self::Context => "context",
         }
     }
 }

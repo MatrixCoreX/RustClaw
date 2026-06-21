@@ -692,9 +692,9 @@ async fn main() -> anyhow::Result<()> {
         },
         reload_ctx: ReloadContext {
             config_path_for_reload: config_path.clone(),
-            registry_path_for_reload: config.skills.registry_path.clone(),
-            skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
-            initial_skills_list_for_reload: config.skills.skills_list.clone(),
+            _registry_path_for_reload: config.skills.registry_path.clone(),
+            _skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
+            _initial_skills_list_for_reload: config.skills.skills_list.clone(),
         },
         ask_states: AskStateRegistry::default(),
     };
@@ -805,7 +805,8 @@ fn spawn_prompts_sighup_listener(state: AppState, cfg: claw_core::config::Prompt
         );
         while stream.recv().await.is_some() {
             info!("prompt_hot_reload: SIGHUP received, reloading runtime prompts");
-            let _report = bootstrap::reload_runtime_prompts(&state, &cfg.config_path);
+            let report = bootstrap::reload_runtime_prompts(&state, &cfg.config_path);
+            info!("prompt_hot_reload: report {}", report.trace_summary());
         }
         info!("prompt_hot_reload: SIGHUP listener exiting");
     });

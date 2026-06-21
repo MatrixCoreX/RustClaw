@@ -737,8 +737,8 @@ fn test_observed_quotes_grounded_requires_exact_match() {
         grounded_ok: true,
         format_ok: true,
         needs_clarify: false,
-        confidence: 0.8,
-        used_evidence_ids: vec!["E1".to_string()],
+        _confidence: 0.8,
+        _used_evidence_ids: vec!["E1".to_string()],
         evidence_quotes: vec!["NL regression test artifacts".to_string()],
     };
     assert!(crate::finalize::observed_quotes_grounded(&schema, observed));

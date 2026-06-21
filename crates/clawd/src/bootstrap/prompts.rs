@@ -422,8 +422,7 @@ pub(crate) fn load_required_prompt_template_for_state_with_meta(
 /// §3.5d: prompt hot-reload 汇总报告。`persona/schedule_*` 字段记录 reload 前后的字符数；
 /// `validation` 是重跑的 [`validate_core_prompts`] 结果；`elapsed_ms` 给运维看本次 reload 耗时。
 ///
-/// 字段当前主要服务于单测 / 未来管理 API；运行期 SIGHUP listener 只把摘要打到日志。
-#[allow(dead_code)]
+/// 字段服务于单测和运行期 SIGHUP listener 摘要日志。
 #[derive(Debug, Clone)]
 pub(crate) struct PromptReloadReport {
     pub persona_chars_before: usize,
@@ -435,6 +434,24 @@ pub(crate) struct PromptReloadReport {
     pub validation: PromptValidationReport,
     pub elapsed_ms: u64,
     pub config_reread_ok: bool,
+}
+
+impl PromptReloadReport {
+    pub(crate) fn trace_summary(&self) -> String {
+        format!(
+            "elapsed_ms={} config_reread_ok={} persona_chars=({}->{}) schedule_intent_chars=({}->{}) schedule_rules_chars=({}->{}) validation_missing={}/{}",
+            self.elapsed_ms,
+            self.config_reread_ok,
+            self.persona_chars_before,
+            self.persona_chars_after,
+            self.schedule_intent_chars_before,
+            self.schedule_intent_chars_after,
+            self.schedule_rules_chars_before,
+            self.schedule_rules_chars_after,
+            self.validation.missing.len(),
+            self.validation.checked
+        )
+    }
 }
 
 /// §3.5d: prompt hot-reload 主入口。

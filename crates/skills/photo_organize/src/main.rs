@@ -227,11 +227,13 @@ struct BuildPhotoPlansResult {
     non_exif_files: Vec<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HostPlatform {
+    #[cfg(target_os = "macos")]
     MacOS,
+    #[cfg(target_os = "linux")]
     Linux,
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     Other,
 }
 

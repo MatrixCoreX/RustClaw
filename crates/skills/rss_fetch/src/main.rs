@@ -175,7 +175,7 @@ fn all_sources_with_state_for_category(
 }
 
 /// 仅返回 URL 列表（兼容旧调用）；排除 deprecated。测试与外部可读配置时使用。
-#[allow(dead_code)]
+#[cfg(test)]
 fn all_sources_for_category(cfg: &RootConfig, category: &str) -> Vec<String> {
     all_sources_with_state_for_category(cfg, category)
         .into_iter()

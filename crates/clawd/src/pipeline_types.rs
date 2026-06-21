@@ -396,7 +396,6 @@ impl RiskCeiling {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct RouteResult {
     /// Runtime mode for ask-flow dispatch. Legacy route labels for logs and
@@ -485,7 +484,6 @@ impl PlanKind {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PlanStep {
     pub(crate) step_id: String,
@@ -493,10 +491,10 @@ pub(crate) struct PlanStep {
     pub(crate) skill: String,
     pub(crate) args: Value,
     pub(crate) depends_on: Vec<String>,
+    /// Planner rationale kept for journal/debug context; execution consumes machine fields.
     pub(crate) why: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PlanResult {
     pub(crate) goal: String,

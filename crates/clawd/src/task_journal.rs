@@ -99,45 +99,28 @@ impl TaskJournalFinalStatus {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskJournalFinalizerStage {
-    General,
-    ObservedRead,
-    ObservedListDir,
     ObservedGeneric,
 }
 
 impl TaskJournalFinalizerStage {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::General => "general",
-            Self::ObservedRead => "observed_read",
-            Self::ObservedListDir => "observed_list_dir",
             Self::ObservedGeneric => "observed_generic",
         }
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskJournalFinalizerFallback {
-    RawText,
-    NoAnswerNonQualified,
-    NoAnswerParseFailed,
-}
+pub(crate) enum TaskJournalFinalizerFallback {}
 
 impl TaskJournalFinalizerFallback {
     pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::RawText => "raw_text",
-            Self::NoAnswerNonQualified => "no_answer_nonqualified",
-            Self::NoAnswerParseFailed => "no_answer_parse_failed",
-        }
+        match self {}
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalVerifyIssue {
     pub(crate) step_id: String,
@@ -145,7 +128,6 @@ pub(crate) struct TaskJournalVerifyIssue {
     pub(crate) detail: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalVerifySummary {
     pub(crate) mode: crate::verifier::VerifyMode,
@@ -156,7 +138,6 @@ pub(crate) struct TaskJournalVerifySummary {
     pub(crate) issues: Vec<TaskJournalVerifyIssue>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalRoundTrace {
     pub(crate) round_no: usize,
@@ -166,7 +147,6 @@ pub(crate) struct TaskJournalRoundTrace {
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalStepTrace {
     pub(crate) step_id: String,
@@ -213,7 +193,6 @@ impl TaskJournalStepTrace {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalFinalizerSummary {
     pub(crate) stage: Option<TaskJournalFinalizerStage>,
@@ -230,7 +209,6 @@ pub(crate) struct TaskJournalFinalizerSummary {
     pub(crate) evidence_quotes_count: usize,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalAnswerVerifierSummary {
     pub(crate) pass: bool,
@@ -266,7 +244,6 @@ impl TaskJournalAnswerVerifierSummary {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct TaskJournalRolloutAttribution {
     pub(crate) switch_name: String,
@@ -791,6 +768,7 @@ fn plan_trace_json(plan: &crate::PlanResult, route: Option<&crate::RouteResult>)
                 "matrix_action_ref": matrix_action_ref,
                 "raw_action_ref": raw_action_ref,
                 "depends_on": &step.depends_on,
+                "why": crate::truncate_for_log(&step.why),
             })
         }).collect::<Vec<_>>(),
     })
@@ -1355,7 +1333,6 @@ fn validation_signal_from_step(step: &TaskJournalStepTrace) -> Option<Value> {
     }))
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalTaskMetrics {
     pub(crate) used_evidence_ids_count: Option<usize>,
@@ -1371,7 +1348,6 @@ pub(crate) struct TaskJournalTaskMetrics {
     pub(crate) by_prompt: Option<std::collections::HashMap<String, crate::LlmPromptBucket>>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournal {
     pub(crate) task_id: Option<String>,
@@ -1437,7 +1413,6 @@ fn summarize_verify_result(
     }
 }
 
-#[allow(dead_code)]
 impl TaskJournal {
     pub(crate) fn new(input_text: impl Into<String>) -> Self {
         Self {
@@ -1455,15 +1430,6 @@ impl TaskJournal {
         journal.task_id = Some(task_id.into());
         journal.kind = Some(kind.into());
         journal
-    }
-
-    pub(crate) fn set_task_identity(
-        &mut self,
-        task_id: impl Into<String>,
-        kind: impl Into<String>,
-    ) {
-        self.task_id = Some(task_id.into());
-        self.kind = Some(kind.into());
     }
 
     pub(crate) fn record_context_bundle_summary(&mut self, summary: impl Into<String>) {
@@ -1491,25 +1457,6 @@ impl TaskJournal {
 
     pub(crate) fn record_verify_result(&mut self, verify_result: &crate::verifier::VerifyResult) {
         self.verify_result = Some(summarize_verify_result(verify_result));
-    }
-
-    pub(crate) fn push_round_trace(
-        &mut self,
-        round_no: usize,
-        goal: impl Into<String>,
-        execution_recipe_summary: Option<String>,
-        plan_result: &crate::PlanResult,
-        verify_result: &crate::verifier::VerifyResult,
-    ) {
-        self.plan_result = Some(plan_result.clone());
-        self.verify_result = Some(summarize_verify_result(verify_result));
-        self.rounds.push(TaskJournalRoundTrace {
-            round_no,
-            goal: goal.into(),
-            execution_recipe_summary,
-            plan_result: Some(plan_result.clone()),
-            verify_result: Some(summarize_verify_result(verify_result)),
-        });
     }
 
     pub(crate) fn push_step_result(&mut self, step_result: &crate::executor::StepExecutionResult) {

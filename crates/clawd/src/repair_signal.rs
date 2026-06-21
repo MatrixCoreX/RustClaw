@@ -5,10 +5,6 @@ pub(crate) enum RepairSignalSource {
     Verifier,
     Executor,
     AnswerVerifier,
-    #[allow(dead_code)]
-    Delivery,
-    #[allow(dead_code)]
-    CapabilityResolver,
 }
 
 impl RepairSignalSource {
@@ -17,8 +13,6 @@ impl RepairSignalSource {
             Self::Verifier => "verifier",
             Self::Executor => "executor",
             Self::AnswerVerifier => "answer_verifier",
-            Self::Delivery => "delivery",
-            Self::CapabilityResolver => "capability_resolver",
         }
     }
 }

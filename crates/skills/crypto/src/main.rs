@@ -247,9 +247,9 @@ struct CryptoConfig {
     default_exchange: Option<String>,
     #[serde(default)]
     execution_mode: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)] // kept for config compatibility; confirmation is now planner-decided
-    require_explicit_send: Option<bool>,
+    // Kept for config compatibility; confirmation is now planner-decided.
+    #[serde(default, rename = "require_explicit_send")]
+    _require_explicit_send: Option<bool>,
     #[serde(default)]
     max_notional_usd: Option<f64>,
     #[serde(default)]

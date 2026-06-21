@@ -34,10 +34,7 @@ pub(crate) enum UserResponseKind {
     Clarify,
     PolicyBlock,
     ToolFailure,
-    #[allow(dead_code)]
-    LlmUnavailable,
     SchemaInvalid,
-    #[allow(dead_code)]
     FinalAnswer,
 }
 
@@ -47,7 +44,6 @@ impl UserResponseKind {
             Self::Clarify => "clarify",
             Self::PolicyBlock => "policy_block",
             Self::ToolFailure => "tool_failure",
-            Self::LlmUnavailable => "llm_unavailable",
             Self::SchemaInvalid => "schema_invalid",
             Self::FinalAnswer => "final_answer",
         }
@@ -818,7 +814,6 @@ pub(crate) enum ClarifyFallbackSource {
     /// 路由层没看出明确意图（normalizer 信心不足 + clarify_question 也空）。
     IntentUnresolved,
     /// 预留：planner 多轮失败 / repair 兜不住。
-    #[allow(dead_code)]
     PlannerFailed,
     /// 预留：执行链中途失败但有部分有效 step 输出。
     ExecutionFailedPartial,
