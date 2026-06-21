@@ -15,6 +15,7 @@ The workflow builds:
 - Rust workspace binaries for `aarch64-unknown-linux-gnu`
 - `UI/dist`
 - a runtime archive named `RustClaw-pi-aarch64-<tag>.tar.gz`
+  (`RustClaw-<tag>.tar.gz` when the tag already starts with `pi-aarch64-`)
 - a matching `.sha256` checksum file
 
 The archive is uploaded both as a workflow artifact and as a GitHub Release
