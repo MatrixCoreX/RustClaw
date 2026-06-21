@@ -10,6 +10,7 @@ import {
   Copy,
   Cpu,
   Database,
+  Download,
   FileText,
   Fingerprint,
   KeyRound,
@@ -113,7 +114,7 @@ interface SubmitTaskResponse {
   task_id: string;
 }
 
-type WorkspaceUpdateMode = "full" | "ui_only" | "clawd_only";
+type WorkspaceUpdateMode = "full" | "ui_only" | "clawd_only" | "release_deploy";
 
 interface WorkspaceUpdateStatus {
   status: "idle" | "running" | "succeeded" | "failed" | "canceled" | "restarting" | "up_to_date" | string;
@@ -3612,6 +3613,14 @@ export default function App() {
         endpoint: "/v1/admin/workspace-update/build-clawd",
         started: t("clawd 编译已开始，下面会自动刷新进度。", "clawd build started. Progress will refresh automatically."),
       },
+      release_deploy: {
+        confirm: t(
+          "直接下载 GitHub Releases 里适合当前机器的预编译包并部署；会保留 configs、data、logs 和 .pids，完成后重启 clawd。确认现在开始吗？",
+          "Download and deploy the prebuilt GitHub Release package for this machine. configs, data, logs, and .pids will be preserved, then clawd will restart. Start now?",
+        ),
+        endpoint: "/v1/admin/workspace-update/deploy-release",
+        started: t("Release 包部署已开始，下面会自动刷新进度。", "Release package deployment started. Progress will refresh automatically."),
+      },
     };
     const selectedMode = modeConfig[mode];
     const confirmed = window.confirm(selectedMode.confirm);
@@ -3644,8 +3653,12 @@ export default function App() {
   const cancelWorkspaceUpdate = async () => {
     const confirmed = window.confirm(
       t(
-        "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
-        "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
+        workspaceUpdateStatus?.mode === "release_deploy"
+          ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
+          : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
+        workspaceUpdateStatus?.mode === "release_deploy"
+          ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
+          : "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
       ),
     );
     if (!confirmed) return;
@@ -5185,11 +5198,14 @@ export default function App() {
       building_ui: t("正在编译 UI", "Building UI"),
       ui_build_succeeded: t("UI 编译完成", "UI build completed"),
       building_clawd: t("正在编译 clawd", "Building clawd"),
+      downloading_release: t("正在下载 Release 包", "Downloading Release package"),
+      deploying_release: t("正在部署 Release 包", "Deploying Release package"),
       cancel_requested: t("正在停止编译", "Stopping build"),
       canceled: t("已停止", "Stopped"),
       restarting_clawd: t("正在安排重启", "Scheduling restart"),
       restart_scheduled: t("已安排重启", "Restart scheduled"),
       clawd_restart_scheduled: t("clawd 已安排重启", "clawd restart scheduled"),
+      release_restart_scheduled: t("Release 已部署，正在重启", "Release deployed, restarting"),
     };
     return labels[step || ""] || step || "--";
   };
@@ -5197,6 +5213,8 @@ export default function App() {
     if (status === "running") {
       return workspaceUpdateStatus?.mode === "ui_only" || workspaceUpdateStatus?.mode === "clawd_only"
         ? t("编译中", "Building")
+        : workspaceUpdateStatus?.mode === "release_deploy"
+          ? t("部署中", "Deploying")
         : t("更新中", "Updating");
     }
     if (status === "restarting") return t("重启中", "Restarting");
@@ -5224,6 +5242,8 @@ export default function App() {
       building_workspace: 82,
       building_ui: 82,
       building_clawd: 82,
+      downloading_release: 35,
+      deploying_release: 78,
       cancel_requested: 92,
       restarting_clawd: 96,
     };
@@ -5240,6 +5260,12 @@ export default function App() {
     }
     if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_clawd") {
       return t("clawd 编译中，完成后会安排 clawd 重启。", "Building clawd; clawd will restart when finished.");
+    }
+    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "downloading_release") {
+      return t("正在下载当前机器对应的 GitHub Release 包。", "Downloading the GitHub Release package for this machine.");
+    }
+    if (workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_deploy") {
+      return t("Release 包部署中，完成后会保留配置并重启 clawd。", "Deploying the Release package; configs will be preserved and clawd will restart.");
     }
     return workspaceUpdateStepLabel(workspaceUpdateStatus?.step);
   })();
@@ -5276,15 +5302,26 @@ export default function App() {
         tone: "error" as const,
         title: workspaceUpdateStatus.error || t("更新失败", "Update failed"),
         detail: t(
-          "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
-          "Check the log summary below, then fix Git, network, or build issues and retry.",
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
+            : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
+            : "Check the log summary below, then fix Git, network, or build issues and retry.",
         ),
       };
     }
     if (workspaceUpdateRestarting) {
       return {
         tone: "success" as const,
-        title: t("构建已完成，RustClaw 正在重启。", "Build completed and RustClaw is restarting."),
+        title: t(
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "Release 包已部署，RustClaw 正在重启。"
+            : "构建已完成，RustClaw 正在重启。",
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "Release package deployed and RustClaw is restarting."
+            : "Build completed and RustClaw is restarting.",
+        ),
         detail: t(
           "请等待 10-20 秒；如果页面没有自动恢复，可以稍后点击“检查远端版本”。",
           "Wait 10-20 seconds. If the page does not recover automatically, click Check remote shortly.",
@@ -5296,8 +5333,12 @@ export default function App() {
         tone: "info" as const,
         title: workspaceUpdateStepLabel(workspaceUpdateStatus.step),
         detail: t(
-          "更新流程正在进行，编译日志会在下方持续刷新。",
-          "The update is running. Build logs will keep refreshing below.",
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "Release 部署正在进行，日志会在下方持续刷新。"
+            : "更新流程正在进行，编译日志会在下方持续刷新。",
+          workspaceUpdateStatus.mode === "release_deploy"
+            ? "Release deployment is running. Logs will keep refreshing below."
+            : "The update is running. Build logs will keep refreshing below.",
         ),
       };
     }
@@ -5945,8 +5986,8 @@ export default function App() {
                     </h3>
                     <p className="mt-2 text-sm leading-7 text-white/65">
                       {t(
-                        "完整编译会先尝试正常拉取远端版本，再编译并重启 clawd；只编译 UI 和只编译 clawd 不会拉取远端版本，适合只改了对应部分时使用。",
-                        "A full build pulls the remote version first, then builds and restarts clawd. Build UI and Build clawd do not pull the remote version, so they are useful when only that part changed.",
+                        "完整编译会先尝试正常拉取远端版本，再编译并重启 clawd；也可以直接下载 GitHub Release 预编译包部署，避免在设备上长时间编译。",
+                        "A full build pulls the remote version first, then builds and restarts clawd. You can also deploy a prebuilt GitHub Release package to avoid long on-device builds.",
                       )}
                     </p>
                   </div>
@@ -6000,6 +6041,15 @@ export default function App() {
                         <Cpu className="h-4 w-4" />
                         {t("只编译 clawd", "Build clawd")}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void startWorkspaceUpdate("release_deploy")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <Download className="h-4 w-4" />
+                        {t("下载 Release 部署", "Deploy Release")}
+                      </button>
                       {workspaceUpdateStatus?.status === "running" ? (
                         <button
                           type="button"
@@ -6012,7 +6062,11 @@ export default function App() {
                           ) : (
                             <X className="h-4 w-4" />
                           )}
-                          {workspaceUpdateCanceling ? t("停止中", "Stopping") : t("停止编译", "Stop Build")}
+                          {workspaceUpdateCanceling
+                            ? t("停止中", "Stopping")
+                            : workspaceUpdateStatus.mode === "release_deploy"
+                              ? t("停止部署", "Stop Deploy")
+                              : t("停止编译", "Stop Build")}
                         </button>
                       ) : null}
                       <button

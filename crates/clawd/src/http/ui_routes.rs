@@ -241,6 +241,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(start_workspace_update_clawd_only),
         )
         .route(
+            "/admin/workspace-update/deploy-release",
+            post(start_workspace_update_release_deploy),
+        )
+        .route(
             "/admin/workspace-update/cancel",
             post(cancel_workspace_update),
         )
