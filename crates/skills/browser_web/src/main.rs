@@ -12,12 +12,12 @@ use url::Url;
 struct Request {
     request_id: String,
     args: Value,
-    #[allow(dead_code)]
-    context: Option<Value>,
-    #[allow(dead_code)]
-    user_id: i64,
-    #[allow(dead_code)]
-    chat_id: i64,
+    #[serde(rename = "context")]
+    _context: Option<Value>,
+    #[serde(rename = "user_id")]
+    _user_id: i64,
+    #[serde(rename = "chat_id")]
+    _chat_id: i64,
 }
 
 #[derive(Debug, Serialize)]

@@ -13,6 +13,13 @@
 - `python3 scripts/check_no_runtime_hard_reply.py`：`candidates=0`。
 - `plan/` 根目录当前只放未完成计划；完成后归档到 `plan/archived_completed_20260620/` 或后续对应归档目录。
 
+2026-06-21 代码核对更新：
+
+- `plan/` 根目录当前仅剩本计划，归档目录下计划不计入当前未完成项。
+- 新增 `video_generate` / `music_generate` 后已完成真实 dry-run 验证：直接 skill 进程、`skill-runner`、`clawd /v1/tasks kind=run_skill` 均通过；registry reload 曾暴露 `output_kind = "video" / "audio"` 不属于当前 `OutputKind` 枚举，已修为 `file` 并提交 `058314a0`。
+- 当前 `#[allow(dead_code)]` 仍集中在 trace / journal / compatibility enum、部分 skill 协议字段和少量历史 fallback 边界；先推进可独立验证、低风险的协议字段清理，再处理 clawd trace/journal 结构。
+- 当前 `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills | wc -l` 在本轮 A0 清理后为 `44`。
+
 清理目标不是扩大重构面，而是减少旧迁移残留、兼容命名、dead-code allow 和 planner 后处理补丁。所有改动必须继续满足多语言 agent 约束：不新增自然语言硬匹配，不新增硬编码用户可见回复模板。
 
 ## 总原则
@@ -29,6 +36,10 @@
 
 目标：删除真正无用的 `#[allow(dead_code)]`，把仍需保留的 trace / journal / reload 占位改成明确用途或缩小可见面。
 
+- [x] A0：清理 skill 协议字段上的低风险 `allow(dead_code)`。
+  - 2026-06-21：`browser_web`、`extension_manager`、`photo_organize` 的未读协议字段改为 `_field` + `serde(rename=...)`，保持 JSON 协议不变；`photo_organize.context` 保留原名，因为语言解析仍读取它。
+  - 2026-06-21：`extension_manager` 生成外部 skill 模板同步改为 `_context/_user_id/_chat_id`，避免新生成代码继续带 dead-code allow。
+  - 验证：`cargo fmt --check`、`cargo test -p browser-web-skill`、`cargo check -p extension-manager-skill -p photo-organize-skill`、`python3 scripts/check_long_files.py` 通过。
 - [ ] 审核 `crates/clawd/src/task_context_builder.rs`
   - `PlannerContextView`
   - `TaskContextBundle`
@@ -50,11 +61,19 @@
   - `note_task_llm_call` / `note_task_llm_elapsed` 旧兼容入口。
   - 若没有调用方，优先删除旧入口；若测试或历史日志需要，改名为 trace/backcompat 明确边界。
 - [ ] 审核其他生产 `#[allow(dead_code)]`
+  - `crates/skills/rss_fetch/src/main.rs`
+  - `crates/skills/photo_organize/src/main.rs` 剩余一处历史辅助函数。
+  - `crates/skills/crypto/src/main.rs` 配置兼容字段。
+  - `crates/skills/browser_web/src/main.rs`、`crates/skills/extension_manager/src/main.rs` 的协议字段已在 A0 清理。
   - `output_contract_verifier.rs`
   - `verifier.rs`
   - `post_route_policy.rs`
   - `bootstrap/prompts.rs`
   - `runtime/types.rs`
+  - `fallback.rs`
+  - `repair_signal.rs`
+  - `pipeline_types.rs`
+  - `worker/ask_pipeline.rs`
 
 验收：
 
@@ -64,6 +83,12 @@
 ## Track B: planner 旧兼容 rewrite 收敛
 
 目标：减少 `agent_engine/legacy_file_config_capabilities.rs` 中的历史补丁，把仍有价值的逻辑迁到 registry / capability resolver / schema repair / 专属功能模块。
+
+优先级调整：
+
+1. 先只做 inventory 和测试命名拆分，不先删除 rewrite。
+2. 再处理能由 registry/schema 明确覆盖的单块 rewrite。
+3. 最后才拆/删跨技能兼容路径；每块都必须有 focused planning tests。
 
 - [ ] 盘点 `normalize_legacy_compatibility_actions()` 内每个 rewrite：
   - registry metadata 已覆盖的，删除 rewrite。
@@ -116,6 +141,9 @@
 
 目标：让 README / docs / config 的描述与当前代码一致，减少用户误解“旧开关仍可作为新架构配置”。
 
+- [x] 媒体 skill registry 约束已补进当前代码事实：
+  - 当前 `OutputKind` 只支持 `text/file/image/mixed`；视频/音乐生成属于文件产物，registry 使用 `output_kind = "file"`。
+  - 若未来要引入 `video/audio` 输出枚举，必须先扩展 `claw-core::skill_registry::OutputKind`、UI health 输出、run_skill finalize、planner output contract，再改 registry。
 - [ ] 更新 README 中 release gate 描述：
   - 说明 2100+ 可以由等价覆盖集替代。
   - 当前推荐使用压缩覆盖集做代码推进门槛，完整大集合作为定期回归。
@@ -179,6 +207,14 @@
 
 - [ ] focused planning unit tests。
 - [ ] 1-5 条最小 NL 实测，覆盖对应功能即可；完整 NL 回归放在全部代码清理完成后。
+
+涉及新增或修正 runner skill / registry 映射时追加：
+
+- [ ] `cargo check -p skill-runner -p <skill-crate>`
+- [ ] 直接 skill 进程 dry-run。
+- [ ] `target/release/skill-runner` dry-run。
+- [ ] `POST /v1/admin/reload-skills` 后 `POST /v1/tasks kind=run_skill` dry-run。
+- [ ] 不实际调用 image/audio/video/music/X 等高额度或外部发布 API，除非用户明确要求 live test。
 
 ## 完成定义
 

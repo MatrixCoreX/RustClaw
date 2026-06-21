@@ -6,9 +6,9 @@ fn test_args_non_object_returns_error() {
     let req = Request {
         request_id: "test-1".to_string(),
         args: json!("not an object"),
-        context: None,
-        user_id: 1,
-        chat_id: 1,
+        _context: None,
+        _user_id: 1,
+        _chat_id: 1,
     };
 
     let resp = handle(req);
