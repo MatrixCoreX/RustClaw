@@ -229,6 +229,27 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
             .and_then(|extra| extra.get("failure_attribution")),
         Some(&serde_json::json!("contract_gap"))
     );
+    let permission = parsed
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("permission_decision"))
+        .expect("permission_decision");
+    assert_eq!(permission["allowed"], false);
+    assert_eq!(permission["denied_by_policy"], true);
+    assert_eq!(permission["needs_confirmation"], false);
+    assert_eq!(permission["dry_run_required"], false);
+    assert_eq!(permission["external_provider_blocked"], false);
+    assert_eq!(
+        permission["owner_layer"],
+        serde_json::json!("contract_matrix_preflight")
+    );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("original_action_ref")),
+        Some(&serde_json::json!("run_cmd"))
+    );
     let metadata = preflight_failure_metadata(&err);
     assert_eq!(metadata.reason, "contract_action_rejected");
     assert_eq!(metadata.error_kind, "contract_action_rejected");
@@ -266,9 +287,92 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
             .and_then(|extra| extra.get("reason_code")),
         Some(&serde_json::json!("media_artifact_requires_media_skill"))
     );
+    let permission = parsed
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("permission_decision"))
+        .expect("permission_decision");
+    assert_eq!(permission["allowed"], false);
+    assert_eq!(permission["denied_by_policy"], true);
+    assert_eq!(
+        permission["owner_layer"],
+        serde_json::json!("run_cmd_media_artifact_preflight")
+    );
+    assert_eq!(
+        permission["reason_code"],
+        serde_json::json!("media_artifact_requires_media_skill")
+    );
     let metadata = preflight_failure_metadata(&err);
     assert_eq!(metadata.reason, "contract_action_rejected");
     assert!(metadata.retry_instruction.contains("image_edit"));
+}
+
+#[test]
+fn contract_matrix_preflight_permission_decision_uses_registry_policy() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "system.run_command", effect = "external", required = ["command"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+"#,
+        &["run_cmd"],
+    );
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::FileNames,
+        requires_content_evidence: true,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({"command": "ls"});
+
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
+        .expect("contract matrix should reject run_cmd for file_names");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("contract policy error should be structured");
+    let permission = parsed
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("permission_decision"))
+        .expect("permission_decision");
+
+    assert_eq!(permission["risk_level"], serde_json::json!("high"));
+    assert_eq!(permission["needs_confirmation"], true);
+    assert_eq!(permission["action_effect"], serde_json::json!("observe"));
+    assert_eq!(permission["canonical_skill"], serde_json::json!("run_cmd"));
+    assert_eq!(
+        permission
+            .pointer("/registry_policy/available")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        permission
+            .pointer("/registry_policy/once_per_task")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        permission
+            .pointer("/registry_policy/dedup_scope")
+            .and_then(serde_json::Value::as_str),
+        Some("action")
+    );
+    assert_eq!(
+        permission
+            .pointer("/registry_policy/idempotent")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]

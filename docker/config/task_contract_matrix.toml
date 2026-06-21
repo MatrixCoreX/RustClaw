@@ -127,15 +127,15 @@ semantic_kind = "command_output_summary"
 operation = "summarize"
 target_object = "system"
 delivery_shape = "summary"
-allowed_actions = ["run_cmd", "log_analyze", "http_basic", "process_basic", "git_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "config_basic.validate"]
-preferred_actions = ["run_cmd", "log_analyze", "git_basic", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "config_basic.validate", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries"]
+allowed_actions = ["run_cmd", "log_analyze", "http_basic", "process_basic", "git_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "config_basic.read_field", "config_basic.read_fields", "config_basic.validate"]
+preferred_actions = ["run_cmd", "log_analyze", "git_basic", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "config_basic.read_field", "config_basic.read_fields", "config_basic.validate", "fs_basic.stat_paths", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries"]
 forbidden_actions = []
 required_evidence = ["command_output"]
 final_answer_shape = "summary_with_evidence"
 failure_policy = "retry_with_alternatives"
 
 [contracts.command_output_summary.evidence_expression]
-any_of = ["command_output", "field_value", "content_excerpt", "count"]
+any_of = ["command_output", "field_value", "content_excerpt", "count", "exists", "path"]
 
 [contracts.service_status]
 semantic_kind = "service_status"
@@ -442,7 +442,7 @@ target_object = "path"
 delivery_shape = "file"
 artifact_kind = "file"
 allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform", "audio_synthesize", "image_generate", "image_edit", "video_generate", "music_generate"]
-preferred_actions = ["fs_basic.write_text"]
+preferred_actions = ["fs_basic.write_text", "audio_synthesize", "image_generate", "image_edit", "video_generate", "music_generate"]
 required_evidence = ["path"]
 final_answer_shape = "delivery_token_or_path"
 failure_policy = "retry_with_alternatives"
@@ -452,8 +452,8 @@ semantic_kind = "generated_file_path_report"
 operation = "write"
 target_object = "path"
 delivery_shape = "raw"
-allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform"]
-preferred_actions = ["fs_basic.write_text"]
+allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform", "audio_synthesize", "image_generate", "image_edit", "video_generate", "music_generate"]
+preferred_actions = ["fs_basic.write_text", "audio_synthesize", "image_generate", "image_edit", "video_generate", "music_generate"]
 required_evidence = ["path"]
 final_answer_shape = "single_path"
 failure_policy = "retry_with_alternatives"

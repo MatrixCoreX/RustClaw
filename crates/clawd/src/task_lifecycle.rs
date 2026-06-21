@@ -1,39 +1,5 @@
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum TimeoutLayer {
-    FrontendRequest,
-    WorkerLeaseHeartbeat,
-    ToolCall,
-    LlmProviderWindow,
-    AgentLoopSoftBudget,
-}
-
-impl TimeoutLayer {
-    pub(crate) fn effect(self) -> TimeoutEffect {
-        match self {
-            Self::FrontendRequest => TimeoutEffect::CallerPollsExistingTask,
-            Self::WorkerLeaseHeartbeat => TimeoutEffect::RecoveryOwnsRunningTask,
-            Self::ToolCall => TimeoutEffect::TerminalToolTimeoutUnlessAsync,
-            Self::LlmProviderWindow => TimeoutEffect::ProviderGapWaitOrFail,
-            Self::AgentLoopSoftBudget => TimeoutEffect::CheckpointAndWait,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum TimeoutEffect {
-    CallerPollsExistingTask,
-    RecoveryOwnsRunningTask,
-    TerminalToolTimeoutUnlessAsync,
-    ProviderGapWaitOrFail,
-    CheckpointAndWait,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,153 +12,6 @@ pub(crate) enum TaskLifecycleState {
     Succeeded,
     Failed,
     Cancelled,
-}
-
-impl TaskLifecycleState {
-    pub(crate) fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
-    }
-
-    pub(crate) fn db_compat_status(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running | Self::Waiting | Self::Background | Self::NeedsUser => "running",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Cancelled => "canceled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum LifecycleTransitionOwner {
-    Worker,
-    AgentLoop,
-    ToolAdapter,
-    ConfirmationGate,
-    ChannelUserAction,
-    RecoveryWorker,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct LifecyclePauseContext {
-    pub(crate) resume_reason: String,
-    pub(crate) next_check_after: i64,
-    pub(crate) checkpoint_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) pending_job_ref: Option<String>,
-}
-
-impl LifecyclePauseContext {
-    pub(crate) fn new(
-        resume_reason: impl Into<String>,
-        next_check_after: i64,
-        checkpoint_id: impl Into<String>,
-        pending_job_ref: Option<String>,
-    ) -> Self {
-        Self {
-            resume_reason: resume_reason.into(),
-            next_check_after,
-            checkpoint_id: checkpoint_id.into(),
-            pending_job_ref,
-        }
-    }
-
-    fn missing_required_fields(&self) -> Vec<&'static str> {
-        let mut missing = Vec::new();
-        if self.resume_reason.trim().is_empty() {
-            missing.push("resume_reason");
-        }
-        if self.next_check_after <= 0 {
-            missing.push("next_check_after");
-        }
-        if self.checkpoint_id.trim().is_empty() {
-            missing.push("checkpoint_id");
-        }
-        missing
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct LifecycleTransition {
-    pub(crate) from: TaskLifecycleState,
-    pub(crate) to: TaskLifecycleState,
-    pub(crate) owner: LifecycleTransitionOwner,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) pause: Option<LifecyclePauseContext>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LifecycleTransitionError {
-    pub(crate) code: &'static str,
-    pub(crate) missing_fields: Vec<&'static str>,
-}
-
-impl LifecycleTransition {
-    pub(crate) fn validate(&self) -> Result<(), LifecycleTransitionError> {
-        if self.from.is_terminal() {
-            return Err(LifecycleTransitionError {
-                code: "terminal_state_transition_rejected",
-                missing_fields: Vec::new(),
-            });
-        }
-
-        if matches!(
-            self.to,
-            TaskLifecycleState::Waiting | TaskLifecycleState::Background
-        ) {
-            let Some(pause) = self.pause.as_ref() else {
-                return Err(LifecycleTransitionError {
-                    code: "pause_context_required",
-                    missing_fields: vec!["resume_reason", "next_check_after", "checkpoint_id"],
-                });
-            };
-            let missing = pause.missing_required_fields();
-            if !missing.is_empty() {
-                return Err(LifecycleTransitionError {
-                    code: "pause_context_incomplete",
-                    missing_fields: missing,
-                });
-            }
-        }
-
-        if !transition_owner_allowed(self.from, self.to, self.owner) {
-            return Err(LifecycleTransitionError {
-                code: "transition_owner_not_allowed",
-                missing_fields: Vec::new(),
-            });
-        }
-
-        Ok(())
-    }
-}
-
-fn transition_owner_allowed(
-    from: TaskLifecycleState,
-    to: TaskLifecycleState,
-    owner: LifecycleTransitionOwner,
-) -> bool {
-    use LifecycleTransitionOwner as Owner;
-    use TaskLifecycleState as State;
-
-    match (from, to, owner) {
-        (State::Queued, State::Running, Owner::Worker) => true,
-        (State::Running, State::Waiting, Owner::AgentLoop | Owner::ToolAdapter) => true,
-        (State::Running, State::Background, Owner::AgentLoop | Owner::ToolAdapter) => true,
-        (State::Running, State::NeedsUser, Owner::AgentLoop | Owner::ConfirmationGate) => true,
-        (State::Waiting, State::Running, Owner::Worker | Owner::RecoveryWorker) => true,
-        (State::Background, State::Running, Owner::Worker | Owner::RecoveryWorker) => true,
-        (State::NeedsUser, State::Running, Owner::ChannelUserAction) => true,
-        (State::Running, State::Succeeded, Owner::AgentLoop | Owner::Worker) => true,
-        (
-            State::Running | State::Waiting | State::Background | State::NeedsUser,
-            State::Failed,
-            Owner::AgentLoop | Owner::ToolAdapter | Owner::RecoveryWorker | Owner::Worker,
-        ) => true,
-        (_, State::Cancelled, Owner::ChannelUserAction | Owner::Worker) => true,
-        _ => false,
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,13 +49,6 @@ impl ResumeTrigger {
             Self::WorkerRecovery => "worker_recovery",
             Self::AsyncJobPoll => "async_job_poll",
         }
-    }
-
-    pub(crate) fn requires_checkpoint(self) -> bool {
-        matches!(
-            self,
-            Self::UserFollowup | Self::ScheduledWakeup | Self::WorkerRecovery | Self::AsyncJobPoll
-        )
     }
 }
 
@@ -285,6 +97,9 @@ pub(crate) fn task_query_lifecycle_projection(
         obj.entry("can_cancel".to_string())
             .or_insert(json!(active_state));
         append_pause_resume_due_fields(obj, &state, crate::now_ts_u64() as i64);
+        if let Some(result_json) = result_json {
+            append_lifecycle_product_contract_fields(obj, result_json, &state);
+        }
         if active_state {
             if let Some(updated_at_ts) = updated_at_ts.filter(|ts| *ts > 0) {
                 obj.entry("last_heartbeat_ts".to_string())
@@ -829,6 +644,109 @@ fn append_pause_resume_due_fields(
         .or_insert(json!(wait_seconds));
 }
 
+fn append_lifecycle_product_contract_fields(
+    obj: &mut serde_json::Map<String, Value>,
+    result_json: &Value,
+    state: &str,
+) {
+    if lifecycle_state_token_is_paused(state) || state.trim() == "needs_user" {
+        if let Some(reason_code) = string_field(obj, "resume_reason")
+            .or_else(|| string_field(obj, "terminal_reason"))
+            .or_else(|| non_empty_state_token(state))
+        {
+            obj.entry("waiting_reason_code".to_string())
+                .or_insert(json!(reason_code));
+        }
+    }
+    if let Some(next_check_after) = obj.get("next_check_after").cloned() {
+        obj.entry("next_poll_after".to_string())
+            .or_insert(next_check_after);
+    }
+    if let Some(owner) = first_nested_string_field(
+        obj,
+        &[
+            &["resume_claim", "owner"],
+            &["resume_executor_claim", "owner"],
+            &["resume_executor_handoff_claim", "owner"],
+            &["resume_executor_dispatch_claim", "owner"],
+            &["resume_executor_result_projection_claim", "owner"],
+        ],
+    ) {
+        obj.entry("resume_owner".to_string())
+            .or_insert(json!(owner));
+    }
+    let Some(checkpoint_payload) = extract_task_checkpoint_payload(result_json) else {
+        return;
+    };
+    if let Some(checkpoint_id) = checkpoint_payload
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        obj.entry("checkpoint_id".to_string())
+            .or_insert(json!(checkpoint_id));
+    }
+    let Ok(checkpoint) = serde_json::from_value::<TaskCheckpoint>(checkpoint_payload) else {
+        return;
+    };
+    obj.entry("resume_entrypoint".to_string())
+        .or_insert(json!(checkpoint.resume_entrypoint));
+    if let Some(last_safe_step_id) = checkpoint
+        .last_successful_step
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        obj.entry("last_safe_step_id".to_string())
+            .or_insert(json!(last_safe_step_id));
+    }
+    if let Some(job) = checkpoint.pending_async_job.as_ref() {
+        obj.entry("poll_ref".to_string())
+            .or_insert(json!(job.job_id.as_str()));
+        obj.entry("cancel_ref".to_string())
+            .or_insert(json!(job.cancel_ref.as_str()));
+        obj.entry("poll_after_seconds".to_string())
+            .or_insert(json!(job.poll_after_seconds));
+        obj.entry("async_job_expires_at".to_string())
+            .or_insert(json!(job.expires_at));
+        obj.entry("async_job_message_key".to_string())
+            .or_insert(json!(job.message_key.as_str()));
+    }
+}
+
+fn non_empty_state_token(state: &str) -> Option<String> {
+    let state = state.trim();
+    (!state.is_empty()).then(|| state.to_string())
+}
+
+fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    obj.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn first_nested_string_field(
+    obj: &serde_json::Map<String, Value>,
+    paths: &[&[&str]],
+) -> Option<String> {
+    paths.iter().find_map(|path| {
+        let (last, parents) = path.split_last()?;
+        let mut current = obj.get(*parents.first()?)?;
+        for key in &parents[1..] {
+            current = current.get(*key)?;
+        }
+        current
+            .get(*last)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TaskCheckpoint {
     pub(crate) schema_version: u8,
@@ -855,15 +773,6 @@ pub(crate) struct TaskCheckpoint {
 impl TaskCheckpoint {
     pub(crate) fn to_machine_json(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({"schema_version": 1}))
-    }
-
-    pub(crate) fn should_skip_completed_side_effect(&self, fingerprint: &str) -> bool {
-        let fingerprint = fingerprint.trim();
-        !fingerprint.is_empty()
-            && self
-                .completed_side_effect_refs
-                .iter()
-                .any(|item| item == fingerprint)
     }
 }
 
@@ -906,70 +815,6 @@ impl AsyncJobRef {
             missing.push("message_key");
         }
         missing
-    }
-
-    pub(crate) fn loop_directive(&self, now_ts: i64) -> AsyncJobLoopDirective {
-        match self.status {
-            AsyncJobStatus::Accepted | AsyncJobStatus::Running if self.expires_at <= now_ts => {
-                AsyncJobLoopDirective::TerminalFailure
-            }
-            AsyncJobStatus::Accepted | AsyncJobStatus::Running => {
-                AsyncJobLoopDirective::CheckpointAndPoll
-            }
-            AsyncJobStatus::Succeeded => AsyncJobLoopDirective::ResumeWithObservation,
-            AsyncJobStatus::Failed | AsyncJobStatus::Expired => {
-                AsyncJobLoopDirective::TerminalFailure
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AsyncJobLoopDirective {
-    CheckpointAndPoll,
-    ResumeWithObservation,
-    TerminalFailure,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ProviderGapDecision {
-    pub(crate) status_code: String,
-    pub(crate) failure_attribution: String,
-    pub(crate) retryable: bool,
-    pub(crate) raw_error_present: bool,
-    pub(crate) message_key: String,
-    pub(crate) target_state: TaskLifecycleState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) pause: Option<LifecyclePauseContext>,
-}
-
-pub(crate) fn provider_gap_decision(
-    retryable: bool,
-    next_check_after: Option<i64>,
-    checkpoint_id: impl Into<String>,
-) -> ProviderGapDecision {
-    let checkpoint_id = checkpoint_id.into();
-    let pause = retryable.then(|| {
-        LifecyclePauseContext::new(
-            "provider_gap_retry_window",
-            next_check_after.unwrap_or(1).max(1),
-            checkpoint_id,
-            None,
-        )
-    });
-    ProviderGapDecision {
-        status_code: "provider_gap".to_string(),
-        failure_attribution: "provider_error".to_string(),
-        retryable,
-        raw_error_present: true,
-        message_key: "clawd.msg.ask_runtime_failure".to_string(),
-        target_state: if retryable {
-            TaskLifecycleState::Waiting
-        } else {
-            TaskLifecycleState::Failed
-        },
-        pause,
     }
 }
 

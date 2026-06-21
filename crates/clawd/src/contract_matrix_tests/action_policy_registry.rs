@@ -1090,6 +1090,54 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
 }
 
 #[test]
+fn allowed_action_keeps_original_ref_without_preferred_replacement() {
+    let route = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        ..IntentOutputContract::default()
+    };
+    let policy = action_policy_for_output_contract(
+        Some(&route),
+        "fs_basic",
+        &json!({"action":"stat_paths", "paths":["README.md"]}),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "fs_basic.stat_paths");
+    assert_eq!(policy.original_action_ref, "fs_basic.stat_paths");
+    assert_eq!(policy.replacement_action_ref, None);
+    assert_eq!(policy.contract_repair_source, "none");
+    assert_eq!(policy.preferred_replacement_reason_code, None);
+}
+
+#[test]
+fn legacy_canonicalization_records_original_and_replacement_refs() {
+    let route = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        ..IntentOutputContract::default()
+    };
+    let policy =
+        action_policy_for_output_contract(Some(&route), "read_file", &json!({"path":"README.md"}))
+            .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.original_action_ref, "read_file");
+    assert_eq!(policy.action_key, "fs_basic.read_text_range");
+    assert_eq!(
+        policy.replacement_action_ref.as_deref(),
+        Some("fs_basic.read_text_range")
+    );
+    assert_eq!(
+        policy.contract_repair_source,
+        "legacy_tool_canonicalization"
+    );
+    assert_eq!(
+        policy.preferred_replacement_reason_code.as_deref(),
+        Some("legacy_tool_canonical_action_allowed")
+    );
+}
+
+#[test]
 fn bundled_matrix_observation_sources_have_extractor_registry_refs() {
     let matrix = load_workspace_matrix();
     let mut missing = Vec::new();

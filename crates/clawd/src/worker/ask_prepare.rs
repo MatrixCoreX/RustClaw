@@ -278,7 +278,7 @@ fn merged_replace_active_prompt(
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 fn should_probe_transcript_for_clarify_fallback(
     prompt: &str,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,

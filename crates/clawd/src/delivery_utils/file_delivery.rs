@@ -687,7 +687,6 @@ pub(super) fn find_file_in_directory_non_recursive(
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn scan_filename_matches_with_limit(
     project_root: &Path,
     file_name: &str,
