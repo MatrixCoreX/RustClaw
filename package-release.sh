@@ -8,8 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "$SCRIPT_DIR"
 
+EXPLICIT_RELEASE_BIN_DIR="${RUSTCLAW_RELEASE_BIN_DIR:-}"
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
-BUILD_RELEASE_DIR="$SCRIPT_DIR/target/release"
+BUILD_RELEASE_DIR="${RUSTCLAW_BUILD_RELEASE_DIR:-$SCRIPT_DIR/target/release}"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
@@ -17,6 +18,10 @@ fi
 
 resolve_release_bin() {
   local name="$1"
+  if [[ -n "$EXPLICIT_RELEASE_BIN_DIR" ]]; then
+    printf '%s\n' "$EXPLICIT_RELEASE_BIN_DIR/$name"
+    return
+  fi
   if [[ -x "$TRACKED_RELEASE_DIR/$name" ]]; then
     printf '%s\n' "$TRACKED_RELEASE_DIR/$name"
     return
@@ -205,13 +210,16 @@ PY
 echo "[5.5/6] Packaged scripts already use release defaults."
 
 echo "[6/6] Create package in RustClaw_bundle and current dir..."
-BUNDLE_DIR="$HOME/RustClaw_bundle"
+BUNDLE_DIR="${RUSTCLAW_BUNDLE_DIR:-$HOME/RustClaw_bundle}"
 mkdir -p "$BUNDLE_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
-OUT="$BUNDLE_DIR/RustClaw-runtime-release-${TS}.tar.gz"
+PACKAGE_BASENAME="${RUSTCLAW_PACKAGE_BASENAME:-RustClaw-runtime-release-${TS}.tar.gz}"
+OUT="$BUNDLE_DIR/$PACKAGE_BASENAME"
 tar -czf "$OUT" -C "$STAGE_ROOT" RustClaw
 LOCAL_OUT="$SCRIPT_DIR/$(basename "$OUT")"
-cp -f "$OUT" "$LOCAL_OUT"
+if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+  cp -f "$OUT" "$LOCAL_OUT"
+fi
 
 cleanup_old_packages() {
   local dir="$1"
@@ -230,9 +238,13 @@ cleanup_old_packages() {
 
 echo "[6.5/6] Remove older release packages..."
 cleanup_old_packages "$BUNDLE_DIR" "$OUT"
-cleanup_old_packages "$SCRIPT_DIR" "$LOCAL_OUT"
+if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+  cleanup_old_packages "$SCRIPT_DIR" "$LOCAL_OUT"
+fi
 
 echo "Package created: $OUT"
 ls -lh "$OUT"
-echo "Local copy created: $LOCAL_OUT"
-ls -lh "$LOCAL_OUT"
+if [[ "${RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
+  echo "Local copy created: $LOCAL_OUT"
+  ls -lh "$LOCAL_OUT"
+fi
