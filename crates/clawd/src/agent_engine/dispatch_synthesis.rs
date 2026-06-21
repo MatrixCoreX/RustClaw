@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::{AppState, OutputResponseShape};
@@ -242,6 +243,148 @@ pub(super) fn package_docker_probe_structured_answer(loop_state: &LoopState) -> 
         })
         .to_string(),
     )
+}
+
+pub(super) fn filesystem_mutation_lifecycle_structured_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilesystemMutationResult {
+        return None;
+    }
+
+    let mut steps = Vec::new();
+    let mut readbacks = Vec::new();
+    let mut actions = Vec::new();
+    let mut paths = Vec::new();
+    let mut resolved_paths = Vec::new();
+    let mut cleanup_observed = false;
+
+    for step in loop_state.executed_step_results.iter().filter(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+    }) {
+        let Some(payload) = step.output.as_deref().and_then(skill_output_payload) else {
+            continue;
+        };
+        let Some(action) = payload
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if !filesystem_mutation_lifecycle_action(action) {
+            continue;
+        }
+
+        push_unique_string(&mut actions, action);
+        if action == "remove_path" {
+            cleanup_observed = true;
+        }
+
+        let path = payload.get("path").and_then(Value::as_str);
+        let resolved_path = payload.get("resolved_path").and_then(Value::as_str);
+        if let Some(path) = path {
+            push_unique_string(&mut paths, path);
+        }
+        if let Some(path) = resolved_path {
+            push_unique_string(&mut resolved_paths, path);
+        }
+
+        let mut step_value = serde_json::Map::new();
+        step_value.insert("step_id".to_string(), Value::String(step.step_id.clone()));
+        step_value.insert("skill".to_string(), Value::String(step.skill.clone()));
+        step_value.insert("status".to_string(), Value::String("ok".to_string()));
+        step_value.insert("action".to_string(), Value::String(action.to_string()));
+        copy_string_field(&payload, &mut step_value, "path");
+        copy_string_field(&payload, &mut step_value, "effective_path");
+        copy_string_field(&payload, &mut step_value, "resolved_path");
+        copy_value_field(&payload, &mut step_value, "append");
+        copy_value_field(&payload, &mut step_value, "content_bytes");
+        copy_value_field(&payload, &mut step_value, "target_kind");
+        copy_value_field(&payload, &mut step_value, "recursive");
+        copy_value_field(&payload, &mut step_value, "total_lines");
+        steps.push(Value::Object(step_value));
+
+        if matches!(action, "read_range" | "read_text_range") {
+            if let Some(excerpt) = payload
+                .get("excerpt")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let mut readback = serde_json::Map::new();
+                readback.insert("step_id".to_string(), Value::String(step.step_id.clone()));
+                copy_string_field(&payload, &mut readback, "path");
+                copy_string_field(&payload, &mut readback, "resolved_path");
+                readback.insert("excerpt".to_string(), Value::String(excerpt.to_string()));
+                copy_value_field(&payload, &mut readback, "total_lines");
+                readbacks.push(Value::Object(readback));
+            }
+        }
+    }
+
+    if steps.is_empty() {
+        return None;
+    }
+
+    let mut observed = BTreeSet::new();
+    for action in &actions {
+        observed.insert(action.as_str());
+    }
+
+    Some(
+        serde_json::json!({
+            "schema_version": 1,
+            "semantic_kind": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
+            "status": "ok",
+            "observed_actions": actions,
+            "observed_action_count": observed.len(),
+            "paths": paths,
+            "resolved_paths": resolved_paths,
+            "steps": steps,
+            "readbacks": readbacks,
+            "final_state": {
+                "cleanup_observed": cleanup_observed,
+            },
+        })
+        .to_string(),
+    )
+}
+
+fn filesystem_mutation_lifecycle_action(action: &str) -> bool {
+    matches!(
+        action,
+        "make_dir"
+            | "write_text"
+            | "append_text"
+            | "read_range"
+            | "read_text_range"
+            | "remove_path"
+    )
+}
+
+fn copy_string_field(source: &Value, target: &mut serde_json::Map<String, Value>, field: &str) {
+    if let Some(value) = source
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        target.insert(field.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn copy_value_field(source: &Value, target: &mut serde_json::Map<String, Value>, field: &str) {
+    if let Some(value) = source.get(field).filter(|value| !value.is_null()) {
+        target.insert(field.to_string(), value.clone());
+    }
 }
 
 fn docker_probe_payload(payload: &Value) -> Value {

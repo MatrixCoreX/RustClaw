@@ -120,6 +120,9 @@ mod file_delivery_tests;
 #[path = "loop_reply_file_missing_tests.rs"]
 mod file_missing_tests;
 
+#[path = "loop_reply_filesystem_mutation_tests.rs"]
+mod filesystem_mutation_tests;
+
 #[path = "loop_reply_delivery_backfill_tests.rs"]
 mod delivery_backfill_tests;
 

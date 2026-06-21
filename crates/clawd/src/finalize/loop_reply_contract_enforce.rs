@@ -44,9 +44,31 @@ pub(super) async fn enforce_delivery_output_contract(
             .filter(|message| crate::finalize::is_execution_summary_message(message))
             .cloned()
             .collect::<Vec<_>>();
+        delivery_messages.push(synthesis.to_string());
+        loop_state.last_user_visible_respond = Some(synthesis.to_string());
+        loop_state.delivery_messages = delivery_messages;
+        return;
+    }
+    if let Some(synthesis) = publishable_synthesis
+        .as_deref()
+        .filter(|text| route_accepts_filesystem_mutation_synthesis(route, text))
+    {
+        let mut delivery_messages = loop_state
+            .delivery_messages
+            .iter()
+            .filter(|message| crate::finalize::is_execution_summary_message(message))
+            .cloned()
+            .collect::<Vec<_>>();
         append_delivery_message(&task.task_id, &mut delivery_messages, synthesis.to_string());
         loop_state.last_user_visible_respond = Some(synthesis.to_string());
         loop_state.delivery_messages = delivery_messages;
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "final_result_use_filesystem_mutation_synthesis",
+            "kept",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
         return;
     }
     if let (Some(synthesis), Some(token)) = (
@@ -228,6 +250,32 @@ pub(super) async fn enforce_delivery_output_contract(
     loop_state.last_user_visible_respond =
         (!normalized_text.trim().is_empty()).then_some(normalized_text);
     loop_state.delivery_messages = normalized_messages;
+}
+
+pub(super) fn route_accepts_filesystem_mutation_synthesis(
+    route: &crate::RouteResult,
+    synthesis: &str,
+) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::FilesystemMutationResult
+        && filesystem_mutation_synthesis_payload_is_complete(synthesis)
+}
+
+fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(synthesis.trim()) else {
+        return false;
+    };
+    payload
+        .pointer("/semantic_kind")
+        .and_then(serde_json::Value::as_str)
+        == Some("filesystem_mutation_result")
+        && payload
+            .pointer("/status")
+            .and_then(serde_json::Value::as_str)
+            == Some("ok")
+        && payload
+            .pointer("/steps")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|steps| !steps.is_empty())
 }
 
 pub(super) async fn discard_meta_respond_placeholder_for_content_evidence(
