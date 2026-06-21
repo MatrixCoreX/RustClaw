@@ -56,7 +56,14 @@ jobs:
             prerelease="true"
           fi
 
-          package_name="RustClaw-pi-aarch64-${release_tag}.tar.gz"
+          case "${release_tag}" in
+            pi-aarch64-*)
+              package_name="RustClaw-${release_tag}.tar.gz"
+              ;;
+            *)
+              package_name="RustClaw-pi-aarch64-${release_tag}.tar.gz"
+              ;;
+          esac
           {
             echo "release_tag=${release_tag}"
             echo "package_name=${package_name}"
