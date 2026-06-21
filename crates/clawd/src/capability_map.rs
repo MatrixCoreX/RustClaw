@@ -304,6 +304,7 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
         "Current capability map (derived from the currently enabled skills):".to_string(),
         "Use this as routing guidance, not as a full tool schema.".to_string(),
         "Do not plan or call capabilities marked `runtime_availability: unavailable`; choose another available capability or explain the dependency gap.".to_string(),
+        crate::agent_runtime_contract::runtime_protocol_hint_line(),
     ];
 
     if !layered.is_empty() {
