@@ -2,7 +2,7 @@
 
 创建日期：2026-06-21
 
-状态：进行中。
+状态：进行中，代码与静态门禁已完成，等待 release 重启和最小 NL。
 
 ## 背景
 
@@ -21,9 +21,21 @@
 
 ## 推进项
 
-- [ ] 添加 focused unit test：planner-introduced shell listing 被替换为 `fs_basic.list_dir` 后，仍保留 `files_only=true`、`max_entries=2`、`sort_by=mtime_desc`。
-- [ ] 在 normalization pipeline 中补第二次 recent-artifacts selector pass。
-- [ ] 运行 focused tests、`cargo fmt --check`、hardmatch/hardreply/legacy/long-file checks、`RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`、`git diff --check`。
+- [x] 添加 focused unit test：planner-introduced shell listing 被替换为 `fs_basic.list_dir` 后，仍保留 `files_only=true`、`max_entries=2`、`sort_by=mtime_desc`。
+- [x] 在 normalization pipeline 中补第二次 recent-artifacts selector pass。
+- [x] 运行 focused tests、`cargo fmt --check`、hardmatch/hardreply/legacy/long-file checks、`RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`、`git diff --check`。
 - [ ] release build + 重启 `clawd`。
 - [ ] 跑 1 条最小 NL logs recent case，确认 `rounds=1`，并检查 step trace 的 `fs_basic` listing 已 bounded。
 - [ ] 更新计划并归档。
+
+## 已完成验证
+
+- `cargo test -p clawd recent_artifacts_repaired_shell_listing_keeps_structured_selector -- --nocapture`
+- `cargo test -p clawd recent_artifacts_judgment -- --nocapture`
+- `cargo fmt --check`
+- `python3 scripts/check_no_nl_hardmatch.py`
+- `python3 scripts/check_no_runtime_hard_reply.py`
+- `python3 scripts/check_legacy_route_boundary.py`
+- `python3 scripts/check_long_files.py`
+- `RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`
+- `git diff --check`
