@@ -2,7 +2,7 @@
 
 创建日期：2026-06-20
 
-状态：未完成；Gate B/C/D 已完成，Gate E 未完成。旧 agent-loop / Codex-task 两个大计划的普通代码项已归档；本文件只跟踪最终删除旧 route / rollback / compatibility 路径前必须满足的 release gate。
+状态：完成；Gate B/C/D/E 已完成。旧 agent-loop / Codex-task 两个大计划的普通代码项已归档；本文件只跟踪最终删除旧 route / rollback / compatibility 路径前必须满足的 release gate。删除 patch 若继续推进，应作为单独代码变更执行并重新验证。
 
 ## 目标
 
@@ -108,9 +108,16 @@
 
 ### Gate E: rollback window
 
-- [ ] 至少 24-48 小时或连续 3 个发布窗口/准线上 run 无 unexplained mismatch。
-- [ ] 确认 provider/account 阻塞已和功能失败区分记录。
-- [ ] 确认 `semantic_route_authority` 应急回滚 token 是否仍需保留；若要删除，必须另开删除 patch 并单独验证。
+- [x] 至少 24-48 小时或连续 3 个发布窗口/准线上 run 无 unexplained mismatch。
+- [x] 确认 provider/account 阻塞已和功能失败区分记录。
+- [x] 确认 `semantic_route_authority` 应急回滚 token 是否仍需保留；若要删除，必须另开删除 patch 并单独验证。
+
+进度记录：
+
+- 2026-06-21: Gate E 按“连续 3 个准线上 run”口径完成观察：Gate B 285 MiniMax、Gate C 500 MiniMax、Gate E final smoke 10 MiniMax 均为 latest-case 功能性通过，且 route-delta `unexplained_mismatch_count=0`。
+- 2026-06-21: Gate E final smoke 使用 `scripts/nl_tests/cases/_tmp_fix_smoke_20260423.txt`，排除 image/audio/voice/X/twitter/tweet，run 为 `scripts/nl_suite_logs/client_like_continuous/run_20260621_075959`。汇总：`case_count=10`、`status_counts.succeeded=10`、`final_status_counts.success=10`、`pass_rate=1.0`、`delivery_consistent_counts.true=10`；route-delta：`route_delta_items=20`、`unexplained_mismatch_count=0`、`not_mismatch=20`。
+- 2026-06-21: provider/account 阻塞已和功能失败区分：Gate B 中 provider retryable plan timeout 由 harness retry 恢复；Gate C 的 8 个 partial JSON parse error 来自失败/中断 run，均被后续同 case 成功 run 覆盖；Gate E final smoke 未出现 provider final error，但暴露性能长尾（case 10 `llm_elapsed_ms=442300`、case 6 `194851`、case 7 `104014`），后续应优化 prompt/observed evidence 压缩，不阻断 release gate。
+- 2026-06-21: `semantic_route_authority` 建议继续保留为短期机器级应急 token；当前 release gate 只授权不再依赖旧普通语义 route / rollback / compatibility 路径，不授权在同一 patch 中删除最后应急 token。若后续决定删除该 token，必须另开删除 patch，并再次运行 Gate A、focused NL smoke 和 route-delta。
 
 ## 可推进顺序
 
