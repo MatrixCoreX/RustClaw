@@ -939,6 +939,7 @@ fn route_has_package_docker_probe_tokens(route: &RouteResult) -> bool {
         "package_manager_detection",
         "package.detect_manager",
         "package_manager.detect",
+        "package_manager.detect_manager",
     ]
     .iter()
     .any(|token| text.contains(token));
@@ -947,6 +948,7 @@ fn route_has_package_docker_probe_tokens(route: &RouteResult) -> bool {
         "docker_basic",
         "docker.version",
         "docker.list_containers",
+        "list_containers",
         "docker_ps",
         "docker_version",
     ]
