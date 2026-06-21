@@ -134,6 +134,7 @@ pub(crate) struct TaskJournalVerifySummary {
     pub(crate) approved: bool,
     pub(crate) blocked_reason: Option<String>,
     pub(crate) shadow_blocked_reason: Option<String>,
+    pub(crate) permission_decision: Value,
     pub(crate) needs_confirmation: bool,
     pub(crate) issues: Vec<TaskJournalVerifyIssue>,
 }
@@ -598,6 +599,7 @@ fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
         "blocked_status_code": first_issue.map(|issue| issue.kind.status_code()),
         "blocked_message_key": first_issue.map(|issue| issue.kind.message_key()),
         "shadow_blocked_reason": verify.shadow_blocked_reason.as_deref().map(crate::truncate_for_log),
+        "permission_decision": &verify.permission_decision,
         "needs_confirmation": verify.needs_confirmation,
         "issue_count": verify.issues.len(),
     })
@@ -618,6 +620,7 @@ fn verify_trace_json(
         "blocked_status_code": first_issue.map(|issue| issue.kind.status_code()),
         "blocked_message_key": first_issue.map(|issue| issue.kind.message_key()),
         "shadow_blocked_reason": verify.shadow_blocked_reason.as_deref().map(crate::truncate_for_log),
+        "permission_decision": &verify.permission_decision,
         "needs_confirmation": verify.needs_confirmation,
         "issues": verify.issues.iter().map(|issue| {
             verifier_issue_repair_signal_json(issue, plan, route)
@@ -1427,6 +1430,7 @@ fn summarize_verify_result(
         approved: verify_result.approved,
         blocked_reason: verify_result.blocked_reason.clone(),
         shadow_blocked_reason: verify_result.shadow_blocked_reason.clone(),
+        permission_decision: verify_result.permission_decision.clone(),
         needs_confirmation: verify_result.needs_confirmation,
         issues: verify_result
             .issues

@@ -698,6 +698,27 @@ fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("plan_verifier")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("risk_budget_exceeded")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
 }
 
 #[test]
@@ -1396,6 +1417,27 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("verify_confirmation_required")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/requires_confirmation")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]

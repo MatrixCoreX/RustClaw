@@ -1042,6 +1042,7 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
         approved: true,
         blocked_reason: None,
         shadow_blocked_reason: Some("missing argument".to_string()),
+        permission_decision: json!({"schema_version":1,"owner_layer":"plan_verifier"}),
         needs_confirmation: false,
         issues: vec![TaskJournalVerifyIssue {
             step_id: "step_1".to_string(),
@@ -1381,6 +1382,7 @@ fn trace_json_includes_verifier_issue_failure_attribution() {
             approved: true,
             blocked_reason: None,
             shadow_blocked_reason: Some("contract action rejected".to_string()),
+            permission_decision: json!({"schema_version":1,"owner_layer":"plan_verifier"}),
             needs_confirmation: false,
             issues: vec![TaskJournalVerifyIssue {
                 step_id: "step_1".to_string(),

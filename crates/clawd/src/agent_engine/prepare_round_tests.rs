@@ -11,6 +11,10 @@ fn verify_result_with_issue(
         approved: matches!(mode, crate::verifier::VerifyMode::ObserveOnly),
         blocked_reason: None,
         shadow_blocked_reason: Some(kind.as_str().to_string()),
+        permission_decision: serde_json::json!({
+            "schema_version": 1,
+            "owner_layer": "plan_verifier",
+        }),
         approved_steps: Vec::new(),
         needs_confirmation: false,
         rewritten_steps: Vec::new(),
