@@ -259,6 +259,64 @@ fn test_task(payload: serde_json::Value) -> ClaimedTask {
     }
 }
 
+#[tokio::test]
+async fn builtin_write_file_outcome_exposes_structured_extra() {
+    let root = TempDirGuard::new("builtin_write_file_structured_extra");
+    let mut state = test_state("zh-CN");
+    install_real_registry(&mut state);
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let write = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": "tmp/out.txt", "content": "alpha\n"}),
+    )
+    .await
+    .expect("write_file outcome");
+    let write_extra = write.extra.expect("write_file extra");
+    assert_eq!(
+        write_extra.get("action").and_then(|value| value.as_str()),
+        Some("write_text")
+    );
+    assert_eq!(
+        write_extra.get("path").and_then(|value| value.as_str()),
+        Some("tmp/out.txt")
+    );
+    assert_eq!(
+        write_extra
+            .get("content_bytes")
+            .and_then(|value| value.as_u64()),
+        Some(6)
+    );
+    assert!(
+        write_extra
+            .get("resolved_path")
+            .and_then(|value| value.as_str())
+            .is_some_and(|path| path.ends_with("tmp/out.txt")),
+        "extra: {write_extra}"
+    );
+
+    let append = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": "tmp/out.txt", "content": "beta\n", "append": true}),
+    )
+    .await
+    .expect("append outcome");
+    let append_extra = append.extra.expect("append extra");
+    assert_eq!(
+        append_extra.get("action").and_then(|value| value.as_str()),
+        Some("append_text")
+    );
+    assert_eq!(
+        append_extra.get("append").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+}
+
 fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
     let db = state.core.db.get().expect("db pool");
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)

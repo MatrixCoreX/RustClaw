@@ -202,6 +202,7 @@ pub(super) fn backfill_delivery_from_last_outputs(
                     &mut loop_state.delivery_messages,
                     last_synthesis_output.clone(),
                 );
+                loop_state.last_user_visible_respond = Some(last_synthesis_output.clone());
                 log_deterministic_delivery_record(
                     &task.task_id,
                     "final_result_use_synthesis_output",

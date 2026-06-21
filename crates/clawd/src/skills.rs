@@ -579,6 +579,70 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) extra: Option<Value>,
 }
 
+fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) -> Option<Value> {
+    let obj = args.as_object()?;
+    match skill_name {
+        "write_file" => {
+            let path = obj.get("path").and_then(Value::as_str)?.trim();
+            if path.is_empty() {
+                return None;
+            }
+            let effective_path = crate::ensure_default_file_path(workspace_root, path);
+            let resolved_path = workspace_resolved_path(workspace_root, &effective_path);
+            let append = obj.get("append").and_then(Value::as_bool).unwrap_or(false);
+            let content_bytes = obj.get("content").and_then(Value::as_str).map(str::len);
+            Some(json!({
+                "schema_version": 1,
+                "source": "builtin_success_extra",
+                "action": if append { "append_text" } else { "write_text" },
+                "path": path,
+                "effective_path": effective_path,
+                "resolved_path": resolved_path,
+                "append": append,
+                "content_bytes": content_bytes,
+            }))
+        }
+        "make_dir" => {
+            let path = obj.get("path").and_then(Value::as_str)?.trim();
+            if path.is_empty() {
+                return None;
+            }
+            Some(json!({
+                "schema_version": 1,
+                "source": "builtin_success_extra",
+                "action": "make_dir",
+                "path": path,
+                "resolved_path": workspace_resolved_path(workspace_root, path),
+            }))
+        }
+        "remove_file" => {
+            let path = obj.get("path").and_then(Value::as_str)?.trim();
+            if path.is_empty() {
+                return None;
+            }
+            Some(json!({
+                "schema_version": 1,
+                "source": "builtin_success_extra",
+                "action": "remove_path",
+                "path": path,
+                "resolved_path": workspace_resolved_path(workspace_root, path),
+                "target_kind": obj.get("target_kind").cloned().unwrap_or(Value::Null),
+                "recursive": obj.get("recursive").and_then(Value::as_bool).unwrap_or(false),
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn workspace_resolved_path(workspace_root: &Path, path: &str) -> String {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.display().to_string()
+    } else {
+        workspace_root.join(path).display().to_string()
+    }
+}
+
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     if let Some(structured) = parse_structured_skill_error(err) {
         if structured_crypto_account_access_error(skill_name, &structured).is_some() {
@@ -1199,13 +1263,14 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     match kind {
         SkillKind::Builtin => {
+            let extra = builtin_success_extra(&state.skill_rt.workspace_root, &skill_name, &args);
             return execute_builtin_skill_for_task(state, task, &skill_name, &args)
                 .await
                 .map(|text| SkillRunOutcome {
                     text,
                     notify: None,
                     validation: None,
-                    extra: None,
+                    extra,
                 });
         }
         SkillKind::External | SkillKind::Runner => {}
