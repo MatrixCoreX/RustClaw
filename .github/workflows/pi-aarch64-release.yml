@@ -1,0 +1,179 @@
+name: Build Pi aarch64 Release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Leave empty to use pi-aarch64-<short-sha>."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease."
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "pi-aarch64-*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-pi-aarch64:
+    name: Build and publish Pi aarch64 package
+    runs-on: ubuntu-22.04
+    env:
+      RUST_TARGET: aarch64-unknown-linux-gnu
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag || '' }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_TAG}" ]]; then
+            release_tag="${INPUT_TAG}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+          else
+            release_tag="pi-aarch64-${GITHUB_SHA::12}"
+          fi
+          if [[ ! "${release_tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "release tag must contain only letters, numbers, dot, underscore, and hyphen: ${release_tag}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            prerelease="${INPUT_PRERELEASE:-true}"
+          else
+            prerelease="true"
+          fi
+
+          package_name="RustClaw-pi-aarch64-${release_tag}.tar.gz"
+          {
+            echo "release_tag=${release_tag}"
+            echo "package_name=${package_name}"
+            echo "prerelease=${prerelease}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            pkg-config \
+            make \
+            perl \
+            clang \
+            libclang-dev \
+            protobuf-compiler
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+
+      - name: Setup Rust target
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add "${RUST_TARGET}"
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Build UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd UI
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Cross-build Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_DEPS=0 ./cross-build-pi.sh --target pi64 --workspace --no-ui --skip-deps
+
+      - name: Package runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          RUSTCLAW_RELEASE_BIN_DIR="$PWD/target/${RUST_TARGET}/release" \
+            RUSTCLAW_BUNDLE_DIR="$PWD/dist-release" \
+            RUSTCLAW_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
+            RUSTCLAW_SKIP_LOCAL_PACKAGE_COPY=1 \
+            ./package-release.sh
+          (cd dist-release && sha256sum "${{ steps.meta.outputs.package_name }}" > "${{ steps.meta.outputs.package_name }}.sha256")
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustclaw-pi-aarch64
+          path: |
+            dist-release/${{ steps.meta.outputs.package_name }}
+            dist-release/${{ steps.meta.outputs.package_name }}.sha256
+          if-no-files-found: error
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n' "RustClaw Raspberry Pi aarch64 runtime package."
+            printf '\n'
+            printf 'Target: %s\n' "${RUST_TARGET}"
+            printf 'Commit: %s\n' "${GITHUB_SHA}"
+            printf '\n'
+            printf '%s\n' "This package contains prebuilt Rust binaries and UI/dist assets. On Pi, keep existing runtime configs/data, replace the packaged runtime files, then restart RustClaw."
+          } > release-notes.md
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          PACKAGE_NAME: ${{ steps.meta.outputs.package_name }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          release_flags=()
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              "dist-release/${PACKAGE_NAME}" \
+              "dist-release/${PACKAGE_NAME}.sha256" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              "dist-release/${PACKAGE_NAME}" \
+              "dist-release/${PACKAGE_NAME}.sha256" \
+              --title "RustClaw Pi aarch64 ${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              "${release_flags[@]}"
+          fi
