@@ -882,6 +882,67 @@ fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
 }
 
 #[test]
+fn recent_artifacts_repaired_shell_listing_keeps_structured_selector() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = true;
+    route.output_contract.self_extension.list_selector.limit = Some(2);
+    route.output_contract.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
+    let loop_state = LoopState::new(1);
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({
+                "command": "cd /home/guagua/rustclaw/logs && ls -1t | head -2"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &loop_state,
+        "List the 2 most recently modified files under logs.",
+        None,
+        Some("/home/guagua/rustclaw/logs"),
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+    assert_eq!(args.get("path").and_then(Value::as_str), Some("logs"));
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("mtime_desc")
+    );
+}
+
+#[test]
 fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),
