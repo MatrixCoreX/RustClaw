@@ -1,0 +1,106 @@
+# Agent Guard Config Wiring Audit
+
+Last updated: 2026-06-21
+
+This document supports
+`plan/agent_loop_ideal_state_convergence_plan_20260615.md`. It classifies
+`configs/agent_guard.toml` fields by current wiring and intended ownership.
+
+## Summary
+
+- Core loop budgets and budget profiles are wired through
+  `agent_engine::support::load_agent_loop_guard_policy()`.
+- `semantic_route_authority` is parsed by `AgentLoopGuardPolicy` and currently
+  defaults to `agent_loop_default`; older `agent_decides_*` names are ignored
+  historical config keys and are not mapped during runtime config load.
+- `structured_evidence_required_for_selected_contracts` is default-on for
+  selected agent-loop contracts; `registry_idempotency_guard_scope` and
+  `answer_verifier_enforce_required_scope` are machine-token scopes. Current
+  config uses `all` for both verifier and registry idempotency guards after the
+  compressed release-gate-equivalent pass; `selected_agent_loop` and `off`
+  remain rollback/debug tokens.
+- Domain action lists, `dynamic_rules`, `messages`, and `trace_messages` need
+  cleanup. Current code search did not find production Rust readers for those
+  sections, so they should not be treated as active rollback controls.
+- User-visible copy should move toward `message_key` plus finalizer/LLM/i18n
+  rendering before it is used in runtime behavior.
+
+## Wiring Matrix
+
+| Config path | Current wiring | Category | Owner | Next action |
+| --- | --- | --- | --- | --- |
+| `agent.loop_guard.max_steps` | Parsed by `load_agent_loop_guard_policy()` and consumed by agent planning/loop budgets. | Wired behavior. | Boundary Layer budget guard. | Keep. Test with `cargo test -p clawd support -- --nocapture` and loop tests. |
+| `agent.loop_guard.max_rounds` | Parsed and applied to `LoopState.max_rounds`. | Wired behavior. | Boundary Layer budget guard. | Keep task-class profile overrides; avoid removing config. |
+| `agent.loop_guard.recoverable_failure_extra_rounds` | Parsed and used by recoverable failure loop extension. | Wired behavior. | Loop budget/repair guard. | Keep; observe LLM cost in canaries. |
+| `agent.loop_guard.multi_round_enabled` | Parsed and logged/used by loop planning path. | Wired behavior. | Loop coordinator. | Keep as emergency rollback toward single-round behavior. |
+| `agent.loop_guard.answer_verifier_retry_limit` | Parsed and used for verifier retry loops. | Wired behavior. | Answer Verifier repair budget. | Keep; canary cost and verifier block rate. |
+| `agent.loop_guard.repeat_action_limit` | Parsed and used in repeat guard. | Wired behavior. | Loop repeat guard. | Keep. |
+| `agent.loop_guard.no_progress_limit` | Parsed and used in no-progress stop logic. | Wired behavior. | Loop progress guard. | Keep task-class overrides. |
+| `agent.loop_guard.max_tool_calls` | Parsed and used in execution loop tool-call guard. | Wired behavior. | Boundary Layer budget guard. | Keep. |
+| `agent.loop_guard.repeat_same_action_limit` | Parsed into policy. | Wired behavior / compatibility. | Loop repeat guard. | Keep until dedup cleanup verifies no duplicate meaning. |
+| `agent.loop_guard.budget_profiles.fast_read` | Parsed and selected for fast read/status tasks. | Wired behavior. | Budget profile selector. | Keep. |
+| `agent.loop_guard.budget_profiles.grounded_summary` | Parsed and selected for summary/evidence tasks. | Wired behavior. | Budget profile selector. | Keep. |
+| `agent.loop_guard.budget_profiles.multi_step_workspace` | Parsed and selected for workspace/write/delivery tasks. | Wired behavior. | Budget profile selector. | Keep. |
+| `agent.loop_guard.ops_closed_loop` | Parsed and selected for `ops_closed_loop` execution recipes. | Wired behavior. | Ops closed-loop budget/repair guard. | Keep. |
+| `agent.loop_guard.answer_verifier_enforce_required_scope` | Parsed as machine token `off \| selected_agent_loop \| all`; current config uses `all`, so required-evidence force-failure behavior can apply beyond selected agent-loop routes. | Wired behavior. | Answer Verifier rollout gate. | Keep route-delta/verifier attribution review active; roll back to `selected_agent_loop` or `off` if false verifier blocks appear. |
+| `agent.loop_guard.answer_verifier_enforce_required` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `answer_verifier_enforce_required_scope`. |
+| `agent.loop_guard.semantic_route_authority` | Parsed and consumed by route-authority selection. Current default is `agent_loop_default`; `legacy` is emergency rollback, `shadow` / `agent_loop_canary` are rollout/debug. | Wired behavior. | Agent-loop route authority lifecycle. | Keep `agent_loop_default`; do not delete global legacy fallback until 500 canary + 2100 safe aggregate + route-delta gate passes. |
+| `agent.loop_guard.agent_loop_canary_bucket` | Parsed for `agent_loop_canary`; ignored by `agent_loop_default`. | Debug/canary compatibility. | Agent-loop route authority lifecycle. | Use only for targeted rollback/debug. |
+| `agent.loop_guard.agent_decides_semantic_route` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration. | Do not document or extend as a config field. |
+| `agent.loop_guard.agent_decides_migration_class` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration. | Do not document or extend as a config field. |
+| `agent.loop_guard.registry_idempotency_guard_scope` | Parsed as machine token `off \| selected_agent_loop \| all`; current config uses `all`, so execution-loop repeat guard can apply beyond selected agent-loop routes. | Wired behavior. | Registry rollout gate. | Keep route-delta/repeat-block attribution review active; roll back to `selected_agent_loop` or `off` if false repeat blocks appear. |
+| `agent.loop_guard.registry_idempotency_guard` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `registry_idempotency_guard_scope`. |
+| `agent.loop_guard.structured_evidence_required_for_selected_contracts` | Parsed and consumed by selected agent-loop contract evidence gate. Current default is true. | Wired behavior. | Evidence coverage gate. | Keep enabled; rollback only if canary shows false evidence gaps. |
+| `agent.loop_guard.crypto.*_actions` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata owns effect/dedup semantics. | Do not wire into runtime; use `planner_capabilities[].effect`, `semantic_tags`, `risk_level`, `once_per_task`, `dedup_scope`, and `idempotent`. |
+| `agent.loop_guard.fs_search.query_actions` | No production Rust reader found in current audit; config comments now mark this key `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / capability contract. | Do not wire into runtime; replace with capability metadata if still needed. |
+| `agent.loop_guard.media.image_*_skills` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / output contract. | Do not wire into runtime; use `semantic_tags` or output delivery metadata. |
+| `agent.loop_guard.dedup.*` | No production Rust reader found in current audit; comments mark compatibility. | Legacy compatibility config. | P3 dedup cleanup. | Deprecate after confirming no tests or deployments rely on it. |
+| `agent.dynamic_rules.*` | No production Rust reader found in current audit. Values are prompt text if wired later. | Prompt-policy text, currently stale. | Prompt layer, not runtime control flow. | Prefer prompt files or generated overlays; do not parse these as runtime semantics. |
+| `agent.messages.*` | No production Rust reader found in current audit. | Potential i18n/message copy. | i18n/finalizer. | If used later, convert to `message_key` plus renderer; do not hardcode final replies in Rust. |
+| `agent.trace_messages.*` | No production Rust reader found in current audit. | Trace/audit copy or reason labels. | Observability. | Replace prose reason strings with stable reason codes where behavior depends on them. |
+
+## Risk Notes
+
+- Treating an ignored legacy config key as a long-term behavior switch is unsafe.
+  The plan must distinguish "historical/log compatibility" from "runtime config
+  input".
+- Dead config is also risky because operators can believe they have changed a
+  guard when runtime ignores the value.
+- Domain action lists duplicate information that should live in registry
+  metadata. Keeping both paths creates drift.
+- `agent.messages` can become a hardcoded multilingual reply path if wired
+  directly into finalizer branches. Use `message_key` and language rendering
+  instead.
+- `dynamic_rules` can reintroduce domain-specific prompt debt if new skills add
+  one-off prompt strings instead of `INTERFACE.md`, generated prompts, schema, or
+  registry metadata.
+
+## Required Follow-Up
+
+1. Add a config wiring test or static audit for stale `agent_guard.toml` keys.
+2. Decide whether domain sections should be marked deprecated in config comments
+   or removed after registry parity.
+3. Keep registry parity checks between `configs/skills_registry.toml` and
+   `docker/config/skills_registry.toml` before enabling registry-driven guards.
+   Use `python3 scripts/check_skill_registry_parity.py --mode p3 --strict`.
+4. Move behavior-affecting reason strings to stable `reason_code` fields.
+5. Keep broad NL canary until after plan/code work is complete; use focused Rust
+   tests and hard-match scan for document-only changes.
+
+## Verification
+
+For this audit class of change:
+
+```bash
+python3 scripts/check_no_nl_hardmatch.py
+git diff --check
+```
+
+Before any behavior migration based on this audit:
+
+```bash
+cargo test -p clawd support -- --nocapture
+cargo test -p clawd loop_control -- --nocapture
+bash scripts/nl_tests/run_suite.sh contract_matrix_offline
+bash scripts/nl_tests/run_suite.sh runtime_capability_boundary
+```
