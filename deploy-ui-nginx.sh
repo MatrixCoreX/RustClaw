@@ -130,14 +130,10 @@ nginx_main_conf_includes_dir() {
 
 nginx_site_link_path() {
   local conf_path="$1"
-  local main_conf="${2:-}"
   if [[ "$HOST_OS" == "macos" ]]; then
     return 0
   fi
   if [[ "$conf_path" == /etc/nginx/sites-available/* ]] && [[ -d "/etc/nginx/sites-enabled" ]]; then
-    if [[ -n "$main_conf" ]] && nginx_main_conf_includes_dir "$main_conf" "/etc/nginx/sites-available"; then
-      return 0
-    fi
     printf '%s\n' "/etc/nginx/sites-enabled/$(basename "$conf_path")"
   fi
 }
@@ -151,9 +147,6 @@ nginx_include_dir_for_conf() {
     if [[ -n "$site_link" ]]; then
       printf '%s\n' "/etc/nginx/sites-enabled"
       return
-    fi
-    if nginx_main_conf_includes_dir "$main_conf" "/etc/nginx/sites-available"; then
-      return 0
     fi
   fi
 
@@ -225,6 +218,9 @@ ensure_nginx_site_include() {
   local include_dir="$2"
   local include_line="    include ${include_dir}/*.conf;"
   [[ -f "$main_conf" ]] || return 0
+  if [[ "$include_dir" == "/etc/nginx/sites-enabled" ]]; then
+    disable_nginx_sites_available_include "$main_conf"
+  fi
   if nginx_main_conf_includes_dir "$main_conf" "$include_dir"; then
     return 0
   fi
@@ -275,6 +271,47 @@ PY
     rm -f "$tmp_file"
   fi
   echo "Ensured nginx include in $main_conf: $include_line"
+}
+
+disable_nginx_sites_available_include() {
+  local main_conf="$1"
+  [[ "$HOST_OS" != "macos" ]] || return 0
+  [[ -f "$main_conf" && -d "/etc/nginx/sites-enabled" ]] || return 0
+  if ! grep -Eq '^[[:space:]]*include[[:space:]]+/etc/nginx/sites-available/\*\.conf;' "$main_conf"; then
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+  python3 - "$main_conf" "$tmp_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+out = []
+changed = False
+for line in src.read_text(encoding="utf-8").splitlines():
+    if re.match(r'^\s*include\s+/etc/nginx/sites-available/\*\.conf;\s*$', line):
+        indent = line[: len(line) - len(line.lstrip())]
+        out.append(f"{indent}# include /etc/nginx/sites-available/*.conf; disabled: active sites are loaded from sites-enabled")
+        changed = True
+    else:
+        out.append(line)
+dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+raise SystemExit(0 if changed else 2)
+PY
+  local rc=$?
+  if [[ "$rc" == "0" ]]; then
+    if [[ -w "$main_conf" ]]; then
+      cp "$tmp_file" "$main_conf"
+    else
+      sudo cp "$tmp_file" "$main_conf"
+    fi
+    echo "Disabled nginx sites-available include to avoid duplicate default_server entries."
+  fi
+  rm -f "$tmp_file"
 }
 
 ensure_nginx_site_link() {
