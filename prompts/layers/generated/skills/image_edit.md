@@ -13,6 +13,13 @@
 - **Input recovery is implemented inside this skill** (not in `clawd`): if `image` is omitted, the skill uses host-provided generic context (`context.recent_image_paths`, newest first) and optional `args._memory.context` to pick a source image or ask for clarification.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, normalized `action`, and `outputs`.
 
+## Planner Selection Notes (from interface)
+- For requests that transform, restyle, edit, outpaint, add/remove content, or otherwise derive a new image from an existing image and save the result, use `image_edit` / planner capability `image.edit` or `image.restyle`.
+- Do not implement semantic image editing by composing shell commands, downloads, or external CLI image tools unless the user explicitly requests shell/CLI execution or `image_edit` is unavailable.
+- Preserve source images as structured `image` or `images` arguments. Use `{"url":"..."}` for URL sources and `{"path":"..."}` for local workspace files.
+- Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.outputs`.
+
+
 ## Config Entry Points (from interface)
 - Default edit provider/model: `configs/image.toml` -> `[image_edit].default_vendor` / `default_model`.
 - Current default: `minimax` + `image-01`.

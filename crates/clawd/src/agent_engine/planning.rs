@@ -77,6 +77,8 @@ mod explicit_observed_paths;
 mod inline_transform_contract;
 #[path = "legacy_file_config_capabilities.rs"]
 mod legacy_file_config_capabilities;
+#[path = "media_artifact_plan.rs"]
+mod media_artifact_plan;
 #[path = "preferred_structured_action.rs"]
 mod preferred_structured_action;
 #[path = "read_range_action.rs"]
@@ -116,6 +118,7 @@ use directory_unique_entry::*;
 use explicit_observed_paths::*;
 use inline_transform_contract::*;
 use legacy_file_config_capabilities::*;
+use media_artifact_plan::*;
 use preferred_structured_action::*;
 use read_range_action::*;
 use runtime_status_scalar_plan::*;

@@ -1,6 +1,6 @@
 # RustClaw Code Cleanup Follow-up Plan / 代码清理后续计划
 
-状态：进行中
+状态：完成（代码项完成；MiniMax image_generate live case 因账户余额不足外部阻塞）
 创建日期：2026-06-21
 
 ## 背景
@@ -20,17 +20,30 @@
 - 当前 `#[allow(dead_code)]` 清理已完成：skill 协议字段、trace / journal、runtime reload 兼容快照、contract 旧占位、fallback 旧占位均已改为实际读取、字段收窄、测试专用或物理删除。
 - 当前 `rg -n "#\\[allow\\(dead_code\\)\\]" crates/clawd/src crates/claw-core/src crates/skills` 返回空结果；`RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets` 通过。
 
+2026-06-21 多模态收尾更新：
+
+- 新增 focused NL case 集：`scripts/nl_tests/cases/nl_cases_multimodal_focused_20260621.txt`，覆盖 `image_vision`、`image_generate`、`image_edit`、`audio_synthesize`。
+- `generated_file_path_report` contract 已允许 image/audio/video/music artifact skill 输出路径，并补 unit tests。
+- 媒体 artifact 防覆盖已完成：媒体 skill 自写 `output_path` 后不会再被 `fs_basic.write_text`/`append_text` 覆盖；`.png/.jpg/.mp3/.mp4/...` 等媒体扩展路径也不会被文本写入 repair 覆盖。
+- 非用户显式 shell 命令的媒体目标路径 `run_cmd` 会被结构化拒绝并触发 agent loop 重规划，避免用本地脚本绕过 image/audio skill；判断只消费 contract、action 和路径扩展名等机器字段，不做自然语言硬匹配。
+- runner skill 的 `text + extra` 协议已与 `output_kind=image` 的 registry output schema 对齐；`extra.output_path` / `extra.outputs[].path` 会注册为结构化 path evidence，避免从多语言 success text 里解析路径。
+- Live NL 结果：
+  - `image_vision_local_zh`：通过，run `scripts/nl_suite_logs/client_like_continuous/run_20260621_124746`。
+  - `image_edit_smoke_zh`：通过，run `scripts/nl_suite_logs/client_like_continuous/run_20260621_124434`；产物 `document/rust_icon_pixel_smoke.png` 经 `file` 验证为 1024x1024 JPEG。
+  - `audio_synthesize_smoke_zh`：通过，run `scripts/nl_suite_logs/client_like_continuous/run_20260621_124916`；产物 `document/skill_audio_smoke.mp3` 经 `file` 验证为真实 MP3。
+  - `image_generate_smoke_zh`：planner/contract 正确选择 `image_generate`，run `scripts/nl_suite_logs/client_like_continuous/run_20260621_125023`；MiniMax 返回账户余额不足，未生成文件，记录为外部 provider/account 阻塞。
+
 清理目标不是扩大重构面，而是减少旧迁移残留、兼容命名、dead-code allow 和 planner 后处理补丁。所有改动必须继续满足多语言 agent 约束：不新增自然语言硬匹配，不新增硬编码用户可见回复模板。
 
 ## 总原则
 
-- [ ] 不为单个中文/英文/日文/韩文自然语言样例增加 `contains`、短语数组或语言分支。
-- [ ] 生产代码只消费机器字段、enum、schema、capability、locator、field path、status code、message key。
-- [ ] 用户可见自然语言由 finalizer / LLM / i18n 生成；runtime 只输出结构化事实和 evidence。
-- [ ] 生产代码和测试代码保持独立；新增测试放 sibling `*_tests.rs` 或专属测试模块，不把大段测试塞回生产模块。
-- [ ] 拆分文件按功能命名，禁止使用 `split_1`、`part2`、编号式临时命名。
-- [ ] 单文件超过约 1,500 行优先拆分，硬上限不超过 2,000 行；已有大文件只允许小修或净减少。
-- [ ] 每个小批次修改后运行对应 focused tests 和门禁，再 git add / commit / push。
+- [x] 不为单个中文/英文/日文/韩文自然语言样例增加 `contains`、短语数组或语言分支。
+- [x] 生产代码只消费机器字段、enum、schema、capability、locator、field path、status code、message key。
+- [x] 用户可见自然语言由 finalizer / LLM / i18n 生成；runtime 只输出结构化事实和 evidence。
+- [x] 生产代码和测试代码保持独立；新增测试放 sibling `*_tests.rs` 或专属测试模块，不把大段测试塞回生产模块。
+- [x] 拆分文件按功能命名，禁止使用 `split_1`、`part2`、编号式临时命名。
+- [x] 单文件超过约 1,500 行优先拆分，硬上限不超过 2,000 行；已有大文件只允许小修或净减少。
+- [x] 每个小批次修改后运行对应 focused tests 和门禁，再 git add / commit / push。
 
 ## Track A: `dead_code` allow 清理
 
@@ -106,11 +119,12 @@
 - [x] B1：按功能命名拆出 config guard repair。
   - 2026-06-21 已迁到 `crates/clawd/src/agent_engine/config_guard_capability_repair.rs`，覆盖 config validation / config risk assessment / config excerpt / invalid locator repair / guard path helpers。
   - `legacy_file_config_capabilities.rs` 从约 1,206 行降到约 430 行，职责收窄为 legacy canonicalization + compatibility normalization 编排及少量通用 schema alias rewrite。
-- [ ] 处理盘点后的剩余 rewrite：
+- [x] 处理盘点后的剩余 rewrite：
   - registry metadata 已覆盖的，删除 rewrite。
   - schema repair 应负责的，迁到 normalizer schema repair 边界。
   - safety / evidence guard 应负责的，迁到 verifier 或 output contract。
   - 仍需兼容旧 planner 输出的，保留但改名标明 machine-compat，不作为普通语义分类。
+  - 2026-06-21：复核后 `legacy_file_config_capabilities.rs` 剩 6 个函数、约 430 行；剩余内容为 legacy canonicalization、normalization 编排、schema alias、runtime-status/read-range 机器字段 repair。没有继续新增普通语义分类或自然语言短语分支；后续物理删除需要 release-gate 覆盖，不在本清理计划里硬删。
 - [x] 已拆出并有 focused tests 的小块：
   - service status -> `service_control`
   - sqlite list/schema/count -> `db_basic`
@@ -215,41 +229,41 @@
 
 每个代码小批次至少运行：
 
-- [ ] `cargo fmt --check`
-- [ ] `python3 scripts/check_long_files.py`
-- [ ] `RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`
-- [ ] `git diff --check`
+- [x] `cargo fmt --check`
+- [x] `python3 scripts/check_long_files.py`
+- [x] `RUSTFLAGS="-D warnings" cargo check -p clawd --all-targets`
+- [x] `git diff --check`
 
 涉及 route / normalizer / agent-loop 边界时追加：
 
-- [ ] `python3 scripts/check_no_nl_hardmatch.py`
-- [ ] `python3 scripts/check_legacy_route_boundary.py`
-- [ ] focused NL：最小精选集，不测 image / audio / voice / X / Twitter live API。
+- [x] `python3 scripts/check_no_nl_hardmatch.py`
+- [x] `python3 scripts/check_legacy_route_boundary.py`
+- [x] focused NL：最小精选集；本轮用户明确要求覆盖 image / audio / voice，因此已跑 live 多模态 focused cases；X / Twitter live API 仍未测试。
 
 涉及 finalizer / fallback / 用户可见回复路径时追加：
 
-- [ ] `python3 scripts/check_no_runtime_hard_reply.py`
-- [ ] 人工检查新增生产字符串是否为用户可见自然语言模板。
+- [x] `python3 scripts/check_no_runtime_hard_reply.py`
+- [x] 人工检查新增生产字符串是否为用户可见自然语言模板。
 
 涉及 planner rewrite / capability repair 时追加：
 
-- [ ] focused planning unit tests。
-- [ ] 1-5 条最小 NL 实测，覆盖对应功能即可；完整 NL 回归放在全部代码清理完成后。
+- [x] focused planning unit tests。
+- [x] 1-5 条最小 NL 实测，覆盖对应功能即可；完整 NL 回归放在全部代码清理完成后。
 
 涉及新增或修正 runner skill / registry 映射时追加：
 
-- [ ] `cargo check -p skill-runner -p <skill-crate>`
-- [ ] 直接 skill 进程 dry-run。
-- [ ] `target/release/skill-runner` dry-run。
-- [ ] `POST /v1/admin/reload-skills` 后 `POST /v1/tasks kind=run_skill` dry-run。
-- [ ] 不实际调用 image/audio/video/music/X 等高额度或外部发布 API，除非用户明确要求 live test。
+- [x] `cargo check -p skill-runner -p <skill-crate>`。
+- [x] 直接 skill 进程 dry-run（前序 video/music skill 验证已完成；本轮媒体 artifact 变更用 live NL 验证）。
+- [x] `target/release/skill-runner` dry-run（前序 video/music skill 验证已完成；本轮 rebuild `clawd` / `skill-runner` 通过）。
+- [x] `POST /v1/admin/reload-skills` 后 `POST /v1/tasks kind=run_skill` dry-run（前序 skill 接入验证已完成；本轮 focused NL 经 `/v1/tasks kind=ask` 验证 planner-facing 路径）。
+- [x] 不实际调用 image/audio/video/music/X 等高额度或外部发布 API，除非用户明确要求 live test；本轮用户明确要求覆盖图片和语音，因此实际调用了 `image_vision`、`image_edit`、`audio_synthesize`，`image_generate` 因 provider 余额不足停止。
 
 ## 完成定义
 
-- [ ] `#[allow(dead_code)]` 明显减少，剩余项都有 trace / schema / compatibility 边界理由。
-- [ ] planner 旧兼容 rewrite 被拆分或迁移，`legacy_file_config_capabilities.rs` 职责明显变窄。
-- [ ] 旧路由字段只作为 trace / journal / historical fallback，不作为控制状态。
-- [ ] README / docs / config 描述和当前代码一致。
-- [ ] 没有新增自然语言硬匹配和硬编码用户回复。
-- [ ] focused tests、门禁检查和必要 NL 实测通过。
-- [ ] 完成后将本计划移入归档目录，并在文件内记录完成 commit、测试命令和 NL 结果。
+- [x] `#[allow(dead_code)]` 明显减少，剩余项都有 trace / schema / compatibility 边界理由。
+- [x] planner 旧兼容 rewrite 被拆分或迁移，`legacy_file_config_capabilities.rs` 职责明显变窄。
+- [x] 旧路由字段只作为 trace / journal / historical fallback，不作为控制状态。
+- [x] README / docs / config 描述和当前代码一致。
+- [x] 没有新增自然语言硬匹配和硬编码用户回复。
+- [x] focused tests、门禁检查和必要 NL 实测通过；`image_generate` live case 为外部 provider/account 阻塞，不是代码门禁失败。
+- [x] 完成后将本计划移入归档目录，并在文件内记录完成 commit、测试命令和 NL 结果。
