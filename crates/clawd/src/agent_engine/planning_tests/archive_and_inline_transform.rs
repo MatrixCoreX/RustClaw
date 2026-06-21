@@ -145,7 +145,7 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint.clear();
+    route.output_contract.locator_hint = format!("{archive} | {db_path}");
     let loop_state = LoopState::new(1);
 
     let plan = archive_database_aggregate_deterministic_plan_result(
