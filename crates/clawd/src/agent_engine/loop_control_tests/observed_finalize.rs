@@ -311,6 +311,87 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
 }
 
 #[test]
+fn recent_artifacts_inventory_can_stop_before_content_read_round() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900},{"kind":"file","modified_ts":7,"name":"act_plan.log","path":"logs/act_plan.log","size_bytes":300}],"names":["clawd.run.log","model_io.log","act_plan.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::Free);
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs".to_string();
+    route.output_contract.self_extension.list_selector.limit = Some(2);
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = true;
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({"action":"list_dir","path":"logs","sort_by":"mtime_desc","files_only":true,"max_entries":2}),
+    }];
+
+    assert!(should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn recent_artifacts_inventory_stop_respects_file_selector() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","entries":[{"kind":"dir","modified_ts":9,"name":"bundle_unpack","path":"tmp/bundle_unpack"},{"kind":"dir","modified_ts":8,"name":"manual_unpack","path":"tmp/manual_unpack"}],"path":"/repo/tmp","sort_by":"mtime_desc"}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::Free);
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp".to_string();
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = true;
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({"action":"list_dir","path":"tmp","sort_by":"mtime_desc","files_only":true}),
+    }];
+
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn existence_with_path_free_output_can_stop_before_second_round() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
