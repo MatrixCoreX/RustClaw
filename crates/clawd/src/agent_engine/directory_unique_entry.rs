@@ -154,6 +154,7 @@ pub(super) fn normalize_archive_entry_target_candidate(
         || trimmed.contains("://")
         || Path::new(trimmed).is_absolute()
         || is_supported_archive_path(trimmed)
+        || is_sqlite_database_path(trimmed)
         || archive_locator_candidate_matches_archive(trimmed, archive_path)
         || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(trimmed)
     {
