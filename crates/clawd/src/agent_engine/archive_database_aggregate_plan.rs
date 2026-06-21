@@ -19,6 +19,7 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ArchiveList
+                | crate::OutputSemanticKind::ContentExcerptSummary
         )
         || !archive_basic_enabled_for_planning(state)
         || !db_basic_enabled_for_planning(state)
