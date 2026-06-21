@@ -18,6 +18,16 @@ struct ModelConfigItem {
     api_key_configured: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     api_key_masked: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    available_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    risk_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dry_run_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    external_provider: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +77,11 @@ fn default_model_item() -> ModelConfigItem {
         api_key: None,
         api_key_configured: None,
         api_key_masked: None,
+        capabilities: Vec::new(),
+        available_models: Vec::new(),
+        risk_level: None,
+        dry_run_supported: None,
+        external_provider: None,
     }
 }
 
@@ -77,7 +92,7 @@ fn read_toml_value(path: &Path) -> toml::Value {
 
 fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
     let Some(table) = value.get(section).and_then(|t| t.as_table()) else {
-        return default_model_item();
+        return model_item_with_capability_metadata(default_model_item(), section);
     };
     let vendor = table
         .get("default_vendor")
@@ -108,14 +123,81 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    ModelConfigItem {
+    let item = ModelConfigItem {
         vendor,
         model,
         base_url,
         api_key: None,
         api_key_configured: Some(api_key.is_some()),
         api_key_masked: api_key.map(mask_secret),
+        capabilities: Vec::new(),
+        available_models: read_section_model_cache(table),
+        risk_level: None,
+        dry_run_supported: None,
+        external_provider: None,
+    };
+    model_item_with_capability_metadata(item, section)
+}
+
+fn read_section_model_cache(table: &toml::map::Map<String, toml::Value>) -> Vec<String> {
+    let mut models = table
+        .get("models")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    models.sort();
+    models.dedup();
+    models
+}
+
+fn read_llm_model_cache(config: &toml::Value, vendor: &str) -> Vec<String> {
+    let mut models = config
+        .get("llm")
+        .and_then(toml::Value::as_table)
+        .and_then(|llm| llm.get(vendor.trim()))
+        .and_then(toml::Value::as_table)
+        .and_then(|vendor_table| vendor_table.get("models"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    models.sort();
+    models.dedup();
+    models
+}
+
+fn model_item_with_capability_metadata(
+    mut item: ModelConfigItem,
+    section: &str,
+) -> ModelConfigItem {
+    let (capability, risk_level, dry_run_supported, external_provider) =
+        match section.trim() {
+            "llm" => ("text.chat", "medium", false, true),
+            "image_edit" => ("image.edit", "high", true, true),
+            "image_generation" => ("image.generate", "high", true, true),
+            "image_vision" => ("image.understand", "medium", false, true),
+            "audio_transcribe" => ("audio.transcribe", "medium", false, true),
+            "audio_synthesize" => ("audio.synthesize", "high", true, true),
+            "video_generation" => ("video.generate", "high", true, true),
+            "music_generation" => ("music.generate", "high", true, true),
+            _ => ("unknown", "unknown", false, false),
+        };
+    if capability != "unknown" {
+        item.capabilities = vec![capability.to_string()];
     }
+    item.risk_level = Some(risk_level.to_string());
+    item.dry_run_supported = Some(dry_run_supported);
+    item.external_provider = Some(external_provider);
+    item
 }
 
 fn upsert_model_section(
@@ -212,23 +294,35 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
     let llm = config
         .get("llm")
         .and_then(|t| t.as_table())
-        .map(|t| ModelConfigItem {
-            vendor: t
+        .map(|t| {
+            let vendor = t
                 .get("selected_vendor")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
-                .to_string(),
-            model: t
+                .to_string();
+            let model = t
                 .get("selected_model")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
-                .to_string(),
-            base_url: None,
-            api_key: None,
-            api_key_configured: None,
-            api_key_masked: None,
+                .to_string();
+            model_item_with_capability_metadata(
+                ModelConfigItem {
+                    available_models: read_llm_model_cache(&config, &vendor),
+                    vendor,
+                    model,
+                    base_url: None,
+                    api_key: None,
+                    api_key_configured: None,
+                    api_key_masked: None,
+                    capabilities: Vec::new(),
+                    risk_level: None,
+                    dry_run_supported: None,
+                    external_provider: None,
+                },
+                "llm",
+            )
         })
-        .unwrap_or_else(default_model_item);
+        .unwrap_or_else(|| model_item_with_capability_metadata(default_model_item(), "llm"));
 
     let image = read_toml_value(&root.join("configs/image.toml"));
     let image_edit = read_model_section(&image, "image_edit");

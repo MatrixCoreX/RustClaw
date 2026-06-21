@@ -255,16 +255,14 @@ fn upsert_model_section_updates_video_and_music_model_items() {
         model: "video-01".to_string(),
         base_url: Some("https://api.minimax.io/v1".to_string()),
         api_key: Some("video-secret".to_string()),
-        api_key_configured: None,
-        api_key_masked: None,
+        ..default_model_item()
     };
     let music_item = ModelConfigItem {
         vendor: "minimax".to_string(),
         model: "music-2.6".to_string(),
         base_url: Some("https://api.minimax.io/v1".to_string()),
         api_key: Some("music-secret".to_string()),
-        api_key_configured: None,
-        api_key_masked: None,
+        ..default_model_item()
     };
 
     upsert_model_section(&mut video, "video_generation", &video_item).unwrap();
@@ -286,4 +284,28 @@ fn upsert_model_section_updates_video_and_music_model_items() {
         read_model_section(&music, "music_generation").api_key_configured,
         Some(true)
     );
+}
+
+#[test]
+fn model_sections_include_capability_metadata_and_model_cache() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[video_generation]
+default_vendor = "minimax"
+default_model = "video-01"
+models = ["video-01", "video-01", "video-02"]
+
+[video_generation.providers.minimax]
+api_key = "video-secret"
+"#,
+    )
+    .expect("parse");
+
+    let item = read_model_section(&parsed, "video_generation");
+
+    assert_eq!(item.capabilities, vec!["video.generate"]);
+    assert_eq!(item.available_models, vec!["video-01", "video-02"]);
+    assert_eq!(item.risk_level.as_deref(), Some("high"));
+    assert_eq!(item.dry_run_supported, Some(true));
+    assert_eq!(item.external_provider, Some(true));
 }

@@ -562,6 +562,11 @@ interface ModelConfigItem {
   api_key?: string;
   api_key_configured?: boolean;
   api_key_masked?: string | null;
+  capabilities?: string[];
+  available_models?: string[];
+  risk_level?: string | null;
+  dry_run_supported?: boolean | null;
+  external_provider?: boolean | null;
 }
 
 interface ModelConfigResponse {
