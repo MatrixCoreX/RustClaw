@@ -129,7 +129,7 @@ fn archive_read_contract_rejects_unsafe_member_locator() {
 }
 
 #[test]
-fn archive_database_aggregate_uses_structured_skills_for_command_summary() {
+fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_route() {
     let state = test_state_with_enabled_skills(&["archive_basic", "db_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
@@ -143,7 +143,7 @@ fn archive_database_aggregate_uses_structured_skills_for_command_summary() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_hint.clear();
     let loop_state = LoopState::new(1);
