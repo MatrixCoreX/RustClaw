@@ -842,10 +842,11 @@ description = "List and cancel queued or running RustClaw tasks through the loca
 semantic_tags = ["task_status", "task_control", "runtime_tasks"]
 planner_capabilities = [
   { name = "task_control.list", action = "list", effect = "observe", optional = ["status", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "task_control.get", action = "get", effect = "observe", required = ["task_id"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
   { name = "task_control.cancel_all", action = "cancel_all", effect = "mutate", optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action" },
   { name = "task_control.cancel_one", action = "cancel_one", effect = "mutate", required = ["index"], optional = ["confirm"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "cancel_all", "cancel_one"] }, index = { type = "integer" }, status = { type = "string" }, limit = { type = "integer" }, confirm = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "get", "cancel_all", "cancel_one"] }, index = { type = "integer" }, task_id = { type = "string" }, status = { type = "string" }, limit = { type = "integer" }, confirm = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]

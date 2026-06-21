@@ -688,6 +688,32 @@ fn service_status_task_control_marker_uses_task_control_plan_before_health_check
 }
 
 #[test]
+fn service_status_task_id_token_uses_task_control_get_plan() {
+    let state = test_state_with_enabled_skills(&["health_check", "task_control"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let task_id = "00000000-0000-4000-8000-000000000000";
+    route.resolved_intent = format!("inspect task_id={task_id}");
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "observe task lifecycle",
+        Some(&route),
+        &loop_state,
+        &format!("query task {task_id}"),
+    )
+    .expect("task id token should use task_control.get before generic status tools");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "task_control", "get");
+    assert_eq!(args.get("task_id").and_then(Value::as_str), Some(task_id));
+}
+
+#[test]
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();

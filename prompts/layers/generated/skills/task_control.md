@@ -8,7 +8,7 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `task_control` lets the current user inspect unfinished tasks in the current chat and cancel them safely.
+- `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, and cancel unfinished tasks safely.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Supports natural-language task operations such as "看看我现在有哪些任务", "结束当前任务", and "结束第 2 个任务".
 - When a `user_key` is present in the runner request/context, it is forwarded to `clawd` for authenticated task queries and cancellations.
@@ -18,13 +18,15 @@
 
 ## Actions (from interface)
 - `list` - List current unfinished tasks (`running` + `queued`) for this user/chat.
+- `get` - Query one task detail by stable `task_id`, including `data.lifecycle` machine fields when available.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `cancel_all`, `cancel_one`. |
+| `action` | yes | string | - | One of: `list`, `get`, `cancel_all`, `cancel_one`. |
+| `task_id` | required for `get` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
 
 Notes:
@@ -34,6 +36,7 @@ Notes:
 
 ## Error Contract (from interface)
 - Unknown action -> readable error text.
+- `get` without `task_id` -> readable error text.
 - `cancel_one` without valid `index` -> readable error text.
 - Invalid index -> readable error text telling the user to query tasks first.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
@@ -58,6 +61,18 @@ Response text example:
 Request:
 ```json
 {"request_id":"r2","args":{"action":"cancel_all"},"user_id":1,"chat_id":2}
+```
+
+### get
+
+Request:
+```json
+{"request_id":"r4","args":{"action":"get","task_id":"00000000-0000-4000-8000-000000000000"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"get","task_id":"00000000-0000-4000-8000-000000000000","db_status":"succeeded","lifecycle":{"state":"succeeded","can_poll":true,"can_cancel":false}}
 ```
 
 ### cancel_one
