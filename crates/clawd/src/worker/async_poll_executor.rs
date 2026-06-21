@@ -62,32 +62,13 @@ fn async_poll_adapter_result<'a>(
         &claimed.dispatch_claim,
     ]
     .into_iter()
-    .filter_map(|value| value.get("async_poll_adapter_result"))
-    .find(|value| adapter_result_matches_job(value, job_id))
+    .filter_map(|value| value.get(crate::async_job_contract::ASYNC_POLL_ADAPTER_RESULT_KEY))
+    .find(|value| crate::async_job_contract::async_poll_adapter_result_matches_job(value, job_id))
     .or_else(|| {
-        claimed
-            .task_checkpoint
-            .observations
-            .iter()
-            .find(|value| adapter_result_matches_job(value, job_id))
+        claimed.task_checkpoint.observations.iter().find(|value| {
+            crate::async_job_contract::async_poll_adapter_result_matches_job(value, job_id)
+        })
     })
-}
-
-fn adapter_result_matches_job(value: &Value, job_id: &str) -> bool {
-    value.is_object()
-        && value.get("text").is_none()
-        && value.get("error_text").is_none()
-        && value.get("job_id").and_then(Value::as_str).map(str::trim) == Some(job_id)
-        && value
-            .get("status")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .is_some_and(|status| {
-                matches!(
-                    status,
-                    "accepted" | "running" | "succeeded" | "failed" | "expired"
-                )
-            })
 }
 
 fn async_poll_dispatch_result_payload_from_adapter_result(
@@ -97,10 +78,7 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
     now_ts: i64,
     default_retry_after_seconds: i64,
 ) -> Option<Value> {
-    let adapter_status = adapter_result
-        .get("status")
-        .and_then(Value::as_str)
-        .map(str::trim)?;
+    let adapter_status = crate::async_job_contract::async_poll_adapter_status(adapter_result)?;
     let mut payload = base_async_poll_result_payload(claimed, job_id, adapter_status);
     match adapter_status {
         "accepted" | "running" => {
