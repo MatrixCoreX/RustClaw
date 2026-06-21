@@ -1305,6 +1305,45 @@ pub(super) fn service_status_deterministic_plan_result(
     None
 }
 
+pub(super) fn task_control_get_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || !task_control_available_for_plan(state)
+    {
+        return None;
+    }
+    let task_id = first_task_id_token(route, user_text)?;
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: serde_json::json!({"action": "get", "task_id": task_id}),
+    };
+    if let AgentAction::CallSkill { skill, args } = &action {
+        if crate::contract_matrix::action_policy_for_output_contract(
+            Some(&route.output_contract),
+            skill,
+            args,
+        )
+        .is_some_and(|policy| policy.is_allowed())
+        {
+            return Some(build_plan_result(
+                goal,
+                "deterministic:task_control_get_by_task_id",
+                PlanKind::Single,
+                &[action],
+            ));
+        }
+    }
+    None
+}
+
 pub(super) fn web_search_summary_deterministic_plan_result(
     state: &AppState,
     goal: &str,

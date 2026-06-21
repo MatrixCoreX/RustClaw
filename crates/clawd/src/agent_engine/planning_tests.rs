@@ -90,7 +90,8 @@ use super::{
     structural_contract_deterministic_plan_overrides_literal_command_guard,
     structured_field_selectors, structured_keys_deterministic_plan_result,
     structured_scalar_field_auto_locator_deterministic_plan_result,
-    web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,
+    task_control_get_deterministic_plan_result, web_search_summary_deterministic_plan_result,
+    LoopState, PlanningPromptClass,
 };
 use crate::agent_engine::{CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG};
 use crate::{
