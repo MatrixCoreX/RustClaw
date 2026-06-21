@@ -1115,6 +1115,40 @@ fn package_docker_probe_uses_structured_readonly_skills_for_service_status_route
 }
 
 #[test]
+fn package_docker_probe_overrides_content_excerpt_auto_locator_route() {
+    let state = test_state_with_enabled_skills(&["package_manager", "docker_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/docker".to_string();
+    route.route_reason =
+        "machine_plan: package_manager.detect_manager package_manager_detection docker_basic list_containers docker.version read_only_no_mutation_no_retry"
+            .to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = package_docker_readonly_probe_deterministic_plan_result(
+        &state,
+        "package and docker readonly probe",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("package/docker probe should use structured skills despite locator fallback");
+
+    assert_eq!(plan.steps.len(), 5);
+    let package_action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&package_action, "package_manager", "detect");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("detect"));
+    let docker_version_action = plan.steps[1].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&docker_version_action, "docker_basic", "version");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("version"));
+    let docker_ps_action = plan.steps[2].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&docker_ps_action, "docker_basic", "ps");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("ps"));
+}
+
+#[test]
 fn contract_hint_preferred_run_cmd_uses_machine_hint_not_request_words() {
     let state = test_state_with_enabled_skills(&["run_cmd", "package_manager"]);
     let mut route = base_route_result();
