@@ -555,6 +555,16 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["content_excerpt", "field_value"],
     ),
     step_json_extractor(
+        "video_generate",
+        "video_generate.structured_json_v1",
+        &["path"],
+    ),
+    step_json_extractor(
+        "music_generate",
+        "music_generate.structured_json_v1",
+        &["path"],
+    ),
+    step_json_extractor(
         "archive_basic.pack",
         "archive_basic.pack.structured_json_v1",
         &["path"],

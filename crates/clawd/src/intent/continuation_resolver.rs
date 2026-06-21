@@ -11,7 +11,7 @@ pub(crate) fn immediate_prior_turn_was_clarify(last_turn_full: &str) -> bool {
     crate::clarify_followup::last_turn_was_clarify(last_turn_full)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn resolve_clarify_followup(
     prompt: &str,
     last_turn_full: Option<&str>,
@@ -79,7 +79,7 @@ pub(crate) fn resolve_clarify_followup_with_surface(
     ClarifyFollowupResolution::NormalizerRewrite { rewritten_prompt }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn resolve_clarify_followup_from_session(
     prompt: &str,
     last_turn_full: Option<&str>,

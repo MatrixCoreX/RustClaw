@@ -35,6 +35,44 @@ pub(super) fn with_agent_decides_shadow_snapshot(
     reply
 }
 
+pub(super) fn with_pre_planner_exit_snapshot(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+    reply: AskReply,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    reason_code: &str,
+) -> AskReply {
+    let Some(exit) = pre_planner_exit_for_reason(reason_code) else {
+        return with_agent_decides_shadow_snapshot(
+            state,
+            task,
+            user_request,
+            reply,
+            agent_run_context,
+        );
+    };
+    let mut reply =
+        with_agent_decides_shadow_snapshot(state, task, user_request, reply, agent_run_context);
+    let journal = reply.task_journal.get_or_insert_with(|| {
+        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_request)
+    });
+    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        journal.record_route_result(route);
+    }
+    journal.record_rollout_attribution(crate::task_journal::TaskJournalRolloutAttribution {
+        switch_name: "pre_planner_exit_inventory".to_string(),
+        event: "pre_planner_exit".to_string(),
+        outcome: "observed".to_string(),
+        reason_code: Some(exit.reason_code.to_string()),
+        owner_layer: Some(exit.owner_layer.to_string()),
+        decision: Some(exit.kind.as_str().to_string()),
+        boundary_context: Some(exit.trace_context()),
+        ..Default::default()
+    });
+    reply
+}
+
 pub(super) fn ask_reply_with_clarify_process(
     task: &ClaimedTask,
     user_request: &str,

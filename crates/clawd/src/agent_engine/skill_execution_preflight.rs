@@ -1,3 +1,4 @@
+use claw_core::skill_registry::SkillRiskLevel;
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -156,9 +157,12 @@ pub(super) fn contract_matrix_action_policy_error(
     ) {
         return None;
     }
-    if let Some(err) =
-        generated_media_path_run_cmd_policy_error(loop_state, normalized_skill, classification_args)
-    {
+    if let Some(err) = generated_media_path_run_cmd_policy_error(
+        state,
+        loop_state,
+        normalized_skill,
+        classification_args,
+    ) {
         return Some(err);
     }
     let policy = crate::contract_matrix::action_policy_for_output_contract(
@@ -213,6 +217,10 @@ pub(super) fn contract_matrix_action_policy_error(
             "failure_attribution": crate::contract_matrix::FailureAttribution::ContractGap.as_str(),
             "decision": policy.decision.as_str(),
             "action": policy.action_key,
+            "original_action_ref": policy.original_action_ref,
+            "replacement_action_ref": policy.replacement_action_ref,
+            "contract_repair_source": policy.contract_repair_source,
+            "preferred_replacement_reason_code": policy.preferred_replacement_reason_code,
             "contract_match": policy.contract_match,
             "required_evidence": policy.required_evidence,
             "preferred_actions": policy.preferred_actions,
@@ -224,11 +232,19 @@ pub(super) fn contract_matrix_action_policy_error(
             "artifact_kind": policy.artifact_kind,
             "channel_visibility": policy.channel_visibility,
             "evidence_profile": policy.evidence_profile,
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                classification_args,
+                "contract_action_rejected",
+                "contract_matrix_preflight",
+            ),
         })),
     ))
 }
 
 fn generated_media_path_run_cmd_policy_error(
+    state: &AppState,
     loop_state: &LoopState,
     normalized_skill: &str,
     classification_args: &Value,
@@ -262,13 +278,128 @@ fn generated_media_path_run_cmd_policy_error(
             "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
             "decision": crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed.as_str(),
             "action": "run_cmd",
+            "original_action_ref": "run_cmd",
             "contract_match": crate::OutputSemanticKind::GeneratedFilePathReport.as_str(),
             "preferred_actions": preferred_actions,
             "target_path": output_contract.locator_hint,
             "final_answer_shape": "single_path",
             "policy_mode": "enforce",
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                classification_args,
+                "media_artifact_requires_media_skill",
+                "run_cmd_media_artifact_preflight",
+            ),
         })),
     ))
+}
+
+fn risk_level_token(value: Option<SkillRiskLevel>) -> &'static str {
+    match value.unwrap_or(SkillRiskLevel::Unknown) {
+        SkillRiskLevel::Unknown => "unknown",
+        SkillRiskLevel::Low => "low",
+        SkillRiskLevel::Medium => "medium",
+        SkillRiskLevel::High => "high",
+    }
+}
+
+fn action_effect_token(effect: crate::execution_recipe::ActionEffect) -> &'static str {
+    match (effect.observes, effect.mutates, effect.validates) {
+        (_, true, true) => "mutate_validate",
+        (_, true, false) => "mutate",
+        (_, false, true) => "validate",
+        (true, false, false) => "observe",
+        _ => "unknown",
+    }
+}
+
+fn normalized_action_arg(args: &Value) -> Option<String> {
+    args.get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .to_ascii_lowercase()
+                .chars()
+                .map(|ch| {
+                    if matches!(ch, '-' | ' ' | '.') {
+                        '_'
+                    } else {
+                        ch
+                    }
+                })
+                .collect()
+        })
+}
+
+fn action_scoped_risk_level(
+    state: &AppState,
+    canonical_skill: &str,
+    action: Option<&str>,
+) -> Option<SkillRiskLevel> {
+    let action = action?;
+    state.skill_manifest(canonical_skill).and_then(|manifest| {
+        manifest
+            .planner_capabilities
+            .into_iter()
+            .find(|mapping| mapping.action.as_deref() == Some(action))
+            .and_then(|mapping| mapping.risk_level)
+    })
+}
+
+fn preflight_permission_decision(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+    reason_code: &'static str,
+    owner_layer: &'static str,
+) -> Value {
+    let canonical_skill = state.resolve_canonical_skill_name(normalized_skill);
+    let action = normalized_action_arg(args);
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args);
+    let manifest = state.skill_manifest(&canonical_skill);
+    let risk_level = action_scoped_risk_level(state, &canonical_skill, action.as_deref())
+        .or_else(|| manifest.as_ref().and_then(|value| value.risk_level));
+    let registry = state.get_skills_registry();
+    let registry_policy = registry.as_ref().map(|registry| {
+        json!({
+            "available": true,
+            "once_per_task": registry.resolved_once_per_task(&canonical_skill, action.as_deref()),
+            "dedup_scope": registry
+                .resolved_dedup_scope(&canonical_skill, action.as_deref())
+                .as_token(),
+            "idempotent": registry.resolved_idempotent(&canonical_skill, action.as_deref()),
+        })
+    });
+    json!({
+        "schema_version": 1,
+        "allowed": false,
+        "needs_confirmation": state
+            .skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args)),
+        "denied_by_policy": true,
+        "dry_run_required": false,
+        "external_provider_blocked": false,
+        "reason_code": reason_code,
+        "owner_layer": owner_layer,
+        "risk_level": risk_level_token(risk_level),
+        "canonical_skill": canonical_skill,
+        "action": action,
+        "action_effect": action_effect_token(effect),
+        "observes": effect.observes,
+        "mutates": effect.mutates,
+        "validates": effect.validates,
+        "registry_policy": registry_policy.unwrap_or_else(|| {
+            json!({
+                "available": false,
+                "once_per_task": false,
+                "dedup_scope": "args",
+                "idempotent": false,
+            })
+        }),
+    })
 }
 
 fn active_ops_recipe_allows_mutation_despite_contract(

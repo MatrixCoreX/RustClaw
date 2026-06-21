@@ -13,6 +13,10 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct ContractActionPolicy {
     pub(crate) decision: ActionPolicyDecision,
     pub(crate) action_key: String,
+    pub(crate) original_action_ref: String,
+    pub(crate) replacement_action_ref: Option<String>,
+    pub(crate) contract_repair_source: String,
+    pub(crate) preferred_replacement_reason_code: Option<String>,
     pub(crate) contract_match: String,
     pub(crate) required_evidence: Vec<String>,
     pub(crate) preferred_actions: Vec<String>,
@@ -369,26 +373,41 @@ pub(crate) fn allowed_action_refs_for_output_contract(
         .unwrap_or_default()
 }
 
-fn contract_policy_action_ref(normalized_skill: &str, args: &Value) -> Option<ActionRef> {
-    runtime_equivalent_virtual_action_ref(normalized_skill, args).or_else(|| {
-        let canonical =
-            crate::virtual_tools::canonicalize_legacy_tool_call(normalized_skill, args.clone())?;
-        ActionRef::from_skill_args(&canonical.tool, &canonical.args)
-    })
-}
-
 fn policy_action_ref_for_match(
     matched: &MatchedContract<'_>,
     normalized_skill: &str,
     args: &Value,
-) -> Option<ActionRef> {
+) -> Option<PolicyActionRef> {
     let action = ActionRef::from_skill_args(normalized_skill, args)?;
     if matched.action_policy(&action) == ActionPolicyDecision::Allowed {
-        return Some(action);
+        return Some(PolicyActionRef::original(action));
     }
-    contract_policy_action_ref(normalized_skill, args)
+    runtime_equivalent_virtual_action_ref(normalized_skill, args)
         .filter(|canonical| matched.action_policy(canonical) == ActionPolicyDecision::Allowed)
-        .or(Some(action))
+        .map(|canonical| {
+            PolicyActionRef::replacement(
+                action.clone(),
+                canonical,
+                "runtime_equivalent_virtual_action",
+                "runtime_virtual_action_allowed",
+            )
+        })
+        .or_else(|| {
+            crate::virtual_tools::canonicalize_legacy_tool_call(normalized_skill, args.clone())
+                .and_then(|canonical| ActionRef::from_skill_args(&canonical.tool, &canonical.args))
+                .filter(|canonical| {
+                    matched.action_policy(canonical) == ActionPolicyDecision::Allowed
+                })
+                .map(|canonical| {
+                    PolicyActionRef::replacement(
+                        action.clone(),
+                        canonical,
+                        "legacy_tool_canonicalization",
+                        "legacy_tool_canonical_action_allowed",
+                    )
+                })
+        })
+        .or_else(|| Some(PolicyActionRef::original(action)))
 }
 
 fn runtime_equivalent_virtual_action_ref(
@@ -408,6 +427,43 @@ fn runtime_equivalent_virtual_action_ref(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PolicyActionRef {
+    original: ActionRef,
+    effective: ActionRef,
+    repair_source: &'static str,
+    replacement_reason_code: Option<&'static str>,
+}
+
+impl PolicyActionRef {
+    fn original(action: ActionRef) -> Self {
+        Self {
+            original: action.clone(),
+            effective: action,
+            repair_source: "none",
+            replacement_reason_code: None,
+        }
+    }
+
+    fn replacement(
+        original: ActionRef,
+        effective: ActionRef,
+        repair_source: &'static str,
+        replacement_reason_code: &'static str,
+    ) -> Self {
+        Self {
+            original,
+            effective,
+            repair_source,
+            replacement_reason_code: Some(replacement_reason_code),
+        }
+    }
+
+    fn replacement_action_ref(&self) -> Option<String> {
+        (self.original.as_key() != self.effective.as_key()).then(|| self.effective.as_key())
+    }
+}
+
 pub(crate) fn action_policy_for_output_contract(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
@@ -424,9 +480,16 @@ pub(crate) fn action_policy_for_output_contract(
     let matched = matrix.match_output_contract(output_contract)?;
     let policy_action = policy_action_ref_for_match(&matched, normalized_skill, args)?;
     let final_answer_shape_kind = matched.final_answer_shape_kind()?;
+    let decision = matched.action_policy(&policy_action.effective);
     Some(ContractActionPolicy {
-        decision: matched.action_policy(&policy_action),
-        action_key: policy_action.as_key(),
+        decision,
+        action_key: policy_action.effective.as_key(),
+        original_action_ref: policy_action.original.as_key(),
+        replacement_action_ref: policy_action.replacement_action_ref(),
+        contract_repair_source: policy_action.repair_source.to_string(),
+        preferred_replacement_reason_code: policy_action
+            .replacement_reason_code
+            .map(str::to_string),
         contract_match: matched.match_name().to_string(),
         required_evidence: matched.required_evidence(),
         preferred_actions: normalized_tokens(matched.preferred_actions()),
@@ -458,7 +521,7 @@ pub(crate) fn arg_policy_decision(
     let matched = matrix.match_output_contract(output_contract)?;
     let action = policy_action_ref_for_match(&matched, normalized_skill, resolved_args)?;
     let final_answer_shape_kind = matched.final_answer_shape_kind()?;
-    let target_groups = contract_target_arg_groups(output_contract, &action);
+    let target_groups = contract_target_arg_groups(output_contract, &action.effective);
     let expected_target_args = target_groups
         .iter()
         .flat_map(|group| group.iter().copied())
@@ -488,7 +551,7 @@ pub(crate) fn arg_policy_decision(
     };
     Some(ContractArgPolicy {
         decision,
-        action_key: action.as_key(),
+        action_key: action.effective.as_key(),
         contract_match: matched.match_name().to_string(),
         required_evidence: matched.required_evidence(),
         missing_target_args,

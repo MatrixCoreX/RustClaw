@@ -12,8 +12,6 @@
 //! 本文件只引入类型 + 合法 transition 表 + 单测；**不**修改任何现有调用面，
 //! Stage B 起接 logger，Stage C 起在主路径插桩。
 
-#![allow(dead_code)]
-
 /// ask 任务的生命周期状态。
 ///
 /// 设计上**只覆盖 ask 主路径**（worker / ask_pipeline / agent_engine / finalize），

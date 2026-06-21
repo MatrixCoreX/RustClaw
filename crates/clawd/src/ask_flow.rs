@@ -133,6 +133,10 @@ pub(crate) use chat_helpers::{
     build_resume_followup_discussion_prompt, build_resume_followup_discussion_prompt_from_context,
 };
 
+#[path = "ask_flow_pre_planner_exit.rs"]
+mod pre_planner_exit;
+use pre_planner_exit::*;
+
 fn task_payload_text(task: &ClaimedTask) -> Option<String> {
     crate::task_payload_value(task)?
         .get("text")
@@ -262,7 +266,14 @@ pub(crate) async fn execute_ask_routed(
     )
     .await?
     {
-        return Ok(reply);
+        return Ok(with_pre_planner_exit_snapshot(
+            state,
+            task,
+            &current_turn_user_request_for_process,
+            reply,
+            agent_run_context.as_ref(),
+            "self_extension_boundary",
+        ));
     }
     let process_language_hint = crate::language_policy::task_response_language_hint(
         state,
@@ -281,12 +292,13 @@ pub(crate) async fn execute_ask_routed(
             crate::highlight_tag("routing"),
             task.task_id
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             reply,
             agent_run_context.as_ref(),
+            "structural_alias_binding_ack",
         ));
     }
     if let Some(candidate) = active_ordered_entries_count_direct_answer_candidate(
@@ -299,12 +311,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             crate::truncate_for_log(&candidate)
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "active_ordered_entries_count_direct_answer",
         ));
     }
     if let Some(candidate) = recent_count_comparison_direct_answer(
@@ -319,12 +332,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             crate::truncate_for_log(&candidate)
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "recent_count_comparison_direct_answer",
         ));
     }
     if let Some(candidate) = runtime_approval_wait_status_direct_answer_candidate(
@@ -337,12 +351,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             crate::truncate_for_log(&candidate)
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "runtime_approval_wait_status_direct_answer",
         ));
     }
     if let Some(candidate) = session_alias_target_direct_answer_candidate(
@@ -357,12 +372,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             crate::truncate_for_log(&candidate)
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "session_alias_target_direct_answer",
         ));
     }
     if let Some(candidate) = normalizer_runtime_fact_direct_answer_candidate(
@@ -376,12 +392,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             candidate.len()
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "normalizer_runtime_fact_direct_answer",
         ));
     }
     if let Some(candidate) = active_file_basename_direct_answer(state, agent_run_context.as_ref()) {
@@ -391,12 +408,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             candidate.answer
         );
-        let mut reply = with_agent_decides_shadow_snapshot(
+        let mut reply = with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate.answer.clone(), &process_language_hint),
             agent_run_context.as_ref(),
+            "active_file_basename_direct_answer",
         );
         let journal = reply.task_journal.get_or_insert_with(|| {
             crate::task_journal::TaskJournal::for_task(
@@ -418,12 +436,13 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             candidate.len()
         );
-        return Ok(with_agent_decides_shadow_snapshot(
+        return Ok(with_pre_planner_exit_snapshot(
             state,
             task,
             &current_turn_user_request_for_process,
             ask_reply_with_chat_process(candidate, &process_language_hint),
             agent_run_context.as_ref(),
+            "runtime_scalar_path_direct_answer",
         ));
     }
     let current_turn_user_request =
@@ -445,12 +464,13 @@ pub(crate) async fn execute_ask_routed(
                     task.task_id,
                     candidate.len()
                 );
-                return Ok(with_agent_decides_shadow_snapshot(
+                return Ok(with_pre_planner_exit_snapshot(
                     state,
                     task,
                     &current_turn_user_request,
                     ask_reply_with_chat_process(candidate, &process_language_hint),
                     agent_run_context.as_ref(),
+                    "normalizer_chat_direct_answer_candidate",
                 ));
             }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
@@ -470,12 +490,13 @@ pub(crate) async fn execute_ask_routed(
                     task.task_id,
                     candidate.len()
                 );
-                return Ok(with_agent_decides_shadow_snapshot(
+                return Ok(with_pre_planner_exit_snapshot(
                     state,
                     task,
                     &current_turn_user_request,
                     ask_reply_with_chat_process(candidate, &process_language_hint),
                     agent_run_context.as_ref(),
+                    "normalizer_chat_direct_answer_candidate_with_context_summary",
                 ));
             }
             let resolved_chat_prompt =
@@ -522,15 +543,23 @@ pub(crate) async fn execute_ask_routed(
                             prompt_with_memory.trim(),
                             current_turn_user_request.trim()
                         );
-                        return execute_via_planner_loop(
+                        let reply = execute_via_planner_loop(
                             state,
                             task,
                             &promoted_prompt_with_memory,
                             execution_user_request,
                             &crate::AskMode::planner_execute_chat_wrapped(),
-                            Some(promoted_ctx),
+                            Some(promoted_ctx.clone()),
                         )
-                        .await;
+                        .await?;
+                        return Ok(with_pre_planner_exit_snapshot(
+                            state,
+                            task,
+                            &current_turn_user_request,
+                            reply,
+                            Some(&promoted_ctx),
+                            "inline_json_transform_promoted_to_planner",
+                        ));
                     }
                 }
             }
@@ -546,12 +575,13 @@ pub(crate) async fn execute_ask_routed(
                     crate::highlight_tag("routing"),
                     task.task_id
                 );
-                return Ok(with_agent_decides_shadow_snapshot(
+                return Ok(with_pre_planner_exit_snapshot(
                     state,
                     task,
                     &current_turn_user_request,
                     reply,
                     agent_run_context.as_ref(),
+                    "structural_alias_binding_ack",
                 ));
             }
             if contract_test_hint_should_enter_planner_loop(
@@ -563,7 +593,7 @@ pub(crate) async fn execute_ask_routed(
                     crate::highlight_tag("routing"),
                     task.task_id
                 );
-                return execute_via_planner_loop(
+                let reply = execute_via_planner_loop(
                     state,
                     task,
                     prompt_with_memory,
@@ -571,7 +601,15 @@ pub(crate) async fn execute_ask_routed(
                     &crate::AskMode::planner_execute_chat_wrapped(),
                     agent_run_context.clone(),
                 )
-                .await;
+                .await?;
+                return Ok(with_pre_planner_exit_snapshot(
+                    state,
+                    task,
+                    &current_turn_user_request,
+                    reply,
+                    agent_run_context.as_ref(),
+                    "contract_test_hint_promoted_to_planner",
+                ));
             }
             if crate::agent_engine::agent_loop_semantic_authority_enabled(state)
                 && agent_run_context
@@ -589,15 +627,23 @@ pub(crate) async fn execute_ask_routed(
                     crate::highlight_tag("routing"),
                     task.task_id
                 );
-                return execute_via_planner_loop(
+                let reply = execute_via_planner_loop(
                     state,
                     task,
                     prompt_with_memory,
                     execution_user_request,
                     &crate::AskMode::planner_execute_chat_wrapped(),
-                    loop_ctx,
+                    loop_ctx.clone(),
                 )
-                .await;
+                .await?;
+                return Ok(with_pre_planner_exit_snapshot(
+                    state,
+                    task,
+                    &current_turn_user_request,
+                    reply,
+                    loop_ctx.as_ref(),
+                    "pure_chat_agent_loop_submode",
+                ));
             }
             let mut direct_answer_gate_approved = false;
             let skip_direct_answer_gate =
@@ -665,12 +711,13 @@ pub(crate) async fn execute_ask_routed(
                                     task.task_id,
                                     crate::truncate_for_log(&candidate)
                                 );
-                                return Ok(with_agent_decides_shadow_snapshot(
+                                return Ok(with_pre_planner_exit_snapshot(
                                     state,
                                     task,
                                     &current_turn_user_request,
                                     ask_reply_with_chat_process(candidate, &request_language_hint),
                                     Some(&gate_ctx),
+                                    "direct_answer_gate_recent_count_comparison",
                                 ));
                             }
                         }
@@ -705,7 +752,7 @@ pub(crate) async fn execute_ask_routed(
                             } else {
                                 question
                             };
-                            return Ok(with_agent_decides_shadow_snapshot(
+                            return Ok(with_pre_planner_exit_snapshot(
                                 state,
                                 task,
                                 &current_turn_user_request,
@@ -716,6 +763,7 @@ pub(crate) async fn execute_ask_routed(
                                     gate_ctx.route_result.as_ref(),
                                 ),
                                 Some(&gate_ctx),
+                                "direct_answer_gate_clarify",
                             ));
                         }
                         DirectAnswerPreflight::PlannerExecute(promoted_ctx) => {
@@ -739,15 +787,23 @@ pub(crate) async fn execute_ask_routed(
                                     )
                                 })
                                 .unwrap_or_else(|| prompt_with_memory.to_string());
-                            return execute_via_planner_loop(
+                            let reply = execute_via_planner_loop(
                                 state,
                                 task,
                                 &promoted_prompt_with_memory,
                                 execution_user_request,
                                 &crate::AskMode::planner_execute_chat_wrapped(),
-                                Some(promoted_ctx),
+                                Some(promoted_ctx.clone()),
                             )
-                            .await;
+                            .await?;
+                            return Ok(with_pre_planner_exit_snapshot(
+                                state,
+                                task,
+                                &current_turn_user_request,
+                                reply,
+                                Some(&promoted_ctx),
+                                "direct_answer_gate_promoted_to_planner",
+                            ));
                         }
                     }
                 }
@@ -840,12 +896,13 @@ pub(crate) async fn execute_ask_routed(
                 }
                 answer = repaired_answer;
             }
-            Ok(with_agent_decides_shadow_snapshot(
+            Ok(with_pre_planner_exit_snapshot(
                 state,
                 task,
                 &current_turn_user_request,
                 ask_reply_with_chat_process(answer, &request_language_hint),
                 agent_run_context.as_ref(),
+                "direct_answer_gate_chat_fallback",
             ))
         }
         mode @ crate::AskMode::Act { .. } => {
@@ -902,12 +959,13 @@ pub(crate) async fn execute_ask_routed(
                 },
             )
             .await;
-            Ok(with_agent_decides_shadow_snapshot(
+            Ok(with_pre_planner_exit_snapshot(
                 state,
                 task,
                 &current_turn_user_request,
                 ask_reply_with_chat_process(clarify, &process_language_hint),
                 agent_run_context.as_ref(),
+                "router_selected_clarify",
             ))
         }
     }

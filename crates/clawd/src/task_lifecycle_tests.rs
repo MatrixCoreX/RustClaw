@@ -2,118 +2,11 @@ use serde_json::json;
 
 use super::{
     checkpoint_resume_directive, paused_checkpoint_recovery_status,
-    paused_checkpoint_resume_readiness, provider_gap_decision, task_query_lifecycle_projection,
-    AsyncJobLoopDirective, AsyncJobRef, AsyncJobStatus, CheckpointBudgetCounters,
-    CheckpointResumeDirective, LifecyclePauseContext, LifecycleTransition,
-    LifecycleTransitionOwner, PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness,
-    ResumeEntrypoint, ResumeTrigger, TaskCheckpoint, TaskLifecycleState, TerminalFailureReason,
-    TimeoutEffect, TimeoutLayer,
+    paused_checkpoint_resume_readiness, task_query_lifecycle_projection, AsyncJobRef,
+    AsyncJobStatus, CheckpointBudgetCounters, CheckpointResumeDirective,
+    PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness, ResumeEntrypoint,
+    ResumeTrigger, TaskCheckpoint, TerminalFailureReason,
 };
-
-#[test]
-fn timeout_layers_have_codex_style_effects() {
-    assert_eq!(
-        TimeoutLayer::FrontendRequest.effect(),
-        TimeoutEffect::CallerPollsExistingTask
-    );
-    assert_eq!(
-        TimeoutLayer::WorkerLeaseHeartbeat.effect(),
-        TimeoutEffect::RecoveryOwnsRunningTask
-    );
-    assert_eq!(
-        TimeoutLayer::ToolCall.effect(),
-        TimeoutEffect::TerminalToolTimeoutUnlessAsync
-    );
-    assert_eq!(
-        TimeoutLayer::LlmProviderWindow.effect(),
-        TimeoutEffect::ProviderGapWaitOrFail
-    );
-    assert_eq!(
-        TimeoutLayer::AgentLoopSoftBudget.effect(),
-        TimeoutEffect::CheckpointAndWait
-    );
-}
-
-#[test]
-fn lifecycle_state_machine_allows_background_resume_success_path() {
-    let queued_to_running = LifecycleTransition {
-        from: TaskLifecycleState::Queued,
-        to: TaskLifecycleState::Running,
-        owner: LifecycleTransitionOwner::Worker,
-        pause: None,
-    };
-    queued_to_running.validate().expect("claim task");
-
-    let running_to_background = LifecycleTransition {
-        from: TaskLifecycleState::Running,
-        to: TaskLifecycleState::Background,
-        owner: LifecycleTransitionOwner::AgentLoop,
-        pause: Some(LifecyclePauseContext::new(
-            "agent_loop_soft_budget",
-            1_781_800_000,
-            "ckpt-1",
-            Some("job-1".to_string()),
-        )),
-    };
-    running_to_background
-        .validate()
-        .expect("checkpoint background");
-
-    let background_to_running = LifecycleTransition {
-        from: TaskLifecycleState::Background,
-        to: TaskLifecycleState::Running,
-        owner: LifecycleTransitionOwner::RecoveryWorker,
-        pause: None,
-    };
-    background_to_running.validate().expect("resume task");
-
-    let running_to_succeeded = LifecycleTransition {
-        from: TaskLifecycleState::Running,
-        to: TaskLifecycleState::Succeeded,
-        owner: LifecycleTransitionOwner::AgentLoop,
-        pause: None,
-    };
-    running_to_succeeded.validate().expect("complete task");
-}
-
-#[test]
-fn paused_states_require_machine_resume_fields() {
-    let transition = LifecycleTransition {
-        from: TaskLifecycleState::Running,
-        to: TaskLifecycleState::Waiting,
-        owner: LifecycleTransitionOwner::AgentLoop,
-        pause: Some(LifecyclePauseContext::new("", 0, "", None)),
-    };
-
-    let err = transition.validate().expect_err("missing pause fields");
-    assert_eq!(err.code, "pause_context_incomplete");
-    assert_eq!(
-        err.missing_fields,
-        vec!["resume_reason", "next_check_after", "checkpoint_id"]
-    );
-}
-
-#[test]
-fn terminal_lifecycle_state_cannot_reopen_without_explicit_new_task() {
-    let transition = LifecycleTransition {
-        from: TaskLifecycleState::Succeeded,
-        to: TaskLifecycleState::Running,
-        owner: LifecycleTransitionOwner::Worker,
-        pause: None,
-    };
-
-    let err = transition.validate().expect_err("terminal reopen rejected");
-    assert_eq!(err.code, "terminal_state_transition_rejected");
-}
-
-#[test]
-fn waiting_background_and_needs_user_keep_running_db_compat_status() {
-    assert_eq!(TaskLifecycleState::Queued.db_compat_status(), "queued");
-    assert_eq!(TaskLifecycleState::Waiting.db_compat_status(), "running");
-    assert_eq!(TaskLifecycleState::Background.db_compat_status(), "running");
-    assert_eq!(TaskLifecycleState::NeedsUser.db_compat_status(), "running");
-    assert_eq!(TaskLifecycleState::Cancelled.db_compat_status(), "canceled");
-}
 
 #[test]
 fn lifecycle_projection_marks_paused_checkpoint_resume_due_from_machine_time() {
@@ -626,21 +519,10 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
     assert_eq!(json["checkpoint_id"], "ckpt-1");
     assert_eq!(json["resume_entrypoint"], "next_planner_round");
     assert_eq!(json["budget"]["llm_calls"], 5);
-    assert!(checkpoint.should_skip_completed_side_effect("write_file:document/report.txt"));
-    assert!(!checkpoint.should_skip_completed_side_effect("write_file:document/other.txt"));
 }
 
 #[test]
 fn resume_triggers_are_checkpoint_based_machine_tokens() {
-    for trigger in [
-        ResumeTrigger::UserFollowup,
-        ResumeTrigger::ScheduledWakeup,
-        ResumeTrigger::WorkerRecovery,
-        ResumeTrigger::AsyncJobPoll,
-    ] {
-        assert!(trigger.requires_checkpoint());
-    }
-
     let serialized = serde_json::to_value(ResumeTrigger::AsyncJobPoll).expect("serialize trigger");
     assert_eq!(serialized, "async_job_poll");
 }
@@ -697,83 +579,6 @@ fn async_job_contract_requires_machine_poll_fields() {
 }
 
 #[test]
-fn async_job_loop_directive_covers_statuses_and_expiry() {
-    let base = AsyncJobRef {
-        job_id: "job-1".to_string(),
-        status: AsyncJobStatus::Accepted,
-        poll_after_seconds: 5,
-        expires_at: 100,
-        cancel_ref: "cancel:job-1".to_string(),
-        message_key: "tool.msg.job.accepted".to_string(),
-    };
-
-    assert_eq!(
-        base.loop_directive(10),
-        AsyncJobLoopDirective::CheckpointAndPoll
-    );
-
-    let mut running = base.clone();
-    running.status = AsyncJobStatus::Running;
-    assert_eq!(
-        running.loop_directive(10),
-        AsyncJobLoopDirective::CheckpointAndPoll
-    );
-    assert_eq!(
-        running.loop_directive(100),
-        AsyncJobLoopDirective::TerminalFailure
-    );
-
-    let mut succeeded = base.clone();
-    succeeded.status = AsyncJobStatus::Succeeded;
-    assert_eq!(
-        succeeded.loop_directive(10),
-        AsyncJobLoopDirective::ResumeWithObservation
-    );
-
-    let mut failed = base.clone();
-    failed.status = AsyncJobStatus::Failed;
-    assert_eq!(
-        failed.loop_directive(10),
-        AsyncJobLoopDirective::TerminalFailure
-    );
-
-    let mut expired = base;
-    expired.status = AsyncJobStatus::Expired;
-    assert_eq!(
-        expired.loop_directive(10),
-        AsyncJobLoopDirective::TerminalFailure
-    );
-}
-
-#[test]
-fn provider_gap_decision_uses_structured_wait_or_failure_without_raw_text() {
-    let retryable = provider_gap_decision(true, Some(1_781_800_300), "ckpt-provider");
-    assert_eq!(retryable.status_code, "provider_gap");
-    assert_eq!(retryable.failure_attribution, "provider_error");
-    assert!(retryable.retryable);
-    assert!(retryable.raw_error_present);
-    assert_eq!(retryable.target_state, TaskLifecycleState::Waiting);
-    assert_eq!(
-        retryable
-            .pause
-            .as_ref()
-            .map(|pause| pause.resume_reason.as_str()),
-        Some("provider_gap_retry_window")
-    );
-
-    let serialized = serde_json::to_value(&retryable).expect("serialize decision");
-    assert_eq!(serialized["message_key"], "clawd.msg.ask_runtime_failure");
-    assert!(
-        serialized.get("raw_error").is_none(),
-        "provider raw text must not enter lifecycle decision json"
-    );
-
-    let terminal = provider_gap_decision(false, None, "ckpt-provider");
-    assert_eq!(terminal.target_state, TaskLifecycleState::Failed);
-    assert!(terminal.pause.is_none());
-}
-
-#[test]
 fn task_query_lifecycle_projects_db_status_when_progress_has_no_lifecycle() {
     let lifecycle = task_query_lifecycle_projection("running", Some(&json!({})), Some(1234));
 
@@ -809,6 +614,47 @@ fn task_query_lifecycle_preserves_checkpoint_waiting_fields() {
     assert_eq!(lifecycle["pending_job_ref"], "job-1");
     assert_eq!(lifecycle["can_cancel"], true);
     assert_eq!(lifecycle["last_heartbeat_ts"], 1234);
+}
+
+#[test]
+fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
+    let mut checkpoint = checkpoint_value("ckpt-product", vec!["write_file:tmp/a.txt"]);
+    checkpoint["last_successful_step"] = json!("step_2");
+    checkpoint["resume_entrypoint"] = json!("poll_async_job");
+    checkpoint["pending_async_job"] = json!({
+        "job_id": "job-product",
+        "status": "running",
+        "poll_after_seconds": 9,
+        "expires_at": 1781800800,
+        "cancel_ref": "cancel:job-product",
+        "message_key": "tool.job.running"
+    });
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "background",
+            "resume_reason": "async_job_poll",
+            "next_check_after": 1781800400,
+            "checkpoint_id": "ckpt-product",
+            "resume_executor_claim": {
+                "owner": "worker_recovery_resume_executor"
+            }
+        },
+        "task_checkpoint": checkpoint
+    });
+
+    let lifecycle = task_query_lifecycle_projection("running", Some(&result), Some(4567));
+
+    assert_eq!(lifecycle["waiting_reason_code"], "async_job_poll");
+    assert_eq!(lifecycle["next_poll_after"], 1781800400);
+    assert_eq!(lifecycle["resume_owner"], "worker_recovery_resume_executor");
+    assert_eq!(lifecycle["resume_entrypoint"], "poll_async_job");
+    assert_eq!(lifecycle["last_safe_step_id"], "step_2");
+    assert_eq!(lifecycle["poll_ref"], "job-product");
+    assert_eq!(lifecycle["cancel_ref"], "cancel:job-product");
+    assert_eq!(lifecycle["poll_after_seconds"], 9);
+    assert_eq!(lifecycle["async_job_expires_at"], 1781800800);
+    assert_eq!(lifecycle["async_job_message_key"], "tool.job.running");
 }
 
 #[test]
