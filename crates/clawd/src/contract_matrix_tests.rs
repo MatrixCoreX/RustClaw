@@ -41,6 +41,10 @@ fn command_output_summary_allows_structured_field_extractors() {
         "config_basic.read_field",
         "config_basic.read_fields",
         "fs_basic.stat_paths",
+        "fs_basic.read_text_range",
+        "archive_basic.list",
+        "archive_basic.read",
+        "db_basic.list_tables",
     ] {
         let action_ref = ActionRef::parse(action).expect("action parses");
         assert_eq!(
@@ -70,10 +74,26 @@ fn command_output_summary_allows_structured_field_extractors() {
             serde_json::json!({"action":"path_batch_facts","paths":["README.md"]}),
             "fs_basic.stat_paths",
         ),
+        (
+            "archive_basic",
+            serde_json::json!({"action":"list","archive":"tmp/test_bundle.zip"}),
+            "archive_basic.list",
+        ),
+        (
+            "archive_basic",
+            serde_json::json!({"action":"read","archive":"tmp/test_bundle.zip","member":"notes.txt"}),
+            "archive_basic.read",
+        ),
+        (
+            "db_basic",
+            serde_json::json!({"action":"list_tables","db_path":"data/test_contract.sqlite"}),
+            "db_basic.list_tables",
+        ),
     ] {
         let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
             .expect("runtime-equivalent policy decision");
         assert!(policy.is_allowed(), "{policy:?}");
+        assert!(policy.action_matches_preferred(), "{policy:?}");
         assert_eq!(policy.action_key, expected_action);
         assert_eq!(policy.contract_match, "command_output_summary");
     }

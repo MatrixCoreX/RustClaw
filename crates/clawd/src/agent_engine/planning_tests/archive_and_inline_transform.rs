@@ -129,6 +129,54 @@ fn archive_read_contract_rejects_unsafe_member_locator() {
 }
 
 #[test]
+fn archive_database_aggregate_uses_structured_skills_for_command_summary() {
+    let state = test_state_with_enabled_skills(&["archive_basic", "db_basic"]);
+    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+    let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
+    let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent = format!(
+        "archive.list archive.read database.list_tables archive={archive} member=notes.txt db_path={db_path}"
+    );
+    route.route_reason = "machine_plan: archive.list archive.read database.list_tables".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_hint.clear();
+    let loop_state = LoopState::new(1);
+
+    let plan = archive_database_aggregate_deterministic_plan_result(
+        &state,
+        "archive plus sqlite aggregate",
+        Some(&route),
+        &loop_state,
+        &request,
+        None,
+    )
+    .expect("multi-source archive/sqlite request should use structured tools");
+
+    assert_eq!(plan.steps.len(), 5);
+    let list_action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&list_action, "archive_basic", "list");
+    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+    let read_action = plan.steps[1].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&read_action, "archive_basic", "read");
+    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+    assert_eq!(
+        args.get("member").and_then(Value::as_str),
+        Some("notes.txt")
+    );
+    let db_action = plan.steps[2].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&db_action, "db_basic", "list_tables");
+    assert_eq!(args.get("db_path").and_then(Value::as_str), Some(db_path));
+    assert_eq!(plan.steps[3].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[4].action_type, "respond");
+}
+
+#[test]
 fn transform_action_alias_and_sort_args_normalize_to_transform_data_ops() {
     let actions = vec![AgentAction::CallTool {
         tool: "transform".to_string(),
