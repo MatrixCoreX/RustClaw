@@ -15,7 +15,7 @@ Current repository highlights:
 - multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
-- built-in, external, and runner-based skills for system, files, web, images, audio, crypto, KB, and automation tasks
+- built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including a standalone NNI device-signing page
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 
@@ -570,7 +570,7 @@ RustClaw currently ships a broad skill set. Representative groups:
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
 - files, config, and developer tools: `run_cmd`, `fs_basic`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
-- multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
+- multimodal and media generation: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`, `video_generate`, `music_generate`
 - workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
 - domain and knowledge skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`
 

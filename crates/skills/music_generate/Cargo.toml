@@ -1,0 +1,18 @@
+[package]
+name = "music-generate-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "music-generate-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+claw-core = { path = "../../claw-core" }
+hex = "0.4"
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

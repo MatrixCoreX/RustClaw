@@ -560,6 +560,8 @@ interface ModelConfigItem {
   model: string;
   base_url?: string;
   api_key?: string;
+  api_key_configured?: boolean;
+  api_key_masked?: string | null;
 }
 
 interface ModelConfigResponse {
@@ -569,6 +571,8 @@ interface ModelConfigResponse {
   image_vision: ModelConfigItem;
   audio_transcribe: ModelConfigItem;
   audio_synthesize: ModelConfigItem;
+  video_generation: ModelConfigItem;
+  music_generation: ModelConfigItem;
   restart_required: boolean;
 }
 
@@ -714,6 +718,7 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   log_analyze: { zh: "分析日志，定位错误和异常。", en: "Analyze logs and find issues." },
   make_dir: { zh: "创建新目录。", en: "Create directories." },
   map_merchant: { zh: "按位置推荐商家或地点。", en: "Recommend nearby merchants or places." },
+  music_generate: { zh: "根据描述和歌词生成音乐。", en: "Generate music from prompts and lyrics." },
   package_manager: { zh: "处理包管理、安装与版本问题。", en: "Manage packages, installs, and versions." },
   photo_organize: { zh: "整理照片文件并生成分类建议。", en: "Organize photos and suggest categories." },
   process_basic: { zh: "查看和管理进程。", en: "Inspect and manage processes." },
@@ -727,6 +732,7 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   task_control: { zh: "查看、取消当前会话未完成任务。", en: "List and cancel unfinished tasks in the current chat." },
   system_basic: { zh: "查看系统信息和基础环境。", en: "Inspect system information and environment basics." },
   transform: { zh: "转换文本、数据或文件格式。", en: "Transform text, data, or file formats." },
+  video_generate: { zh: "根据描述或图片生成视频。", en: "Generate videos from prompts or images." },
   weather: { zh: "查询天气和基础预报信息。", en: "Check weather and basic forecasts." },
   web_search_extract: { zh: "搜索网页并提取关键内容。", en: "Search the web and extract key content." },
   write_file: { zh: "写入或修改文件内容。", en: "Write or update file contents." },
@@ -3485,7 +3491,15 @@ export default function App() {
     }
   };
 
-  const MULTIMODAL_KEYS = ["image_edit", "image_generation", "image_vision", "audio_synthesize", "audio_transcribe"] as const;
+  const MULTIMODAL_KEYS = [
+    "image_edit",
+    "image_generation",
+    "image_vision",
+    "audio_synthesize",
+    "audio_transcribe",
+    "video_generation",
+    "music_generation",
+  ] as const;
 
   const fetchMultimodalConfig = async () => {
     setMultimodalConfigLoading(true);
@@ -3536,7 +3550,7 @@ export default function App() {
       });
       const body = (await res.json()) as ApiResponse<{ restart_required?: boolean }>;
       if (!res.ok || !body.ok) throw new Error(body.error || "save failed");
-      setMultimodalConfigSaveMessage(t("图像与语音模块配置已保存，需重启 clawd 生效。", "Image/audio config saved. Restart clawd to apply."));
+      setMultimodalConfigSaveMessage(t("多模态模块配置已保存，需重启 clawd 生效。", "Multimodal config saved. Restart clawd to apply."));
       await fetchMultimodalConfig();
     } catch (err) {
       setMultimodalConfigError(err instanceof Error ? err.message : "Unknown");
@@ -7894,9 +7908,9 @@ export default function App() {
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-semibold">{t("图像与语音模块", "Image & Audio Modules")}</h3>
+                      <h3 className="text-base font-semibold">{t("多模态模块", "Multimodal Modules")}</h3>
                       <p className="mt-2 text-sm text-white/55">
-                        {t("以下是高级模块。第一次使用可以先不配置，等主模型和机器人接入跑通后再补。", "These are advanced modules. You can skip them on the first run and come back after the main model and bot setup are working.")}
+                        {t("以下是图像、声音、视频和音乐模块。第一次使用可以先不配置，等主模型和机器人接入跑通后再补。", "These image, audio, video, and music modules are advanced settings. You can skip them on the first run and come back after the main model and bot setup are working.")}
                       </p>
                     </div>
                     <button
@@ -7905,7 +7919,7 @@ export default function App() {
                       className="theme-topbar-btn px-3 py-2 text-xs font-medium"
                     >
                       <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelsAdvancedOpen ? "rotate-180" : ""}`} />
-                      {modelsAdvancedOpen ? t("收起图像与语音模块", "Hide image/audio modules") : t("展开图像与语音模块", "Show image/audio modules")}
+                      {modelsAdvancedOpen ? t("收起多模态模块", "Hide multimodal modules") : t("展开多模态模块", "Show multimodal modules")}
                     </button>
                   </div>
 
@@ -7928,7 +7942,7 @@ export default function App() {
                           className="theme-accent-btn px-3 py-2 text-xs"
                         >
                           {multimodalConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
-                          {t("保存图像/语音配置", "Save Image/Audio Config")}
+                          {t("保存多模态配置", "Save Multimodal Config")}
                         </button>
                       </div>
 
@@ -7940,7 +7954,7 @@ export default function App() {
                       ) : null}
                       {hasUnsavedMultimodalChanges ? (
                         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                          {t("你有未保存的图像/语音配置变更。", "You have unsaved image/audio config changes.")}
+                          {t("你有未保存的多模态配置变更。", "You have unsaved multimodal config changes.")}
                         </p>
                       ) : null}
 
@@ -8000,6 +8014,96 @@ export default function App() {
                           {[
                             { key: "audio_synthesize" as const, label: t("语音合成", "Audio TTS") },
                             { key: "audio_transcribe" as const, label: t("语音转写", "Audio STT") },
+                          ].map(({ key, label }) => (
+                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
+                                <input
+                                  className="theme-input w-28 shrink-0 text-xs"
+                                  placeholder={t("厂商", "Vendor")}
+                                  value={multimodalDraft[key]?.vendor ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[140px] flex-1 text-xs"
+                                  placeholder={t("模型", "Model")}
+                                  value={multimodalDraft[key]?.model ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
+                                />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
+                                <input
+                                  className="theme-input min-w-[200px] flex-1 text-xs"
+                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
+                                  value={multimodalDraft[key]?.base_url ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[160px] flex-1 text-xs"
+                                  type="password"
+                                  placeholder={t("API Key", "API Key")}
+                                  value={multimodalDraft[key]?.api_key ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("视频模块", "Video Modules")}</h4>
+                        <p className="mb-4 text-xs text-white/50">
+                          {t("视频生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/video.toml）。", "Configure vendor, model, base URL and API key for video generation. Saved to configs/video.toml.")}
+                        </p>
+                        <div className="space-y-4">
+                          {[
+                            { key: "video_generation" as const, label: t("视频生成", "Video Generate") },
+                          ].map(({ key, label }) => (
+                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
+                                <input
+                                  className="theme-input w-28 shrink-0 text-xs"
+                                  placeholder={t("厂商", "Vendor")}
+                                  value={multimodalDraft[key]?.vendor ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[140px] flex-1 text-xs"
+                                  placeholder={t("模型", "Model")}
+                                  value={multimodalDraft[key]?.model ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
+                                />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
+                                <input
+                                  className="theme-input min-w-[200px] flex-1 text-xs"
+                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
+                                  value={multimodalDraft[key]?.base_url ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[160px] flex-1 text-xs"
+                                  type="password"
+                                  placeholder={t("API Key", "API Key")}
+                                  value={multimodalDraft[key]?.api_key ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("音乐模块", "Music Modules")}</h4>
+                        <p className="mb-4 text-xs text-white/50">
+                          {t("音乐生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/music.toml）。", "Configure vendor, model, base URL and API key for music generation. Saved to configs/music.toml.")}
+                        </p>
+                        <div className="space-y-4">
+                          {[
+                            { key: "music_generation" as const, label: t("音乐生成", "Music Generate") },
                           ].map(({ key, label }) => (
                             <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
                               <div className="flex flex-wrap items-center gap-3">
