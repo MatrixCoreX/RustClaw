@@ -63,6 +63,9 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(prompt.contains("current_user, host_name, or kernel_release"));
     assert!(prompt.contains("kb.ingest=>planner_execute filesystem_mutation_result"));
     assert!(prompt.contains("do not classify these as service_status"));
+    assert!(
+        prompt.contains("Filesystem lifecycle mutation contracts outrank command_output_summary")
+    );
     assert!(prompt.contains("inherit only the slice/count constraint"));
     assert!(prompt.contains("Never ask the user to paste local file contents"));
     assert!(prompt.contains("Output exactly one raw JSON object and then stop"));

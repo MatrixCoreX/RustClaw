@@ -73,6 +73,8 @@ mod directory_entry_group_locator;
 mod directory_unique_entry;
 #[path = "explicit_observed_paths.rs"]
 mod explicit_observed_paths;
+#[path = "filesystem_mutation_plan.rs"]
+mod filesystem_mutation_plan;
 #[path = "inline_transform_contract.rs"]
 mod inline_transform_contract;
 #[path = "legacy_file_config_capabilities.rs"]
@@ -116,6 +118,7 @@ use direct_observed_finalize_support::*;
 use directory_entry_group_locator::*;
 use directory_unique_entry::*;
 use explicit_observed_paths::*;
+use filesystem_mutation_plan::*;
 use inline_transform_contract::*;
 use legacy_file_config_capabilities::*;
 use media_artifact_plan::*;
@@ -303,6 +306,16 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_service_status"
+    );
+    return_deterministic_plan!(
+        filesystem_mutation_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_filesystem_mutation"
     );
     if allow_structural_deterministic_plans {
         return_deterministic_plan!(
@@ -621,12 +634,12 @@ pub(super) async fn plan_round_actions(
     let skill_playbooks = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         build_skill_playbooks_text_scoped(state, task, contract_skill_scope.as_ref())
     } else {
-        build_lightweight_skill_playbooks_text(state, task)
+        build_lightweight_skill_playbooks_text(state, task, contract_skill_scope.as_ref())
     };
     let skill_quick_index = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         build_skill_quick_index_text_scoped(state, task, contract_skill_scope.as_ref())
     } else {
-        build_lightweight_skill_quick_index_text(state, task)
+        build_lightweight_skill_quick_index_text(state, task, contract_skill_scope.as_ref())
     };
     let tool_spec_template = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::bootstrap::load_required_prompt_template_for_state(state, AGENT_TOOL_SPEC_PATH)

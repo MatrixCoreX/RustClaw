@@ -275,6 +275,8 @@ pub(crate) async fn run_intent_normalizer(
                 &mut legacy_normalizer_decision,
                 &mut execution_finalize_style,
             );
+        let fs_basic_lifecycle_contract_repair =
+            apply_fs_basic_lifecycle_machine_contract_repair(&mut output_contract, &out.reason);
         if matches!(
             legacy_normalizer_decision,
             FirstLayerDecision::PlannerExecute
@@ -681,6 +683,7 @@ pub(crate) async fn run_intent_normalizer(
             state_patch_replacement_literal_conflict_repair,
             self_contained_payload_repair,
             inline_structured_transform_direct_answer_repair,
+            fs_basic_lifecycle_contract_repair,
             active_ordered_scalar_path_chat_repair,
             active_observed_output_chat_repair,
             active_bound_path_answer_candidate_repair,

@@ -59,6 +59,32 @@ fn explicit_locator_summary_still_requires_fresh_evidence() {
 }
 
 #[test]
+fn fs_basic_lifecycle_machine_tokens_repair_command_summary_contract() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "tmp/nl_codex_resume_smoke".to_string(),
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_fs_basic_lifecycle_machine_contract_repair(
+        &mut contract,
+        "fs_basic.make_dir -> write_text -> append_text -> read_text_range -> remove_path(recursive)",
+    );
+
+    assert_eq!(reason, Some("fs_basic_lifecycle_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::FilesystemMutationResult
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+}
+
+#[test]
 fn structural_config_field_value_repairs_to_config_mutation_contract() {
     let request = "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);

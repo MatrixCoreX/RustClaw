@@ -345,8 +345,12 @@ fn compact_json_value_token(value: &Value) -> String {
 pub(super) fn build_lightweight_skill_playbooks_text(
     state: &AppState,
     task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
 ) -> String {
-    let visible = state.planner_available_skills_for_task(task);
+    let mut visible = state.planner_available_skills_for_task(task);
+    if let Some(skill_scope) = skill_scope {
+        visible.retain(|skill| skill_scope.contains(skill));
+    }
     if visible.is_empty() {
         return "No skill playbooks configured.".to_string();
     }
@@ -373,8 +377,12 @@ pub(super) fn build_lightweight_skill_playbooks_text(
 pub(super) fn build_lightweight_skill_quick_index_text(
     state: &AppState,
     task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
 ) -> String {
-    let visible = state.planner_available_skills_for_task(task);
+    let mut visible = state.planner_available_skills_for_task(task);
+    if let Some(skill_scope) = skill_scope {
+        visible.retain(|skill| skill_scope.contains(skill));
+    }
     if visible.is_empty() {
         return "- (no enabled skills)".to_string();
     }

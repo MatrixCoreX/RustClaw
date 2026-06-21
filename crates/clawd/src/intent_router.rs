@@ -280,6 +280,7 @@ use current_turn_anchor::{
 mod current_turn_structural_repair;
 use current_turn_structural_repair::{
     apply_current_turn_structural_contract_repair,
+    apply_fs_basic_lifecycle_machine_contract_repair,
     apply_unbound_workspace_generic_content_clarify_repair,
     apply_workspace_scope_patch_to_contract, infer_missing_target_policy_from_contract,
     is_meaningful_state_patch, should_detach_bare_acknowledgement_from_active_task,

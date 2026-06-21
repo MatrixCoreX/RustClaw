@@ -513,14 +513,30 @@ pub(crate) async fn execute_builtin_skill_with_task(
             Ok(format!("created directory {}", real_path.display()))
         }
         "remove_file" => {
-            ensure_only_keys(map, &["path"])?;
+            ensure_only_keys(map, &["path", "target_kind", "recursive"])?;
             let path = required_string(map, "path")?;
+            let target_kind = optional_string(map, "target_kind")
+                .unwrap_or_default()
+                .trim();
+            let recursive = optional_bool(map, "recursive").unwrap_or(false);
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
                 crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() {
+                if target_kind.eq_ignore_ascii_case("directory") && recursive {
+                    std::fs::remove_dir_all(&real_path).map_err(|err| {
+                        io_builtin_error(
+                            "remove_file",
+                            "remove_dir_all",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    })?;
+                    return Ok(format!("removed {}", real_path.display()));
+                }
                 return Err(builtin_error(
                     "remove_file",
                     "is_directory",

@@ -229,6 +229,33 @@ async fn remove_file_missing_path_is_structured_but_not_recoverable() {
 }
 
 #[tokio::test]
+async fn remove_file_keeps_directory_delete_explicit() {
+    let root = TempDirGuard::new("remove_file_directory_explicit");
+    fs::create_dir_all(root.path.join("scratch")).expect("create scratch");
+    fs::write(root.path.join("scratch/note.txt"), "alpha").expect("write scratch file");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(&state, "remove_file", &json!({"path": "scratch"}))
+        .await
+        .expect_err("directory target should require explicit recursive directory args");
+    let structured =
+        crate::skills::parse_structured_skill_error(&err).expect("structured remove_file error");
+    assert_eq!(structured.skill, "remove_file");
+    assert_eq!(structured.error_kind, "is_directory");
+
+    let output = execute_builtin_skill(
+        &state,
+        "remove_file",
+        &json!({"path": "scratch", "target_kind": "directory", "recursive": true}),
+    )
+    .await
+    .expect("explicit recursive directory delete");
+
+    assert!(output.contains(root.path.join("scratch").to_string_lossy().as_ref()));
+    assert!(!root.path.join("scratch").exists());
+}
+
+#[tokio::test]
 async fn run_cmd_accepts_timeout_seconds_override() {
     let root = TempDirGuard::new("run_cmd_timeout_override");
     let state = test_state(root.path.clone());
