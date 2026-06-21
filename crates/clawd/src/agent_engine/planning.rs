@@ -61,6 +61,8 @@ use scalar_count_filter::{
 mod action_route_locator_artifact;
 #[path = "concrete_respond_structural_observation.rs"]
 mod concrete_respond_structural_observation;
+#[path = "config_guard_capability_repair.rs"]
+mod config_guard_capability_repair;
 #[path = "configured_command_prefix.rs"]
 mod configured_command_prefix;
 #[path = "direct_observed_finalize_support.rs"]
@@ -103,6 +105,7 @@ mod system_basic_action_path;
 mod value_string_list;
 use action_route_locator_artifact::*;
 use concrete_respond_structural_observation::*;
+use config_guard_capability_repair::*;
 use configured_command_prefix::*;
 pub(in crate::agent_engine) use configured_command_prefix::{
     explicit_command_segment, explicit_execution_command_segment,
