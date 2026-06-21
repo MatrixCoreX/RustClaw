@@ -3,6 +3,7 @@ enum WorkspaceUpdateMode {
     Full,
     UiOnly,
     ClawdOnly,
+    ReleaseDeploy,
 }
 
 impl WorkspaceUpdateMode {
@@ -11,6 +12,7 @@ impl WorkspaceUpdateMode {
             Self::Full => "full",
             Self::UiOnly => "ui_only",
             Self::ClawdOnly => "clawd_only",
+            Self::ReleaseDeploy => "release_deploy",
         }
     }
 }
@@ -141,6 +143,13 @@ async fn start_workspace_update_clawd_only(
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ClawdOnly).await
+}
+
+async fn start_workspace_update_release_deploy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleaseDeploy).await
 }
 
 async fn start_workspace_update_with_mode(
@@ -297,6 +306,10 @@ async fn run_workspace_update_job(
         }
         WorkspaceUpdateMode::ClawdOnly => {
             run_workspace_update_clawd_only_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::ReleaseDeploy => {
+            run_workspace_update_release_deploy_job(workspace_root, shared, control).await;
             return;
         }
     }
@@ -739,6 +752,260 @@ async fn run_workspace_update_clawd_only_job(
             );
         }
     }
+}
+
+async fn run_workspace_update_release_deploy_job(
+    workspace_root: PathBuf,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    control: Arc<Mutex<WorkspaceUpdateControl>>,
+) {
+    record_workspace_update_current_version(&workspace_root, &shared).await;
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "downloading_release");
+    reset_workspace_update_build_logs(&shared);
+    {
+        let mut guard = shared.lock().unwrap();
+        guard.next_step = Some("release_deploy_downloading".to_string());
+    }
+    match run_workspace_update_command_streaming(
+        "bash",
+        &["-lc", release_deploy_script()],
+        &workspace_root,
+        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
+        shared.clone(),
+        control.clone(),
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "release deploy failed",
+                "release_deploy_check_network_or_permissions",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            if err == WORKSPACE_UPDATE_CANCELED_ERROR
+                || finish_workspace_update_if_canceled(&shared, &control)
+            {
+                return;
+            }
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "release_deploy_check_network_or_permissions",
+            );
+            return;
+        }
+    }
+    if finish_workspace_update_if_canceled(&shared, &control) {
+        return;
+    }
+
+    set_workspace_update_step(&shared, "restarting_clawd");
+    match schedule_workspace_update_clawd_restart(&workspace_root) {
+        Ok(()) => {
+            let mut guard = shared.lock().unwrap();
+            guard.status = "restarting".to_string();
+            guard.step = "release_restart_scheduled".to_string();
+            guard.finished_ts = Some(current_unix_ts());
+            guard.error = None;
+            guard.next_step = Some("release_deploy_restart_scheduled".to_string());
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "release_deploy_restart_failed",
+            );
+        }
+    }
+}
+
+fn release_deploy_script() -> &'static str {
+    r#"
+set -euo pipefail
+
+repo="${RUSTCLAW_RELEASE_REPO:-MatrixCoreX/RustClaw}"
+arch="$(uname -m)"
+case "$arch" in
+  aarch64|arm64)
+    release_prefix="pi-aarch64-"
+    asset_prefix="RustClaw-pi-aarch64-"
+    platform_label="pi-aarch64"
+    ;;
+  x86_64|amd64)
+    release_prefix="ubuntu-x86_64-"
+    asset_prefix="RustClaw-ubuntu-x86_64-"
+    platform_label="ubuntu-x86_64"
+    ;;
+  *)
+    echo "unsupported_release_arch=$arch" >&2
+    exit 1
+    ;;
+esac
+
+echo "release_repo=$repo"
+echo "release_platform=$platform_label"
+
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/rustclaw-release-deploy.XXXXXX")"
+cleanup() {
+  rm -rf "$work_dir"
+}
+trap cleanup EXIT
+
+meta_file="$work_dir/release.json"
+python3 - "$repo" "$release_prefix" "$asset_prefix" <<'PY' > "$meta_file"
+import json
+import sys
+import urllib.request
+
+repo, release_prefix, asset_prefix = sys.argv[1:]
+url = f"https://api.github.com/repos/{repo}/releases?per_page=50"
+req = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "RustClaw-release-deploy",
+    },
+)
+with urllib.request.urlopen(req, timeout=30) as resp:
+    releases = json.load(resp)
+
+for release in releases:
+    tag = str(release.get("tag_name") or "")
+    if not tag.startswith(release_prefix):
+        continue
+    archive = None
+    checksum = None
+    for asset in release.get("assets") or []:
+        name = str(asset.get("name") or "")
+        if name.endswith(".sha256"):
+            checksum = asset
+            continue
+        if name.endswith(".tar.gz") and (
+            name.startswith(asset_prefix) or name == f"RustClaw-{tag}.tar.gz"
+        ):
+            archive = asset
+    if archive:
+        print(json.dumps({
+            "tag": tag,
+            "archive_name": archive.get("name"),
+            "archive_url": archive.get("browser_download_url"),
+            "checksum_name": checksum.get("name") if checksum else "",
+            "checksum_url": checksum.get("browser_download_url") if checksum else "",
+        }))
+        break
+else:
+    raise SystemExit(f"no release asset found for prefix {release_prefix}")
+PY
+
+python3 - "$meta_file" > "$work_dir/release.env" <<'PY'
+import json
+import shlex
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    meta = json.load(f)
+for key, value in meta.items():
+    print(f"{key.upper()}={shlex.quote(str(value or ''))}")
+PY
+. "$work_dir/release.env"
+
+echo "release_tag=$TAG"
+echo "release_asset=$ARCHIVE_NAME"
+
+archive_path="$work_dir/$ARCHIVE_NAME"
+python3 - "$ARCHIVE_URL" "$archive_path" <<'PY'
+import sys
+import urllib.request
+
+url, output = sys.argv[1:]
+req = urllib.request.Request(url, headers={"User-Agent": "RustClaw-release-deploy"})
+with urllib.request.urlopen(req, timeout=120) as resp, open(output, "wb") as f:
+    while True:
+        chunk = resp.read(1024 * 1024)
+        if not chunk:
+            break
+        f.write(chunk)
+PY
+
+if [[ -n "${CHECKSUM_URL:-}" ]]; then
+  checksum_path="$work_dir/$CHECKSUM_NAME"
+  python3 - "$CHECKSUM_URL" "$checksum_path" <<'PY'
+import sys
+import urllib.request
+
+url, output = sys.argv[1:]
+req = urllib.request.Request(url, headers={"User-Agent": "RustClaw-release-deploy"})
+with urllib.request.urlopen(req, timeout=30) as resp, open(output, "wb") as f:
+    f.write(resp.read())
+PY
+  (cd "$work_dir" && sha256sum -c "$CHECKSUM_NAME")
+else
+  echo "release_checksum=missing"
+fi
+
+extract_dir="$work_dir/extract"
+mkdir -p "$extract_dir"
+tar -xzf "$archive_path" -C "$extract_dir"
+package_dir="$extract_dir/RustClaw"
+if [[ ! -x "$package_dir/target/release/clawd" ]]; then
+  echo "release package missing target/release/clawd" >&2
+  exit 1
+fi
+
+echo "deploying_binaries"
+mkdir -p target/release
+cp -a "$package_dir/target/release/." target/release/
+chmod +x target/release/* 2>/dev/null || true
+
+if [[ -d "$package_dir/UI/dist" ]]; then
+  echo "deploying_ui_dist"
+  mkdir -p UI
+  rm -rf UI/dist
+  cp -a "$package_dir/UI/dist" UI/dist
+fi
+
+for dir in prompts migrations scripts component_start pi_app; do
+  if [[ -d "$package_dir/$dir" ]]; then
+    echo "deploying_dir=$dir"
+    rm -rf "$dir"
+    mkdir -p "$(dirname "$dir")"
+    cp -a "$package_dir/$dir" "$dir"
+  fi
+done
+
+if [[ -d "$package_dir/services/wa-web-bridge" ]]; then
+  echo "deploying_dir=services/wa-web-bridge"
+  mkdir -p services
+  rm -rf services/wa-web-bridge
+  cp -a "$package_dir/services/wa-web-bridge" services/wa-web-bridge
+fi
+
+for file in README.md rustclaw install-rustclaw-cmd.sh start-all.sh start-all-bin.sh stop-rustclaw.sh; do
+  if [[ -e "$package_dir/$file" ]]; then
+    echo "deploying_file=$file"
+    cp -a "$package_dir/$file" "$file"
+  fi
+done
+
+chmod +x rustclaw install-rustclaw-cmd.sh start-all.sh start-all-bin.sh stop-rustclaw.sh 2>/dev/null || true
+
+echo "preserved_runtime_dirs=configs,data,logs,.pids"
+echo "deployed_release_tag=$TAG"
+"#
 }
 
 async fn record_workspace_update_current_version(
