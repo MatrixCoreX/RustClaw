@@ -3,9 +3,10 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
-    deterministic_scalar_markdown_heading_answer, strip_internal_execution_args,
-    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
+    archive_database_aggregate_structured_answer, classify_skill_failure_recovery,
+    deterministic_observed_execution_status_answer, deterministic_scalar_markdown_heading_answer,
+    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
+    synthesize_answer_allows_direct_fallback,
     synthesize_contract_matrix_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -988,6 +989,49 @@ fn synthesize_answer_direct_fallback_only_for_single_last_output() {
         "last_output".to_string(),
         "step_1".to_string()
     ]));
+}
+
+#[test]
+fn archive_database_aggregate_structured_answer_combines_observations() {
+    let mut loop_state = LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "archive_basic",
+        r#"{"extra":{"action":"list","archive":"/tmp/test_bundle.zip","candidates":["notes.txt","nested/config.ini"],"count":2,"entries":[{"kind":"file","name":"notes.txt"},{"kind":"file","name":"nested/config.ini"}]},"text":"{}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "archive_basic",
+        r#"{"extra":{"action":"read","archive":"/tmp/test_bundle.zip","content":"fixture archive notes\n","member":"notes.txt"},"text":"{}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "db_basic",
+        r#"{"extra":{"action":"list_tables","db_path":"/tmp/test_contract.sqlite","result":{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}},"text":"{}"}"#,
+    ));
+
+    let answer =
+        archive_database_aggregate_structured_answer(&loop_state).expect("aggregate answer");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
+
+    assert_eq!(
+        value
+            .pointer("/archive/entries/0")
+            .and_then(serde_json::Value::as_str),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        value
+            .pointer("/archive/member/content")
+            .and_then(serde_json::Value::as_str),
+        Some("fixture archive notes")
+    );
+    assert_eq!(
+        value
+            .pointer("/database/tables/2")
+            .and_then(serde_json::Value::as_str),
+        Some("users")
+    );
 }
 
 #[test]

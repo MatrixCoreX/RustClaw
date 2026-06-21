@@ -17,8 +17,9 @@ use crate::{AgentAction, OutputResponseShape};
 mod dispatch_synthesis;
 
 use dispatch_synthesis::{
-    deterministic_scalar_markdown_heading_answer, route_resolved_intent,
-    step_has_observable_synthesis_fact, synthesize_answer_allows_direct_fallback,
+    archive_database_aggregate_structured_answer, deterministic_scalar_markdown_heading_answer,
+    route_resolved_intent, step_has_observable_synthesis_fact,
+    synthesize_answer_allows_direct_fallback,
     synthesize_contract_matrix_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -1275,6 +1276,9 @@ pub(super) async fn handle_synthesize_answer_action(
                 {
                     return Ok(answer);
                 }
+            }
+            if let Some(answer) = archive_database_aggregate_structured_answer(loop_state) {
+                return Ok(answer);
             }
             if let Some(answer) = synthesize_contract_matrix_direct_observed_fallback_answer(
                 state,
