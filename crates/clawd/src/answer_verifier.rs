@@ -94,6 +94,9 @@ pub(crate) fn should_verify_answer(
     if context_only_tool_discovery_answer_can_skip_answer_verifier(route_result) {
         return false;
     }
+    if pure_chat_agent_loop_submode_can_skip_answer_verifier(route_result, journal) {
+        return false;
+    }
     let task_contract = TaskContract::from_route_result(route_result);
     let active_text_rewrite =
         direct_answer_active_text_rewrite_should_verify(route_result, journal);
@@ -125,15 +128,44 @@ fn direct_answer_active_text_rewrite_should_verify(
 
 fn pure_chat_agent_loop_submode_should_verify(
     route_result: &RouteResult,
+    _journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if !route_result
+        .route_reason
+        .contains("pure_chat_agent_loop_submode")
+    {
+        return false;
+    }
+    if route_reason_has_backend_identity_metadata_marker(route_result) {
+        return true;
+    }
+    false
+}
+
+fn pure_chat_agent_loop_submode_can_skip_answer_verifier(
+    route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     route_result
         .route_reason
         .contains("pure_chat_agent_loop_submode")
+        && !route_reason_has_backend_identity_metadata_marker(route_result)
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery
+        && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route_result.output_contract.locator_hint.trim().is_empty()
         && journal.step_results.is_empty()
+}
+
+fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
+    [
+        "agent_display_name_hint_backend_metadata_removed",
+        "normalizer_answer_candidate_backend_metadata_removed",
+    ]
+    .iter()
+    .any(|marker| route_result.route_reason.contains(marker))
 }
 
 fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {

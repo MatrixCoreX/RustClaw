@@ -585,6 +585,22 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["count", "field_value", "path"],
     ),
     step_json_extractor(
+        "kb.search",
+        "kb.search.structured_json_v1",
+        &[
+            "candidates",
+            "content_excerpt",
+            "count",
+            "field_value",
+            "path",
+        ],
+    ),
+    step_json_extractor(
+        "kb.stats",
+        "kb.stats.structured_json_v1",
+        &["count", "field_value", "status"],
+    ),
+    step_json_extractor(
         "task_control.list",
         "task_control.list.structured_json_v1",
         &["content_excerpt", "field_value", "status"],

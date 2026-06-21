@@ -40,11 +40,12 @@ use super::{
     inject_structural_extension_filter_for_directory_inventory,
     inject_synthesize_answer_for_bare_placeholder_respond,
     inline_json_transform_deterministic_plan_result, is_bare_last_output_placeholder,
-    normalize_action_schema_aliases, normalize_archive_basic_schema_aliases,
-    normalize_fs_basic_schema_aliases, normalize_git_basic_schema_aliases,
-    normalize_planned_actions, normalize_planned_actions_with_original,
-    normalize_planned_actions_with_original_and_context, normalize_system_basic_schema_aliases,
-    normalize_transform_schema_aliases, observation_only_plan_can_finalize_from_direct_output,
+    kb_chain_deterministic_plan_result, normalize_action_schema_aliases,
+    normalize_archive_basic_schema_aliases, normalize_fs_basic_schema_aliases,
+    normalize_git_basic_schema_aliases, normalize_planned_actions,
+    normalize_planned_actions_with_original, normalize_planned_actions_with_original_and_context,
+    normalize_system_basic_schema_aliases, normalize_transform_schema_aliases,
+    observation_only_plan_can_finalize_from_direct_output,
     package_docker_readonly_probe_deterministic_plan_result,
     package_manager_detect_deterministic_plan_result,
     package_manager_dry_run_deterministic_plan_result, plan_repair_reason,
@@ -502,6 +503,8 @@ mod explicit_command_sequences;
 mod file_paths_workspace_and_raw_command;
 #[path = "planning_tests/git_runtime_status_and_observation.rs"]
 mod git_runtime_status_and_observation;
+#[path = "planning_tests/kb_chain.rs"]
+mod kb_chain;
 #[path = "planning_tests/log_excerpt_quantity_and_skill_policy.rs"]
 mod log_excerpt_quantity_and_skill_policy;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]

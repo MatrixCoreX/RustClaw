@@ -543,16 +543,36 @@ fn direct_answer_route_skips_answer_verifier() {
 }
 
 #[test]
-fn pure_chat_agent_loop_submode_uses_answer_verifier() {
+fn pure_chat_agent_loop_submode_skips_answer_verifier_for_freeform_response() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
     route.route_reason = "pure_chat_agent_loop_submode".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.wants_file_delivery = false;
     let journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
+}
+
+#[test]
+fn pure_chat_agent_loop_backend_identity_marker_still_uses_answer_verifier() {
+    let mut route = backend_identity_guard_route();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.wants_file_delivery = false;
+    let journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "identity response request");
 
     assert!(should_verify_answer(&route, &journal, "candidate response"));
 }
