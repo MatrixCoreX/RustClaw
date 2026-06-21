@@ -260,6 +260,57 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
 }
 
 #[test]
+fn contract_matrix_preflight_allows_registry_observe_config_preview_for_summary() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "config_edit"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+"#,
+        &["config_edit"],
+    );
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+        requires_content_evidence: true,
+        ..crate::IntentOutputContract::default()
+    });
+    let preview_args = serde_json::json!({
+        "action": "plan_config_change",
+        "path": "configs/config.toml",
+        "field_path": "llm.selected_vendor",
+        "value": "minimax"
+    });
+    let apply_args = serde_json::json!({
+        "action": "apply_config_change",
+        "path": "configs/config.toml",
+        "field_path": "llm.selected_vendor",
+        "value": "minimax"
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &preview_args)
+            .is_none()
+    );
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
+        .expect("mutating config apply must still be rejected");
+    let parsed =
+        crate::skills::parse_structured_skill_error(&err).expect("preflight error is structured");
+    assert_eq!(parsed.error_kind, "contract_action_rejected");
+}
+
+#[test]
 fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);

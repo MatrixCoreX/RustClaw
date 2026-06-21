@@ -12,6 +12,7 @@
     "task",
     "target_job_id",
     "raw",
+    "mode",
     "confidence",
     "reason",
     "needs_clarify",
@@ -71,6 +72,11 @@
     },
     "raw": {
       "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["execute", "compile_only", "dry_run"],
+      "description": "Execution mode. execute allows the schedule service to persist changes; compile_only/dry_run means return a structured preview only and do not mutate scheduled_jobs."
     },
     "confidence": {
       "type": "number",

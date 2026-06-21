@@ -75,6 +75,7 @@ pub(super) fn unbound_model_context_target_route_should_force_clarify(
         )
         || raw_command_output_without_locator_can_plan_via_contract(state, prompt, route_result)
         || runtime_status_query_route_can_plan_without_locator(turn_analysis, route_result)
+        || task_control_route_can_plan_without_locator(route_result)
         || command_observation_route_has_runtime_evidence(state, prompt, route_result)
         || current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
         || current_request_has_self_contained_structured_payload(prompt)
@@ -123,6 +124,74 @@ pub(super) fn unbound_model_context_target_route_should_force_clarify(
         return false;
     }
     route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
+}
+
+pub(super) fn task_control_route_can_plan_without_locator(
+    route_result: &crate::RouteResult,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    route_contains_machine_token(route_result, "task_control")
+}
+
+pub(super) fn restore_explicit_extension_assess_gap_to_command_summary(
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !route_requests_extension_assess_gap(route_result)
+    {
+        return false;
+    }
+
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    if route_result.output_contract.response_shape == crate::OutputResponseShape::Strict {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    }
+    append_route_reason(
+        route_result,
+        "extension_assess_gap_contract_restored_to_command_output_summary",
+    );
+    true
+}
+
+fn route_contains_machine_token(route_result: &crate::RouteResult, token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty() {
+        return false;
+    }
+    [
+        route_result.resolved_intent.as_str(),
+        route_result.route_reason.as_str(),
+    ]
+    .into_iter()
+    .any(|text| machine_token_present(text, token))
+}
+
+fn route_requests_extension_assess_gap(route_result: &crate::RouteResult) -> bool {
+    route_contains_machine_token(route_result, "extension.assess_gap")
+        || (route_contains_machine_token(route_result, "extension_manager")
+            && route_contains_machine_token(route_result, "assess_gap"))
+}
+
+fn machine_token_present(text: &str, token: &str) -> bool {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+        .any(|part| part == token || part.starts_with(&format!("{token}.")))
 }
 
 fn current_workspace_listing_search_route_can_skip_unbound_context_guard(
@@ -444,6 +513,7 @@ pub(super) fn repair_directory_purpose_command_summary_contract(
         || route_result.output_contract.semantic_kind
             != crate::OutputSemanticKind::CommandOutputSummary
         || command_observation_route_has_runtime_evidence(state, prompt, route_result)
+        || route_requests_extension_assess_gap(route_result)
         || !route_reason_has_directory_purpose_repair_token(route_result)
     {
         return false;

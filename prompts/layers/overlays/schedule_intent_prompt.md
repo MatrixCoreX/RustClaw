@@ -51,6 +51,7 @@ Output JSON only. Never output <think> tags, code fences, or extra explanation b
   },
   "target_job_id": "",
   "raw": "__REQUEST__",
+  "mode": "execute|compile_only|dry_run",
   "confidence": 0.0,
   "reason": "",
   "needs_clarify": false,
@@ -62,6 +63,7 @@ Contract for action kinds:
 - Never emit placeholders in `target_job_id` (forbidden: `ALL`, `*`, `all`, `every`, `everything`).
 - If no concrete id exists for a bulk/pronoun request, keep `target_job_id=""` and explain in `reason`.
 - For `kind=none`, keep schedule fields empty/default and task payload empty.
+- Set `mode="execute"` only when the request authorizes changing scheduled jobs. Set `mode="compile_only"` when the request asks to parse, preview, explain required structured fields, test the schedule parser, or otherwise avoid creating/updating/deleting jobs. `mode="dry_run"` is equivalent to `compile_only` for runtime behavior.
 - Do not guess a cron expression when the request is naturally representable as `once`, `daily`, `weekly`, or `interval`.
 - When time/date information is insufficient for `create`, lower confidence and use the most conservative supported parse rather than inventing missing calendar details.
 - When a schedule can be recognized but required information is missing, keep the best-known structure, set `needs_clarify=true`, and ask exactly one concise follow-up question in `clarify_question`.
@@ -69,27 +71,27 @@ Contract for action kinds:
 Illustrative JSON shape samples:
 User: Delete all scheduled tasks
 Output:
-{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Delete all scheduled tasks","confidence":0.62,"reason":"bulk delete intent without concrete job_id"}
+{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Delete all scheduled tasks","mode":"execute","confidence":0.62,"reason":"bulk delete intent without concrete job_id"}
 
 User: Pause all scheduled tasks
 Output:
-{"kind":"pause","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Pause all scheduled tasks","confidence":0.62,"reason":"bulk pause intent without concrete job_id"}
+{"kind":"pause","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Pause all scheduled tasks","mode":"execute","confidence":0.62,"reason":"bulk pause intent without concrete job_id"}
 
 User: Resume all scheduled tasks
 Output:
-{"kind":"resume","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Resume all scheduled tasks","confidence":0.62,"reason":"bulk resume intent without concrete job_id"}
+{"kind":"resume","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Resume all scheduled tasks","mode":"execute","confidence":0.62,"reason":"bulk resume intent without concrete job_id"}
 
 User: Delete scheduled task job_9e289b4c73
 Output:
-{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"Delete scheduled task job_9e289b4c73","confidence":0.93,"reason":"single job delete with explicit id","needs_clarify":false,"clarify_question":""}
+{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"Delete scheduled task job_9e289b4c73","mode":"execute","confidence":0.93,"reason":"single job delete with explicit id","needs_clarify":false,"clarify_question":""}
 
 User: Tell me today's weather and the next three days every day at 8 AM
 Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"Tell me today's weather and the next three days every day at 8 AM","confidence":0.84,"reason":"weather schedule recognized but english city name missing","needs_clarify":true,"clarify_question":"Please provide the city name in English."}
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"Tell me today's weather and the next three days every day at 8 AM","mode":"execute","confidence":0.84,"reason":"weather schedule recognized but english city name missing","needs_clarify":true,"clarify_question":"Please provide the city name in English."}
 
 User: Tell me Nanjing weather for today and the next three days every day at 8 AM
 Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{"city":"Nanjing","days":4}}},"target_job_id":"","raw":"Tell me Nanjing weather for today and the next three days every day at 8 AM","confidence":0.9,"reason":"daily weather schedule with explicit city converted to English geocoding name and forecast range","needs_clarify":false,"clarify_question":""}
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{"city":"Nanjing","days":4}}},"target_job_id":"","raw":"Tell me Nanjing weather for today and the next three days every day at 8 AM","mode":"execute","confidence":0.9,"reason":"daily weather schedule with explicit city converted to English geocoding name and forecast range","needs_clarify":false,"clarify_question":""}
 
 Rules:
 __RULES__

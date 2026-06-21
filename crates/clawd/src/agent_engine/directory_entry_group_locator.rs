@@ -759,6 +759,7 @@ pub(super) fn directory_purpose_extension_locator(route: &RouteResult) -> Option
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+        || route_requests_extension_assess_gap(route)
         || !matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::CurrentWorkspace | crate::OutputLocatorKind::Path
@@ -768,6 +769,27 @@ pub(super) fn directory_purpose_extension_locator(route: &RouteResult) -> Option
     }
     extension_from_globish_pattern(route.output_contract.locator_hint.trim())
         .or_else(|| structural_extension_filter_from_text(&route.resolved_intent))
+}
+
+fn route_requests_extension_assess_gap(route: &RouteResult) -> bool {
+    route_has_machine_token(route, "extension.assess_gap")
+        || (route_has_machine_token(route, "extension_manager")
+            && route_has_machine_token(route, "assess_gap"))
+}
+
+fn route_has_machine_token(route: &RouteResult, token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty() {
+        return false;
+    }
+    [route.resolved_intent.as_str(), route.route_reason.as_str()]
+        .into_iter()
+        .any(|text| machine_token_present(text, token))
+}
+
+fn machine_token_present(text: &str, token: &str) -> bool {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+        .any(|part| part == token || part.starts_with(&format!("{token}.")))
 }
 
 pub(super) fn directory_purpose_extension_inventory_deterministic_plan_result(

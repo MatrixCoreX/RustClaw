@@ -4,6 +4,7 @@ use super::{
     promote_broad_current_workspace_content_summary_to_directory_purpose,
     repair_directory_purpose_command_summary_contract,
     repair_directory_purpose_quantity_comparison_contract,
+    restore_explicit_extension_assess_gap_to_command_summary,
     unbound_model_context_target_route_should_force_clarify,
     unbound_targeted_evidence_route_should_force_clarify,
 };
@@ -387,6 +388,64 @@ fn explicit_command_summary_does_not_repair_to_directory_purpose() {
 }
 
 #[test]
+fn extension_assess_gap_command_summary_does_not_repair_to_directory_purpose() {
+    let state = test_state_with_root(make_temp_root("extension_gap_no_directory_repair"));
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
+    route.route_reason = concat!(
+        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection",
+        "; capability=extension.assess_gap"
+    )
+    .to_string();
+
+    assert!(!repair_directory_purpose_command_summary_contract(
+        &state,
+        "extension_manager assess_gap",
+        &mut route,
+    ));
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+}
+
+#[test]
+fn extension_assess_gap_directory_contract_restores_to_command_summary() {
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "*.csv".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
+    route.route_reason = "capability=extension.assess_gap".to_string();
+
+    assert!(restore_explicit_extension_assess_gap_to_command_summary(
+        &mut route
+    ));
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+    );
+    assert!(route
+        .route_reason
+        .contains("extension_assess_gap_contract_restored_to_command_output_summary"));
+}
+
+#[test]
 fn quantity_comparison_single_directory_repair_promotes_to_directory_purpose() {
     let root = make_temp_root("directory_purpose_quantity_repair");
     std::fs::create_dir_all(root.join("prompts/schemas")).expect("schemas");
@@ -680,6 +739,34 @@ fn unbound_model_context_target_requires_clarify_before_planner_guess() {
     assert!(unbound_model_context_target_route_should_force_clarify(
         &state,
         "extract name from that package file",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn task_control_machine_route_executes_without_locator() {
+    let state = test_state_with_root(make_temp_root("task_control_without_locator"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Use task_control.list and task_control.get to inspect task lifecycle fields.".to_string();
+    route.route_reason = "task_control.list task_control.get runtime task query".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentPresenceCheck;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_model_context_target_route_should_force_clarify(
+        &state,
+        "inspect task lifecycle fields",
         &route,
         None,
         &snapshot,

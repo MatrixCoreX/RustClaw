@@ -285,9 +285,10 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
   - Exact-output refinements can constrain sentence count, line count, item count, body-only output, tone, audience, or length. Treat them as active-task presentation constraints unless the user explicitly switches to file/code/log inspection or a new standalone topic.
   - In a clarification chain, preserve the original task anchor, apply the newly supplied constraints, and prefer `decision="direct_answer"` when no tool call, file delivery, or fresh observation is needed.
 - `schedule_intent`: use `null` when `schedule_kind="none"`. Otherwise provide the best structured schedule intent object you can infer, using the same field contract as the schedule compiler:
-  - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `raw`, `reason`, `needs_clarify`, `clarify_question`, `confidence`
+  - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `raw`, `mode`, `reason`, `needs_clarify`, `clarify_question`, `confidence`
   - Keep this object semantically aligned with top-level `schedule_kind`, `needs_clarify`, `clarify_question`, and `confidence`.
   - For `schedule_kind="create"`, put the operation in `kind="create"` and put schedule type/frequency in `schedule.type`; do not use `kind` or top-level `schedule_kind` for `daily`, `weekly`, `interval`, `once`, or `cron`.
+  - Use `mode="execute"` only when the request authorizes a schedule mutation. Use `mode="compile_only"` or `mode="dry_run"` when the request asks only to parse, preview, explain required structured fields, or avoid creating/updating/deleting jobs.
   - If the schedule can be recognized but required schedule/task fields are still missing, keep the best-known structure, set both top-level and nested `needs_clarify=true`, and ask exactly one concise follow-up in both `clarify_question` fields.
 - output_contract.response_shape:
   - free: normal free-form final answer

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
-use claw_core::skill_registry::{PrimaryFallbackRole, SkillRiskLevel};
+use claw_core::skill_registry::{PlannerCapabilityEffect, PrimaryFallbackRole, SkillRiskLevel};
 use serde_json::{json, Value};
 
 use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
@@ -705,6 +705,47 @@ fn action_scoped_risk_level(
             .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
             .and_then(|mapping| mapping.risk_level)
     })
+}
+
+fn registry_declares_non_mutating_planner_action(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> bool {
+    let Some(action) = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    state
+        .skill_manifest(normalized_skill)
+        .is_some_and(|manifest| {
+            manifest.planner_capabilities.into_iter().any(|mapping| {
+                mapping
+                    .action
+                    .as_deref()
+                    .map(normalize_schema_token)
+                    .is_some_and(|mapped| mapped == action)
+                    && matches!(
+                        mapping.effect,
+                        Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
+                    )
+            })
+        })
+}
+
+fn registry_action_can_extend_summary_contract(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+    contract_match: &str,
+) -> bool {
+    contract_match == "command_output_summary"
+        && registry_declares_non_mutating_planner_action(state, normalized_skill, args)
 }
 
 fn effective_step_risk_level(
@@ -1583,6 +1624,12 @@ pub(crate) fn verify_plan(
             ) {
                 if !policy.is_allowed()
                     && !crate::agent_engine::action_has_user_named_output_path_marker(&step.args)
+                    && !registry_action_can_extend_summary_contract(
+                        state,
+                        &normalized_skill,
+                        &step.args,
+                        &policy.contract_match,
+                    )
                 {
                     issues.push(VerifyIssue {
                         step_id: step.step_id.clone(),
@@ -1640,6 +1687,11 @@ pub(crate) fn verify_plan(
             }
             if !confirmation_already_granted
                 && !safe_autonomous_creation
+                && !registry_declares_non_mutating_planner_action(
+                    state,
+                    &normalized_skill,
+                    &step.args,
+                )
                 && (state.skill_invocation_requires_confirmation_policy(
                     &normalized_skill,
                     Some(&step.args),

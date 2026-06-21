@@ -1,4 +1,4 @@
-use claw_core::skill_registry::SkillRiskLevel;
+use claw_core::skill_registry::{PlannerCapabilityEffect, SkillRiskLevel};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -189,6 +189,18 @@ pub(super) fn contract_matrix_action_policy_error(
         );
         return None;
     }
+    if registry_action_can_extend_summary_contract(
+        state,
+        normalized_skill,
+        classification_args,
+        &policy.contract_match,
+    ) {
+        info!(
+            "preflight_keep_registry_non_mutating_action skill={} action={} contract={}",
+            normalized_skill, policy.action_key, policy.contract_match
+        );
+        return None;
+    }
     if action_has_user_named_output_path_marker(classification_args) {
         return None;
     }
@@ -361,6 +373,54 @@ fn normalized_action_arg(args: &Value) -> Option<String> {
                 })
                 .collect()
         })
+}
+
+fn registry_declares_non_mutating_planner_action(
+    state: &AppState,
+    canonical_skill: &str,
+    args: &Value,
+) -> bool {
+    let Some(action) = normalized_action_arg(args) else {
+        return false;
+    };
+    state
+        .skill_manifest(canonical_skill)
+        .is_some_and(|manifest| {
+            manifest.planner_capabilities.into_iter().any(|mapping| {
+                mapping
+                    .action
+                    .as_deref()
+                    .map(|value| {
+                        value
+                            .trim()
+                            .to_ascii_lowercase()
+                            .chars()
+                            .map(|ch| {
+                                if matches!(ch, '-' | ' ' | '.') {
+                                    '_'
+                                } else {
+                                    ch
+                                }
+                            })
+                            .collect::<String>()
+                    })
+                    .is_some_and(|mapped| mapped == action)
+                    && matches!(
+                        mapping.effect,
+                        Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
+                    )
+            })
+        })
+}
+
+fn registry_action_can_extend_summary_contract(
+    state: &AppState,
+    canonical_skill: &str,
+    args: &Value,
+    contract_match: &str,
+) -> bool {
+    contract_match == "command_output_summary"
+        && registry_declares_non_mutating_planner_action(state, canonical_skill, args)
 }
 
 fn action_scoped_risk_level(

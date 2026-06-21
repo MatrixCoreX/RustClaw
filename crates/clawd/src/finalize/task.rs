@@ -1117,13 +1117,13 @@ pub(crate) async fn try_finalize_schedule_direct_success(
     task: &crate::ClaimedTask,
     payload: &Value,
     prompt: &str,
-    resolved_prompt_for_execution: &str,
+    _resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
 ) -> Result<bool> {
     if let Ok(Some(schedule_reply)) = crate::intent_router::try_handle_schedule_request(
         state,
         task,
-        resolved_prompt_for_execution,
+        prompt,
         route_result.schedule_intent.as_ref(),
     )
     .await

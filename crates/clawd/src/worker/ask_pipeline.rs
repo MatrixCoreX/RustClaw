@@ -164,7 +164,9 @@ use unbound_context_guard::{
     raw_command_output_without_locator_can_plan_via_contract,
     repair_directory_purpose_command_summary_contract,
     repair_directory_purpose_quantity_comparison_contract,
+    restore_explicit_extension_assess_gap_to_command_summary,
     runtime_status_query_route_can_plan_without_locator,
+    task_control_route_can_plan_without_locator,
     unbound_model_context_target_route_should_force_clarify,
     unbound_targeted_evidence_route_should_force_clarify,
 };
@@ -662,6 +664,7 @@ fn apply_ask_post_route(
     promote_broad_current_workspace_content_summary_to_directory_purpose(prompt, &mut route_result);
     repair_directory_purpose_command_summary_contract(state, prompt, &mut route_result);
     repair_directory_purpose_quantity_comparison_contract(state, prompt, &mut route_result);
+    restore_explicit_extension_assess_gap_to_command_summary(&mut route_result);
     promote_locatorless_git_capability_to_repository_state(&mut route_result);
     promote_locatorless_scalar_child_metadata_to_quantity_comparison(
         state,
