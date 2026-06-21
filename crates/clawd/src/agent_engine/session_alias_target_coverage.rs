@@ -716,6 +716,7 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
                 | crate::OutputSemanticKind::ExistenceWithPathSummary
                 | crate::OutputSemanticKind::ContentExcerptSummary
                 | crate::OutputSemanticKind::ContentExcerptWithSummary
+                | crate::OutputSemanticKind::GeneratedFilePathReport
                 | crate::OutputSemanticKind::ScalarCount
                 | crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames

@@ -44,6 +44,31 @@ fn normalize_planned_actions_resolves_action_ref_call_capability_before_policy_g
 }
 
 #[test]
+fn normalize_planned_actions_applies_skill_arg_aliases_before_verifier() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "image_edit".to_string(),
+        args: json!({
+            "image": "https://example.test/rust.png",
+            "prompt": "pixel art style",
+            "output_path": "document/rust_icon_pixel_smoke.png"
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+    assert_eq!(normalized.len(), 1);
+    let AgentAction::CallSkill { skill, args } = &normalized[0] else {
+        panic!("expected image_edit call, got {:?}", normalized[0]);
+    };
+    assert_eq!(skill, "image_edit");
+    assert_eq!(
+        args.get("instruction").and_then(Value::as_str),
+        Some("pixel art style")
+    );
+}
+
+#[test]
 fn compound_capability_plan_preserves_stat_paths_supporting_content_read() {
     let state = test_state_with_registry();
     let mut route = base_route_result();

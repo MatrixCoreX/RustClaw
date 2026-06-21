@@ -29,8 +29,10 @@ RustClaw's main natural-language path now uses a Codex / Claude style agent loop
 flowchart TD
     A[Channel / UI / API request] --> B[POST /v1/tasks]
     B --> C[Persist task + queue]
-    C --> D[worker_once claims task]
-    D --> E{Task kind}
+    C --> D[Return task_id<br/>caller can poll]
+    D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
+    E0 --> E1[Claim next queued task]
+    E1 --> E{Task kind}
     E -->|run_skill| RS[Direct run_skill path]
     E -->|ask| F[Resolve identity + session + active task]
     F --> G[Intent normalizer<br/>structured hint only]
@@ -66,6 +68,8 @@ flowchart TD
 ```
 
 - `POST /v1/tasks`: channel daemons, the browser UI, and HTTP callers converge on the same persisted task queue.
+- `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
+- `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - `Task kind`: `kind=ask` enters the agent-capable natural-language path; `kind=run_skill` bypasses normalizer and planner and uses the shared skill dispatcher directly.
 - `Intent normalizer`: produces structured hints and compatibility trace fields. It is not the final semantic owner for ordinary eligible work.
 - `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
@@ -274,38 +278,67 @@ Useful code and config entry points:
 
 ```mermaid
 flowchart TD
-    A[Foreground task submit] --> B[Persist task record]
-    B --> C[Worker claim + lease]
-    C --> D[Heartbeat + timeout policy]
-    D --> E[Agent loop round]
-    E --> F[Journal checkpoint<br/>decision + observations + evidence]
-    F --> G{Task state}
-    G -->|needs more loop work| E
-    G -->|long tool / provider wait| H[Waiting or background state]
-    G -->|budget nearly spent| I[Soft stop checkpoint]
-    G -->|complete| J[Finalize visible result]
-    H --> K[Poll / wake / user follow-up]
-    I --> K
-    K --> L[Reload journal + session anchors]
-    L --> E
-    J --> M[Task result + channel delivery]
-    J --> N[Session update<br/>aliases + active task anchors]
-    J --> O[Task journal trace]
-    J -. optional .-> P[Structured memory intent extractor]
-    P --> Q[Runtime validation<br/>enum + scope + confidence + safety]
-    Q --> R[(user_preferences)]
-    Q --> S[(memory_facts)]
-    J -. optional .-> T[Short-term memory write]
-    T --> U[(memories)]
-    J -. optional .-> V[Long-term summary refresh]
-    V --> W[(long_term_memories)]
-    R --> X[Index update]
-    S --> X
-    U --> X
-    W --> X
-    X --> Y[(memory_retrieval_index)]
-    O --> Z[memory_trace + route/loop evidence]
+    A[POST /v1/tasks] --> B[(tasks row<br/>status=queued)]
+    B --> C[Return task_id]
+    C --> D[Caller polls<br/>GET /v1/tasks/:id]
+    B --> E[worker_once tick]
+    E --> F[Runtime recovery pass]
+    F --> G{running task state}
+    G -->|ordinary stale running| H[status=timeout<br/>machine error_text]
+    G -->|paused waiting/background| I[Preserve running<br/>read checkpoint]
+    G -->|no recovery work| J[Claim next queued task]
+    I --> K{checkpoint due?}
+    K -->|not due| D
+    K -->|due| L[claim_due_paused_checkpoint_task<br/>resume lease]
+    L --> M[Seed LoopState<br/>budget + observations + side effects]
+    M --> N[record resume_work_item]
+    N --> O[record resume_executor]
+    O --> P{resume_entrypoint}
+    P -->|next_planner_round| Q[plan run_seeded_agent_loop]
+    P -->|poll_async_job| R[plan poll_async_job]
+    P -->|await_user_input| S[state=needs_user]
+    P -->|verify_and_finalize| T[plan verify_and_finalize]
+    Q --> U[handoff + dispatch claim]
+    R --> U
+    T --> U
+    U --> V{concrete executor}
+    V -->|seeded loop| W[run_agent_with_tools_seeded]
+    V -->|async poll| X[poll adapter result]
+    V -->|finalize| Y[verify/finalize projection]
+    W --> Z[dispatch result]
+    X --> Z
+    Y --> Z
+    Z --> ZA{projection}
+    ZA -->|reschedule| I
+    ZA -->|terminal success/failure| ZB[Persist result_json/status]
+    J --> ZC[Heartbeat + process ask/run_skill]
+    ZC --> ZD{agent loop outcome}
+    ZD -->|soft budget/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint]
+    ZE --> D
+    ZD -->|needs user| S
+    ZD -->|complete| ZB
+    ZB --> ZF[Channel delivery + session update]
+    ZB --> ZG[Task journal trace]
+    ZB -. optional .-> ZH[Structured memory intent extractor]
+    ZH --> ZI[Runtime validation<br/>enum + scope + confidence + safety]
+    ZI --> ZJ[(user_preferences)]
+    ZI --> ZK[(memory_facts)]
+    ZB -. optional .-> ZL[(memories)]
+    ZB -. optional .-> ZM[(long_term_memories)]
+    ZJ --> ZN[(memory_retrieval_index)]
+    ZK --> ZN
+    ZL --> ZN
+    ZM --> ZN
 ```
+
+Important lifecycle details:
+
+- Foreground HTTP/channel waits are short by design. A caller that stops waiting should keep polling the same `task_id`; it should not create a duplicate task or treat the background task as failed.
+- `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
+- Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
+- Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
+- Seeded resume restores checkpoint budget counters, observations, artifact refs, and completed side-effect fingerprints before re-entering the agent loop.
+- Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 
 ## Main Components
 
