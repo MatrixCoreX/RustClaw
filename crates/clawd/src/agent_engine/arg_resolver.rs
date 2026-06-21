@@ -140,6 +140,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
     }
     match normalized_skill {
         "fs_search" => normalize_fs_search_arg_aliases(args),
+        "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
         _ => false,
     }
@@ -184,6 +185,13 @@ fn move_value_alias_if_missing(
     };
     obj.insert(canonical.to_string(), value);
     true
+}
+
+fn normalize_image_edit_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_string_alias_if_missing(obj, "instruction", &["prompt", "query", "text"])
 }
 
 fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {

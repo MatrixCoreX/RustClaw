@@ -129,6 +129,47 @@ fn async_poll_adapter_running_becomes_machine_reschedule() {
 }
 
 #[test]
+fn async_poll_adapter_accepted_becomes_machine_reschedule() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "accepted",
+        "poll_after_seconds": 11,
+        "expires_at": 1_080
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll accepted payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_rescheduled");
+    assert_eq!(payload["reason_code"], "async_poll_accepted");
+    assert_eq!(payload["defer_reason_code"], "async_poll_accepted");
+    assert_eq!(payload["retry_after_seconds"], 11);
+    assert_eq!(payload["next_check_after"], 1_011);
+    assert_eq!(payload["expires_at"], 1_080);
+    assert_eq!(payload["message_key"], "tool.msg.job.running");
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn async_poll_adapter_running_after_expiry_becomes_machine_failure() {
+    let claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "running",
+        "poll_after_seconds": 13,
+        "expires_at": 999
+    })));
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("async poll expired payload");
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(payload["error_code"], "async_poll_expired");
+    assert_eq!(payload["message_key"], "clawd.task.async_poll_expired");
+    assert_eq!(payload["adapter_status"], "running");
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
 fn async_poll_adapter_failure_keeps_machine_error_contract() {
     let claimed = async_poll_claimed_dispatch(Some(json!({
         "job_id": "job-async-poll-adapter",

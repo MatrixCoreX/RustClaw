@@ -844,3 +844,38 @@ fn task_query_lifecycle_maps_timeout_to_failed_machine_state() {
     assert_eq!(lifecycle["terminal_reason"], "worker_task_timeout");
     assert_eq!(lifecycle["can_cancel"], false);
 }
+
+#[test]
+fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
+    let queued = task_query_lifecycle_projection("queued", None, None);
+    assert_eq!(queued["state"], "queued");
+    assert_eq!(queued["can_poll"], true);
+    assert_eq!(queued["can_cancel"], true);
+
+    let needs_user = task_query_lifecycle_projection(
+        "running",
+        Some(&json!({
+            "task_lifecycle": {
+                "state": "needs_user",
+                "checkpoint_id": "ckpt-user",
+                "resume_reason": "confirmation_required"
+            }
+        })),
+        Some(321),
+    );
+    assert_eq!(needs_user["state"], "needs_user");
+    assert_eq!(needs_user["db_status"], "running");
+    assert_eq!(needs_user["can_poll"], true);
+    assert_eq!(needs_user["can_cancel"], true);
+    assert_eq!(needs_user["last_heartbeat_ts"], 321);
+
+    let succeeded = task_query_lifecycle_projection("succeeded", None, None);
+    assert_eq!(succeeded["state"], "succeeded");
+    assert_eq!(succeeded["can_poll"], true);
+    assert_eq!(succeeded["can_cancel"], false);
+
+    let cancelled = task_query_lifecycle_projection("canceled", None, None);
+    assert_eq!(cancelled["state"], "cancelled");
+    assert_eq!(cancelled["can_poll"], true);
+    assert_eq!(cancelled["can_cancel"], false);
+}

@@ -155,6 +155,21 @@ fn fs_search_aliases_normalize_to_supported_contract() {
 }
 
 #[test]
+fn image_edit_prompt_alias_normalizes_to_instruction() {
+    let mut args = json!({
+        "image": "https://example.test/rust.png",
+        "prompt": "pixel art style",
+        "output_path": "document/rust_icon_pixel_smoke.png"
+    });
+
+    assert!(normalize_skill_arg_aliases("image_edit", &mut args));
+    assert_eq!(
+        args.get("instruction").and_then(|value| value.as_str()),
+        Some("pixel art style")
+    );
+}
+
+#[test]
 fn kb_ingest_source_alias_normalizes_to_paths_array() {
     let mut args = json!({
         "action": "ingest",
