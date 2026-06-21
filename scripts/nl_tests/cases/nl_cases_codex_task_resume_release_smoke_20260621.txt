@@ -1,0 +1,73 @@
+# Codex-style task/resume release smoke NL coverage.
+# Created: 2026-06-21
+#
+# Purpose:
+# - Provide a compact, maintainable gate for code changes before the larger aggregate NL suite.
+# - Cover the current RustClaw architecture: ask, direct run_skill boundary, files, config,
+#   system state, task query/cancel, agent-loop execution, checkpoint/resume, image, and voice/audio.
+# - Keep routing pressure on planner/capability metadata instead of runtime natural-language matching.
+#
+# Format:
+# suite|name|tags|prompt|expect=<substring>
+#
+# Default policy:
+# - X/Twitter publish/fetch live API is intentionally excluded.
+# - Destructive operations must be dry-run or scoped to tmp paths that are created and removed by the case.
+# - Image/audio cases are required coverage for release smoke, but may be recorded as provider_blocker when
+#   the configured provider quota or model capability is unavailable.
+# - Long-tail async cases should verify checkpoint/poll/cancel machine fields, not wait on one foreground request.
+# - Direct `kind=run_skill` E2E should be executed by local harness code, not by asking the model to handle auth:
+#   source scripts/lib.sh && submit_run_skill_task health_check '{}'
+#
+# Suggested runner:
+#   bash scripts/nl_tests/run_manual_test.sh \
+#     --case-file scripts/nl_tests/cases/nl_cases_codex_task_resume_release_smoke_20260621.txt \
+#     --prompt-reply-only --fail-fast 3
+
+codex_task_resume_release_smoke|ask_readonly_repo_orientation_zh|covers:ask,doc_parse,fs_basic;requires_tool_call=true;local_readonly|阅读 README.md 和 plan/background_task_resume_convergence_plan_20260621.md，只总结当前任务执行架构里前台 task_id、后台 worker、checkpoint/resume 三个关键词各自代表什么；不要修改文件。|expect=task_id
+
+codex_task_resume_release_smoke|direct_run_skill_boundary_zh|covers:run_skill,task_boundary;requires_tool_call=true;local_readonly|根据 README 说明 kind=ask 和 kind=run_skill 的执行边界：run_skill 是否经过 normalizer/planner、是否走共享 skill dispatcher、结果是否仍进入 task 查询；只回答这些结构化差异，不要提交新任务。|expect=run_skill
+
+codex_task_resume_release_smoke|task_query_lifecycle_fields_zh|covers:task_control,task_query,lifecycle;requires_tool_call=true;local_readonly|查询最近任务列表和其中一个任务详情，只回答机器字段里是否能看到 state、can_poll、can_cancel、db_status、last_heartbeat_ts 或 checkpoint_id；不要取消任务。|expect=can_poll
+
+codex_task_resume_release_smoke|task_cancel_dry_run_boundary_zh|covers:task_control,cancel,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|如果我要取消一个仍在运行的任务，请只做 dry-run：说明需要 task_id、当前 state、can_cancel 和取消后的机器状态字段；不要真的取消任何现有任务。|expect=can_cancel
+
+codex_task_resume_release_smoke|fs_config_system_matrix_zh|covers:fs_basic,config_basic,system_basic;requires_tool_call=true;local_readonly|检查 README.md 是否存在；读取 configs/config.toml 的 llm.selected_vendor 当前值；查看当前工作目录和系统时间；用表格汇总，不能泄露密钥。|expect=llm.selected_vendor
+
+codex_task_resume_release_smoke|tmp_file_side_effect_cycle_zh|covers:fs_basic,write_file,make_dir,remove_file;requires_tool_call=true;local_side_effect|在 tmp/nl_codex_resume_smoke 创建目录，写 note.txt 内容 alpha，再追加 beta，读取确认两行都存在，然后删除这个临时目录；只汇总结构化结果。|expect=note.txt
+
+codex_task_resume_release_smoke|explicit_command_process_zh|covers:run_cmd,process_basic;requires_tool_call=true;local_readonly|执行明确命令 pwd；再检查 clawd 相关进程或监听端口是否可见；回答工作目录和 clawd 是否可见。|expect=/home/guagua/rustclaw
+
+codex_task_resume_release_smoke|git_config_preview_guard_zh|covers:git_basic,config_edit,config_guard;requires_tool_call=true;local_readonly,dry_run|查看当前 git 分支和工作区变更数量；只预览把 configs/config.toml 的 llm.selected_vendor 改成 minimax，不要写入；再运行配置风险检查。|expect=main
+
+codex_task_resume_release_smoke|logs_doc_transform_fixture_zh|covers:log_analyze,doc_parse,transform;requires_tool_call=true;local_readonly|分析 scripts/nl_tests/fixtures/device_local/logs/app.log 的 error 和 warn；解析 scripts/nl_tests/fixtures/device_local/docs/service_notes.md；把 alpha=7、beta=12、gamma=9 按分数降序转成 markdown 表格。|expect=beta
+
+codex_task_resume_release_smoke|archive_db_fixture_zh|covers:archive_basic,db_basic;requires_tool_call=true;local_readonly|列出 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 的成员并读取 notes.txt；再查看 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的表列表。|expect=notes.txt
+
+codex_task_resume_release_smoke|package_docker_safe_probe_zh|covers:package_manager,docker_basic;requires_tool_call=true;local_conditional|检测系统包管理器类型；再用只读方式检查 Docker 版本和容器列表；如果 Docker 不可用，返回结构化 unavailable，不要重试启动 Docker。|expect=Docker
+
+codex_task_resume_release_smoke|kb_local_cycle_zh|covers:kb,doc_parse,fs_basic;requires_tool_call=true;local_side_effect|把 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 导入知识库 namespace=nl_codex_resume_smoke；搜索 service status；再查看这个 namespace 的统计信息。|expect=nl_codex_resume_smoke
+
+codex_task_resume_release_smoke|browser_http_readonly_en|covers:browser_web,http_basic;requires_tool_call=true;external_network|Open https://example.com with the browser extraction tool and make a read-only HTTP GET to the same URL; answer only with the page title and HTTP status.|expect=Example Domain
+
+codex_task_resume_release_smoke|web_search_readonly_en|covers:web_search_extract;requires_tool_call=true;external_network|Search the web for "Rust async tutorial" with top_k=3 and return only titles plus source domains. Do not open extra pages unless the search result already includes metadata.|expect=Rust
+
+codex_task_resume_release_smoke|schedule_boundary_dry_run_zh|covers:schedule,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 RustClaw 服务，请只解析日程意图和需要的结构化字段，不要创建真实提醒任务。|expect=9
+
+codex_task_resume_release_smoke|extension_gap_dry_run_zh|covers:extension_manager,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。|expect=assess
+
+codex_task_resume_release_smoke|install_module_no_install_dry_run_zh|covers:install_module,package_manager,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装任何包或模块；说明应该走系统包管理器还是语言模块安装。|expect=dry
+
+codex_task_resume_release_smoke|checkpoint_resume_machine_fields_zh|covers:agent_loop,checkpoint,resume;requires_tool_call=true;local_readonly|根据 README 和当前计划说明 soft budget 后的 checkpoint/resume 机器字段链路：checkpoint_id、resume_entrypoint、resume_work_item、resume_executor、dispatch_state、result_projection_state；不要新增任务。|expect=checkpoint_id
+
+codex_task_resume_release_smoke|async_job_poll_contract_dry_run_zh|covers:async_poll,checkpoint,resume,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry-run：说明一个长尾工具应如何返回 pending_async_job，并由 worker 通过 poll_async_job、next_check_after、expires_at、message_key 继续轮询；不要启动真实长任务。|expect=poll_async_job
+
+codex_task_resume_release_smoke|provider_blocker_recording_zh|covers:provider_blocker,lifecycle;requires_tool_call=true;dry_run|如果模型 provider 额度不足或窗口暂时不可用，请说明测试记录应该落成 external blocker，而不是把路由或代码判失败；回答里保留 provider_blocker 这个机器 token。|expect=provider_blocker
+
+codex_task_resume_release_smoke|image_vision_local_zh|covers:image_vision,multimodal;requires_tool_call=true;image;local_readonly|看一下本地图片 document/rust_icon_pixel.png，先返回这个图片路径，再用一句中文描述主要内容。|expect=document/rust_icon_pixel.png
+
+codex_task_resume_release_smoke|image_generate_smoke_zh|covers:image_generate,multimodal;requires_tool_call=true;image;provider_optional;side_effect|生成一张 512x512 极简测试图片，文字为 RustClaw Smoke，保存到 document/skill_generate_smoke.png，并返回文件路径。|expect=skill_generate_smoke.png
+
+codex_task_resume_release_smoke|image_edit_smoke_zh|covers:image_edit,multimodal;requires_tool_call=true;image;provider_optional;side_effect|把这张 Rust 图标改成像素风测试图并保存到 document/rust_icon_pixel_smoke.png，然后返回文件路径：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png|expect=rust_icon_pixel_smoke.png
+
+codex_task_resume_release_smoke|audio_synthesize_smoke_zh|covers:audio_synthesize,voice,audio;requires_tool_call=true;audio;provider_optional;side_effect|把“RustClaw 语音能力测试通过”合成一段短语音，保存到 document/skill_audio_smoke.mp3，并返回文件路径。|expect=skill_audio_smoke.mp3

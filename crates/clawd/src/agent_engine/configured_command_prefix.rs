@@ -1094,6 +1094,29 @@ pub(super) fn normalize_planned_actions_with_original(
     )
 }
 
+fn normalize_action_arg_aliases(state: &AppState, actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .map(|mut action| {
+            match &mut action {
+                AgentAction::CallTool { tool, args } => {
+                    let normalized = state.resolve_canonical_skill_name(tool);
+                    super::super::arg_resolver::normalize_skill_arg_aliases(&normalized, args);
+                }
+                AgentAction::CallSkill { skill, args } => {
+                    let normalized = state.resolve_canonical_skill_name(skill);
+                    super::super::arg_resolver::normalize_skill_arg_aliases(&normalized, args);
+                }
+                AgentAction::CallCapability { .. }
+                | AgentAction::SynthesizeAnswer { .. }
+                | AgentAction::Respond { .. }
+                | AgentAction::Think { .. } => {}
+            }
+            action
+        })
+        .collect()
+}
+
 pub(super) fn normalize_planned_actions_with_original_and_context(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -1105,6 +1128,7 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let actions = crate::capability_resolver::resolve_agent_actions_for_state(state, actions);
+    let actions = normalize_action_arg_aliases(state, actions);
     let terminal_mixed_last_output_content = terminal_mixed_last_output_respond_content(&actions);
     let actions = replace_scalar_path_respond_only_with_auto_locator_observation(
         route_result,
