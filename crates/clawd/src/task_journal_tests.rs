@@ -207,6 +207,20 @@ fn summary_json_includes_finalizer_and_task_metrics() {
     assert_eq!(
         summary
             .get("route_result")
+            .and_then(|v| v.get("initial_gate_ref"))
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        summary
+            .get("route_result")
+            .and_then(|v| v.get("initial_hint_ref"))
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .get("route_result")
             .and_then(|v| v.get("legacy_first_layer_decision"))
             .and_then(Value::as_str),
         Some("planner_execute")
@@ -311,6 +325,18 @@ fn agent_decides_shadow_attribution_is_machine_readable() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/initial_gate_ref")
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/initial_hint_ref")
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/old_first_layer_decision")
             .and_then(Value::as_str),
         Some("planner_execute")
@@ -412,6 +438,18 @@ fn dispatch_boundary_attribution_records_owner_and_rollback_tokens() {
             .pointer("/rollout_attribution/0/route_gate_kind")
             .and_then(Value::as_str),
         Some("execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/initial_gate_ref")
+            .and_then(Value::as_str),
+        Some("execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/initial_hint_ref")
+            .and_then(Value::as_str),
+        Some("planner_execute")
     );
     assert_eq!(
         summary

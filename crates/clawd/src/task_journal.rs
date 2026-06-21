@@ -266,6 +266,8 @@ pub(crate) struct TaskJournalRolloutAttribution {
     pub(crate) confidence: Option<f64>,
     pub(crate) risk_level: Option<String>,
     pub(crate) output_contract_ref: Option<String>,
+    pub(crate) initial_gate_ref: Option<String>,
+    pub(crate) initial_hint_ref: Option<String>,
     pub(crate) route_gate_kind: Option<String>,
     pub(crate) old_first_layer_decision: Option<String>,
     pub(crate) agent_decision: Option<String>,
@@ -308,6 +310,13 @@ impl TaskJournalRolloutAttribution {
             reason_code: Some("dispatch_boundary_attribution_recorded".to_string()),
             owner_layer: Some(new_owner.clone()),
             decision: Some(chosen_path.clone()),
+            initial_gate_ref: Some(route.gate_kind().as_str().to_string()),
+            initial_hint_ref: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
             route_gate_kind: Some(route.gate_kind().as_str().to_string()),
             old_first_layer_decision: Some(
                 route
@@ -440,6 +449,13 @@ impl TaskJournalRolloutAttribution {
             reason_code: Some("agent_decides_shadow_not_evaluated".to_string()),
             owner_layer: Some("agent_loop_shadow".to_string()),
             decision: Some(route.gate_kind().as_str().to_string()),
+            initial_gate_ref: Some(route.gate_kind().as_str().to_string()),
+            initial_hint_ref: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
             route_gate_kind: Some(route.gate_kind().as_str().to_string()),
             old_first_layer_decision: Some(
                 route
@@ -485,6 +501,13 @@ impl TaskJournalRolloutAttribution {
             owner_layer: Some("agent_loop_shadow".to_string()),
             decision: Some(agent_decision.to_string()),
             capability_ref: first_non_think_action_capability_ref(actions).map(str::to_string),
+            initial_gate_ref: Some(route.gate_kind().as_str().to_string()),
+            initial_hint_ref: Some(
+                route
+                    .legacy_first_layer_decision_for_trace()
+                    .as_str()
+                    .to_string(),
+            ),
             route_gate_kind: Some(route.gate_kind().as_str().to_string()),
             old_first_layer_decision: Some(
                 route
@@ -540,6 +563,8 @@ fn rollout_attribution_json(attribution: &TaskJournalRolloutAttribution) -> Valu
         "confidence": attribution.confidence,
         "risk_level": attribution.risk_level.as_deref(),
         "output_contract_ref": attribution.output_contract_ref.as_deref(),
+        "initial_gate_ref": attribution.initial_gate_ref.as_deref().or(attribution.route_gate_kind.as_deref()),
+        "initial_hint_ref": attribution.initial_hint_ref.as_deref().or(attribution.old_first_layer_decision.as_deref()),
         "route_gate_kind": attribution.route_gate_kind.as_deref(),
         "old_first_layer_decision": attribution.old_first_layer_decision.as_deref(),
         "agent_decision": attribution.agent_decision.as_deref(),
@@ -777,6 +802,8 @@ fn plan_trace_json(plan: &crate::PlanResult, route: Option<&crate::RouteResult>)
 fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "route_gate_kind": route.gate_kind().as_str(),
+        "initial_gate_ref": route.gate_kind().as_str(),
+        "initial_hint_ref": route.legacy_first_layer_decision_for_trace().as_str(),
         "legacy_first_layer_decision": route.legacy_first_layer_decision_for_trace().as_str(),
         "legacy_route_label": route.legacy_route_label_for_trace(),
         "needs_clarify": route.needs_clarify,
