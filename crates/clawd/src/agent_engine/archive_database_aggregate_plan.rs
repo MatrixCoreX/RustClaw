@@ -189,15 +189,30 @@ fn collect_sqlite_path_candidates(out: &mut Vec<String>, text: &str) {
     if text.is_empty() {
         return;
     }
-    push_sqlite_path_candidate(out, text);
+    push_sqlite_path_candidates_from_locator_text(out, text);
     for locator in
         crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
     {
-        push_sqlite_path_candidate(out, &locator.locator_hint);
+        push_sqlite_path_candidates_from_locator_text(out, &locator.locator_hint);
     }
     for filename in crate::delivery_utils::extract_filename_candidates(text) {
         push_sqlite_path_candidate(out, &filename);
     }
+}
+
+fn push_sqlite_path_candidates_from_locator_text(out: &mut Vec<String>, text: &str) {
+    let parts: Vec<_> = text
+        .split(|ch| matches!(ch, '|' | '\n' | '\r'))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() > 1 {
+        for part in parts {
+            push_sqlite_path_candidate(out, part);
+        }
+        return;
+    }
+    push_sqlite_path_candidate(out, text);
 }
 
 fn push_sqlite_path_candidate(out: &mut Vec<String>, candidate: &str) {
@@ -207,6 +222,9 @@ fn push_sqlite_path_candidate(out: &mut Vec<String>, candidate: &str) {
             '"' | '\'' | '`' | ',' | '，' | '。' | ';' | '；' | '(' | ')' | '（' | '）'
         )
     });
+    if candidate.contains('|') || candidate.contains('\n') || candidate.contains('\r') {
+        return;
+    }
     if !is_sqlite_database_path(candidate) {
         return;
     }
