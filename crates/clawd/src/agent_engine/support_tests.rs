@@ -209,6 +209,14 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         "step_1"
     );
     assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["tool_or_skill"],
+        "config_edit"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["status"],
+        "ok"
+    );
+    assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["signal"],
         "max_rounds"
     );
@@ -240,6 +248,13 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             tool_calls: 2,
             elapsed_ms: 900,
         },
+        attempt_ledger: Some(serde_json::json!([{
+            "attempt_id": "a1",
+            "action_ref": "config_edit",
+            "tool_or_skill": "config_edit",
+            "status": "error",
+            "error_code": "needs_retry"
+        }])),
         pending_async_job: None,
         repair_signal: None,
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
@@ -277,6 +292,17 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             .get("agent_loop.resume_completed_side_effect_count"),
         Some(&"1".to_string())
     );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_attempt_ledger_present"),
+        Some(&"true".to_string())
+    );
+    assert!(loop_state
+        .history_compact
+        .iter()
+        .any(|line| line.starts_with("checkpoint_attempt_ledger_json=")
+            && line.contains("\"error_code\":\"needs_retry\"")));
     assert_eq!(
         loop_state
             .task_checkpoint

@@ -644,6 +644,21 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
         "agent_loop.resume_observation_count".to_string(),
         checkpoint.observations.len().to_string(),
     );
+    if let Some(attempt_ledger) = checkpoint
+        .attempt_ledger
+        .as_ref()
+        .filter(|value| value.is_array() || value.is_object())
+    {
+        loop_state.output_vars.insert(
+            "agent_loop.resume_attempt_ledger_present".to_string(),
+            "true".to_string(),
+        );
+        if let Ok(snapshot) = serde_json::to_string(attempt_ledger) {
+            loop_state
+                .history_compact
+                .push(format!("checkpoint_attempt_ledger_json={snapshot}"));
+        }
+    }
 
     loop_state.history_compact.push(format!(
         "checkpoint_resume checkpoint_id={} entrypoint={} round={} step={} tool_calls={} side_effects={} observations={}",

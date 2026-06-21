@@ -806,6 +806,8 @@ pub(crate) struct TaskCheckpoint {
     pub(crate) artifact_refs: Vec<String>,
     pub(crate) completed_side_effect_refs: Vec<String>,
     pub(crate) budget: CheckpointBudgetCounters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) attempt_ledger: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) pending_async_job: Option<AsyncJobRef>,
     #[serde(skip_serializing_if = "Option::is_none")]

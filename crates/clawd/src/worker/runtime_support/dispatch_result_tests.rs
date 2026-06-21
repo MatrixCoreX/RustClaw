@@ -30,6 +30,7 @@ fn seeded_claimed_dispatch() -> crate::repo::ClaimedDispatchedPausedCheckpointRe
             tool_calls: 1,
             elapsed_ms: 100,
         },
+        attempt_ledger: None,
         pending_async_job: None,
         repair_signal: None,
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
@@ -96,6 +97,7 @@ fn async_poll_claimed_dispatch(
             tool_calls: 1,
             elapsed_ms: 100,
         },
+        attempt_ledger: None,
         pending_async_job: Some(crate::task_lifecycle::AsyncJobRef {
             job_id: "job-async-poll".to_string(),
             status: crate::task_lifecycle::AsyncJobStatus::Running,
