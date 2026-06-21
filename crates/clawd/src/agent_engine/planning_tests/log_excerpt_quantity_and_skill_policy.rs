@@ -362,6 +362,66 @@ fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observatio
 }
 
 #[test]
+fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "git_basic".to_string(),
+            args: json!({"action": "status"}),
+        },
+        AgentAction::CallSkill {
+            skill: "config_edit".to_string(),
+            args: json!({
+                "action": "plan_config_change",
+                "path": "configs/config.toml",
+                "field_path": "llm.selected_vendor",
+                "value": "minimax",
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "config_basic".to_string(),
+            args: json!({
+                "action": "guard_rustclaw_config",
+                "path": "configs/config.toml",
+            }),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "preview configs/config.toml llm.selected_vendor minimax and guard config",
+        None,
+        actions,
+    );
+
+    assert!(
+        normalized.iter().any(|action| planned_call_is(
+            action,
+            "config_edit",
+            "plan_config_change"
+        )),
+        "normalized actions: {normalized:?}"
+    );
+    assert!(
+        normalized.iter().any(|action| planned_call_is(
+            action,
+            "config_basic",
+            "guard_rustclaw_config"
+        )),
+        "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
 fn active_ops_apply_keeps_mutation_despite_summary_contract_hint() {
     let state = test_state_with_registry();
     let mut route = route_result(

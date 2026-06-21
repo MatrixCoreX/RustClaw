@@ -609,6 +609,13 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 );
                 return action;
             }
+            if registry_declares_non_mutating_planner_action(state, &normalized_skill, args) {
+                info!(
+                    "plan_keep_registry_non_mutating_action idx={} contract={} action={}",
+                    idx, policy.contract_match, policy.action_key
+                );
+                return action;
+            }
 
             for preferred in &preferred_actions {
                 let Some(candidate) = preferred_structured_action_for_contract_hint(
@@ -652,6 +659,54 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 );
             }
             action
+        })
+        .collect()
+}
+
+fn registry_declares_non_mutating_planner_action(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    let Some(action) = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_registry_action_token)
+        .filter(|action| !action.is_empty())
+    else {
+        return false;
+    };
+    state
+        .skill_manifest(normalized_skill)
+        .is_some_and(|manifest| {
+            manifest.planner_capabilities.into_iter().any(|mapping| {
+                mapping
+                    .action
+                    .as_deref()
+                    .map(normalize_registry_action_token)
+                    .is_some_and(|mapped| mapped == action)
+                    && matches!(
+                        mapping.effect,
+                        Some(
+                            claw_core::skill_registry::PlannerCapabilityEffect::Observe
+                                | claw_core::skill_registry::PlannerCapabilityEffect::Validate
+                        )
+                    )
+            })
+        })
+}
+
+fn normalize_registry_action_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
         })
         .collect()
 }

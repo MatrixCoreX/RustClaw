@@ -128,6 +128,7 @@ pub(super) fn normalize_schedule_intent_from_normalizer(
         return None;
     }
     let mut intent = schedule_intent?;
+    crate::schedule_service::normalize_schedule_intent_alias_fields(&mut intent);
     let cleaned_kind = crate::schedule_service::clean_schedule_kind(&intent.kind);
     if !cleaned_kind.is_empty() && cleaned_kind != schedule_kind.as_str() {
         return None;
@@ -168,10 +169,21 @@ fn schedule_intent_is_complete_enough_for_direct_use(
             let schedule_type =
                 crate::schedule_service::clean_schedule_kind(&intent.schedule.r#type);
             let task_kind = crate::schedule_service::clean_schedule_kind(&intent.task.kind);
-            matches!(
+            if !matches!(
                 schedule_type.as_str(),
                 "once" | "daily" | "weekly" | "interval" | "cron"
-            ) && matches!(task_kind.as_str(), "ask" | "run_skill")
+            ) || !matches!(task_kind.as_str(), "ask" | "run_skill")
+            {
+                return false;
+            }
+            if schedule_type == "once" {
+                return crate::schedule_service::parse_local_datetime(
+                    &intent.schedule.run_at,
+                    crate::schedule_service::parse_timezone(&intent.timezone),
+                )
+                .is_some();
+            }
+            true
         }
         ScheduleKind::Update | ScheduleKind::Delete | ScheduleKind::Query => true,
         ScheduleKind::None => false,

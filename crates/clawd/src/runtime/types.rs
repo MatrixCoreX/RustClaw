@@ -4,6 +4,10 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+fn bool_is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeChannel {
     Telegram,
@@ -230,6 +234,14 @@ pub(crate) struct ScheduleIntentOutput {
     #[serde(default)]
     pub(crate) raw: String,
     #[serde(default)]
+    pub(crate) mode: String,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub(crate) dry_run: bool,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub(crate) preview_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) create_real: Option<bool>,
+    #[serde(default)]
     pub(crate) reason: String,
     #[serde(default)]
     pub(crate) needs_clarify: bool,
@@ -243,7 +255,7 @@ pub(crate) struct ScheduleIntentOutput {
 pub(crate) struct ScheduleIntentSchedule {
     #[serde(default)]
     pub(crate) r#type: String,
-    #[serde(default)]
+    #[serde(default, alias = "trigger_at")]
     pub(crate) run_at: String,
     #[serde(default)]
     pub(crate) time: String,
@@ -253,6 +265,10 @@ pub(crate) struct ScheduleIntentSchedule {
     pub(crate) every_minutes: i64,
     #[serde(default)]
     pub(crate) cron: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) timezone: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) content: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

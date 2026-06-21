@@ -1,5 +1,6 @@
 // Normalizer schedule and turn-policy tests for intent_router.
 
+use crate::runtime::types::{ScheduleIntentSchedule, ScheduleIntentTask};
 use crate::FirstLayerDecision;
 
 use super::{
@@ -113,6 +114,37 @@ fn normalizer_schedule_intent_missing_object_uses_schedule_compiler_later() {
         0.9,
     );
     assert!(intent.is_none());
+}
+
+#[test]
+fn normalizer_schedule_intent_relative_trigger_at_uses_schedule_compiler_later() {
+    let intent = crate::ScheduleIntentOutput {
+        kind: "create".to_string(),
+        mode: String::new(),
+        dry_run: true,
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "tomorrow 09:00:00 +08:00".to_string(),
+            content: "check service".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: String::new(),
+            payload: serde_json::json!({}),
+        },
+        confidence: 0.9,
+        ..Default::default()
+    };
+    let normalized = super::normalize_schedule_intent_from_normalizer(
+        super::ScheduleKind::Create,
+        Some(intent),
+        "Create a one-time reminder tomorrow",
+        "schedule operation recognized",
+        false,
+        "",
+        0.9,
+    );
+    assert!(normalized.is_none());
 }
 
 #[test]

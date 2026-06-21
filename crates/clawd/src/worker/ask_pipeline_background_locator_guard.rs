@@ -58,6 +58,7 @@ pub(super) fn background_only_locator_route_should_force_clarify(
         || route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         || generated_file_delivery_uses_runtime_target(route_result)
         || semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
+        || task_control_route_can_plan_without_locator(route_result)
         || route_reason_has_marker(
             route_result,
             WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,

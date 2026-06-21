@@ -359,12 +359,49 @@ pub(crate) fn parse_timezone(raw: &str) -> Tz {
 }
 
 pub(crate) fn parse_local_datetime(raw: &str, tz: Tz) -> Option<i64> {
-    let dt = NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S")
+    let trimmed = raw.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Some(dt.with_timezone(&Utc).timestamp());
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %:z") {
+        return Some(dt.with_timezone(&Utc).timestamp());
+    }
+    let normalized = trimmed.replace('T', " ");
+    let dt = NaiveDateTime::parse_from_str(normalized.trim(), "%Y-%m-%d %H:%M:%S")
         .ok()
-        .or_else(|| NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M").ok())?;
+        .or_else(|| NaiveDateTime::parse_from_str(normalized.trim(), "%Y-%m-%d %H:%M").ok())?;
     tz.from_local_datetime(&dt)
         .earliest()
         .map(|v| v.with_timezone(&Utc).timestamp())
+}
+
+pub(crate) fn normalize_schedule_intent_alias_fields(intent: &mut ScheduleIntentOutput) {
+    if intent.mode.trim().is_empty()
+        && (intent.dry_run || intent.preview_only || intent.create_real == Some(false))
+    {
+        intent.mode = "compile_only".to_string();
+    }
+    if intent.timezone.trim().is_empty() && !intent.schedule.timezone.trim().is_empty() {
+        intent.timezone = intent.schedule.timezone.trim().to_string();
+    }
+    let content = sanitize_schedule_task_text(&intent.schedule.content);
+    if !content.is_empty() {
+        if intent.task.kind.trim().is_empty() {
+            intent.task.kind = "ask".to_string();
+        }
+        if !intent.task.payload.is_object() {
+            intent.task.payload = json!({});
+        }
+        if let Value::Object(map) = &mut intent.task.payload {
+            let has_text = map
+                .get("text")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| !sanitize_schedule_task_text(value).is_empty());
+            if !has_text {
+                map.insert("text".to_string(), Value::String(content));
+            }
+        }
+    }
 }
 
 fn parse_hhmm(raw: &str) -> Option<(u32, u32)> {
@@ -577,14 +614,14 @@ fn is_supported_schedule_type(schedule_type: &str) -> bool {
 fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &str) -> String {
     if task_kind == "ask" {
         if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-            let t = text.trim();
+            let t = sanitize_schedule_task_text(text);
             if !t.is_empty() {
-                return t.to_string();
+                return t;
             }
         }
-        let p = fallback_prompt.trim();
+        let p = sanitize_schedule_task_text(fallback_prompt);
         if !p.is_empty() {
-            return p.to_string();
+            return p;
         }
     } else if task_kind == "run_skill" {
         let skill = payload
@@ -606,6 +643,43 @@ fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &st
         "-".to_string()
     } else {
         payload_str
+    }
+}
+
+fn sanitize_schedule_task_text(raw: &str) -> String {
+    const INTERNAL_CONTEXT_MARKERS: &[&str] = &[
+        "### RUNTIME_CONTEXT",
+        "### ACTIVE_TASK_CONTEXT",
+        "### ACTIVE_EXECUTION_ANCHOR",
+        "### SESSION_ALIAS_BINDINGS",
+        "### REQUEST_SURFACE_HINTS",
+        "### RECENT_EXECUTION_CONTEXT",
+    ];
+
+    let mut end = raw.len();
+    for marker in INTERNAL_CONTEXT_MARKERS {
+        if let Some(idx) = raw.find(marker) {
+            end = end.min(idx);
+        }
+    }
+    raw[..end].trim().to_string()
+}
+
+fn sanitize_schedule_ask_payload_text(payload: &mut Value, fallback_prompt: &str) {
+    let Value::Object(map) = payload else {
+        return;
+    };
+    let cleaned = map
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(sanitize_schedule_task_text)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let fallback = sanitize_schedule_task_text(fallback_prompt);
+            (!fallback.is_empty()).then_some(fallback)
+        });
+    if let Some(cleaned) = cleaned {
+        map.insert("text".to_string(), Value::String(cleaned));
     }
 }
 
@@ -677,13 +751,45 @@ fn schedule_needs_more_info_fallback_text(
     )
 }
 
+fn schedule_intent_mode(intent: &ScheduleIntentOutput) -> &str {
+    let mode = intent.mode.trim();
+    if mode.is_empty() {
+        "execute"
+    } else {
+        mode
+    }
+}
+
+fn schedule_intent_is_compile_only(intent: &ScheduleIntentOutput) -> bool {
+    matches!(schedule_intent_mode(intent), "compile_only" | "dry_run")
+}
+
+fn schedule_compile_only_response(
+    intent: &ScheduleIntentOutput,
+    kind: &str,
+    would_mutate: bool,
+    extra: Value,
+) -> String {
+    json!({
+        "schema_version": 1,
+        "semantic_kind": "schedule_intent_preview",
+        "status": "ok",
+        "mode": schedule_intent_mode(intent),
+        "kind": kind,
+        "would_mutate": would_mutate,
+        "intent": intent,
+        "extra": extra,
+    })
+    .to_string()
+}
+
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
     precompiled_intent: Option<&ScheduleIntentOutput>,
 ) -> Result<Option<String>, String> {
-    let intent = if let Some(intent) = precompiled_intent
+    let mut intent = if let Some(intent) = precompiled_intent
         .filter(|intent| intent.needs_clarify || !clean_schedule_kind(&intent.kind).is_empty())
     {
         intent.clone()
@@ -703,6 +809,7 @@ pub(crate) async fn try_handle_schedule_request(
             Err(_) => return Ok(None),
         }
     };
+    normalize_schedule_intent_alias_fields(&mut intent);
     let kind = clean_schedule_kind(&intent.kind);
     if intent.needs_clarify {
         let q = intent.clarify_question.trim();
@@ -724,6 +831,14 @@ pub(crate) async fn try_handle_schedule_request(
         "schedule intent parsed: task_id={} kind={} confidence={}",
         task.task_id, kind, intent.confidence
     );
+    if schedule_intent_is_compile_only(&intent) && kind != "create" {
+        return Ok(Some(schedule_compile_only_response(
+            &intent,
+            &kind,
+            matches!(kind.as_str(), "delete" | "pause" | "resume"),
+            json!({}),
+        )));
+    }
     match kind.as_str() {
         "list" => {
             let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
@@ -1017,7 +1132,10 @@ pub(crate) async fn try_handle_schedule_request(
                 intent.task.payload.clone()
             };
 
-            let payload = inherit_schedule_delivery_context(task, payload);
+            let mut payload = inherit_schedule_delivery_context(task, payload);
+            if task_kind == "ask" {
+                sanitize_schedule_ask_payload_text(&mut payload, prompt);
+            }
 
             let payload = if task_kind == "run_skill" {
                 match validate_schedule_run_skill(state, &payload) {
@@ -1027,6 +1145,25 @@ pub(crate) async fn try_handle_schedule_request(
             } else {
                 payload
             };
+
+            let next_run_human = humanize_next_run_at(next_run_at, &timezone);
+            let task_content = summarize_task_content(&task_kind, &payload, prompt);
+            if schedule_intent_is_compile_only(&intent) {
+                return Ok(Some(schedule_compile_only_response(
+                    &intent,
+                    &kind,
+                    false,
+                    json!({
+                        "schedule_type": schedule_type,
+                        "timezone": timezone,
+                        "next_run_at": next_run_at,
+                        "next_run_human": next_run_human,
+                        "task_kind": task_kind,
+                        "task_payload": payload,
+                        "task_content": task_content,
+                    }),
+                )));
+            }
 
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
             let created_at = crate::now_ts();
@@ -1059,8 +1196,6 @@ pub(crate) async fn try_handle_schedule_request(
             )
             .map_err(|e| e.to_string())?;
 
-            let next_run_human = humanize_next_run_at(next_run_at, &timezone);
-            let task_content = summarize_task_content(&task_kind, &payload, prompt);
             Ok(Some(schedule_t_with(
                 state,
                 "schedule.msg.create_ok",

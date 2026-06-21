@@ -126,6 +126,21 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "config_edit"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "text"
+side_effect = true
+requires_confirmation = true
+auto_invocable = true
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, field_path = { type = "string" }, value = { type = "string" } } }
+planner_capabilities = [
+  { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], risk_level = "low" },
+  { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], risk_level = "high" },
+]
+
+[[skills]]
 name = "audio_synthesize"
 enabled = true
 kind = "runner"
@@ -793,6 +808,88 @@ fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection(
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+}
+
+#[test]
+fn summary_contract_allows_registry_observe_config_preview_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::CommandOutputSummary);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "config_edit".to_string(),
+                args: json!({
+                    "action": "plan_config_change",
+                    "path": "configs/config.toml",
+                    "field_path": "llm.selected_vendor",
+                    "value": "minimax"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
+#[test]
+fn summary_contract_still_rejects_registry_mutating_config_apply() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::CommandOutputSummary);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "config_edit".to_string(),
+                args: json!({
+                    "action": "apply_config_change",
+                    "path": "configs/config.toml",
+                    "field_path": "llm.selected_vendor",
+                    "value": "minimax"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
 }
 
 #[test]

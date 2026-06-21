@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::types::{ScheduleIntentSchedule, ScheduleIntentTask};
 use crate::ClaimedTask;
 use serde_json::json;
 
@@ -142,6 +143,153 @@ fn schedule_payload_does_not_inherit_context_token_for_non_wechat_channel() {
     let merged = inherit_schedule_delivery_context(&task, payload);
 
     assert_eq!(merged.get("context_token"), None);
+}
+
+#[tokio::test]
+async fn schedule_compile_only_create_returns_preview_without_insert() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_task_with_payload(
+        "ui",
+        json!({
+            "text": "schedule parser dry-run"
+        }),
+    );
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        mode: "compile_only".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "ask".to_string(),
+            payload: json!({"text": "check service"}),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+
+    let reply =
+        try_handle_schedule_request(&state, &task, "schedule parser dry-run", Some(&intent))
+            .await
+            .expect("schedule handler")
+            .expect("preview reply");
+    let value: serde_json::Value = serde_json::from_str(&reply).expect("preview json");
+    assert_eq!(
+        value.get("semantic_kind").and_then(|value| value.as_str()),
+        Some("schedule_intent_preview")
+    );
+    assert_eq!(
+        value.get("would_mutate").and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    let db = state.core.db.get().expect("db");
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM scheduled_jobs", [], |row| row.get(0))
+        .expect("count scheduled jobs");
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn schedule_compile_only_preview_strips_internal_context_from_ask_payload() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_task_with_payload(
+        "ui",
+        json!({
+            "text": "schedule parser dry-run"
+        }),
+    );
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        mode: "compile_only".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "ask".to_string(),
+            payload: json!({}),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+    let prompt_with_internal_context =
+        "check service\n\n### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/runtime.log";
+
+    let reply =
+        try_handle_schedule_request(&state, &task, prompt_with_internal_context, Some(&intent))
+            .await
+            .expect("schedule handler")
+            .expect("preview reply");
+    let value: serde_json::Value = serde_json::from_str(&reply).expect("preview json");
+    assert_eq!(
+        value
+            .pointer("/extra/task_content")
+            .and_then(|value| value.as_str()),
+        Some("check service")
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/task_payload/text")
+            .and_then(|value| value.as_str()),
+        Some("check service")
+    );
+    assert!(!value.to_string().contains("ACTIVE_EXECUTION_ANCHOR"));
+}
+
+#[test]
+fn parse_local_datetime_accepts_t_separator_and_offset_forms() {
+    let tz = parse_timezone("Asia/Shanghai");
+    let base = parse_local_datetime("2099-01-01 09:00:00", tz).expect("space datetime");
+    assert_eq!(parse_local_datetime("2099-01-01T09:00:00", tz), Some(base));
+    assert_eq!(
+        parse_local_datetime("2099-01-01 09:00:00 +08:00", tz),
+        Some(base)
+    );
+    assert_eq!(
+        parse_local_datetime("2099-01-01T09:00:00+08:00", tz),
+        Some(base)
+    );
+}
+
+#[test]
+fn schedule_intent_alias_fields_normalize_to_canonical_payload() {
+    let mut intent: ScheduleIntentOutput = serde_json::from_value(json!({
+        "kind": "create",
+        "dry_run": true,
+        "timezone": "",
+        "schedule": {
+            "type": "once",
+            "trigger_at": "2099-01-01T09:00:00+08:00",
+            "timezone": "Asia/Shanghai",
+            "content": "check service"
+        },
+        "task": {
+            "kind": "",
+            "payload": {}
+        },
+        "confidence": 0.99
+    }))
+    .expect("schedule intent aliases");
+
+    normalize_schedule_intent_alias_fields(&mut intent);
+
+    assert_eq!(intent.mode, "compile_only");
+    assert_eq!(intent.timezone, "Asia/Shanghai");
+    assert_eq!(intent.schedule.run_at, "2099-01-01T09:00:00+08:00");
+    assert_eq!(intent.task.kind, "ask");
+    assert_eq!(
+        intent
+            .task
+            .payload
+            .get("text")
+            .and_then(|value| value.as_str()),
+        Some("check service")
+    );
 }
 
 #[test]
@@ -495,6 +643,7 @@ fn schedule_intent_schema_drift() {
         "task",
         "target_job_id",
         "raw",
+        "mode",
         "confidence",
         "reason",
         "needs_clarify",
@@ -550,6 +699,7 @@ fn schedule_intent_schema_drift() {
         },
         "target_job_id": "",
         "raw": "每天 8 点看天气",
+        "mode": "execute",
         "confidence": 0.9,
         "reason": "daily weather schedule",
         "needs_clarify": false,

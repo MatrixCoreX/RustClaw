@@ -973,6 +973,32 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
 }
 
 #[test]
+fn directory_purpose_extension_inventory_defers_explicit_extension_assess_gap() {
+    let root = TempDirGuard::new("directory_purpose_extension_assess_gap_defers");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "*.csv".to_string();
+    route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
+    route.route_reason = "capability=extension.assess_gap".to_string();
+
+    assert!(
+        directory_purpose_extension_inventory_deterministic_plan_result(
+            "extension_manager assess_gap",
+            Some(&route),
+            &LoopState::new(1),
+            Some(&root_path),
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn directory_purpose_reads_representative_found_files_after_extension_inventory() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
