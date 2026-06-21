@@ -53,6 +53,7 @@ struct ActiveTaskItem {
 struct SkillInput {
     action: String,
     index: Option<usize>,
+    task_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -136,9 +137,12 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .to_ascii_lowercase();
     let action = match action.as_str() {
         "list" | "query" | "status" => "list",
+        "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
-        _ => return Err("unsupported action; use list | cancel_all | cancel_one".to_string()),
+        _ => {
+            return Err("unsupported action; use list | get | cancel_all | cancel_one".to_string())
+        }
     }
     .to_string();
     let index = obj
@@ -150,7 +154,21 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     if action == "cancel_one" && index.unwrap_or(0) == 0 {
         return Err("cancel_one requires index >= 1".to_string());
     }
-    Ok(SkillInput { action, index })
+    let task_id = obj
+        .get("task_id")
+        .or_else(|| obj.get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    if action == "get" && task_id.is_none() {
+        return Err("get requires task_id".to_string());
+    }
+    Ok(SkillInput {
+        action,
+        index,
+        task_id,
+    })
 }
 
 fn execute(
@@ -182,6 +200,18 @@ fn execute(
                 Ok(SkillOutput::structured(
                     render_task_list(&tasks),
                     task_list_extra(&tasks),
+                ))
+            }
+            "get" => {
+                let task_id = input
+                    .task_id
+                    .as_deref()
+                    .ok_or_else(|| "get requires task_id".to_string())?;
+                let detail =
+                    fetch_task_detail(&client, &base_url, task_id, user_key.as_deref()).await?;
+                Ok(SkillOutput::structured(
+                    render_task_detail(&detail),
+                    task_detail_extra(task_id, &detail),
                 ))
             }
             "cancel_all" => {
@@ -277,6 +307,27 @@ async fn fetch_active_tasks(
         debug_assert_eq!(v.count, v.tasks.len());
         v.tasks
     })
+}
+
+async fn fetch_task_detail(
+    client: &reqwest::Client,
+    base_url: &str,
+    task_id: &str,
+    user_key: Option<&str>,
+) -> Result<Value, String> {
+    let mut req = client.get(format!(
+        "{}/v1/tasks/{}",
+        base_url.trim_end_matches('/'),
+        task_id
+    ));
+    if let Some(key) = user_key {
+        req = req.header("x-rustclaw-key", key);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request task detail failed: {e}"))?;
+    parse_api_response::<Value>(resp).await
 }
 
 async fn cancel_all_tasks(
@@ -420,6 +471,39 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
             "count": task_count,
             "task_count": task_count,
             "has_unfinished": task_count > 0,
+        },
+    })
+}
+
+fn render_task_detail(detail: &Value) -> String {
+    serde_json::to_string(&task_detail_extra(
+        detail
+            .get("task_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        detail,
+    ))
+    .unwrap_or_else(|_| "{\"action\":\"get\",\"status\":\"decode_error\"}".to_string())
+}
+
+fn task_detail_extra(task_id: &str, detail: &Value) -> Value {
+    let status = detail
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let lifecycle = detail.get("lifecycle").cloned().unwrap_or(Value::Null);
+    json!({
+        "schema_version": 1,
+        "action": "get",
+        "status": if status.is_empty() { "unknown" } else { status },
+        "task_id": task_id,
+        "db_status": status,
+        "lifecycle": lifecycle,
+        "field_value": {
+            "action": "get",
+            "task_id": task_id,
+            "db_status": status,
+            "lifecycle": detail.get("lifecycle").cloned().unwrap_or(Value::Null),
         },
     })
 }

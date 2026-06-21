@@ -584,6 +584,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "task_control.list.structured_json_v1",
         &["content_excerpt", "field_value", "status"],
     ),
+    step_json_extractor(
+        "task_control.get",
+        "task_control.get.structured_json_v1",
+        &["field_value", "status"],
+    ),
     step_text_extractor(
         "archive_basic",
         "archive_basic.text_legacy_v1",
@@ -613,6 +618,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "task_control.list",
         "task_control.list.text_legacy_v1",
         &["content_excerpt", "field_value", "status"],
+    ),
+    step_text_extractor(
+        "task_control.get",
+        "task_control.get.text_legacy_v1",
+        &["field_value", "status"],
     ),
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepOutput,

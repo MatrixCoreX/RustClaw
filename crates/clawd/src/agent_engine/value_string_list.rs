@@ -1131,6 +1131,30 @@ pub(super) fn service_status_deterministic_plan_result(
             }
         }
     }
+    if task_control_available_for_plan(state) {
+        if let Some(task_id) = first_task_id_token(route, user_text) {
+            let action = AgentAction::CallSkill {
+                skill: "task_control".to_string(),
+                args: serde_json::json!({"action": "get", "task_id": task_id}),
+            };
+            if let AgentAction::CallSkill { skill, args } = &action {
+                if crate::contract_matrix::action_policy_for_output_contract(
+                    Some(&route.output_contract),
+                    skill,
+                    args,
+                )
+                .is_some_and(|policy| policy.is_allowed())
+                {
+                    return Some(build_plan_result(
+                        goal,
+                        "deterministic:service_status_task_control_get",
+                        PlanKind::Single,
+                        &[action],
+                    ));
+                }
+            }
+        }
+    }
     if task_control_available_for_plan(state) && route_mentions_task_control_list(route) {
         let action = AgentAction::CallSkill {
             skill: "task_control".to_string(),
@@ -1370,6 +1394,34 @@ fn web_search_query_from_route(route: &RouteResult) -> Option<String> {
 fn route_mentions_task_control_list(route: &RouteResult) -> bool {
     route_reason_has_marker(route, "capability_ref=task_control.list")
         || route_reason_has_marker(route, "task_control.list")
+}
+
+fn first_task_id_token(route: &RouteResult, user_text: &str) -> Option<String> {
+    [
+        user_text,
+        route.resolved_intent.as_str(),
+        route.route_reason.as_str(),
+        route.output_contract.locator_hint.as_str(),
+    ]
+    .into_iter()
+    .find_map(first_uuid_like_token)
+}
+
+fn first_uuid_like_token(text: &str) -> Option<String> {
+    text.split(|ch: char| !(ch.is_ascii_hexdigit() || ch == '-'))
+        .map(str::trim)
+        .find(|token| is_uuid_like_token(token))
+        .map(ToString::to_string)
+}
+
+fn is_uuid_like_token(token: &str) -> bool {
+    if token.len() != 36 {
+        return false;
+    }
+    token.char_indices().all(|(idx, ch)| match idx {
+        8 | 13 | 18 | 23 => ch == '-',
+        _ => ch.is_ascii_hexdigit(),
+    })
 }
 
 pub(super) fn service_status_url_locator(route: &RouteResult, user_text: &str) -> Option<String> {
