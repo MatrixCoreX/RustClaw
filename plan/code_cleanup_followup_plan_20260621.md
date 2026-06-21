@@ -146,15 +146,20 @@
 
 目标：继续把 `FirstLayerDecision` / `legacy_normalizer_decision` / `legacy_first_layer_decision_for_trace` 限制在 normalizer hint、journal trace 和历史日志读取边界。
 
-- [ ] 审核 `intent_router_route_output.rs` 的 `ask_mode_from_legacy_normalizer_decision()`，确认它是否还能改名为 hint-based 转换，避免暗示旧决策仍是语义权威。
-- [ ] 审核 `runtime/ask_mode.rs` 中的 `legacy_route_label_for_trace()` / `legacy_first_layer_decision_for_trace()`，确认调用点只用于 trace / journal。
-- [ ] 审核 `task_journal.rs` 中 `old_first_layer_decision` 与 `legacy_first_layer_decision` 输出字段，判断是否可以新增新字段名并保留旧字段只做历史兼容。
-- [ ] 保持 `semantic_route_authority` 为当前机器 token；不恢复 `agent_decides_semantic_route` / `agent_decides_migration_class` 运行时配置解析。
+- [x] 审核 `intent_router_route_output.rs` 的 `ask_mode_from_legacy_normalizer_decision()`，确认它是否还能改名为 hint-based 转换，避免暗示旧决策仍是语义权威。
+  - 2026-06-21：已改名为 `ask_mode_from_normalizer_hint()`；输入仍是兼容 normalizer token，但 `AskMode` 才是 runtime dispatch 状态。
+- [x] 审核 `runtime/ask_mode.rs` 中的 `legacy_route_label_for_trace()` / `legacy_first_layer_decision_for_trace()`，确认调用点只用于 trace / journal。
+  - 2026-06-21：保留 `_for_trace` 命名；focused `ask_mode` tests 证明实际 dispatch 使用 `gate_kind()` / `AskMode`，旧 label 仅为日志/journal 兼容输出。
+- [x] 审核 `task_journal.rs` 中 `old_first_layer_decision` 与 `legacy_first_layer_decision` 输出字段，判断是否可以新增新字段名并保留旧字段只做历史兼容。
+  - 2026-06-21：`route_result` 和 rollout attribution 新增 `initial_gate_ref` / `initial_hint_ref`；旧 `legacy_first_layer_decision` / `old_first_layer_decision` 继续输出给历史日志兼容。
+- [x] 保持 `semantic_route_authority` 为当前机器 token；不恢复 `agent_decides_semantic_route` / `agent_decides_migration_class` 运行时配置解析。
+  - 2026-06-21：代码核对 `load_agent_loop_guard_policy()` 只解析 `semantic_route_authority` 和 `agent_loop_canary_bucket`；旧 bool 仅在配置注释、docs 和测试说明中出现。
 
 验收：
 
-- [ ] `python3 scripts/check_legacy_route_boundary.py` 通过。
-- [ ] 旧字段不回流为 agent-loop 控制状态。
+- [x] `python3 scripts/check_legacy_route_boundary.py` 通过。
+- [x] 旧字段不回流为 agent-loop 控制状态。
+  - 2026-06-21：`cargo test -p clawd task_journal -- --nocapture`、`cargo test -p clawd ask_mode -- --nocapture` 通过。
 
 ## Track D: 文档和配置残留说明清理
 
