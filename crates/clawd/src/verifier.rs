@@ -712,6 +712,9 @@ fn effective_step_risk_level(
     normalized_skill: &str,
     args: &serde_json::Value,
 ) -> SkillRiskLevel {
+    if package_manager_dry_run_install_action(normalized_skill, args) {
+        return SkillRiskLevel::Low;
+    }
     if let Some(risk) = action_scoped_risk_level(state, normalized_skill, args) {
         return risk;
     }
@@ -728,6 +731,25 @@ fn effective_step_risk_level(
     } else {
         SkillRiskLevel::Low
     }
+}
+
+fn package_manager_dry_run_install_action(
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> bool {
+    if normalized_skill != "package_manager" {
+        return false;
+    }
+    if args.get("dry_run").and_then(serde_json::Value::as_bool) != Some(true) {
+        return false;
+    }
+    let action = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .unwrap_or_default();
+    matches!(action.as_str(), "install" | "uninstall" | "smart_install")
 }
 
 fn risk_level_token(risk_level: SkillRiskLevel) -> &'static str {

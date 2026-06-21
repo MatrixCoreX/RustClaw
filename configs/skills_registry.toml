@@ -442,13 +442,18 @@ required_bins = ["sh", "id"]
 optional_bins = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew", "sudo"]
 platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package managers before Homebrew fallback."]
 semantic_tags = ["package_manager_detection"]
+confirmation_exempt_when = [
+  { action = "install", dry_run = true },
+  { action = "smart_install", dry_run = true },
+]
 preferred_over_run_cmd = true
 planner_capabilities = [
   { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
   { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
   { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "uninstall"] }, package = { type = "string" }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]

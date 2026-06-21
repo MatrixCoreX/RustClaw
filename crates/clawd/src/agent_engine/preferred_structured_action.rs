@@ -984,10 +984,6 @@ pub(super) fn package_manager_dry_run_deterministic_plan_result(
         || route.needs_clarify
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
         || route.output_contract.delivery_required
         || !package_manager_available_for_plan(state)
     {

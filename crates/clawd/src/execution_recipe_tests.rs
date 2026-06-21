@@ -79,6 +79,25 @@ fn goal_overlay_includes_code_change_guidance_for_current_repo() {
 }
 
 #[test]
+fn package_manager_dry_run_install_is_observe_effect() {
+    let state = test_state();
+    let dry_run = classify_skill_action_effect(
+        &state,
+        "package_manager",
+        &json!({"action":"smart_install","packages":["jq"],"dry_run":true}),
+    );
+    assert!(dry_run.observes);
+    assert!(!dry_run.mutates);
+
+    let real_install = classify_skill_action_effect(
+        &state,
+        "package_manager",
+        &json!({"action":"smart_install","packages":["jq"],"dry_run":false}),
+    );
+    assert!(real_install.mutates);
+}
+
+#[test]
 fn goal_overlay_includes_skill_authoring_and_greenfield_guidance() {
     let overlay = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,

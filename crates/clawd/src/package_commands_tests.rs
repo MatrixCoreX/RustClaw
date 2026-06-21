@@ -39,6 +39,16 @@ fn preview_text_extracts_single_safe_package_token() {
 }
 
 #[test]
+fn preview_text_extracts_single_ascii_command_token_from_multilingual_request() {
+    assert_eq!(
+        package_install_packages_from_preview_text(
+            "假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装。"
+        ),
+        Some(vec!["jq".to_string()])
+    );
+}
+
+#[test]
 fn preview_text_ignores_ambiguous_control_sentence() {
     assert_eq!(
         package_install_packages_from_preview_text("dry-run install for ripgrep"),

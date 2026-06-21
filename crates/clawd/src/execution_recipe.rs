@@ -744,6 +744,9 @@ pub(crate) fn classify_skill_action_effect(
     args: &Value,
 ) -> ActionEffect {
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    if package_manager_dry_run_install_action(&normalized_skill, args) {
+        return ActionEffect::observe();
+    }
     if let Some(effect) = args
         .get("action")
         .and_then(|value| value.as_str())
@@ -869,6 +872,17 @@ pub(crate) fn classify_skill_action_effect(
         _ => ActionEffect::default(),
     };
     merge_structured_validation_effect(&normalized_skill, args, effect)
+}
+
+fn package_manager_dry_run_install_action(normalized_skill: &str, args: &Value) -> bool {
+    if normalized_skill != "package_manager" {
+        return false;
+    }
+    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let action = normalized_action_arg(args);
+    contains_any(&action, &["install", "uninstall", "smart_install"])
 }
 
 fn service_state_is_healthy(state: &str) -> bool {
