@@ -1,0 +1,53 @@
+# =========================
+# Music Generation / 音乐生成
+# =========================
+# Provider architecture:
+# - default provider: minimax
+# - MiniMax native adapter is implemented first.
+# - other vendors can be configured for planning, dry-run, future native adapters,
+#   or MiniMax-compatible endpoints by setting adapter_kind = "minimax_compatible".
+# - `music-2.6` prompt + lyrics, lyrics optimizer, instrumental generation,
+#   and cover-generation fields currently use the MiniMax-compatible
+#   `/v1/music_generation` contract.
+# - Use `dry_run=true` in tests to validate routing without consuming music quota.
+[music_generation]
+default_vendor = "minimax"
+default_model = "music-2.6"
+default_format = "mp3"
+default_output_dir = "music/download"
+
+openai_models = []
+google_models = []
+anthropic_models = []
+grok_models = []
+deepseek_models = []
+qwen_models = []
+minimax_models = ["music-2.6", "music-cover", "music-2.6-free", "music-cover-free"]
+mimo_models = []
+custom_models = []
+models = ["music-2.6", "music-cover"]
+
+max_concurrency = 1
+max_prompt_chars = 2000
+max_lyrics_chars = 3500
+sample_rate = 44100
+bitrate = 256000
+timeout_seconds = 300
+
+# API key source:
+# 1. [music_generation.providers.minimax].api_key or MUSIC_GENERATION_MINIMAX_API_KEY
+# 2. fallback to configs/config.toml -> [llm.minimax].api_key or MINIMAX_API_KEY
+[music_generation.providers.minimax]
+base_url = "https://api.minimaxi.com/v1"
+api_key = ""
+model = "music-2.6"
+timeout_seconds = 300
+
+# Example for a self-hosted or gateway endpoint with the same request/response
+# contract as MiniMax. Leave commented unless the endpoint is actually compatible.
+# [music_generation.providers.custom]
+# base_url = "https://example.com/v1"
+# api_key = ""
+# model = "music-2.6"
+# timeout_seconds = 300
+# adapter_kind = "minimax_compatible"

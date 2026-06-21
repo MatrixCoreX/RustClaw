@@ -1,0 +1,54 @@
+# =========================
+# Video Generation / 视频生成
+# =========================
+# Provider architecture:
+# - default provider: minimax
+# - MiniMax native adapter is implemented first.
+# - other vendors can be configured for planning, dry-run, future native adapters,
+#   or MiniMax-compatible endpoints by setting adapter_kind = "minimax_compatible".
+# - text-to-video, image-to-video, and first/last-frame video currently use the
+#   MiniMax-compatible `/v1/video_generation` contract.
+# - Video generation is asynchronous: create task -> query status -> retrieve file.
+# - Use `dry_run=true` in tests to validate routing without consuming video quota.
+[video_generation]
+default_vendor = "minimax"
+default_model = "MiniMax-Hailuo-2.3"
+default_resolution = "768P"
+default_duration = 6
+default_output_dir = "video/download"
+download_on_success = true
+
+openai_models = []
+google_models = []
+anthropic_models = []
+grok_models = []
+deepseek_models = []
+qwen_models = []
+minimax_models = ["MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02", "I2V-01-Director", "I2V-01-live", "I2V-01"]
+mimo_models = []
+custom_models = []
+models = ["MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02"]
+
+max_concurrency = 1
+max_input_bytes = 20971520
+timeout_seconds = 120
+max_poll_seconds = 600
+poll_interval_ms = 5000
+
+# API key source:
+# 1. [video_generation.providers.minimax].api_key or VIDEO_GENERATION_MINIMAX_API_KEY
+# 2. fallback to configs/config.toml -> [llm.minimax].api_key or MINIMAX_API_KEY
+[video_generation.providers.minimax]
+base_url = "https://api.minimaxi.com/v1"
+api_key = ""
+model = "MiniMax-Hailuo-2.3"
+timeout_seconds = 120
+
+# Example for a self-hosted or gateway endpoint with the same request/response
+# contract as MiniMax. Leave commented unless the endpoint is actually compatible.
+# [video_generation.providers.custom]
+# base_url = "https://example.com/v1"
+# api_key = ""
+# model = "MiniMax-Hailuo-2.3"
+# timeout_seconds = 120
+# adapter_kind = "minimax_compatible"

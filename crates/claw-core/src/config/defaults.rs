@@ -80,6 +80,8 @@ pub(super) fn default_skills_list() -> Vec<String> {
         "image_edit".to_string(),
         "audio_transcribe".to_string(),
         "audio_synthesize".to_string(),
+        "video_generate".to_string(),
+        "music_generate".to_string(),
         "health_check".to_string(),
         "log_analyze".to_string(),
         "service_control".to_string(),
