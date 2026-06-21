@@ -711,6 +711,46 @@ input_schema = { type = "object", required = ["text"], properties = { text = { t
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
+name = "video_generate"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+group = "video"
+aliases = ["video_generation", "generate_video", "text_to_video", "image_to_video"]
+timeout_seconds = 900
+prompt_file = "prompts/skills/video_generate.md"
+output_kind = "video"
+description = "Create MiniMax video generation tasks from text and optional frame images, then optionally poll and save the generated video file."
+semantic_tags = ["video_generation", "text_to_video", "image_to_video", "first_last_frame_video"]
+capabilities = ["llm", "net", "fs.read", "fs.write"]
+side_effect = true
+planner_capabilities = [
+  { name = "video.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["first_frame_image", "first_frame", "image", "last_frame_image", "last_frame", "duration", "resolution", "output_path", "wait_for_completion", "download", "dry_run", "vendor", "model", "max_poll_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, first_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, first_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame_image = { anyOf = [ { type = "string" }, { type = "object" } ] }, last_frame = { anyOf = [ { type = "string" }, { type = "object" } ] }, duration = { type = "integer" }, resolution = { type = "string" }, output_path = { type = "string" }, wait_for_completion = { type = "boolean" }, download = { type = "boolean" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" }, max_poll_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
+name = "music_generate"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+group = "audio"
+aliases = ["music_generation", "generate_music", "song_generate", "text_to_music"]
+timeout_seconds = 360
+prompt_file = "prompts/skills/music_generate.md"
+output_kind = "audio"
+description = "Generate MiniMax music/audio files from a musical prompt, lyrics, instrumental mode, or cover-generation inputs."
+semantic_tags = ["music_generation", "song_generation", "instrumental_music", "cover_music"]
+capabilities = ["llm", "net", "fs.write"]
+side_effect = true
+planner_capabilities = [
+  { name = "music.generate", action = "generate", effect = "external", required = ["prompt|lyrics"], optional = ["description", "lyrics_optimizer", "is_instrumental", "format", "response_format", "output_path", "audio_url", "audio_base64", "cover_feature_id", "dry_run", "vendor", "model"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+input_schema = { type = "object", properties = { prompt = { type = "string" }, description = { type = "string" }, lyrics = { type = "string" }, lyrics_optimizer = { type = "boolean" }, is_instrumental = { type = "boolean" }, format = { type = "string" }, response_format = { type = "string" }, output_path = { type = "string" }, audio_url = { type = "string" }, audio_base64 = { type = "string" }, cover_feature_id = { type = "string" }, dry_run = { type = "boolean" }, vendor = { type = "string" }, model = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
 name = "health_check"
 enabled = true
 kind = "runner"
