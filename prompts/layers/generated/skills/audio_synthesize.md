@@ -14,6 +14,12 @@
 - It supports Mimo native TTS through `mimo-v2.5-tts` using the chat-completions audio response contract.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `voice`, `response_format`, `output_path`, and `outputs`.
 
+## Planner Selection Notes (from interface)
+- For requests that turn text into spoken audio, voice, narration, or TTS output and save or return an audio file, use `audio_synthesize` / planner capability `audio.synthesize`.
+- Do not synthesize speech through shell commands or local CLI tools unless the user explicitly requests shell/CLI execution or the configured audio synthesis providers are unavailable and a deliberate local fallback is enabled.
+- Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.output_path` and `extra.outputs`.
+
+
 ## Config Entry Points (from interface)
 - Main TTS config: `configs/audio.toml` -> `[audio_synthesize]`.
 - Shared provider fallback: `configs/config.toml` -> `[llm.<vendor>]`.

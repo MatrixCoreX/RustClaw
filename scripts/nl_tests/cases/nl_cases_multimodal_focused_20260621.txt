@@ -1,0 +1,19 @@
+# Focused multimodal NL coverage for image and voice/audio skills.
+# Created: 2026-06-21
+#
+# Purpose:
+# - Keep a small repeatable set that exercises planner-facing multimodal skills.
+# - Cover image understanding, image generation, image editing, and voice synthesis.
+# - Keep speech-to-text out of the required-green set unless the configured local
+#   transcription provider is available.
+#
+# Format:
+# suite|name|tags|prompt|expect=<substring>
+
+multimodal_focused|image_vision_local_zh|covers:image_vision;requires_tool_call=true;image;local_readonly|看一下本地图片 document/rust_icon_pixel.png，先返回这个图片路径，再用一句中文描述主要内容。|expect=document/rust_icon_pixel.png
+
+multimodal_focused|image_generate_smoke_zh|covers:image_generate;requires_tool_call=true;image;side_effect|生成一张 512x512 极简测试图片，文字为 RustClaw Smoke，保存到 document/skill_generate_smoke.png，并返回文件路径。|expect=skill_generate_smoke.png
+
+multimodal_focused|image_edit_smoke_zh|covers:image_edit;requires_tool_call=true;image;side_effect|把这张 Rust 图标改成像素风测试图并保存到 document/rust_icon_pixel_smoke.png，然后返回文件路径：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png|expect=rust_icon_pixel_smoke.png
+
+multimodal_focused|audio_synthesize_smoke_zh|covers:audio_synthesize;requires_tool_call=true;audio;voice;side_effect|把“RustClaw 语音能力测试通过”合成一段短语音，保存到 document/skill_audio_smoke.mp3，并返回文件路径。|expect=skill_audio_smoke.mp3

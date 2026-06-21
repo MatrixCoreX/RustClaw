@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -8,7 +9,7 @@ use super::{
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
     preflight_failure_metadata, skill_extra_requests_user_input, structured_extra_evidence_output,
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
-    AgentLoopGuardPolicy, LoopState,
+    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
@@ -17,6 +18,7 @@ use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
+use claw_core::skill_registry::SkillsRegistry;
 use rusqlite::params;
 
 fn test_state() -> AppState {
@@ -105,6 +107,28 @@ fn enable_test_skills(state: &AppState, skills: &[&str]) {
         .write()
         .expect("write skill snapshot") = Arc::new(SkillViewsSnapshot {
         registry: None,
+        skills_list: Arc::new(set),
+    });
+}
+
+fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
+    let path = std::env::temp_dir().join(format!(
+        "rustclaw-skill-execution-test-{}-{}.toml",
+        std::process::id(),
+        skills.join("-")
+    ));
+    fs::write(&path, raw).expect("write registry fixture");
+    let registry = Arc::new(SkillsRegistry::load_from_path(&path).expect("load registry fixture"));
+    let set = skills
+        .iter()
+        .map(|skill| skill.to_string())
+        .collect::<HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("write skill snapshot") = Arc::new(SkillViewsSnapshot {
+        registry: Some(registry),
         skills_list: Arc::new(set),
     });
 }
@@ -212,6 +236,39 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
         .retry_instruction
         .contains("ContractPolicyDecision=rejected_not_allowed"));
     assert!(metadata.retry_instruction.contains("fs_basic.list_dir"));
+}
+
+#[test]
+fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::GeneratedFilePathReport,
+        requires_content_evidence: true,
+        response_shape: crate::OutputResponseShape::Scalar,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "document/rust_icon_pixel_smoke.png".to_string(),
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({"command": "python3 -c 'create image'"});
+
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
+        .expect("media path run_cmd should be rejected");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("contract policy error should be structured");
+
+    assert_eq!(parsed.error_kind, "contract_action_rejected");
+    assert_eq!(parsed.error_text, "media_artifact_requires_media_skill");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("media_artifact_requires_media_skill"))
+    );
+    let metadata = preflight_failure_metadata(&err);
+    assert_eq!(metadata.reason, "contract_action_rejected");
+    assert!(metadata.retry_instruction.contains("image_edit"));
 }
 
 #[test]
@@ -645,6 +702,34 @@ fn structured_extra_evidence_output_wraps_text_and_extra_for_journal() {
             .and_then(serde_json::Value::as_str),
         Some("/tmp/rustclaw-image.png")
     );
+}
+
+#[test]
+fn image_output_kind_accepts_skill_text_protocol_schema() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "image_edit"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_kind = "image"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", properties = { instruction = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+"#,
+        &["image_edit"],
+    );
+
+    assert!(validate_skill_output_contract(
+        &state,
+        "image_edit",
+        "Edited successfully and saved: /tmp/rustclaw-image.png"
+    )
+    .is_ok());
 }
 
 #[test]

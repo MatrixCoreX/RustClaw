@@ -193,6 +193,7 @@ def validate_external_matrix_admission(
 
 def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     capability = _extract_section(interface_md, "Capability Summary")
+    planner_selection_notes = _extract_section(interface_md, "Planner Selection Notes")
     config_entry_points = _extract_section(interface_md, "Config Entry Points")
     memory_entry_points = _extract_section(interface_md, "Memory Entry Points")
     actions = _extract_section(interface_md, "Actions")
@@ -220,6 +221,13 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
 ## Structured Evidence Contract (from interface)
 {structured_evidence}
 """
+    planner_selection_section = ""
+    if planner_selection_notes:
+        planner_selection_section = f"""
+
+## Planner Selection Notes (from interface)
+{planner_selection_notes}
+"""
 
     content = f"""{PROMPT_MANAGED_MARKER}
 ## Role & Boundaries
@@ -231,7 +239,7 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-{capability}
+{capability}{planner_selection_section}
 
 ## Config Entry Points (from interface)
 {config_entry_points}
