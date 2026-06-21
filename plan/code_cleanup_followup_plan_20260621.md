@@ -97,24 +97,34 @@
 2. 再处理能由 registry/schema 明确覆盖的单块 rewrite。
 3. 最后才拆/删跨技能兼容路径；每块都必须有 focused planning tests。
 
-- [ ] 盘点 `normalize_legacy_compatibility_actions()` 内每个 rewrite：
+- [x] B0：盘点 `normalize_legacy_compatibility_actions()` 内每个 rewrite。
+  - 2026-06-21 代码核对：`service status -> service_control` 已在 `scalar_count_explicit_path.rs`，并由 `planning_tests/scalar_count_and_hidden_entries.rs` 覆盖。
+  - 2026-06-21 代码核对：`sqlite list/schema/count` 已在 `sqlite_table_listing_rewrite.rs`，并由 `planning_tests` 下 sqlite / config structured field 相关 focused tests 覆盖。
+  - 2026-06-21 代码核对：`docker readonly -> docker_basic` 已在 `shell_sequence_part.rs`，不在 legacy 文件主体内。
+  - 2026-06-21 代码核对：`archive unpack` 已在 `sqlite_table_listing_rewrite.rs`，`archive pack` 已在 `shell_sequence_part.rs`，`archive schema alias / short archive target` 已在 `runtime_status_scalar_plan.rs`，并由 `planning_tests/delivery_archive_config_edit.rs`、`planning_tests/config_structured_field_reads.rs` 覆盖。
+  - 2026-06-21 代码核对：`legacy_file_config_capabilities.rs` 原先主要剩两类职责：normalization 编排入口 `normalize_legacy_compatibility_actions()` / `canonicalize_legacy_file_config_capabilities()`，以及 RustClaw config guard / config validation / config risk 兼容 repair。
+- [x] B1：按功能命名拆出 config guard repair。
+  - 2026-06-21 已迁到 `crates/clawd/src/agent_engine/config_guard_capability_repair.rs`，覆盖 config validation / config risk assessment / config excerpt / invalid locator repair / guard path helpers。
+  - `legacy_file_config_capabilities.rs` 从约 1,206 行降到约 430 行，职责收窄为 legacy canonicalization + compatibility normalization 编排及少量通用 schema alias rewrite。
+- [ ] 处理盘点后的剩余 rewrite：
   - registry metadata 已覆盖的，删除 rewrite。
   - schema repair 应负责的，迁到 normalizer schema repair 边界。
   - safety / evidence guard 应负责的，迁到 verifier 或 output contract。
   - 仍需兼容旧 planner 输出的，保留但改名标明 machine-compat，不作为普通语义分类。
-- [ ] 优先处理可独立验证的小块：
+- [x] 已拆出并有 focused tests 的小块：
   - service status -> `service_control`
   - sqlite list/schema/count -> `db_basic`
   - docker readonly -> `docker_basic`
   - archive pack/unpack -> `archive_basic`
-  - config guard -> `config_basic`
-- [ ] 拆分时按功能命名，例如：
+- [x] 已拆出的 config 小块：
+  - config guard / validation / risk -> `config_basic`
+- [x] 拆分时按功能命名，例如：
   - `service_status_capability_repair.rs`
   - `sqlite_capability_repair.rs`
   - `archive_capability_repair.rs`
   - `config_guard_capability_repair.rs`
   - 不使用 `split_1.rs`、`legacy_part2.rs` 等编号式命名。
-- [ ] 所有保留 rewrite 必须只读机器字段：
+- [x] 所有保留 rewrite 必须只读机器字段：
   - `semantic_kind`
   - `delivery_intent`
   - `locator_kind`
@@ -125,10 +135,12 @@
 
 验收：
 
-- [ ] focused planning tests 覆盖每个迁移小块。
-- [ ] `python3 scripts/check_no_nl_hardmatch.py` 通过。
-- [ ] `python3 scripts/check_legacy_route_boundary.py` 通过。
-- [ ] `cargo test -p clawd <focused_test_name> -- --nocapture` 通过。
+- [x] focused planning tests 覆盖每个迁移小块。
+  - 2026-06-21：`cargo test -p clawd config_structured_field_reads -- --nocapture`
+  - 2026-06-21：`cargo test -p clawd delivery_archive_config_edit -- --nocapture`
+- [x] `python3 scripts/check_no_nl_hardmatch.py` 通过。
+- [x] `python3 scripts/check_legacy_route_boundary.py` 通过。
+- [x] `cargo test -p clawd <focused_test_name> -- --nocapture` 通过。
 
 ## Track C: 旧路由命名和 trace 边界收窄
 
