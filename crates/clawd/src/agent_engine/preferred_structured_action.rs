@@ -874,6 +874,101 @@ pub(super) fn package_manager_detect_deterministic_plan_result(
     ))
 }
 
+pub(super) fn package_docker_readonly_probe_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !package_manager_available_for_plan(state)
+        || !docker_basic_available_for_plan(state)
+        || !route_has_package_docker_probe_tokens(route)
+    {
+        return None;
+    }
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "package_manager".to_string(),
+            args: serde_json::json!({"action": "detect"}),
+        },
+        AgentAction::CallSkill {
+            skill: "docker_basic".to_string(),
+            args: serde_json::json!({"action": "version"}),
+        },
+        AgentAction::CallSkill {
+            skill: "docker_basic".to_string(),
+            args: serde_json::json!({"action": "ps"}),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec![
+                "step_1".to_string(),
+                "step_2".to_string(),
+                "step_3".to_string(),
+            ],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    if !actions
+        .iter()
+        .all(|action| readonly_probe_action_allowed(route, action))
+    {
+        return None;
+    }
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn route_has_package_docker_probe_tokens(route: &RouteResult) -> bool {
+    let text = format!("{}\n{}", route.route_reason, route.resolved_intent);
+    let has_package = [
+        "package_manager_detection",
+        "package.detect_manager",
+        "package_manager.detect",
+    ]
+    .iter()
+    .any(|token| text.contains(token));
+    let has_docker = [
+        "docker_container_lifecycle",
+        "docker_basic",
+        "docker.version",
+        "docker.list_containers",
+        "docker_ps",
+        "docker_version",
+    ]
+    .iter()
+    .any(|token| text.contains(token));
+    has_package && has_docker
+}
+
+fn readonly_probe_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
+    let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+        action
+    else {
+        return true;
+    };
+    crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        skill,
+        args,
+    )
+    .is_some_and(|policy| policy.is_allowed())
+}
+
 pub(super) fn package_manager_dry_run_deterministic_plan_result(
     state: &AppState,
     goal: &str,
