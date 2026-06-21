@@ -22,6 +22,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod agent_engine;
+mod agent_runtime_contract;
 mod answer_verifier;
 mod app_helpers;
 mod ask_flow;
