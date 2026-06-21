@@ -45,7 +45,7 @@ flowchart TD
     L -->|general work| N[Planner LLM<br/>call_capability preferred]
     M --> O[CapabilityResolver]
     N --> O
-    O --> P[PlanVerifier<br/>visibility + args + risk + effect + contract]
+    O --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
     P --> Q{Verified step}
     Q -->|respond| R[Terminal response]
     Q -->|synthesize_answer| S[Grounded synthesis]
@@ -75,6 +75,7 @@ flowchart TD
 - `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
 - `Agent-loop semantic authority`: ordinary eligible work enters the loop, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
+- `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
@@ -99,7 +100,7 @@ flowchart TD
     L --> M
     N[Skill registry<br/>planner_capabilities] --> M
     O[Generated INTERFACE prompts] --> K
-    M --> P[PlanVerifier<br/>schema + visibility + risk + effect]
+    M --> P[PlanVerifier<br/>schema + permission_decision + effect]
     P --> Q{Step}
     Q -->|call_capability| R[Resolved tool or skill]
     Q -->|call_tool| S[Tool executor]
@@ -131,11 +132,20 @@ flowchart TD
 - `Planner prompt`: is built only for loop rounds that need model reasoning. Narrow observation contracts can use runtime-built plans without an extra planner call.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
-- `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs.
+- `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
 - `Compatibility finalization`: remains for non-eligible, high-risk, schedule, delivery, and rollback cases, but it is not the ordinary semantic decision path.
+
+### Permission Plane And Command Policy
+
+The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, contract matrix policy, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose.
+
+- `risk_level`, `requires_confirmation`, `once_per_task`, `idempotent`, and `dedup_scope` come from registry and planner capability metadata where available.
+- `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
+- `run_cmd` decisions include a nested `command_policy` for machine fields such as `policy_authority`, `literal_command_token`, `command_arg_present`, `unresolved_runtime_template_present`, and command effect flags.
+- Explicit user command preservation is represented by `_clawd_literal_command`; otherwise `run_cmd` is treated as planner-structured command args and remains subject to contract and media-artifact blockers.
 
 ## Natural Language Contract Boundary
 
@@ -148,6 +158,7 @@ Runtime code should consume stable contracts such as:
 - registry metadata and `planner_capabilities`
 - `TaskContract` / `OutputContract` fields, target locators, and explicit `field_path` values
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
+- `permission_decision` and `command_policy` machine fields
 
 Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
 

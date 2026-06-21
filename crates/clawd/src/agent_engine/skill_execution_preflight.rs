@@ -314,6 +314,35 @@ fn action_effect_token(effect: crate::execution_recipe::ActionEffect) -> &'stati
     }
 }
 
+fn run_cmd_command_policy(
+    canonical_skill: &str,
+    args: &Value,
+    effect: crate::execution_recipe::ActionEffect,
+) -> Option<Value> {
+    if !canonical_skill.eq_ignore_ascii_case("run_cmd") {
+        return None;
+    }
+    let literal_command_token = run_cmd_is_literal_user_command(args);
+    Some(json!({
+        "schema_version": 1,
+        "policy_authority": if literal_command_token {
+            "explicit_command_token"
+        } else {
+            "planner_structured_args"
+        },
+        "literal_command_token": literal_command_token,
+        "command_arg_present": args
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty()),
+        "unresolved_runtime_template_present": contains_unresolved_runtime_template_arg(args),
+        "effect": action_effect_token(effect),
+        "observes": effect.observes,
+        "mutates": effect.mutates,
+        "validates": effect.validates,
+    }))
+}
+
 fn normalized_action_arg(args: &Value) -> Option<String> {
     args.get("action")
         .and_then(Value::as_str)
@@ -363,6 +392,7 @@ fn preflight_permission_decision(
     let manifest = state.skill_manifest(&canonical_skill);
     let risk_level = action_scoped_risk_level(state, &canonical_skill, action.as_deref())
         .or_else(|| manifest.as_ref().and_then(|value| value.risk_level));
+    let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
     let registry = state.get_skills_registry();
     let registry_policy = registry.as_ref().map(|registry| {
         json!({
@@ -391,6 +421,7 @@ fn preflight_permission_decision(
         "observes": effect.observes,
         "mutates": effect.mutates,
         "validates": effect.validates,
+        "command_policy": command_policy,
         "registry_policy": registry_policy.unwrap_or_else(|| {
             json!({
                 "available": false,

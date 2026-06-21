@@ -22,6 +22,70 @@ fn publishing_preview_allows_x_preview_without_locator() {
 }
 
 #[test]
+fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
+    let cases = [
+        (
+            OutputSemanticKind::PackageManagerDetection,
+            "package_manager",
+            serde_json::json!({"action":"detect","dry_run":true}),
+            "package_manager.detect",
+            "package_manager_detection",
+        ),
+        (
+            OutputSemanticKind::SqliteTableListing,
+            "db_basic",
+            serde_json::json!({"action":"list_tables","db_path":"tmp/app.db"}),
+            "db_basic.list_tables",
+            "sqlite_table_listing",
+        ),
+        (
+            OutputSemanticKind::SqliteSchemaVersion,
+            "db_basic",
+            serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
+            "db_basic.schema_version",
+            "sqlite_schema_version",
+        ),
+        (
+            OutputSemanticKind::DockerContainerLifecycle,
+            "docker_basic",
+            serde_json::json!({"action":"restart","container":"rustclaw_api","dry_run":true}),
+            "docker_basic.restart",
+            "docker_container_lifecycle",
+        ),
+    ];
+
+    for (semantic_kind, skill, args, expected_action, expected_contract) in cases {
+        let policy = action_policy_for_output_contract(
+            Some(&IntentOutputContract {
+                semantic_kind,
+                requires_content_evidence: true,
+                response_shape: OutputResponseShape::Strict,
+                ..IntentOutputContract::default()
+            }),
+            skill,
+            &args,
+        )
+        .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.original_action_ref, expected_action);
+        assert_eq!(policy.replacement_action_ref, None);
+        assert_eq!(policy.contract_repair_source, "none");
+        assert_eq!(policy.contract_match, expected_contract);
+        assert!(
+            policy.required_evidence.iter().all(|token| {
+                token
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch == '_' || ch.is_ascii_digit())
+            }),
+            "required evidence should stay machine-tokenized: {:?}",
+            policy.required_evidence
+        );
+    }
+}
+
+#[test]
 fn generic_inline_transform_allows_transform_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

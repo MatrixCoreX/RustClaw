@@ -302,9 +302,44 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
         permission["reason_code"],
         serde_json::json!("media_artifact_requires_media_skill")
     );
+    assert_eq!(
+        permission.pointer("/command_policy/policy_authority"),
+        Some(&serde_json::json!("planner_structured_args"))
+    );
+    assert_eq!(
+        permission.pointer("/command_policy/literal_command_token"),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(
+        permission.pointer("/command_policy/command_arg_present"),
+        Some(&serde_json::json!(true))
+    );
     let metadata = preflight_failure_metadata(&err);
     assert_eq!(metadata.reason, "contract_action_rejected");
     assert!(metadata.retry_instruction.contains("image_edit"));
+}
+
+#[test]
+fn contract_matrix_preflight_does_not_block_literal_media_run_cmd() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::GeneratedFilePathReport,
+        requires_content_evidence: true,
+        response_shape: crate::OutputResponseShape::Scalar,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "document/rust_icon_pixel_smoke.png".to_string(),
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "command": "python3 -c 'create image'",
+        super::super::CLAWD_LITERAL_COMMAND_ARG: true
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        "literal user commands should preserve the explicit command policy boundary"
+    );
 }
 
 #[test]
@@ -349,6 +384,14 @@ planner_capabilities = [
     assert_eq!(permission["needs_confirmation"], true);
     assert_eq!(permission["action_effect"], serde_json::json!("observe"));
     assert_eq!(permission["canonical_skill"], serde_json::json!("run_cmd"));
+    assert_eq!(
+        permission.pointer("/command_policy/policy_authority"),
+        Some(&serde_json::json!("planner_structured_args"))
+    );
+    assert_eq!(
+        permission.pointer("/command_policy/effect"),
+        Some(&serde_json::json!("observe"))
+    );
     assert_eq!(
         permission
             .pointer("/registry_policy/available")
