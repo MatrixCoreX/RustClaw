@@ -159,7 +159,6 @@ pub(crate) enum LocatorResolution {
     Fuzzy(Vec<String>),
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PostRoutePolicyResult {
     pub(crate) execution_route_result: RouteResult,

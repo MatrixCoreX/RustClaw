@@ -63,24 +63,13 @@ impl OutputContractVerdict {
         Self::OWNER_LAYER
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn reason_code(&self) -> Option<&'static str> {
         match self {
             Self::Pass => None,
             Self::Reshape { reason_code, .. } | Self::Reject { reason_code, .. } => {
                 Some(*reason_code)
             }
-        }
-    }
-
-    /// 给未来 metrics counter `clawd_finalize_verify_total{verdict="..."}` 用。
-    /// 当前 finalize hook 直接用 match 分支 + tracing field，未走此函数。
-    #[allow(dead_code)]
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            Self::Pass => "pass",
-            Self::Reshape { .. } => "reshape",
-            Self::Reject { .. } => "reject",
         }
     }
 }

@@ -14,7 +14,6 @@ pub(crate) struct TaskContextRawSources {
     pub(crate) schedule_rules: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PlannerContextView {
     pub(crate) visible_skills: Vec<String>,
@@ -49,7 +48,6 @@ pub(crate) struct ExecutionContextView {
     pub(crate) image_context: Option<String>,
 }
 
-#[allow(dead_code)]
 pub(crate) struct TaskContextBundle {
     pub(crate) raw_sources: TaskContextRawSources,
     pub(crate) planner_view: PlannerContextView,

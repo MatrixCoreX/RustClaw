@@ -269,7 +269,6 @@ impl AgentLoopGuardPolicy {
                 contract.operation,
                 crate::task_contract::TaskOperation::Write
                     | crate::task_contract::TaskOperation::Modify
-                    | crate::task_contract::TaskOperation::Configure
             )
         {
             return LoopBudgetProfile::MultiStepWorkspace;
