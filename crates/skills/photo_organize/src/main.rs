@@ -30,12 +30,12 @@ struct Req {
     args: Value,
     #[serde(default)]
     context: Option<Value>,
-    #[allow(dead_code)]
     #[serde(default)]
-    user_id: i64,
-    #[allow(dead_code)]
+    #[serde(rename = "user_id")]
+    _user_id: i64,
     #[serde(default)]
-    chat_id: i64,
+    #[serde(rename = "chat_id")]
+    _chat_id: i64,
 }
 
 #[derive(Debug, Serialize)]
