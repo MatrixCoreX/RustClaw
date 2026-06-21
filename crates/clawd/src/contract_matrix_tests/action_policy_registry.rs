@@ -52,6 +52,13 @@ fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
             "docker_basic.restart",
             "docker_container_lifecycle",
         ),
+        (
+            OutputSemanticKind::DockerContainerLifecycle,
+            "package_manager",
+            serde_json::json!({"action":"detect"}),
+            "package_manager.detect",
+            "docker_container_lifecycle",
+        ),
     ];
 
     for (semantic_kind, skill, args, expected_action, expected_contract) in cases {
