@@ -10,11 +10,11 @@ use crate::{
     RiskCeiling, RouteResult,
 };
 
-fn ask_mode_from_legacy_normalizer_decision(
-    legacy_normalizer_decision: FirstLayerDecision,
+fn ask_mode_from_normalizer_hint(
+    normalizer_hint: FirstLayerDecision,
     finalize_style: ActFinalizeStyle,
 ) -> AskMode {
-    match legacy_normalizer_decision {
+    match normalizer_hint {
         FirstLayerDecision::Clarify => AskMode::clarify(),
         FirstLayerDecision::DirectAnswer => AskMode::direct_answer(),
         FirstLayerDecision::PlannerExecute => AskMode::Act {
@@ -78,7 +78,7 @@ pub(crate) fn route_result_from_normalizer(
             .and_then(|analysis| analysis.state_patch.as_ref()),
     );
     RouteResult {
-        ask_mode: ask_mode_from_legacy_normalizer_decision(
+        ask_mode: ask_mode_from_normalizer_hint(
             normalizer_out.legacy_first_layer_decision,
             normalizer_out.execution_finalize_style,
         ),
