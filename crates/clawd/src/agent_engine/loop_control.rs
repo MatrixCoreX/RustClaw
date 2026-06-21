@@ -377,6 +377,20 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
+    if has_executable_observation_or_action(actions)
+        && !has_discussion_followup_action(actions)
+        && recent_artifacts_inventory_observation_can_finalize(route_result, loop_state)
+    {
+        return required_success_marker.is_none_or(|marker| {
+            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
+        });
+    }
+    if route_result.output_contract.semantic_kind
+        == crate::OutputSemanticKind::RecentArtifactsJudgment
+        && !has_discussion_followup_action(actions)
+    {
+        return false;
+    }
     if quantity_comparison_one_sentence_needs_model_language_before_stop(route_result)
         && !has_discussion_followup_action(actions)
     {

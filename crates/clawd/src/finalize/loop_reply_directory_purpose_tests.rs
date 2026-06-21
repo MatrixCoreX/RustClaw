@@ -862,6 +862,58 @@ fn recent_artifacts_judgment_classifies_scripts_per_entry() {
 }
 
 #[test]
+fn recent_artifacts_judgment_classifies_logs_per_entry() {
+    let task = claimed_task("task-recent-artifacts-logs-per-entry");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900}],"names":["clawd.run.log","model_io.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.self_extension.list_selector.limit = Some(2);
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind_specified = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_recent_artifacts_judgment_answer(
+            &task,
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    let answer = loop_state.delivery_messages.join("\n");
+    assert!(answer.contains("recent_entries.count=2"));
+    assert!(answer.contains("recent_entries[0].name=clawd.run.log"));
+    assert!(answer.contains("recent_entries[0].classification=runtime_log"));
+    assert!(answer.contains("recent_entries[1].name=model_io.log"));
+    assert!(answer.contains("recent_entries[1].classification=runtime_log"));
+    assert!(answer.contains("classification=runtime_log"));
+    assert!(answer.contains("classification.business_data=false"));
+    assert!(summary.is_some());
+}
+
+#[test]
 fn recent_artifacts_judgment_classifies_docs_markdown_per_entry() {
     let task = claimed_task("task-recent-artifacts-docs-per-entry");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
