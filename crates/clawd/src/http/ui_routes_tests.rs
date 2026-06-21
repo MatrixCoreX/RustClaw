@@ -213,3 +213,77 @@ models = ["mimo-v2.5-pro"]
         Some("openai_compat")
     );
 }
+
+#[test]
+fn model_provider_keys_include_video_and_music_sections() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[video_generation.providers.minimax]
+api_key = "video-secret"
+
+[music_generation.providers.minimax]
+api_key = "music-secret"
+"#,
+    )
+    .expect("parse");
+
+    let video = read_module_provider_keys(&parsed, &["video_generation"]);
+    let music = read_module_provider_keys(&parsed, &["music_generation"]);
+
+    assert_eq!(
+        video
+            .get("video_generation")
+            .and_then(|vendors| vendors.get("minimax"))
+            .map(String::as_str),
+        Some("vide****cret")
+    );
+    assert_eq!(
+        music
+            .get("music_generation")
+            .and_then(|vendors| vendors.get("minimax"))
+            .map(String::as_str),
+        Some("musi****cret")
+    );
+}
+
+#[test]
+fn upsert_model_section_updates_video_and_music_model_items() {
+    let mut video = toml::Value::Table(toml::map::Map::new());
+    let mut music = toml::Value::Table(toml::map::Map::new());
+    let video_item = ModelConfigItem {
+        vendor: "minimax".to_string(),
+        model: "video-01".to_string(),
+        base_url: Some("https://api.minimax.io/v1".to_string()),
+        api_key: Some("video-secret".to_string()),
+        api_key_configured: None,
+        api_key_masked: None,
+    };
+    let music_item = ModelConfigItem {
+        vendor: "minimax".to_string(),
+        model: "music-2.6".to_string(),
+        base_url: Some("https://api.minimax.io/v1".to_string()),
+        api_key: Some("music-secret".to_string()),
+        api_key_configured: None,
+        api_key_masked: None,
+    };
+
+    upsert_model_section(&mut video, "video_generation", &video_item).unwrap();
+    upsert_model_section(&mut music, "music_generation", &music_item).unwrap();
+
+    assert_eq!(
+        read_model_section(&video, "video_generation").model,
+        "video-01"
+    );
+    assert_eq!(
+        read_model_section(&music, "music_generation").model,
+        "music-2.6"
+    );
+    assert_eq!(
+        read_model_section(&video, "video_generation").api_key_configured,
+        Some(true)
+    );
+    assert_eq!(
+        read_model_section(&music, "music_generation").api_key_configured,
+        Some(true)
+    );
+}
