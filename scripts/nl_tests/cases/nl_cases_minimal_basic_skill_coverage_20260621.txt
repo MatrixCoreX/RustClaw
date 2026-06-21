@@ -1,0 +1,61 @@
+# Minimal NL coverage for RustClaw basic skills.
+# Created: 2026-06-21
+#
+# Purpose:
+# - Cover the planner-facing basic skill/tool surface with the fewest maintainable NL cases.
+# - Prefer structured capability routing over natural-language phrase matching.
+# - Keep default execution safe: no image/audio/voice generation, no X/Twitter live API, no real package install,
+#   no service restart/stop/start, no destructive config write.
+#
+# Format:
+# suite|name|tags|prompt|expect=<substring>
+#
+# Coverage scope:
+# - Core local tools: fs_basic, config_basic, config_edit preview, system_basic, run_cmd, git_basic,
+#   process_basic, package_manager detect, archive_basic, db_basic, docker_basic, health_check,
+#   log_analyze, service_control status, task_control list, doc_parse, transform, kb, http_basic.
+# - Web read-only tools: browser_web open_extract, web_search_extract search_extract.
+# - Workflow boundaries: schedule dry-run / clarify-safe path, extension_manager assess_gap only.
+# - Backing/legacy tools such as read_file/list_dir/write_file/make_dir/remove_file/fs_search/config_guard
+#   are covered through planner-facing fs_basic/config_basic/config_edit routes unless explicitly tagged.
+#
+# Default skip / dry-run policy:
+# - Do not include image_generate, image_edit, image_vision, audio_transcribe, audio_synthesize, x, Twitter/X API.
+# - Do not perform package install/uninstall; only detect or request a dry-run plan.
+# - Do not stop/start/restart services; status/logs/verify only.
+# - Do not commit/push/write config; config_edit case must be preview/read-back/guard only.
+#
+# Runner suggestion:
+# - Run this file as a focused smoke before larger aggregate NL.
+# - For strict live runs, skip tags containing external_network if the provider/network is unavailable.
+# - For mutation-safe CI, skip tags containing local_side_effect unless the workspace sandbox is disposable.
+
+minimal_basic_skill_coverage|fs_config_readonly_matrix_zh|covers:fs_basic,config_basic,read_file,list_dir,fs_search,system_basic;requires_tool_call=true;local_readonly|检查 README.md 是否存在；列出 scripts/nl_tests/fixtures/device_local/docs 的文件名；统计 scripts/nl_tests/fixtures/device_local/logs 直接子项数量；在 configs/skills_registry.toml 读取 fs_basic 的 planner_kind；最后用表格回答，不能泄露密钥。|expect=fs_basic
+
+minimal_basic_skill_coverage|fs_sandbox_mutation_cycle_zh|covers:fs_basic,write_file,make_dir,remove_file;requires_tool_call=true;local_side_effect|在 tmp/nl_basic_skill_coverage_case 创建目录，写入 note.txt 内容为 alpha，追加一行 beta，读取文件确认两行都存在，然后删除这个临时目录；只汇总每一步的结构化结果。|expect=note.txt
+
+minimal_basic_skill_coverage|explicit_shell_process_ports_en|covers:run_cmd,process_basic;requires_tool_call=true;local_readonly|Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.|expect=/home/guagua/rustclaw
+
+minimal_basic_skill_coverage|git_package_status_zh|covers:git_basic,package_manager;requires_tool_call=true;local_readonly|检查当前仓库 git 分支、工作区变更文件数量和最近 1 条提交；再检测系统包管理器类型；用不超过 5 行回答。|expect=main
+
+minimal_basic_skill_coverage|runtime_ops_health_zh|covers:health_check,service_control,task_control,http_basic,system_basic;requires_tool_call=true;local_readonly|做一次 RustClaw 运行状态小体检：请求本机 clawd health 接口，检查 clawd 服务或进程状态，查看当前任务队列概况，并给出系统运行状态摘要；不要重启或停止任何服务。|expect=clawd
+
+minimal_basic_skill_coverage|logs_doc_transform_zh|covers:log_analyze,doc_parse,transform;requires_tool_call=true;local_readonly|分析 scripts/nl_tests/fixtures/device_local/logs/app.log 有没有 error/warn；解析 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 的主要内容；把 [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}] 按 score 降序转成 markdown 表格。|expect=beta
+
+minimal_basic_skill_coverage|archive_db_fixture_zh|covers:archive_basic,db_basic;requires_tool_call=true;local_readonly|列出 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里的成员，读取 notes.txt；再查看 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的表列表和 schema version；用表格汇总。|expect=notes.txt
+
+minimal_basic_skill_coverage|docker_safe_probe_en|covers:docker_basic;requires_tool_call=true;local_conditional|Check Docker availability with read-only Docker actions: version and container list. If Docker CLI or daemon is unavailable, report that structured unavailable state instead of falling back to ad-hoc shell retries.|expect=Docker
+
+minimal_basic_skill_coverage|config_preview_guard_zh|covers:config_edit,config_guard,config_basic;requires_tool_call=true;local_readonly,dry_run|只预览把 configs/config.toml 里的 llm.selected_vendor 改成 minimax，不要写入；然后读取当前 llm.selected_vendor，并运行配置风险检查；回答预览是否会改变、当前值和是否有明显风险。|expect=llm.selected_vendor
+
+minimal_basic_skill_coverage|kb_local_cycle_zh|covers:kb,doc_parse,fs_basic;requires_tool_call=true;local_side_effect|把 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 导入知识库 namespace=nl_basic_skill_coverage；搜索 service status；再查看这个 namespace 的统计信息；用三行以内回答。|expect=nl_basic_skill_coverage
+
+minimal_basic_skill_coverage|browser_page_extract_en|covers:browser_web,http_basic;requires_tool_call=true;external_network|Open https://example.com with the browser extraction tool, also make a simple HTTP GET to the same URL, then answer with the page title and HTTP status only.|expect=Example Domain
+
+minimal_basic_skill_coverage|web_search_extract_readonly_en|covers:web_search_extract;requires_tool_call=true;external_network|Search the web for "Rust async tutorial" with top_k=3 and return only titles plus source domains. Do not open additional pages unless the search tool already returns extractable metadata.|expect=Rust
+
+minimal_basic_skill_coverage|schedule_boundary_dry_run_zh|covers:schedule;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 RustClaw 服务，请只解析日程意图并说明需要的结构化字段，不要创建真实提醒任务。|expect=9
+
+minimal_basic_skill_coverage|extension_assess_gap_only_zh|covers:extension_manager;requires_tool_call=true;dry_run,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。|expect=assess
+
+minimal_basic_skill_coverage|install_module_no_install_dry_run_zh|covers:install_module,package_manager;requires_tool_call=true;dry_run,no_external_side_effect|假设需要 jq 模块或命令，请只给出安装前检查和 dry-run 计划，不要实际安装任何包或模块；如果应该走系统包管理器而不是语言模块安装，也要说明结构化判断。|expect=dry
