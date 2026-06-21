@@ -212,6 +212,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
         .route("/nni/records", get(nni_request_records))
+        .route("/nni/records/clear", post(nni_clear_request_records))
         .route("/nni/heartbeat/records", get(nni_request_records))
         .route("/nni/heartbeat/errors", get(nni_heartbeat_errors))
         .route(
@@ -339,6 +340,7 @@ struct NniDeviceActionRequest {
 
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/nni_internal_llm.rs");
+include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");

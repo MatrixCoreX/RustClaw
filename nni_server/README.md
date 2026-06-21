@@ -27,6 +27,7 @@ node nni_server/server.mjs
 ```
 
 The server stores its tasks, joined devices, compliance records, and public-key whitelist in the JSON state file configured by `NNI_SERVER_STATE_PATH`.
+Request records stay in this server-side state file for administrator audit and troubleshooting. The service does not expose a public request-record query API.
 
 ## Public-Key Whitelist
 
@@ -59,6 +60,8 @@ Both join phases enforce the whitelist:
 - `GET /v1/health`
 - `POST /v1/nni/server/join/request`
 - `POST /v1/nni/server/join/verify`
+- `POST /v1/nni/server/heartbeat/request`
+- `POST /v1/nni/server/heartbeat/verify`
 
 The request endpoint creates an empty `nni_join` task payload and returns a random `challenge`.
 The verify endpoint validates the device signature against the public key recorded by this server.
