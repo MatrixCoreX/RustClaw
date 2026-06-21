@@ -163,6 +163,15 @@ timeout_seconds = 120
 # 该技能当前统一走兼容式输入输出，内部按厂商适配。
 # OSS note / OSS 说明：
 # - current image vision path does NOT use OSS / 当前图像理解链路不使用 OSS
+# MiniMax note / MiniMax 说明：
+# - MiniMax-M3 is the current M-series multimodal language model for image/video
+#   understanding through compatible chat content parts.
+#   / MiniMax-M3 是当前 M 系列多模态语言模型，通过兼容 chat content parts
+#   做图片/视频理解。
+# - MiniMax image generation/editing still uses `image-01`; do not use M3 for
+#   image_generation/image_edit.
+#   / MiniMax 文生图/图像编辑仍使用 `image-01`，不要把 M3 用到
+#   image_generation/image_edit。
 # Vendor selection priority / 厂商选择优先级：
 # request.vendor > default_vendor > llm.selected_vendor
 # Model selection priority / 模型选择优先级：
@@ -173,16 +182,16 @@ default_vendor = "minimax"
 adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
 
 # Default model / 默认模型
-default_model = "MiniMax-M2.7"
+default_model = "MiniMax-M3"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-4o-mini", "gpt-4o"]
 google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
 anthropic_models = ["claude-sonnet-4-6"]
 qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
-minimax_models = ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"]
+minimax_models = ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"]
 mimo_models = ["mimo-v2.5", "mimo-v2-omni"]
-models = ["mimo-v2.5", "mimo-v2-omni", "qwen-vl-max", "qwen-vl-plus"]
+models = ["MiniMax-M3", "mimo-v2.5", "mimo-v2-omni", "qwen-vl-max", "qwen-vl-plus"]
 
 # Runtime limits / 运行限制
 default_output_dir = "image/upload"
@@ -193,18 +202,21 @@ timeout_seconds = 90
 
 # Optional dedicated provider override / 可选独立 provider 覆盖
 # Recommended / 推荐：
-# - image_vision: MiniMax MCP image understanding with `MiniMax-M2.7` as the
-#   compat fallback label / 图片理解当前优先使用 MiniMax MCP，`MiniMax-M2.7`
-#   作为兼容回退标签
+# - image_vision: MiniMax `MiniMax-M3` for multimodal image/video understanding;
+#   MiniMax MCP may still handle the call first, with OpenAI-compatible chat as
+#   fallback / 图片理解推荐 MiniMax `MiniMax-M3`；MiniMax MCP 可优先处理，
+#   OpenAI-compatible chat 作为回退
 # [image_vision.providers.google]
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
 # api_key = "REPLACE_ME_GOOGLE_API_KEY"
 # model = "gemini-2.5-flash"
 # timeout_seconds = 90
 [image_vision.providers.minimax]
+# Endpoint note: keep aligned with [llm.minimax] unless image_vision uses a
+# dedicated MiniMax account or regional gateway.
 base_url = "https://api.minimaxi.com/v1"
 api_key = ""
-model = "MiniMax-M2.7"
+model = "MiniMax-M3"
 timeout_seconds = 90
 # [image_vision.providers.mimo]
 # base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
