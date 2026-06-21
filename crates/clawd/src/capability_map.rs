@@ -9,11 +9,18 @@ use claw_core::skill_registry::{
 enum CapabilityDomain {
     Filesystem,
     System,
+    Config,
+    Git,
+    Process,
+    Service,
+    TaskControl,
     OpsStatus,
     MarketData,
     NewsContent,
     ImageMedia,
     AudioMedia,
+    VideoMedia,
+    MusicMedia,
     Publishing,
     GeneralChat,
 }
@@ -23,11 +30,18 @@ impl CapabilityDomain {
         match self {
             CapabilityDomain::Filesystem => "filesystem",
             CapabilityDomain::System => "system",
+            CapabilityDomain::Config => "config",
+            CapabilityDomain::Git => "git",
+            CapabilityDomain::Process => "process",
+            CapabilityDomain::Service => "service",
+            CapabilityDomain::TaskControl => "task_control",
             CapabilityDomain::OpsStatus => "ops/status",
             CapabilityDomain::MarketData => "market/data",
             CapabilityDomain::NewsContent => "news/web",
             CapabilityDomain::ImageMedia => "image",
             CapabilityDomain::AudioMedia => "audio",
+            CapabilityDomain::VideoMedia => "video",
+            CapabilityDomain::MusicMedia => "music",
             CapabilityDomain::Publishing => "publishing",
             CapabilityDomain::GeneralChat => "chat",
         }
@@ -41,6 +55,11 @@ impl CapabilityDomain {
             CapabilityDomain::System => {
                 "run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information"
             }
+            CapabilityDomain::Config
+            | CapabilityDomain::Git
+            | CapabilityDomain::Process
+            | CapabilityDomain::Service
+            | CapabilityDomain::TaskControl => self.title(),
             CapabilityDomain::OpsStatus => {
                 "check service/process/runtime task status, list or cancel the current chat's queued/running tasks, read logs, run health checks, and inspect safe config state"
             }
@@ -54,6 +73,7 @@ impl CapabilityDomain {
                 "analyze images and perform image generation or editing"
             }
             CapabilityDomain::AudioMedia => "transcribe audio and synthesize spoken output",
+            CapabilityDomain::VideoMedia | CapabilityDomain::MusicMedia => self.title(),
             CapabilityDomain::Publishing => "draft or send outbound social content",
             CapabilityDomain::GeneralChat => {
                 "provide conversational explanation, rewriting, and smalltalk when external retrieval is not needed"
@@ -64,17 +84,22 @@ impl CapabilityDomain {
     fn from_registry_group(group: &str) -> Option<Self> {
         match group.trim().to_ascii_lowercase().as_str() {
             "filesystem" | "file" | "files" | "fs" => Some(Self::Filesystem),
+            "config" | "configuration" => Some(Self::Config),
+            "git" | "vcs" | "repository" => Some(Self::Git),
+            "process" | "processes" => Some(Self::Process),
+            "service" | "services" => Some(Self::Service),
+            "task" | "tasks" | "task_control" => Some(Self::TaskControl),
             "system" | "developer" | "dev" | "shell" | "http" | "database" | "db" | "package"
             | "archive" | "transform" | "workflow" | "flows" | "orchestration" => {
                 Some(Self::System)
             }
-            "ops" | "status" | "ops/status" | "service" | "runtime" | "config" => {
-                Some(Self::OpsStatus)
-            }
+            "ops" | "status" | "ops/status" | "runtime" => Some(Self::OpsStatus),
             "market" | "market/data" | "finance" => Some(Self::MarketData),
             "news" | "web" | "news/web" => Some(Self::NewsContent),
             "image" | "vision" => Some(Self::ImageMedia),
             "audio" | "voice" => Some(Self::AudioMedia),
+            "video" => Some(Self::VideoMedia),
+            "music" => Some(Self::MusicMedia),
             "publishing" | "social" => Some(Self::Publishing),
             "chat" | "general_chat" => Some(Self::GeneralChat),
             _ => None,
@@ -95,6 +120,9 @@ fn infer_domain_from_skill_metadata(state: &AppState, skill: &str) -> Option<Cap
 }
 
 fn infer_domain_from_registry_entry(entry: &SkillRegistryEntry) -> Option<CapabilityDomain> {
+    if let Some(domain) = legacy_domain_from_skill_name(entry.name.trim()) {
+        return Some(domain);
+    }
     if let Some(domain) = entry
         .group
         .as_deref()
@@ -134,7 +162,7 @@ fn infer_domain_from_registry_entry(entry: &SkillRegistryEntry) -> Option<Capabi
     if canonical.is_empty() {
         return None;
     }
-    legacy_domain_from_skill_name(canonical)
+    None
 }
 
 fn legacy_domain_from_skill_name(skill: &str) -> Option<CapabilityDomain> {
@@ -143,14 +171,20 @@ fn legacy_domain_from_skill_name(skill: &str) -> Option<CapabilityDomain> {
         "rss_fetch" | "web_search_extract" | "browser_web" => Some(CapabilityDomain::NewsContent),
         "image_vision" | "image_generate" | "image_edit" => Some(CapabilityDomain::ImageMedia),
         "audio_transcribe" | "audio_synthesize" => Some(CapabilityDomain::AudioMedia),
+        "video_generate" => Some(CapabilityDomain::VideoMedia),
+        "music_generate" => Some(CapabilityDomain::MusicMedia),
         "x" => Some(CapabilityDomain::Publishing),
         "chat" => Some(CapabilityDomain::GeneralChat),
         "fs_basic" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
         | "fs_search" => Some(CapabilityDomain::Filesystem),
-        "process_basic" | "docker_basic" | "health_check" | "log_analyze" | "service_control"
-        | "task_control" | "config_guard" => Some(CapabilityDomain::OpsStatus),
-        "run_cmd" | "system_basic" | "http_basic" | "git_basic" | "install_module"
-        | "package_manager" | "archive_basic" | "db_basic" => Some(CapabilityDomain::System),
+        "config_basic" | "config_edit" | "config_guard" => Some(CapabilityDomain::Config),
+        "git_basic" => Some(CapabilityDomain::Git),
+        "process_basic" => Some(CapabilityDomain::Process),
+        "service_control" | "health_check" | "log_analyze" => Some(CapabilityDomain::Service),
+        "task_control" => Some(CapabilityDomain::TaskControl),
+        "docker_basic" => Some(CapabilityDomain::OpsStatus),
+        "run_cmd" | "system_basic" | "http_basic" | "install_module" | "package_manager"
+        | "archive_basic" | "db_basic" => Some(CapabilityDomain::System),
         _ => None,
     }
 }
@@ -166,13 +200,67 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if !mapping.required.is_empty() {
         parts.push(format!("required={}", mapping.required.join("|")));
     }
+    if !mapping.optional.is_empty() {
+        parts.push(format!("optional={}", mapping.optional.join("|")));
+    }
+    if let Some(risk_level) = mapping.risk_level {
+        parts.push(format!("risk={}", risk_level_token(risk_level)));
+    }
     if mapping.preferred {
         parts.push("preferred=true".to_string());
+    }
+    if let Some(once_per_task) = mapping.once_per_task {
+        parts.push(format!("once_per_task={once_per_task}"));
+    }
+    if let Some(dedup_scope) = mapping.dedup_scope {
+        parts.push(format!("dedup_scope={}", dedup_scope.as_token()));
+    }
+    if let Some(idempotent) = mapping.idempotent {
+        parts.push(format!("idempotent={idempotent}"));
     }
     if parts.is_empty() {
         mapping.name.clone()
     } else {
         format!("{}({})", mapping.name, parts.join(","))
+    }
+}
+
+fn risk_level_token(risk_level: claw_core::skill_registry::SkillRiskLevel) -> &'static str {
+    match risk_level {
+        claw_core::skill_registry::SkillRiskLevel::Unknown => "unknown",
+        claw_core::skill_registry::SkillRiskLevel::Low => "low",
+        claw_core::skill_registry::SkillRiskLevel::Medium => "medium",
+        claw_core::skill_registry::SkillRiskLevel::High => "high",
+    }
+}
+
+fn skill_permission_profile_hint(entry: &SkillRegistryEntry) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(risk_level) = entry.risk_level {
+        parts.push(format!("risk={}", risk_level_token(risk_level)));
+    }
+    if let Some(requires_confirmation) = entry.requires_confirmation {
+        parts.push(format!("requires_confirmation={requires_confirmation}"));
+    }
+    if let Some(side_effect) = entry.side_effect {
+        parts.push(format!("side_effect={side_effect}"));
+    }
+    if let Some(auto_invocable) = entry.auto_invocable {
+        parts.push(format!("auto_invocable={auto_invocable}"));
+    }
+    if let Some(once_per_task) = entry.once_per_task {
+        parts.push(format!("once_per_task={once_per_task}"));
+    }
+    if let Some(dedup_scope) = entry.dedup_scope {
+        parts.push(format!("dedup_scope={}", dedup_scope.as_token()));
+    }
+    if let Some(idempotent) = entry.idempotent {
+        parts.push(format!("idempotent={idempotent}"));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(","))
     }
 }
 
@@ -348,6 +436,9 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
             }
             if entry.preferred_over_run_cmd {
                 parts.push("prefer over run_cmd when semantics match".to_string());
+            }
+            if let Some(permission_profile) = skill_permission_profile_hint(entry) {
+                parts.push(format!("permission_profile={permission_profile}"));
             }
             if !validation_actions.is_empty() {
                 parts.push(format!(

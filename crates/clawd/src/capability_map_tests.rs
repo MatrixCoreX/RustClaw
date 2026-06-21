@@ -1,6 +1,7 @@
 use super::*;
 use claw_core::skill_registry::{
-    PlannerCapabilityEffect, PlannerCapabilityMapping, SkillsRegistry,
+    PlannerCapabilityEffect, PlannerCapabilityMapping, RegistryDedupScope, SkillRiskLevel,
+    SkillsRegistry,
 };
 
 fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
@@ -32,6 +33,56 @@ capabilities = ["net"]
 }
 
 #[test]
+fn machine_skill_names_refine_broad_registry_groups() {
+    let entry = registry_entry_from(
+        r#"
+[[skills]]
+name = "task_control"
+enabled = true
+planner_kind = "tool"
+group = "ops"
+"#,
+        "task_control",
+    );
+    assert_eq!(
+        infer_domain_from_registry_entry(&entry),
+        Some(CapabilityDomain::TaskControl)
+    );
+}
+
+#[test]
+fn registry_groups_cover_media_and_config_domains() {
+    let config_entry = registry_entry_from(
+        r#"
+[[skills]]
+name = "custom_config_tool"
+enabled = true
+planner_kind = "tool"
+group = "config"
+"#,
+        "custom_config_tool",
+    );
+    let video_entry = registry_entry_from(
+        r#"
+[[skills]]
+name = "custom_video_tool"
+enabled = true
+planner_kind = "skill"
+group = "video"
+"#,
+        "custom_video_tool",
+    );
+    assert_eq!(
+        infer_domain_from_registry_entry(&config_entry),
+        Some(CapabilityDomain::Config)
+    );
+    assert_eq!(
+        infer_domain_from_registry_entry(&video_entry),
+        Some(CapabilityDomain::VideoMedia)
+    );
+}
+
+#[test]
 fn filesystem_capability_infers_domain_without_skill_name() {
     let entry = registry_entry_from(
         r#"
@@ -57,14 +108,37 @@ fn planner_capability_hint_includes_structured_contract() {
         effect: Some(PlannerCapabilityEffect::Observe),
         required: vec!["path".to_string()],
         optional: vec!["names_only".to_string()],
-        risk_level: None,
+        risk_level: Some(SkillRiskLevel::Low),
         preferred: true,
-        once_per_task: None,
-        dedup_scope: None,
-        idempotent: None,
+        once_per_task: Some(false),
+        dedup_scope: Some(RegistryDedupScope::Args),
+        idempotent: Some(true),
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,effect=observe,required=path,preferred=true)"
+        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true)"
+    );
+}
+
+#[test]
+fn permission_profile_hint_uses_registry_machine_fields() {
+    let entry = registry_entry_from(
+        r#"
+[[skills]]
+name = "writer"
+enabled = true
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+auto_invocable = false
+once_per_task = true
+dedup_scope = "action"
+idempotent = false
+"#,
+        "writer",
+    );
+    assert_eq!(
+        skill_permission_profile_hint(&entry).as_deref(),
+        Some("risk=high,requires_confirmation=true,side_effect=true,auto_invocable=false,once_per_task=true,dedup_scope=action,idempotent=false")
     );
 }
