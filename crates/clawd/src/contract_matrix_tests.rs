@@ -126,6 +126,40 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
 }
 
 #[test]
+fn archive_list_allows_compound_readonly_archive_and_db_observations() {
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ArchiveList,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        ..IntentOutputContract::default()
+    };
+    for (skill, args, expected_action) in [
+        (
+            "archive_basic",
+            serde_json::json!({"action":"list","archive":"tmp/test_bundle.zip"}),
+            "archive_basic.list",
+        ),
+        (
+            "archive_basic",
+            serde_json::json!({"action":"read","archive":"tmp/test_bundle.zip","member":"notes.txt"}),
+            "archive_basic.read",
+        ),
+        (
+            "db_basic",
+            serde_json::json!({"action":"list_tables","db_path":"data/test_contract.sqlite"}),
+            "db_basic.list_tables",
+        ),
+    ] {
+        let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
+            .expect("archive list policy decision");
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert!(policy.action_matches_preferred(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "archive_list");
+    }
+}
+
+#[test]
 fn service_status_allows_http_basic_observation() {
     let matrix = load_workspace_matrix();
     let contract = matrix
