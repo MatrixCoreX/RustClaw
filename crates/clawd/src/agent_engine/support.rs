@@ -742,6 +742,7 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
             tool_calls: saturating_u32(loop_state.tool_calls_total),
             elapsed_ms: 0,
         },
+        attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
         pending_async_job: None,
         repair_signal: loop_state.last_stop_signal.as_ref().map(|signal| {
             json!({

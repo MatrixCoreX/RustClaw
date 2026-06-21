@@ -509,6 +509,7 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
             tool_calls: 2,
             elapsed_ms: 1234,
         },
+        attempt_ledger: None,
         pending_async_job: None,
         repair_signal: Some(json!({"status_code": "missing_required_evidence"})),
         resume_entrypoint: ResumeEntrypoint::NextPlannerRound,

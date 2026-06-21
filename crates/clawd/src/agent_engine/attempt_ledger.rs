@@ -117,6 +117,12 @@ pub(super) fn record_attempt_with_retry_instruction(
 }
 
 pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
+    build_attempt_ledger_snapshot(loop_state)
+        .and_then(|snapshot| serde_json::to_string_pretty(&snapshot).ok())
+        .unwrap_or_else(|| "(empty)".to_string())
+}
+
+pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Value> {
     if !loop_state.attempt_ledger_entries.is_empty() {
         let mut entries = loop_state
             .attempt_ledger_entries
@@ -126,10 +132,10 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
             .map(attempt_entry_json)
             .collect::<Vec<_>>();
         entries.reverse();
-        return serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
+        return Some(Value::Array(entries));
     }
     if loop_state.executed_step_results.is_empty() {
-        return "(empty)".to_string();
+        return None;
     }
     let mut entries = loop_state
         .executed_step_results
@@ -192,7 +198,7 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
         })
         .collect::<Vec<_>>();
     entries.reverse();
-    serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string())
+    Some(Value::Array(entries))
 }
 
 fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
