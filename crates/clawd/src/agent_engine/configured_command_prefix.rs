@@ -1187,6 +1187,11 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         actions,
     );
     let actions =
+        super::super::planning_recent_artifacts::normalize_recent_artifacts_listing_selectors(
+            route_result,
+            actions,
+        );
+    let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_evidence_contract_actions(
         state,
