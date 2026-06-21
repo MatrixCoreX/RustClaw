@@ -246,62 +246,6 @@ function deviceKey(userKey, devicePubkey) {
   return `${userKey}:${devicePubkey}`;
 }
 
-function parsePositiveInt(value, fallback, max) {
-  const parsed = Number.parseInt(String(value || ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.min(parsed, max);
-}
-
-function publicRequestRecord(record) {
-  return {
-    id: record.id || null,
-    request_kind: record.request_kind || "nni_join",
-    task_id: record.task_id || null,
-    user_key: record.user_key || null,
-    device_pubkey: record.device_pubkey || null,
-    compliant: Boolean(record.compliant),
-    status: record.status || "unknown",
-    error_code: record.error_code || null,
-    created_at_ts: record.created_at_ts || null,
-    signature_present: Boolean(record.signature),
-    challenge_present: Boolean(record.challenge),
-  };
-}
-
-function isNniRequestRecord(record) {
-  const kind = record.request_kind || "nni_join";
-  return kind === "nni_join" || kind === "nni_heartbeat";
-}
-
-async function handleNniRequestRecords(res, url) {
-  const page = parsePositiveInt(url.searchParams.get("page"), 1, 1000000);
-  const perPage = parsePositiveInt(url.searchParams.get("per_page"), 10, 100);
-  const state = await loadState();
-  const records = state.requests
-    .filter(isNniRequestRecord)
-    .sort((left, right) => {
-      const tsDelta = (right.created_at_ts || 0) - (left.created_at_ts || 0);
-      if (tsDelta !== 0) return tsDelta;
-      return (right.id || 0) - (left.id || 0);
-    });
-  const total = records.length;
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
-  const start = (page - 1) * perPage;
-  const pageRecords = records.slice(start, start + perPage).map(publicRequestRecord);
-  sendJson(
-    res,
-    200,
-    ok({
-      status: "nni_request_records",
-      page,
-      per_page: perPage,
-      total,
-      total_pages: totalPages,
-      records: pageRecords,
-    }),
-  );
-}
-
 async function handleJoinRequest(res, body) {
   let devicePubkey;
   try {
@@ -709,13 +653,6 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     if (req.method === "GET" && url.pathname === "/v1/health") {
       sendJson(res, 200, ok({ service: "nni-server", status: "ok" }));
-      return;
-    }
-    if (
-      req.method === "GET" &&
-      (url.pathname === "/v1/nni/server/records" || url.pathname === "/v1/nni/server/heartbeat/records")
-    ) {
-      await handleNniRequestRecords(res, url);
       return;
     }
     if (req.method !== "POST") {

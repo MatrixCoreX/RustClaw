@@ -268,36 +268,22 @@ test("heartbeat verify records public key request time and count", async (t) => 
   assert.equal(state.requests[0].status, "accepted");
 });
 
-test("records endpoint returns paginated NNI request history", async (t) => {
-  const requests = [];
-  for (let index = 1; index <= 12; index += 1) {
-    requests.push({
-      id: index,
-      request_kind: "nni_heartbeat",
-      task_id: `heartbeat-${index}`,
-      user_key: "clawd-nni-heartbeat",
+test("request records are stored but not exposed through public query endpoints", async (t) => {
+  const requests = [
+    {
+      id: 1,
+      request_kind: "nni_join",
+      task_id: "join-visible",
+      user_key: "ui-user",
       device_pubkey: VALID_PUBKEY,
       challenge: "00".repeat(32),
       signature: "11".repeat(64),
       compliant: true,
       status: "accepted",
       error_code: null,
-      created_at_ts: 1_700_000_000 + index,
-    });
-  }
-  requests.push({
-    id: 99,
-    request_kind: "nni_join",
-    task_id: "join-visible",
-    user_key: "ui-user",
-    device_pubkey: VALID_PUBKEY,
-    challenge: "00".repeat(32),
-    signature: "11".repeat(64),
-    compliant: true,
-    status: "accepted",
-    error_code: null,
-    created_at_ts: 1_800_000_000,
-  });
+      created_at_ts: 1_800_000_000,
+    },
+  ];
   const server = await startServer({
     initialState: {
       tasks: {},
@@ -308,30 +294,17 @@ test("records endpoint returns paginated NNI request history", async (t) => {
   });
   t.after(() => server.stop());
 
-  const page1 = await getJson(server.baseUrl, "/v1/nni/server/records?page=1&per_page=10");
-  assert.equal(page1.status, 200);
-  assert.equal(page1.body.ok, true);
-  assert.equal(page1.body.data.status, "nni_request_records");
-  assert.equal(page1.body.data.total, 13);
-  assert.equal(page1.body.data.total_pages, 2);
-  assert.equal(page1.body.data.records.length, 10);
-  assert.equal(page1.body.data.records[0].task_id, "join-visible");
-  assert.equal(page1.body.data.records[0].request_kind, "nni_join");
-  assert.equal(page1.body.data.records[0].signature_present, true);
-  assert.equal(page1.body.data.records[0].challenge_present, true);
-  assert.equal(Object.hasOwn(page1.body.data.records[0], "signature"), false);
-  assert.equal(Object.hasOwn(page1.body.data.records[0], "challenge"), false);
+  const records = await getJson(server.baseUrl, "/v1/nni/server/records?page=1&per_page=10");
+  assert.equal(records.status, 404);
+  assert.equal(records.body.ok, false);
+  assert.equal(records.body.error, "not_found");
 
-  const legacyPage1 = await getJson(server.baseUrl, "/v1/nni/server/heartbeat/records?page=1&per_page=10");
-  assert.equal(legacyPage1.status, 200);
-  assert.equal(legacyPage1.body.ok, true);
-  assert.equal(legacyPage1.body.data.total, 13);
+  const legacyRecords = await getJson(server.baseUrl, "/v1/nni/server/heartbeat/records?page=1&per_page=10");
+  assert.equal(legacyRecords.status, 404);
+  assert.equal(legacyRecords.body.ok, false);
+  assert.equal(legacyRecords.body.error, "not_found");
 
-  const page2 = await getJson(server.baseUrl, "/v1/nni/server/records?page=2&per_page=10");
-  assert.equal(page2.status, 200);
-  assert.equal(page2.body.ok, true);
-  assert.equal(page2.body.data.records.length, 3);
-  assert.equal(page2.body.data.records[0].task_id, "heartbeat-3");
-  assert.equal(page2.body.data.records[1].task_id, "heartbeat-2");
-  assert.equal(page2.body.data.records[2].task_id, "heartbeat-1");
+  const state = JSON.parse(await readFile(server.statePath, "utf8"));
+  assert.equal(state.requests.length, 1);
+  assert.equal(state.requests[0].task_id, "join-visible");
 });

@@ -219,6 +219,11 @@ async fn nni_join_request(
     let node_urls = match normalize_nni_node_urls(&req.node_urls) {
         Ok(urls) if !urls.is_empty() => urls,
         Ok(_) => {
+            let mut record = nni_request_record("nni_join", "failed");
+            record.user_key = Some(identity.user_key.clone());
+            record.error_code = Some("nni_remote_node_required".to_string());
+            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+            record_nni_request_event(&state, record);
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
                 "nni_remote_node_required",
@@ -226,6 +231,11 @@ async fn nni_join_request(
             );
         }
         Err(err) => {
+            let mut record = nni_request_record("nni_join", "failed");
+            record.user_key = Some(identity.user_key.clone());
+            record.error_code = Some(err.to_string());
+            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+            record_nni_request_event(&state, record);
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
                 err,
@@ -236,7 +246,15 @@ async fn nni_join_request(
 
     let device_pubkey = match nni_device_pubkey(&state).await {
         Ok(pubkey) => pubkey,
-        Err((status, error, data)) => return nni_join_error(status, error, data),
+        Err((status, error, data)) => {
+            let mut record = nni_request_record("nni_join", "failed");
+            record.user_key = Some(identity.user_key.clone());
+            record.compliant = Some(false);
+            record.error_code = Some(error.to_string());
+            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+            record_nni_request_event(&state, record);
+            return nni_join_error(status, error, data);
+        }
     };
 
     let mut attempts = Vec::new();
@@ -259,6 +277,25 @@ async fn nni_join_request(
                 let status = resp.status();
                 match resp.json::<ApiResponse<Value>>().await {
                     Ok(mut body) if status.is_success() && body.ok => {
+                        let data_ref = body.data.as_ref();
+                        let mut record = nni_request_record(
+                            "nni_join",
+                            data_ref
+                                .and_then(|data| data.get("status"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("challenge_created"),
+                        );
+                        record.task_id = data_ref
+                            .and_then(|data| data.get("task_id"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        record.user_key = Some(identity.user_key.clone());
+                        record.device_pubkey = Some(device_pubkey.clone());
+                        record.node_url = Some(node_url.clone());
+                        record.created_at_ts =
+                            Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                        record.challenge_present = true;
+                        record_nni_request_event(&state, record);
                         let data = body.data.get_or_insert_with(|| json!({}));
                         if let Some(obj) = data.as_object_mut() {
                             obj.insert("node_url".to_string(), Value::String(node_url));
@@ -269,23 +306,66 @@ async fn nni_join_request(
                         }
                         return (StatusCode::OK, Json(body));
                     }
-                    Ok(body) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error": body.error,
-                        "data": body.data,
-                    })),
-                    Err(err) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error": format!("nni_remote_bad_response: {err}"),
-                    })),
+                    Ok(body) => {
+                        let data_ref = body.data.as_ref();
+                        let mut record = nni_request_record(
+                            "nni_join",
+                            data_ref
+                                .and_then(|data| data.get("status"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("failed"),
+                        );
+                        record.task_id = data_ref
+                            .and_then(|data| data.get("task_id"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        record.user_key = Some(identity.user_key.clone());
+                        record.device_pubkey = Some(device_pubkey.clone());
+                        record.node_url = Some(node_url.clone());
+                        record.compliant = Some(false);
+                        record.error_code = body.error.clone();
+                        record.created_at_ts =
+                            Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                        record_nni_request_event(&state, record);
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error": body.error,
+                            "data": body.data,
+                        }));
+                    }
+                    Err(err) => {
+                        let mut record = nni_request_record("nni_join", "failed");
+                        record.user_key = Some(identity.user_key.clone());
+                        record.device_pubkey = Some(device_pubkey.clone());
+                        record.node_url = Some(node_url.clone());
+                        record.compliant = Some(false);
+                        record.error_code = Some("nni_remote_bad_response".to_string());
+                        record.created_at_ts =
+                            Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                        record_nni_request_event(&state, record);
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error": format!("nni_remote_bad_response: {err}"),
+                        }));
+                    }
                 }
             }
-            Err(err) => attempts.push(json!({
-                "node_url": node_url,
-                "error": format!("nni_remote_request_failed: {err}"),
-            })),
+            Err(err) => {
+                let mut record = nni_request_record("nni_join", "failed");
+                record.user_key = Some(identity.user_key.clone());
+                record.device_pubkey = Some(device_pubkey.clone());
+                record.node_url = Some(node_url.clone());
+                record.compliant = Some(false);
+                record.error_code = Some("nni_remote_request_failed".to_string());
+                record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                record_nni_request_event(&state, record);
+                attempts.push(json!({
+                    "node_url": node_url,
+                    "error": format!("nni_remote_request_failed: {err}"),
+                }));
+            }
         }
     }
 
@@ -304,20 +384,30 @@ async fn nni_join_verify(
     headers: HeaderMap,
     Json(req): Json<NniLocalJoinVerifyRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
     };
 
     let node_url = match normalize_nni_node_url(&req.node_url) {
         Ok(url) => url,
         Err(err) => {
+            let mut record = nni_request_record("nni_join", "failed");
+            record.task_id = Some(req.task_id.trim().to_string()).filter(|value| !value.is_empty());
+            record.user_key = Some(identity.user_key.clone());
+            record.error_code = Some(err.to_string());
+            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+            record.signature_present = !req.signature.trim().is_empty();
+            record_nni_request_event(&state, record);
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
                 err,
@@ -343,6 +433,48 @@ async fn nni_join_verify(
             let status = resp.status();
             match resp.json::<ApiResponse<Value>>().await {
                 Ok(mut body) => {
+                    let data_ref = body.data.as_ref();
+                    let remote_status = data_ref
+                        .and_then(|data| data.get("status"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(if status.is_success() && body.ok {
+                            "accepted"
+                        } else {
+                            "failed"
+                        });
+                    let mut record = nni_request_record(
+                        "nni_join",
+                        if remote_status == "joined" {
+                            "accepted"
+                        } else {
+                            remote_status
+                        },
+                    );
+                    record.task_id = data_ref
+                        .and_then(|data| data.get("task_id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| {
+                            Some(req.task_id.trim().to_string()).filter(|value| !value.is_empty())
+                        });
+                    record.user_key = Some(identity.user_key.clone());
+                    record.device_pubkey = data_ref
+                        .and_then(|data| data.get("device_pubkey"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    record.node_url = Some(node_url.clone());
+                    record.compliant = data_ref
+                        .and_then(|data| data.get("compliant"))
+                        .and_then(Value::as_bool)
+                        .or_else(|| (status.is_success() && body.ok).then_some(true));
+                    record.error_code = body.error.clone();
+                    record.created_at_ts = data_ref
+                        .and_then(|data| data.get("verified_at_ts"))
+                        .and_then(Value::as_u64)
+                        .or_else(|| Some(u64::try_from(current_unix_ts()).unwrap_or_default()));
+                    record.signature_present = !req.signature.trim().is_empty();
+                    record.challenge_present = true;
+                    record_nni_request_event(&state, record);
                     if let Some(data) = body.data.as_mut().and_then(|value| value.as_object_mut()) {
                         data.insert("node_url".to_string(), Value::String(node_url));
                     }
@@ -350,18 +482,44 @@ async fn nni_join_verify(
                         StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
                     (axum_status, Json(body))
                 }
-                Err(err) => nni_join_error(
-                    StatusCode::BAD_GATEWAY,
-                    "nni_remote_bad_response",
-                    json!({"status": "remote_bad_response", "error": err.to_string()}),
-                ),
+                Err(err) => {
+                    let mut record = nni_request_record("nni_join", "failed");
+                    record.task_id =
+                        Some(req.task_id.trim().to_string()).filter(|value| !value.is_empty());
+                    record.user_key = Some(identity.user_key.clone());
+                    record.node_url = Some(node_url);
+                    record.compliant = Some(false);
+                    record.error_code = Some("nni_remote_bad_response".to_string());
+                    record.created_at_ts =
+                        Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                    record.signature_present = !req.signature.trim().is_empty();
+                    record.challenge_present = true;
+                    record_nni_request_event(&state, record);
+                    nni_join_error(
+                        StatusCode::BAD_GATEWAY,
+                        "nni_remote_bad_response",
+                        json!({"status": "remote_bad_response", "error": err.to_string()}),
+                    )
+                }
             }
         }
-        Err(err) => nni_join_error(
-            StatusCode::BAD_GATEWAY,
-            "nni_remote_request_failed",
-            json!({"status": "remote_request_failed", "error": err.to_string()}),
-        ),
+        Err(err) => {
+            let mut record = nni_request_record("nni_join", "failed");
+            record.task_id = Some(req.task_id.trim().to_string()).filter(|value| !value.is_empty());
+            record.user_key = Some(identity.user_key);
+            record.node_url = Some(node_url);
+            record.compliant = Some(false);
+            record.error_code = Some("nni_remote_request_failed".to_string());
+            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+            record.signature_present = !req.signature.trim().is_empty();
+            record.challenge_present = true;
+            record_nni_request_event(&state, record);
+            nni_join_error(
+                StatusCode::BAD_GATEWAY,
+                "nni_remote_request_failed",
+                json!({"status": "remote_request_failed", "error": err.to_string()}),
+            )
+        }
     }
 }
 
@@ -381,85 +539,69 @@ async fn nni_request_records(
         );
     };
 
-    let config = match read_nni_config(&state) {
-        Ok(config) => config,
-        Err(err) => {
-            return nni_join_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "nni_config_read_failed",
-                json!({"status": "config_read_failed", "error": err.to_string()}),
-            );
+    match read_nni_request_records(&state) {
+        Ok(records) => {
+            let page = query.page.unwrap_or(1).max(1);
+            let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
+            let total = records.len();
+            let total_pages = total.div_ceil(per_page).max(1);
+            let start = page.saturating_sub(1).saturating_mul(per_page).min(total);
+            let end = start.saturating_add(per_page).min(total);
+            let page_records = records[start..end].to_vec();
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "status": "local_request_records",
+                        "page": page,
+                        "per_page": per_page,
+                        "total": total,
+                        "total_pages": total_pages,
+                        "records": page_records,
+                    })),
+                    error: None,
+                }),
+            )
         }
-    };
-    if config.remote_nodes.is_empty() {
-        return nni_join_error(
-            StatusCode::BAD_REQUEST,
-            "nni_remote_nodes_unavailable",
-            json!({"status": "remote_nodes_unavailable", "attempts": []}),
+        Err(err) => nni_join_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nni_request_records_read_failed",
+            json!({"status": "request_records_read_failed", "error": err.to_string()}),
+        ),
+    }
+}
+
+async fn nni_clear_request_records(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
         );
+    };
+
+    match clear_nni_request_records(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => nni_join_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nni_request_records_clear_failed",
+            json!({"status": "request_records_clear_failed", "error": err.to_string()}),
+        ),
     }
-
-    let page = query.page.unwrap_or(1).max(1);
-    let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
-    let mut attempts = Vec::new();
-    for node_url in config.remote_nodes {
-        for endpoint_path in ["/v1/nni/server/records", "/v1/nni/server/heartbeat/records"] {
-            let endpoint = format!("{node_url}{endpoint_path}?page={page}&per_page={per_page}");
-            let response = state
-                .core
-                .http_client
-                .get(&endpoint)
-                .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
-                .send()
-                .await;
-
-            match response {
-                Ok(resp) => {
-                    let status = resp.status();
-                    match resp.json::<ApiResponse<Value>>().await {
-                        Ok(mut body) if status.is_success() && body.ok => {
-                            let data = body.data.get_or_insert_with(|| json!({}));
-                            if let Some(obj) = data.as_object_mut() {
-                                obj.insert("node_url".to_string(), Value::String(node_url));
-                                obj.insert(
-                                    "records_endpoint".to_string(),
-                                    Value::String(endpoint_path.to_string()),
-                                );
-                            }
-                            return (StatusCode::OK, Json(body));
-                        }
-                        Ok(body) => attempts.push(json!({
-                            "node_url": node_url,
-                            "endpoint": endpoint_path,
-                            "http_status": status.as_u16(),
-                            "error": body.error,
-                            "data": body.data,
-                        })),
-                        Err(err) => attempts.push(json!({
-                            "node_url": node_url,
-                            "endpoint": endpoint_path,
-                            "http_status": status.as_u16(),
-                            "error": format!("nni_remote_bad_response: {err}"),
-                        })),
-                    }
-                }
-                Err(err) => attempts.push(json!({
-                    "node_url": node_url,
-                    "endpoint": endpoint_path,
-                    "error": format!("nni_remote_request_failed: {err}"),
-                })),
-            }
-        }
-    }
-
-    nni_join_error(
-        StatusCode::BAD_GATEWAY,
-        "nni_request_records_unavailable",
-        json!({
-            "status": "request_records_unavailable",
-            "attempts": attempts,
-        }),
-    )
 }
 
 async fn nni_heartbeat_errors(
@@ -914,6 +1056,16 @@ fn write_nni_heartbeat_status(
     read_nni_config(state)
 }
 
+fn nni_error_code_from_message(message: &str) -> String {
+    message
+        .split(':')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("nni_request_failed")
+        .to_string()
+}
+
 pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
@@ -957,6 +1109,43 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
                 Some(heartbeat_count),
                 Some(0),
             )?;
+            let remote_status = data
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("accepted");
+            let mut record = nni_request_record(
+                "nni_heartbeat",
+                if remote_status == "heartbeat_accepted" {
+                    "accepted"
+                } else {
+                    remote_status
+                },
+            );
+            record.task_id = data
+                .get("task_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            record.user_key = Some(NNI_HEARTBEAT_USER_KEY.to_string());
+            record.device_pubkey = data
+                .get("device_pubkey")
+                .and_then(Value::as_str)
+                .or_else(|| data.get("local_device_pubkey").and_then(Value::as_str))
+                .map(str::to_string);
+            record.node_url = data
+                .get("node_url")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            record.compliant = data
+                .get("compliant")
+                .and_then(Value::as_bool)
+                .or(Some(true));
+            record.created_at_ts = data
+                .get("verified_at_ts")
+                .and_then(Value::as_u64)
+                .or(Some(heartbeat_ts));
+            record.signature_present = true;
+            record.challenge_present = true;
+            record_nni_request_event(state, record);
             tracing::info!(
                 "nni heartbeat accepted: ts={} count={} node={}",
                 heartbeat_ts,
@@ -982,6 +1171,12 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
                 None,
                 network_failures,
             )?;
+            let mut record = nni_request_record("nni_heartbeat", "failed");
+            record.user_key = Some(NNI_HEARTBEAT_USER_KEY.to_string());
+            record.compliant = Some(false);
+            record.error_code = Some(nni_error_code_from_message(&err.to_string()));
+            record.created_at_ts = Some(now);
+            record_nni_request_event(state, record);
             return Err(err.into());
         }
     }
