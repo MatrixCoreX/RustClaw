@@ -2,9 +2,9 @@ use serde_json::{json, Value};
 
 use super::{
     delivery_payload_consistent, evidence_coverage_for_route, observed_evidence_from_output,
-    TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerFallback, TaskJournalFinalizerStage,
-    TaskJournalFinalizerSummary, TaskJournalRolloutAttribution, TaskJournalRoundTrace,
-    TaskJournalStepTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
+    TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerStage, TaskJournalFinalizerSummary,
+    TaskJournalRolloutAttribution, TaskJournalRoundTrace, TaskJournalStepTrace,
+    TaskJournalVerifyIssue, TaskJournalVerifySummary,
 };
 
 #[path = "task_journal_tests/observed_evidence_core_tests.rs"]
@@ -72,9 +72,9 @@ fn summary_json_includes_finalizer_and_task_metrics() {
         },
     });
     journal.record_finalizer_summary(TaskJournalFinalizerSummary {
-        stage: Some(TaskJournalFinalizerStage::General),
+        stage: Some(TaskJournalFinalizerStage::ObservedGeneric),
         disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
-        fallback: Some(TaskJournalFinalizerFallback::RawText),
+        fallback: None,
         parsed: false,
         contract_ok: false,
         completion_ok: None,
@@ -121,7 +121,7 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .get("finalizer_summary")
             .and_then(|v| v.get("stage"))
             .and_then(Value::as_str),
-        Some("general")
+        Some("observed_generic")
     );
     assert_eq!(
         summary

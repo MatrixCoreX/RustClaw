@@ -194,9 +194,7 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     }
     if matches!(
         contract.operation,
-        crate::task_contract::TaskOperation::Write
-            | crate::task_contract::TaskOperation::Modify
-            | crate::task_contract::TaskOperation::Configure
+        crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
     ) {
         return AgentLoopEligibility::blocked("side_effect_operation");
     }
@@ -282,9 +280,7 @@ fn route_is_low_risk_single_file_delivery(
     }
     if matches!(
         contract.operation,
-        crate::task_contract::TaskOperation::Write
-            | crate::task_contract::TaskOperation::Modify
-            | crate::task_contract::TaskOperation::Configure
+        crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
     ) {
         return false;
     }

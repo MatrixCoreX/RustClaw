@@ -79,17 +79,14 @@ pub(crate) struct ChannelConfig {
 
 /// P2.1 — 把"配置 / 注册表 reload 时需要查的元信息"从 [`AppState`] 主体中剥出来。
 ///
-/// 这一组字段除了 `config_path_for_reload` 在 `reload_skill_views` 用到，其他
-/// 三个目前实际只在 reload 时被读（`#[allow(dead_code)]` 在历史版本里就标着）。
+/// 这一组字段除了 `config_path_for_reload` 在 `reload_skill_views` 用到，其他字段
+/// 只保留为 reload 兼容快照，避免重新解析配置失败时丢失上一轮运行态上下文。
 #[derive(Clone, Default)]
 pub(crate) struct ReloadContext {
     pub(crate) config_path_for_reload: String,
-    #[allow(dead_code)]
-    pub(crate) registry_path_for_reload: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) skill_switches_for_reload: Arc<HashMap<String, bool>>,
-    #[allow(dead_code)]
-    pub(crate) initial_skills_list_for_reload: Vec<String>,
+    pub(crate) _registry_path_for_reload: Option<String>,
+    pub(crate) _skill_switches_for_reload: Arc<HashMap<String, bool>>,
+    pub(crate) _initial_skills_list_for_reload: Vec<String>,
 }
 
 /// P2.1 Stage 2 — `CoreServices` 簇：所有模块都需要的核心运行时句柄
@@ -736,9 +733,9 @@ impl AppState {
         };
         *self.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
         self.reload_ctx.config_path_for_reload = config_path_str;
-        self.reload_ctx.registry_path_for_reload = config.skills.registry_path.clone();
-        self.reload_ctx.skill_switches_for_reload = Arc::new(config.skills.skill_switches.clone());
-        self.reload_ctx.initial_skills_list_for_reload = config.skills.skills_list.clone();
+        self.reload_ctx._registry_path_for_reload = config.skills.registry_path.clone();
+        self.reload_ctx._skill_switches_for_reload = Arc::new(config.skills.skill_switches.clone());
+        self.reload_ctx._initial_skills_list_for_reload = config.skills.skills_list.clone();
         self
     }
 
@@ -914,13 +911,6 @@ impl AppState {
         self.core.skill_views_snapshot.read().unwrap().clone()
     }
 
-    /// 兼容入口：不带 label 的累计。新代码请优先调用 [`Self::note_task_llm_call_with_label`]
-    /// 把 `label` 也传进来，否则 `by_prompt` 维度会缺失。
-    #[allow(dead_code)]
-    pub(crate) fn note_task_llm_call(&self, task_id: &str) {
-        self.note_task_llm_call_with_label(task_id, "unspecified");
-    }
-
     /// Phase 1.5: 累计一次 LLM 调用，并按 prompt label 分桶记录。
     /// `label` 由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
     pub(crate) fn note_task_llm_call_with_label(&self, task_id: &str, label: &str) {
@@ -955,13 +945,6 @@ impl AppState {
             .get(task_id)
             .copied()
             .unwrap_or(0)
-    }
-
-    /// Phase 1.3: 追加一次 LLM 调用的耗时（成功/失败都记，保证预算真实反映压力）。
-    /// 兼容入口：不带 label。新代码请优先调用 [`Self::note_task_llm_elapsed_with_label`]。
-    #[allow(dead_code)]
-    pub(crate) fn note_task_llm_elapsed(&self, task_id: &str, elapsed_ms: u64) {
-        self.note_task_llm_elapsed_with_label(task_id, "unspecified", elapsed_ms);
     }
 
     /// Phase 1.5: 按 prompt label 分桶记录耗时。会同时累加全局耗时表。

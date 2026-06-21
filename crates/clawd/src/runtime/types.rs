@@ -83,7 +83,6 @@ impl AskReply {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum AgentAction {
     Think {
-        #[allow(dead_code)]
         content: String,
     },
     CallTool {

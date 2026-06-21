@@ -290,14 +290,17 @@ pub(super) fn preferred_auto_source_root(roots: Vec<PathBuf>) -> Option<PathBuf>
 
 pub(super) fn platform_hint_lines(cat: &TextCatalog) -> Vec<String> {
     match current_platform() {
+        #[cfg(target_os = "macos")]
         HostPlatform::MacOS => vec![
             tr(cat, "photo_organize.msg.no_external_candidates"),
             tr(cat, "photo_organize.msg.macos_hint"),
         ],
+        #[cfg(target_os = "linux")]
         HostPlatform::Linux => vec![
             tr(cat, "photo_organize.msg.no_external_candidates"),
             tr(cat, "photo_organize.msg.linux_hint"),
         ],
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         HostPlatform::Other => vec![
             tr(cat, "photo_organize.msg.no_external_candidates"),
             tr(cat, "photo_organize.msg.other_os_hint"),
