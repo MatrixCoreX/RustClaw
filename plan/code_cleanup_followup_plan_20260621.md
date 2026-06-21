@@ -195,18 +195,21 @@
 
 目标：删除不应长期保留的测试生成物，保留可复用 fixtures、case 集合和 release-gate 结果摘要。
 
-- [ ] 扫描 `scripts/nl_suite_logs/`、`logs/agent_rollout_metrics/`、`document/` 下历史测试产物。
-- [ ] 区分：
+- [x] 扫描 `scripts/nl_suite_logs/`、`logs/agent_rollout_metrics/`、`document/` 下历史测试产物。
+- [x] 区分：
   - release gate 证据：保留。
   - 可复用 NL case / fixture：保留。
   - 临时调试输出、图片、音频、手工试验文件：删除或移入明确 ignored 目录。
-- [ ] 不删除用户资料、密钥、运行数据库和当前服务需要的日志。
-- [ ] 不提交 secrets、token、私钥。
+  - 2026-06-21：保留 `scripts/nl_suite_logs/` 与 `logs/agent_rollout_metrics/` 中 release-gate / route-delta / NL 历史证据；不批量删除 `document/`，避免误删用户资料或测试夹具。
+  - 2026-06-21：删除 Python `__pycache__` / tracked `.pyc` 生成物、`scripts/nl_tests/cases/_tmp_*.txt`、`scripts/nl_tests/cases/_probe/`、`logs/agent_rollout_metrics/tmp_case_1_40_122_rollout_metrics.json`。
+- [x] 不删除用户资料、密钥、运行数据库和当前服务需要的日志。
+- [x] 不提交 secrets、token、私钥。
 
 验收：
 
-- [ ] `git status --short` 中没有无意义测试生成物。
-- [ ] `.gitignore` 覆盖新的临时输出位置。
+- [x] `git status --short` 中没有无意义测试生成物。
+- [x] `.gitignore` 覆盖新的临时输出位置。
+  - 2026-06-21：清理对象均为已忽略生成物或 tracked `.pyc`，未新增临时输出路径。
 
 ## Track F: 验证策略
 
