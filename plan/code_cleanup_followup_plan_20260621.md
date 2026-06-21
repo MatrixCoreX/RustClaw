@@ -168,27 +168,28 @@
 - [x] 媒体 skill registry 约束已补进当前代码事实：
   - 当前 `OutputKind` 只支持 `text/file/image/mixed`；视频/音乐生成属于文件产物，registry 使用 `output_kind = "file"`。
   - 若未来要引入 `video/audio` 输出枚举，必须先扩展 `claw-core::skill_registry::OutputKind`、UI health 输出、run_skill finalize、planner output contract，再改 registry。
-- [ ] 更新 README 中 release gate 描述：
+- [x] 更新 README 中 release gate 描述：
   - 说明 2100+ 可以由等价覆盖集替代。
   - 当前推荐使用压缩覆盖集做代码推进门槛，完整大集合作为定期回归。
-- [ ] 审核 `configs/agent_guard.toml`
+- [x] 审核 `configs/agent_guard.toml`
   - 保留 `semantic_route_authority` 当前配置说明。
   - 旧 bool 只作为历史说明，不作为推荐配置。
-- [ ] 审核 docs：
+- [x] 审核 docs：
   - `docs/agent_guard_config_wiring_audit.md`
   - `docs/agent_loop_pre_agent_decision_inventory.md`
   - `docs/agent_upgrade_rollout_guardrails.md`
   - 将已完成项标记为历史状态，未完成项转入本计划或后续专项。
-- [ ] 确认 README 三个流程图仍反映当前主路径：
+- [x] 确认 README 三个流程图仍反映当前主路径：
   - API / worker / normalizer / agent loop / finalizer。
   - boundary guard 只做安全、绑定、预算、contract，不做普通语义权威。
   - legacy / compatibility 路径只作为非 eligible、高风险、schedule、delivery、回滚边界。
+  - 2026-06-21：README 已补当前 `configs/agent_guard.toml` 默认：`semantic_route_authority = "agent_loop_default"`、`answer_verifier_enforce_required_scope = "all"`、`registry_idempotency_guard_scope = "all"`；旧 `agent_decides_*` 名称说明为 ignored historical config keys。
 
 验收：
 
-- [ ] README 与当前代码主流程一致。
-- [ ] 文档不推荐旧 bool 开关作为新架构入口。
-- [ ] `git diff --check` 通过。
+- [x] README 与当前代码主流程一致。
+- [x] 文档不推荐旧 bool 开关作为新架构入口。
+- [x] `git diff --check` 通过。
 
 ## Track E: 测试资产和生成物清理
 
