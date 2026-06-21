@@ -461,6 +461,7 @@ interface NniHeartbeatRecord {
   task_id?: string | null;
   user_key?: string | null;
   device_pubkey?: string | null;
+  node_url?: string | null;
   compliant?: boolean | null;
   status: string;
   error_code?: string | null;
@@ -471,7 +472,6 @@ interface NniHeartbeatRecord {
 
 interface NniHeartbeatRecordsResponse {
   status: string;
-  node_url?: string;
   page: number;
   per_page: number;
   total: number;
@@ -1193,9 +1193,10 @@ export default function App() {
   const [nniHeartbeatRecordsPage, setNniHeartbeatRecordsPage] = useState(1);
   const [nniHeartbeatRecordsTotal, setNniHeartbeatRecordsTotal] = useState(0);
   const [nniHeartbeatRecordsTotalPages, setNniHeartbeatRecordsTotalPages] = useState(1);
-  const [nniHeartbeatRecordsNode, setNniHeartbeatRecordsNode] = useState("");
   const [nniHeartbeatRecordsLoading, setNniHeartbeatRecordsLoading] = useState(false);
+  const [nniHeartbeatRecordsClearing, setNniHeartbeatRecordsClearing] = useState(false);
   const [nniHeartbeatRecordsError, setNniHeartbeatRecordsError] = useState<string | null>(null);
+  const [nniHeartbeatRecordsMessage, setNniHeartbeatRecordsMessage] = useState<string | null>(null);
   const [nniHeartbeatErrors, setNniHeartbeatErrors] = useState<NniHeartbeatErrorRecord[]>([]);
   const [nniHeartbeatErrorsPage, setNniHeartbeatErrorsPage] = useState(1);
   const [nniHeartbeatErrorsTotal, setNniHeartbeatErrorsTotal] = useState(0);
@@ -2932,6 +2933,7 @@ export default function App() {
     if (!silent) {
       setNniHeartbeatRecordsLoading(true);
       setNniHeartbeatRecordsError(null);
+      setNniHeartbeatRecordsMessage(null);
     }
     try {
       const params = new URLSearchParams({
@@ -2947,13 +2949,58 @@ export default function App() {
       setNniHeartbeatRecordsPage(body.data.page || safePage);
       setNniHeartbeatRecordsTotal(body.data.total ?? 0);
       setNniHeartbeatRecordsTotalPages(Math.max(1, body.data.total_pages ?? 1));
-      setNniHeartbeatRecordsNode(body.data.node_url || "");
       setNniHeartbeatRecordsError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       if (!silent) setNniHeartbeatRecordsError(message);
     } finally {
       if (!silent) setNniHeartbeatRecordsLoading(false);
+    }
+  };
+
+  const clearNniHeartbeatRecords = async () => {
+    const confirmed = window.confirm(
+      t(
+        "确定清理本机 NNI 请求记录吗？这只会清理本机保存的加入和心跳历史，不会修改远程 NNI 服务端记录。",
+        "Clear local NNI request records? This only clears Join and Heartbeat history saved on this device and will not change remote NNI server records.",
+      ),
+    );
+    if (!confirmed) return;
+    setNniHeartbeatRecordsClearing(true);
+    setNniHeartbeatRecordsError(null);
+    setNniHeartbeatRecordsMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/records/clear`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const rawText = await res.text();
+      let body: ApiResponse<{ deleted_records?: number }>;
+      try {
+        body = JSON.parse(rawText) as ApiResponse<{ deleted_records?: number }>;
+      } catch {
+        throw new Error(t("NNI 请求记录清理接口返回了非 JSON 内容。", "The NNI request records clear endpoint returned non-JSON content."));
+      }
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `NNI request records clear failed (${res.status})`);
+      }
+      const deletedRecords = body.data?.deleted_records ?? 0;
+      setNniHeartbeatRecords([]);
+      setNniHeartbeatRecordsPage(1);
+      setNniHeartbeatRecordsTotal(0);
+      setNniHeartbeatRecordsTotalPages(1);
+      setNniHeartbeatRecordsMessage(
+        t(
+          `已清理 ${deletedRecords} 条本机 NNI 请求记录。`,
+          `${deletedRecords} local NNI request records cleared.`,
+        ),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniHeartbeatRecordsError(message);
+    } finally {
+      setNniHeartbeatRecordsClearing(false);
     }
   };
 
@@ -6922,38 +6969,51 @@ export default function App() {
                     <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
                       {t("NNI 请求记录", "NNI request records")}
                     </p>
-                    <h4 className="mt-2 text-lg font-semibold">{t("远程服务端请求记录", "Remote server request records")}</h4>
+                    <h4 className="mt-2 text-lg font-semibold">{t("本机请求记录", "Local request records")}</h4>
                     <p className="mt-2 text-sm leading-6 text-white/60">
                       {t(
                         `共 ${nniHeartbeatRecordsTotal} 条记录，每页 ${NNI_HEARTBEAT_RECORDS_PAGE_SIZE} 条。`,
                         `${nniHeartbeatRecordsTotal} records total, ${NNI_HEARTBEAT_RECORDS_PAGE_SIZE} per page.`,
                       )}
-                      {nniHeartbeatRecordsNode ? (
-                        <span className="ml-1 break-all font-mono text-white/50">{nniHeartbeatRecordsNode}</span>
-                      ) : null}
                     </p>
                     <p className="mt-1 text-xs leading-5 text-white/45">
                       {t(
-                        "这里同时显示手动加入验证和后续自动心跳；列表里的标签会区分“加入”和“心跳”。",
-                        "This includes manual Join verification and later automatic heartbeats; each row is labeled as Join or Heartbeat.",
+                        "这里保存本机看到的手动加入和自动心跳结果；远端服务端记录不再从 UI 拉取。",
+                        "This stores manual Join and automatic Heartbeat results seen by this device. Remote server records are no longer fetched in the UI.",
                       )}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage)}
-                    disabled={nniHeartbeatRecordsLoading}
-                    className="theme-secondary-btn px-3 py-2 text-xs"
-                  >
-                    {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    {t("刷新记录", "Refresh records")}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void clearNniHeartbeatRecords()}
+                      disabled={nniHeartbeatRecordsTotal === 0 || nniHeartbeatRecordsLoading || nniHeartbeatRecordsClearing}
+                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {nniHeartbeatRecordsClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {t("清理记录", "Clear records")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage)}
+                      disabled={nniHeartbeatRecordsLoading}
+                      className="theme-secondary-btn px-3 py-2 text-xs"
+                    >
+                      {nniHeartbeatRecordsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("刷新记录", "Refresh records")}
+                    </button>
+                  </div>
                 </div>
 
                 {nniHeartbeatRecordsError ? (
                   <p className="mt-3 break-words rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
                     {t("NNI 请求记录暂时无法载入：", "NNI request records could not be loaded: ")}
                     {nniHeartbeatRecordsError}
+                  </p>
+                ) : null}
+                {nniHeartbeatRecordsMessage ? (
+                  <p className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs leading-5 text-emerald-100">
+                    {nniHeartbeatRecordsMessage}
                   </p>
                 ) : null}
 
@@ -6963,15 +7023,15 @@ export default function App() {
                       {nniHeartbeatRecordsLoading
                         ? t("正在载入 NNI 请求记录...", "Loading NNI request records...")
                         : t(
-                            "远程服务端还没有 NNI 请求记录。手动加入成功后会先出现一条加入记录，后续自动心跳也会继续追加。",
-                            "The remote server has no NNI request records yet. A successful manual Join appears first, and later automatic heartbeats are added here too.",
+                            "本机还没有 NNI 请求记录。手动加入和自动心跳的成功或失败结果都会保存在这里。",
+                            "This device has no NNI request records yet. Manual Join and automatic Heartbeat successes or failures will be saved here.",
                           )}
                     </p>
                   ) : (
                     nniHeartbeatRecords.map((record) => {
                       const complianceKnown = typeof record.compliant === "boolean";
                       const accepted = record.status === "accepted" && record.compliant !== false;
-                      const attention = ["blocked", "rejected", "expired"].includes(record.status) || record.compliant === false;
+                      const attention = ["blocked", "rejected", "expired", "failed"].includes(record.status) || record.compliant === false;
                       const statusClass = accepted
                         ? "setup-status setup-status-done"
                         : attention
@@ -6986,7 +7046,11 @@ export default function App() {
                               ? t("已拒绝", "Rejected")
                               : record.status === "expired"
                                 ? t("已过期", "Expired")
-                                : record.status || t("未知", "Unknown");
+                                : record.status === "challenge_created"
+                                  ? t("挑战已创建", "Challenge created")
+                                  : record.status === "failed"
+                                    ? t("失败", "Failed")
+                                    : record.status || t("未知", "Unknown");
                       const kindLabel =
                         record.request_kind === "nni_join"
                           ? t("加入", "Join")
@@ -6999,6 +7063,10 @@ export default function App() {
                           ? t("合规", "Compliant")
                           : record.compliant === false
                             ? t("未合规", "Not compliant")
+                            : record.status === "challenge_created"
+                              ? t("等待签名验证", "Waiting for signature verification")
+                              : record.status === "failed"
+                                ? t("失败", "Failed")
                             : record.status === "accepted"
                               ? t("已通过", "Accepted")
                               : t("未返回", "Not reported"));
@@ -7040,14 +7108,15 @@ export default function App() {
                           {!complianceKnown && record.status !== "accepted" && !record.error_code ? (
                             <p className="mt-2 text-xs leading-5 text-white/40">
                               {t(
-                                "远程服务端没有返回合规状态；请以状态标签和错误码为准。",
-                                "The remote server did not report compliance; use the status label and error code.",
+                                "这条记录没有合规结果；请以状态标签和错误码为准。",
+                                "This record has no compliance result; use the status label and error code.",
                               )}
                             </p>
                           ) : null}
                           <p className="mt-2 text-xs leading-5 text-white/40">
                             {t("签名", "Signature")}: {record.signature_present ? t("已记录", "Recorded") : t("无", "None")} ·{" "}
                             {t("挑战", "Challenge")}: {record.challenge_present ? t("已记录", "Recorded") : t("无", "None")} ·{" "}
+                            {t("节点", "Node")}: <span className="font-mono">{shortNniValue(record.node_url)}</span> ·{" "}
                             {t("用户", "User")}: <span className="font-mono">{shortNniValue(record.user_key)}</span>
                           </p>
                         </div>
