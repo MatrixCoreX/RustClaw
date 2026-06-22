@@ -50,12 +50,28 @@ fn nni_short_hex(hex: &str) -> Option<String> {
     ))
 }
 
+fn nni_signature_helper_log_context(args: &[String]) -> Value {
+    json!({
+        "action": args.first().map(String::as_str).unwrap_or(""),
+        "arg_count": args.len(),
+    })
+}
+
 async fn run_nni_signature_helper(
     state: &AppState,
     args: &[String],
 ) -> Result<NniSignatureHelperOutput, String> {
     let script_path = nni_signature_helper_path(state);
+    let log_context = nni_signature_helper_log_context(args);
     if !script_path.is_file() {
+        append_nni_log_event_best_effort(
+            state,
+            "signature_helper_missing",
+            json!({
+                "helper_path": script_path.display().to_string(),
+                "context": log_context.clone(),
+            }),
+        );
         return Err(format!(
             "signature helper not found: {}",
             script_path.display()
@@ -79,8 +95,26 @@ async fn run_nni_signature_helper(
     .await
     {
         Ok(Ok(output)) => output,
-        Ok(Err(err)) => return Err(format!("failed to run signature helper: {err}")),
+        Ok(Err(err)) => {
+            append_nni_log_event_best_effort(
+                state,
+                "signature_helper_run_error",
+                json!({
+                    "error": err.to_string(),
+                    "context": log_context.clone(),
+                }),
+            );
+            return Err(format!("failed to run signature helper: {err}"));
+        }
         Err(_) => {
+            append_nni_log_event_best_effort(
+                state,
+                "signature_helper_timeout",
+                json!({
+                    "timeout_seconds": NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS,
+                    "context": log_context.clone(),
+                }),
+            );
             return Err(format!(
                 "signature helper timed out after {NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}s"
             ));
@@ -90,6 +124,15 @@ async fn run_nni_signature_helper(
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stdout.is_empty() {
+        append_nni_log_event_best_effort(
+            state,
+            "signature_helper_empty_output",
+            json!({
+                "exit_code": output.status.code(),
+                "stderr_present": !stderr.is_empty(),
+                "context": log_context.clone(),
+            }),
+        );
         return Err(if stderr.is_empty() {
             "signature helper returned empty output".to_string()
         } else {
@@ -97,8 +140,18 @@ async fn run_nni_signature_helper(
         });
     }
 
-    let payload: Value = serde_json::from_str(&stdout)
-        .map_err(|err| format!("signature helper returned non-json output: {err}: {stdout}"))?;
+    let payload: Value = serde_json::from_str(&stdout).map_err(|err| {
+        append_nni_log_event_best_effort(
+            state,
+            "signature_helper_non_json_output",
+            json!({
+                "error": err.to_string(),
+                "stdout_bytes": stdout.len(),
+                "context": log_context.clone(),
+            }),
+        );
+        format!("signature helper returned non-json output: {err}: {stdout}")
+    })?;
     let ok = payload
         .get("ok")
         .and_then(|value| value.as_bool())
@@ -107,6 +160,18 @@ async fn run_nni_signature_helper(
         .get("error")
         .and_then(|value| value.as_str())
         .map(str::to_string);
+
+    append_nni_log_event_best_effort(
+        state,
+        "signature_helper_result",
+        json!({
+            "ok": ok,
+            "exit_code": output.status.code(),
+            "stderr_present": !stderr.is_empty(),
+            "context": log_context.clone(),
+            "meta": nni_helper_payload_meta(&payload),
+        }),
+    );
 
     Ok(NniSignatureHelperOutput {
         ok,
@@ -145,6 +210,16 @@ async fn nni_device_status(
     let script_path = nni_signature_helper_path(&state);
     let supported_actions = nni_supported_actions();
     if !script_path.is_file() {
+        append_nni_log_event_best_effort(
+            &state,
+            "device_status",
+            json!({
+                "status": "helper_missing",
+                "helper_available": false,
+                "signature_chip_present": false,
+                "helper_path": script_path.to_string_lossy(),
+            }),
+        );
         return (
             StatusCode::OK,
             Json(ApiResponse {
@@ -171,6 +246,16 @@ async fn nni_device_status(
                 .get("pubkey")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
+            append_nni_log_event_best_effort(
+                &state,
+                "device_status",
+                json!({
+                    "status": "ready",
+                    "helper_available": true,
+                    "signature_chip_present": true,
+                    "exit_code": output.exit_code,
+                }),
+            );
             (
                 StatusCode::OK,
                 Json(ApiResponse {
@@ -202,6 +287,17 @@ async fn nni_device_status(
                     (!output.stderr_tail.trim().is_empty()).then(|| output.stderr_tail.clone())
                 })
                 .unwrap_or_else(|| "signature chip unavailable".to_string());
+            append_nni_log_event_best_effort(
+                &state,
+                "device_status",
+                json!({
+                    "status": "signature_chip_missing",
+                    "helper_available": true,
+                    "signature_chip_present": false,
+                    "exit_code": output.exit_code,
+                    "error_present": !reason.trim().is_empty(),
+                }),
+            );
             (
                 StatusCode::OK,
                 Json(ApiResponse {
@@ -222,24 +318,36 @@ async fn nni_device_status(
                 }),
             )
         }
-        Err(err) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({
-                    "nni_available": true,
+        Err(err) => {
+            append_nni_log_event_best_effort(
+                &state,
+                "device_status",
+                json!({
+                    "status": "signature_chip_missing",
                     "helper_available": true,
                     "signature_chip_present": false,
-                    "status": "signature_chip_missing",
-                    "message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
-                    "next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
-                    "helper_path": script_path.to_string_lossy(),
-                    "supported_actions": supported_actions,
                     "error": err,
-                })),
-                error: None,
-            }),
-        ),
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "nni_available": true,
+                        "helper_available": true,
+                        "signature_chip_present": false,
+                        "status": "signature_chip_missing",
+                        "message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
+                        "next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+                        "helper_path": script_path.to_string_lossy(),
+                        "supported_actions": supported_actions,
+                        "error": err,
+                    })),
+                    error: None,
+                }),
+            )
+        }
     }
 }
 
@@ -261,6 +369,14 @@ async fn nni_device_action(
 
     let action = req.action.trim().to_ascii_lowercase();
     if !nni_supported_actions().contains(&action.as_str()) {
+        append_nni_log_event_best_effort(
+            &state,
+            "device_action",
+            json!({
+                "action": action,
+                "status": "unsupported_action",
+            }),
+        );
         return api_error_value(
             StatusCode::BAD_REQUEST,
             format!("unsupported NNI action: {action}"),
@@ -277,33 +393,65 @@ async fn nni_device_action(
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let Some(challenge) = challenge else {
+            append_nni_log_event_best_effort(
+                &state,
+                "device_action",
+                json!({
+                    "action": action,
+                    "status": "challenge_missing",
+                }),
+            );
             return api_error_value(StatusCode::BAD_REQUEST, "nni_challenge_required");
         };
         args.push(challenge.to_string());
     }
 
     match run_nni_signature_helper(&state, &args).await {
-        Ok(output) if output.ok => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({
+        Ok(output) if output.ok => {
+            append_nni_log_event_best_effort(
+                &state,
+                "device_action",
+                json!({
                     "action": action,
+                    "status": "ok",
                     "signature_chip_present": true,
-                    "message": "NNI 设备签名操作完成。",
-                    "payload": output.payload,
-                    "meta": nni_helper_payload_meta(&output.payload),
                     "exit_code": output.exit_code,
-                })),
-                error: None,
-            }),
-        ),
+                    "meta": nni_helper_payload_meta(&output.payload),
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "action": action,
+                        "signature_chip_present": true,
+                        "message": "NNI 设备签名操作完成。",
+                        "payload": output.payload,
+                        "meta": nni_helper_payload_meta(&output.payload),
+                        "exit_code": output.exit_code,
+                    })),
+                    error: None,
+                }),
+            )
+        }
         Ok(output) => {
             let reason = output
                 .error
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| (!output.stderr_tail.trim().is_empty()).then_some(output.stderr_tail))
                 .unwrap_or_else(|| "signature chip unavailable".to_string());
+            append_nni_log_event_best_effort(
+                &state,
+                "device_action",
+                json!({
+                    "action": action,
+                    "status": "signature_chip_missing",
+                    "signature_chip_present": false,
+                    "exit_code": output.exit_code,
+                    "error_present": !reason.trim().is_empty(),
+                }),
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 Json(ApiResponse {
@@ -319,19 +467,31 @@ async fn nni_device_action(
                 }),
             )
         }
-        Err(err) => (
-            StatusCode::BAD_GATEWAY,
-            Json(ApiResponse {
-                ok: false,
-                data: Some(json!({
+        Err(err) => {
+            append_nni_log_event_best_effort(
+                &state,
+                "device_action",
+                json!({
                     "action": action,
-                    "signature_chip_present": false,
                     "status": "signature_chip_missing",
-                    "message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
-                })),
-                error: Some(err),
-            }),
-        ),
+                    "signature_chip_present": false,
+                    "error": err,
+                }),
+            );
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: Some(json!({
+                        "action": action,
+                        "signature_chip_present": false,
+                        "status": "signature_chip_missing",
+                        "message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
+                    })),
+                    error: Some(err),
+                }),
+            )
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 const NNI_REQUEST_RECORD_HISTORY_LIMIT: usize = 500;
+const NNI_LOG_FILE_NAME: &str = "nni.log";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NniRequestRecord {
@@ -43,17 +44,11 @@ fn nni_request_record(request_kind: &str, status: &str) -> NniRequestRecord {
 }
 
 fn record_nni_request_event(state: &AppState, record: NniRequestRecord) {
-    if let Err(err) = write_nni_request_record(state, record) {
-        tracing::warn!("nni request record write failed: {err}");
-    }
+    let _ = write_nni_request_record(state, record);
 }
 
 fn write_nni_request_record(state: &AppState, mut record: NniRequestRecord) -> anyhow::Result<()> {
-    let raw = std::fs::read_to_string(state.skill_rt.workspace_root.join("configs/config.toml"))
-        .unwrap_or_else(|_| String::new());
-    let parsed: toml::Value =
-        toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
-    let mut records = parse_nni_request_records(&parsed);
+    let records = read_nni_request_records(state)?;
     record.id = records
         .iter()
         .map(|record| record.id)
@@ -63,12 +58,7 @@ fn write_nni_request_record(state: &AppState, mut record: NniRequestRecord) -> a
     if record.created_at_ts.is_none() {
         record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
     }
-    records.insert(0, record);
-    records.truncate(NNI_REQUEST_RECORD_HISTORY_LIMIT);
-    let rendered_records = render_nni_request_records(&records);
-    let output = upsert_section_key_line(&raw, "nni", "request_records", &rendered_records);
-    write_runtime_config_file(state, &output)?;
-    Ok(())
+    append_nni_log_event(state, "request_record", serde_json::to_value(record)?)
 }
 
 fn read_nni_request_records(state: &AppState) -> anyhow::Result<Vec<NniRequestRecord>> {
@@ -77,6 +67,7 @@ fn read_nni_request_records(state: &AppState) -> anyhow::Result<Vec<NniRequestRe
     let parsed: toml::Value =
         toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
     let mut records = parse_nni_request_records(&parsed);
+    records.extend(read_nni_request_records_from_log(state)?);
     records.sort_by(|left, right| {
         let ts_order = right
             .created_at_ts
@@ -84,6 +75,7 @@ fn read_nni_request_records(state: &AppState) -> anyhow::Result<Vec<NniRequestRe
             .cmp(&left.created_at_ts.unwrap_or_default());
         ts_order.then_with(|| right.id.cmp(&left.id))
     });
+    records.truncate(NNI_REQUEST_RECORD_HISTORY_LIMIT);
     Ok(records)
 }
 
@@ -93,10 +85,12 @@ fn clear_nni_request_records(state: &AppState) -> anyhow::Result<Value> {
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
     let output = upsert_section_key_line(&raw, "nni", "request_records", "[]");
     write_runtime_config_file(state, &output)?;
+    rewrite_nni_log_without_event_kinds(state, &["request_record"])?;
     Ok(json!({
         "status": "nni_request_records_cleared",
         "deleted_records": existing_count,
         "config_path": path.display().to_string(),
+        "log_path": nni_log_path(state).display().to_string(),
     }))
 }
 
@@ -165,63 +159,93 @@ fn parse_nni_request_record(value: &toml::Value) -> Option<NniRequestRecord> {
     })
 }
 
-fn render_nni_request_records(records: &[NniRequestRecord]) -> String {
-    let values = records
-        .iter()
-        .map(|record| {
-            let mut table = toml::map::Map::new();
-            table.insert(
-                "id".to_string(),
-                toml::Value::Integer(i64::try_from(record.id).unwrap_or(i64::MAX)),
-            );
-            table.insert(
-                "request_kind".to_string(),
-                toml::Value::String(record.request_kind.clone()),
-            );
-            if let Some(task_id) = &record.task_id {
-                table.insert("task_id".to_string(), toml::Value::String(task_id.clone()));
+fn nni_log_path(state: &AppState) -> PathBuf {
+    state.skill_rt.workspace_root.join("logs").join(NNI_LOG_FILE_NAME)
+}
+
+fn append_nni_log_event(state: &AppState, event_kind: &str, payload: Value) -> anyhow::Result<()> {
+    let log_path = nni_log_path(state);
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    let line = json!({
+        "ts": current_unix_ts(),
+        "event_kind": event_kind,
+        "payload": payload,
+    });
+    serde_json::to_writer(&mut file, &line)?;
+    writeln!(file)?;
+    Ok(())
+}
+
+fn append_nni_log_event_best_effort(state: &AppState, event_kind: &str, payload: Value) {
+    let _ = append_nni_log_event(state, event_kind, payload);
+}
+
+fn read_nni_log_payloads(state: &AppState, event_kind: &str) -> anyhow::Result<Vec<Value>> {
+    let path = nni_log_path(state);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Ok(Vec::new());
+    };
+    let mut payloads = Vec::new();
+    for line in raw.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("event_kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == event_kind)
+        {
+            if let Some(payload) = value.get("payload") {
+                payloads.push(payload.clone());
             }
-            if let Some(user_key) = &record.user_key {
-                table.insert("user_key".to_string(), toml::Value::String(user_key.clone()));
-            }
-            if let Some(device_pubkey) = &record.device_pubkey {
-                table.insert(
-                    "device_pubkey".to_string(),
-                    toml::Value::String(device_pubkey.clone()),
-                );
-            }
-            if let Some(node_url) = &record.node_url {
-                table.insert("node_url".to_string(), toml::Value::String(node_url.clone()));
-            }
-            if let Some(compliant) = record.compliant {
-                table.insert("compliant".to_string(), toml::Value::Boolean(compliant));
-            }
-            table.insert(
-                "status".to_string(),
-                toml::Value::String(record.status.clone()),
-            );
-            if let Some(error_code) = &record.error_code {
-                table.insert(
-                    "error_code".to_string(),
-                    toml::Value::String(error_code.clone()),
-                );
-            }
-            if let Some(created_at_ts) = record.created_at_ts {
-                table.insert(
-                    "created_at_ts".to_string(),
-                    toml::Value::Integer(i64::try_from(created_at_ts).unwrap_or(i64::MAX)),
-                );
-            }
-            table.insert(
-                "signature_present".to_string(),
-                toml::Value::Boolean(record.signature_present),
-            );
-            table.insert(
-                "challenge_present".to_string(),
-                toml::Value::Boolean(record.challenge_present),
-            );
-            toml::Value::Table(table)
-        })
-        .collect::<Vec<_>>();
-    toml::Value::Array(values).to_string()
+        }
+    }
+    Ok(payloads)
+}
+
+fn read_nni_request_records_from_log(state: &AppState) -> anyhow::Result<Vec<NniRequestRecord>> {
+    Ok(read_nni_log_payloads(state, "request_record")?
+        .into_iter()
+        .filter_map(|payload| serde_json::from_value::<NniRequestRecord>(payload).ok())
+        .collect())
+}
+
+fn rewrite_nni_log_without_event_kinds(
+    state: &AppState,
+    event_kinds: &[&str],
+) -> anyhow::Result<()> {
+    let path = nni_log_path(state);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let mut kept = Vec::new();
+    for line in raw.lines() {
+        let remove = serde_json::from_str::<Value>(line)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("event_kind")
+                    .and_then(Value::as_str)
+                    .map(|kind| event_kinds.iter().any(|candidate| candidate == &kind))
+            })
+            .unwrap_or(false);
+        if !remove {
+            kept.push(line);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut output = kept.join("\n");
+    if !output.is_empty() {
+        output.push('\n');
+    }
+    std::fs::write(path, output)?;
+    Ok(())
 }

@@ -350,6 +350,7 @@ Important lifecycle details:
 
 - Foreground HTTP/channel waits are short by design. A caller that stops waiting should keep polling the same `task_id`; it should not create a duplicate task or treat the background task as failed.
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
+- Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
@@ -571,6 +572,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
+- NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` keeps only current NNI state and legacy record fallback.
 
 Quick example:
 
