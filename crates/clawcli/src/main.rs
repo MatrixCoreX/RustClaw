@@ -51,6 +51,21 @@ enum Command {
         interval_ms: u64,
     },
 
+    /// POST /v1/tasks with kind=run_skill.
+    RunSkill {
+        skill_name: String,
+        #[arg(long = "args-json")]
+        args_json: Option<String>,
+        #[arg(long = "args-file")]
+        args_file: Option<PathBuf>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
+    },
+
     /// Continue an existing task through a user_followup payload.
     Resume {
         /// Existing task id to continue.
@@ -164,6 +179,26 @@ fn main() -> Result<()> {
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_submit(base_url, k, text, *wait, *detach, *json, *interval_ms)
+        }
+        Command::RunSkill {
+            skill_name,
+            args_json,
+            args_file,
+            wait,
+            json,
+            interval_ms,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_skill(
+                base_url,
+                k,
+                skill_name,
+                args_json.as_deref(),
+                args_file.as_ref(),
+                *wait,
+                *json,
+                *interval_ms,
+            )
         }
         Command::Resume { task_id, text } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
