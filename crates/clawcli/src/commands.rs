@@ -91,7 +91,7 @@ pub(crate) fn run_watch(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
-    let mut last_status = String::new();
+    let mut last_snapshot = String::new();
     let mut seen_events = HashSet::new();
     let interval = Duration::from_millis(interval_ms.max(100));
 
@@ -101,17 +101,26 @@ pub(crate) fn run_watch(
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "task_id": task.task_id,
-                    "status": task.status,
+                    "task_id": &task.task_id,
+                    "status": &task.status,
+                    "lifecycle_state": task.lifecycle_state(),
+                    "lifecycle": task.lifecycle().cloned().unwrap_or(serde_json::Value::Null),
                     "terminal": task.is_terminal(),
                     "event_count": task.events.len(),
                 }))?
             );
         } else if json_output {
             println!("{}", serde_json::to_string_pretty(&task.raw_data)?);
-        } else if task.status != last_status {
-            print_task_status(&task, false, &requested_event_types);
-            last_status = task.status.clone();
+        } else {
+            let snapshot = format!(
+                "{}|{}",
+                task.status,
+                task.lifecycle_summary_tokens().join(" ")
+            );
+            if snapshot != last_snapshot {
+                print_task_status(&task, false, &requested_event_types);
+                last_snapshot = snapshot;
+            }
         }
 
         if events || !requested_event_types.is_empty() {
@@ -135,7 +144,15 @@ fn print_task_status(
     include_events: bool,
     requested_event_types: &[String],
 ) {
+    println!("task_id: {}", task.task_id);
     println!("status: {}", task.status);
+    if let Some(state) = task.lifecycle_state() {
+        println!("lifecycle_state: {state}");
+    }
+    let lifecycle_tokens = task.lifecycle_summary_tokens();
+    if !lifecycle_tokens.is_empty() {
+        println!("lifecycle: {}", lifecycle_tokens.join(" "));
+    }
     if let Some(text) = task.result_text.as_deref() {
         println!("{text}");
     }
@@ -225,6 +242,49 @@ pub(crate) fn run_cancel(
     );
     if !status.is_success() {
         anyhow::bail!("cancel returned {}: {:?}", status, body.get("error"));
+    }
+    Ok(())
+}
+
+pub(crate) fn run_cancel_task(base_url: &str, key: &str, task_id: &str) -> Result<()> {
+    let body = task::cancel_task_by_id(base_url, key, task_id)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
+    Ok(())
+}
+
+pub(crate) fn run_cancel_index(
+    base_url: &str,
+    key: &str,
+    user_id: i64,
+    chat_id: i64,
+    index: usize,
+    exclude_task_id: Option<String>,
+) -> Result<()> {
+    let url = format!("{}/tasks/cancel-one", client::base_v1(base_url));
+    let payload = json!({
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "index": index,
+        "exclude_task_id": exclude_task_id,
+    });
+    let resp = client::make_client()?
+        .post(&url)
+        .header("x-rustclaw-key", key)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+        .context("cancel task by index failed")?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().context("parse cancel-index response")?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
+    if !status.is_success() {
+        anyhow::bail!("cancel-index returned {}: {:?}", status, body.get("error"));
     }
     Ok(())
 }

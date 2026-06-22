@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use claw_core::types::ApiResponse;
+use claw_core::types::{ApiResponse, AuthIdentity};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info};
@@ -28,6 +28,11 @@ pub(super) struct CancelOneTaskRequest {
     chat_id: i64,
     index: usize,
     exclude_task_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CancelTaskByIdRequest {
+    task_id: String,
 }
 
 fn authorize_task_admin_request(
@@ -68,6 +73,53 @@ fn authorize_task_admin_request(
     }
 }
 
+fn require_task_admin_identity(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(AuthIdentity, String), (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    let Some(raw_key) = headers
+        .get("x-rustclaw-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return Err(super::api_err::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED,
+            "task_admin_key_required",
+        ));
+    };
+    let normalized_key = crate::normalize_user_key(raw_key);
+    match crate::resolve_auth_identity_by_key(state, &normalized_key) {
+        Ok(Some(identity)) => Ok((identity, normalized_key)),
+        Ok(None) => Err(super::api_err::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED,
+            "invalid_user_key",
+        )),
+        Err(err) => {
+            error!("Resolve task admin identity failed: {}", err);
+            Err(super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth_lookup_failed",
+            ))
+        }
+    }
+}
+
+fn task_admin_target_matches_identity(
+    target: &crate::TaskAdminTarget,
+    identity: &AuthIdentity,
+    normalized_key: &str,
+) -> bool {
+    if target.user_id == identity.user_id {
+        return true;
+    }
+    target
+        .user_key
+        .as_deref()
+        .map(crate::normalize_user_key)
+        .is_some_and(|task_key| task_key == normalized_key)
+}
+
 pub(super) async fn list_active_tasks(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -92,6 +144,58 @@ pub(super) async fn list_active_tasks(
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "List active tasks failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn cancel_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CancelTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let (identity, normalized_key) = match require_task_admin_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let task_id = req.task_id.trim();
+    if task_id.is_empty() {
+        return super::api_err::<serde_json::Value>(StatusCode::BAD_REQUEST, "task_id_required");
+    }
+    let target = match crate::get_task_admin_target(&state, task_id) {
+        Ok(Some(target)) => target,
+        Ok(None) => {
+            return super::api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "task_not_found");
+        }
+        Err(err) => {
+            error!("Cancel task by id lookup failed: {}", err);
+            return super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_lookup_failed",
+            );
+        }
+    };
+    if !task_admin_target_matches_identity(&target, &identity, &normalized_key) {
+        return super::api_err::<serde_json::Value>(StatusCode::FORBIDDEN, "task_owner_mismatch");
+    }
+    if !matches!(target.status.as_str(), "queued" | "running") {
+        return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_active");
+    }
+    match crate::cancel_task_by_id(&state, &target.task_id) {
+        Ok(count) if count > 0 => super::api_ok(json!({
+            "status": "task_cancelled",
+            "canceled": count,
+            "task_id": target.task_id,
+            "user_id": target.user_id,
+            "chat_id": target.chat_id,
+            "channel": target.channel,
+        })),
+        Ok(_) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_active"),
+        Err(err) => {
+            error!("Cancel task by id failed: {}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_cancel_failed",
             )
         }
     }

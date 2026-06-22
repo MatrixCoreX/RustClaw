@@ -132,12 +132,13 @@ use providers::{
 pub(crate) use repo::{
     attach_pending_channel_bind_session_install_flow, bind_channel_identity,
     build_conversation_chat_id, build_submit_task_payload, cancel_one_task_for_user_chat,
-    cancel_tasks_for_user_chat, check_submit_task_access, check_submit_task_limits,
-    check_task_view_access, create_auth_key, create_pending_channel_bind_session,
-    delete_auth_key_by_id, exchange_credential_status_for_user_key, factory_reset_auth_state,
+    cancel_task_by_id, cancel_tasks_for_user_chat, check_submit_task_access,
+    check_submit_task_limits, check_task_view_access, create_auth_key,
+    create_pending_channel_bind_session, delete_auth_key_by_id,
+    exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, find_recent_failed_resume_context,
     get_auth_key_value_by_id, get_pending_channel_bind_session_by_id,
-    get_pending_channel_bind_session_by_token, get_task_query_record,
+    get_pending_channel_bind_session_by_token, get_task_admin_target, get_task_query_record,
     has_channel_binding_for_user_key, insert_audit_log, insert_submitted_task, is_user_allowed,
     list_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
     mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
@@ -147,10 +148,13 @@ pub(crate) use repo::{
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
     upsert_webd_login_account, verify_webd_password_login, FactoryResetDbResult,
     PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
-    TaskViewerAccessError,
+    TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
-use task_admin_routes::{cancel_one_task, cancel_tasks, list_active_tasks};
+use task_admin_routes::{
+    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
+    list_active_tasks,
+};
 pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
 // ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
@@ -739,6 +743,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/cancel", post(cancel_tasks))
         .route("/tasks/cancel-one", post(cancel_one_task))
+        .route("/tasks/cancel-by-task-id", post(cancel_task_by_id_handler))
         .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 

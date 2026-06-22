@@ -351,6 +351,7 @@ Important lifecycle details:
 - Foreground HTTP/channel waits are short by design. A caller that stops waiting should keep polling the same `task_id`; it should not create a duplicate task or treat the background task as failed.
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
 - Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
+- `clawcli get` and `clawcli watch` render lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
@@ -567,6 +568,8 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/cancel`
+- `POST /v1/tasks/cancel-by-task-id`
+- `POST /v1/tasks/cancel-one`: compatibility endpoint that cancels by active-list index
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
