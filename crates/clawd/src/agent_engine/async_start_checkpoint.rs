@@ -3,13 +3,13 @@ use tracing::{debug, warn};
 
 use super::LoopState;
 use crate::task_lifecycle::{
-    AsyncJobRef, AsyncJobStatus, CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint,
-    TaskLifecycleState,
+    AsyncJobRef, CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint, TaskLifecycleState,
 };
 use crate::{repo, AppState, ClaimedTask};
 
 const START_ADAPTER_SOURCE: &str = "async_job_start_adapter";
 const WAITING_STOP_SIGNAL: &str = "async_job_checkpoint_waiting";
+const START_ADAPTER_ERROR_PREFIX: &str = "async_job_start_adapter_invalid";
 
 pub(super) fn publish_pending_async_job_start_checkpoint(
     state: &AppState,
@@ -75,118 +75,19 @@ pub(super) fn publish_pending_async_job_start_checkpoint(
 }
 
 fn pending_async_job_ref_from_extra(extra: Option<&Value>) -> Result<Option<AsyncJobRef>, String> {
-    let Some(candidate) = pending_async_job_candidate(extra) else {
-        return Ok(None);
-    };
-    if candidate.get("text").is_some() || candidate.get("error_text").is_some() {
-        return Err("async_job_start_adapter_invalid: user_text_fields_forbidden".to_string());
-    }
-    let Some(status) = async_job_status(candidate) else {
-        return Err("async_job_start_adapter_invalid: unsupported_status".to_string());
-    };
-    if !matches!(status, AsyncJobStatus::Accepted | AsyncJobStatus::Running) {
-        return Err("async_job_start_adapter_invalid: non_pending_status".to_string());
-    }
-    let job = AsyncJobRef {
-        job_id: required_string(candidate, "job_id").unwrap_or_default(),
-        status,
-        poll_after_seconds: candidate
-            .get("poll_after_seconds")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        expires_at: candidate
-            .get("expires_at")
-            .and_then(Value::as_i64)
-            .unwrap_or(0),
-        cancel_ref: required_string(candidate, "cancel_ref").unwrap_or_default(),
-        message_key: required_string(candidate, "message_key").unwrap_or_default(),
-    };
-    let missing = job.missing_required_fields();
-    if !missing.is_empty() {
-        return Err(format!(
-            "async_job_start_adapter_invalid: missing_required_fields={}",
-            missing.join("|")
-        ));
-    }
-    Ok(Some(job))
-}
-
-fn pending_async_job_candidate(extra: Option<&Value>) -> Option<&Value> {
-    let extra = extra?;
-    extra
-        .get("pending_async_job")
-        .or_else(|| extra.get("async_job"))
-        .or_else(|| {
-            let kind = extra
-                .get("type")
-                .or_else(|| extra.get("kind"))
-                .and_then(Value::as_str)
-                .map(str::trim);
-            (kind == Some("pending_async_job")).then_some(extra)
-        })
+    crate::async_job_contract::parse_pending_async_job_ref_from_extra(
+        extra,
+        START_ADAPTER_ERROR_PREFIX,
+    )
 }
 
 fn pending_async_job_poll_adapter_from_extra(
     extra: Option<&Value>,
 ) -> Result<Option<Value>, String> {
-    let Some(candidate) = pending_async_job_candidate(extra) else {
-        return Ok(None);
-    };
-    let Some(adapter) = candidate
-        .get("poll_adapter")
-        .or_else(|| extra.and_then(|extra| extra.get("poll_adapter")))
-    else {
-        return Ok(None);
-    };
-    if adapter.get("text").is_some() || adapter.get("error_text").is_some() {
-        return Err(
-            "async_job_start_adapter_invalid: poll_adapter_user_text_fields_forbidden".to_string(),
-        );
-    }
-    let adapter_kind = adapter
-        .get("adapter_kind")
-        .or_else(|| adapter.get("kind"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "async_job_start_adapter_invalid: poll_adapter_kind_missing".to_string())?;
-    if adapter_kind != "skill_poll" {
-        return Err("async_job_start_adapter_invalid: unsupported_poll_adapter_kind".to_string());
-    }
-    adapter
-        .get("skill_name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            "async_job_start_adapter_invalid: poll_adapter_skill_name_missing".to_string()
-        })?;
-    if let Some(args) = adapter.get("args") {
-        if !args.is_object() || args.get("text").is_some() || args.get("error_text").is_some() {
-            return Err("async_job_start_adapter_invalid: poll_adapter_args_invalid".to_string());
-        }
-    }
-    Ok(Some(adapter.clone()))
-}
-
-fn async_job_status(value: &Value) -> Option<AsyncJobStatus> {
-    match value.get("status").and_then(Value::as_str).map(str::trim)? {
-        "accepted" => Some(AsyncJobStatus::Accepted),
-        "running" => Some(AsyncJobStatus::Running),
-        "succeeded" => Some(AsyncJobStatus::Succeeded),
-        "failed" => Some(AsyncJobStatus::Failed),
-        "expired" => Some(AsyncJobStatus::Expired),
-        _ => None,
-    }
-}
-
-fn required_string(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+    crate::async_job_contract::parse_pending_async_job_poll_adapter_from_extra(
+        extra,
+        START_ADAPTER_ERROR_PREFIX,
+    )
 }
 
 fn build_pending_async_job_checkpoint_progress_payload(
