@@ -100,6 +100,21 @@ enum Command {
         exclude_task_id: Option<String>,
     },
 
+    /// POST /v1/tasks/cancel-by-task-id
+    CancelTask { task_id: String },
+
+    /// POST /v1/tasks/cancel-one by active task index.
+    CancelIndex {
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long)]
+        chat_id: i64,
+        #[arg(long)]
+        index: usize,
+        #[arg(long)]
+        exclude_task_id: Option<String>,
+    },
+
     /// POST /v1/admin/reload-skills
     ReloadSkills,
 }
@@ -182,6 +197,26 @@ fn main() -> Result<()> {
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_cancel(base_url, k, *user_id, *chat_id, exclude_task_id.clone())
+        }
+        Command::CancelTask { task_id } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_cancel_task(base_url, k, task_id)
+        }
+        Command::CancelIndex {
+            user_id,
+            chat_id,
+            index,
+            exclude_task_id,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_cancel_index(
+                base_url,
+                k,
+                *user_id,
+                *chat_id,
+                *index,
+                exclude_task_id.clone(),
+            )
         }
         Command::ReloadSkills => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;

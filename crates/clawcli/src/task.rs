@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::client;
 use crate::events::{task_event_lines, TaskEventLine};
@@ -15,10 +15,76 @@ pub(crate) struct TaskStatusView {
 
 impl TaskStatusView {
     pub(crate) fn is_terminal(&self) -> bool {
+        if let Some(state) = self.lifecycle_state() {
+            if matches!(state, "succeeded" | "failed" | "cancelled") {
+                return true;
+            }
+        }
         matches!(
             self.status.as_str(),
             "succeeded" | "failed" | "canceled" | "cancelled" | "timeout"
         )
+    }
+
+    pub(crate) fn lifecycle(&self) -> Option<&Value> {
+        self.raw_data.get("task_lifecycle")
+    }
+
+    pub(crate) fn lifecycle_state(&self) -> Option<&str> {
+        self.lifecycle()
+            .and_then(|lifecycle| lifecycle.get("state"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    pub(crate) fn lifecycle_summary_tokens(&self) -> Vec<String> {
+        let Some(lifecycle) = self.lifecycle() else {
+            return Vec::new();
+        };
+        let mut tokens = Vec::new();
+        for key in [
+            "state",
+            "db_status",
+            "state_source",
+            "can_poll",
+            "can_cancel",
+            "checkpoint_id",
+            "resume_due",
+            "resume_wait_seconds",
+            "last_heartbeat_ts",
+            "resume_entrypoint",
+            "resume_reason",
+            "waiting_reason_code",
+            "next_action_kind",
+            "next_action_ref",
+            "poll_ref",
+            "cancel_ref",
+            "next_poll_after",
+            "poll_after_seconds",
+            "async_job_expires_at",
+            "async_job_message_key",
+            "message_key",
+            "terminal_reason",
+        ] {
+            push_value_token(&mut tokens, key, lifecycle.get(key));
+        }
+        tokens
+    }
+}
+
+fn push_value_token(parts: &mut Vec<String>, key: &str, value: Option<&Value>) {
+    let Some(value) = value else {
+        return;
+    };
+    let token = match value {
+        Value::String(value) => value.trim().to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => String::new(),
+    };
+    if !token.is_empty() {
+        parts.push(format!("{key}={token}"));
     }
 }
 
@@ -136,4 +202,28 @@ pub(crate) fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Resul
         error_text,
         events,
     })
+}
+
+pub(crate) fn cancel_task_by_id(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+) -> Result<serde_json::Value> {
+    let url = format!("{}/tasks/cancel-by-task-id", client::base_v1(base_url));
+    let payload = json!({
+        "task_id": task_id,
+    });
+    let resp = client::make_client()?
+        .post(&url)
+        .header("x-rustclaw-key", key)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+        .context("cancel task by id failed")?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().context("parse cancel task response")?;
+    if !status.is_success() {
+        anyhow::bail!("cancel-task returned {}: {:?}", status, body.get("error"));
+    }
+    Ok(body)
 }

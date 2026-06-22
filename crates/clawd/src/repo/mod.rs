@@ -42,15 +42,16 @@ pub(crate) use task_resume_execution::{
     ClaimedHandoffPausedCheckpointResumeExecution, ClaimedPausedCheckpointResumeDispatchResult,
 };
 pub(crate) use tasks::{
-    cancel_one_task_for_user_chat, cancel_tasks_for_user_chat, check_task_view_access,
-    claim_due_paused_checkpoint_task_internal, claim_next_task,
-    claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    is_task_still_running, list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
+    check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
+    claim_ready_paused_checkpoint_resume_executor_internal, get_task_admin_target,
+    get_task_query_record, is_task_still_running, list_active_tasks_internal,
+    list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task, update_task_failure,
     update_task_failure_with_result, update_task_progress_result, update_task_success,
     update_task_timeout, ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask,
-    TaskViewerAccessError,
+    TaskAdminTarget, TaskViewerAccessError,
 };
