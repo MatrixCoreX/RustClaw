@@ -185,6 +185,8 @@ fn plan_config_change(
     let sensitive = is_sensitive_field_path(field_path);
     let display_old = redact_if_sensitive(sensitive, old_value.clone().unwrap_or(Value::Null));
     let display_new = redact_if_sensitive(sensitive, new_value.clone());
+    let would_change = old_value.as_ref() != Some(&new_value);
+    let exists = old_value.is_some();
 
     Ok(json!({
         "action": "plan_config_change",
@@ -193,10 +195,17 @@ fn plan_config_change(
         "format": target.format,
         "field_path": field_path,
         "operation": operation,
-        "exists": old_value.is_some(),
-        "old_value": display_old,
-        "new_value": display_new,
-        "would_change": old_value.as_ref() != Some(&new_value),
+        "exists": exists,
+        "old_value": display_old.clone(),
+        "new_value": display_new.clone(),
+        "would_change": would_change,
+        "field_value": {
+            "field_path": field_path,
+            "old_value": display_old,
+            "new_value": display_new,
+            "exists": exists,
+            "would_change": would_change,
+        },
         "requires_confirmation": true,
         "restart_recommended": restart_recommended_for_path(&target.input_path),
     }))
@@ -347,13 +356,18 @@ fn guard_config(
         risks.push("telegram.sendfile.full_access=true".to_string());
     }
     add_skills_registry_risks(&target.real_path, &root, &mut risks);
+    let risk_count = risks.len();
+    let valid = risk_count == 0;
 
     Ok(json!({
         "action": "guard_config",
         "path": target.input_path,
         "resolved_path": target.real_path.display().to_string(),
         "format": target.format,
-        "risk_count": risks.len(),
+        "valid": valid,
+        "count": risk_count,
+        "risk_count": risk_count,
+        "candidates": risks.clone(),
         "risks": risks,
     }))
 }

@@ -1,7 +1,9 @@
 use serde_json::Value;
 
 use crate::{AgentAction, AppState};
-use claw_core::skill_registry::{PlannerCapabilityKind, SkillRiskLevel};
+use claw_core::skill_registry::{
+    PlannerCapabilityKind, PlannerCapabilityMapping, SkillRiskLevel, SkillsRegistry,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CapabilityResolutionRecord {
@@ -224,10 +226,8 @@ fn resolve_registry_capability_action(
         if !skill_is_globally_resolvable(state, &skill) {
             continue;
         }
-        let Some(mapping) = registry
-            .planner_capabilities(&skill)
-            .iter()
-            .find(|mapping| mapping.name == normalized_capability)
+        let Some(mapping) =
+            registry_mapping_for_capability(&registry, &skill, normalized_capability, &args)
         else {
             continue;
         };
@@ -263,6 +263,68 @@ fn resolve_registry_capability_action(
             ),
             action,
         }
+    })
+}
+
+fn registry_mapping_for_capability<'a>(
+    registry: &'a SkillsRegistry,
+    skill: &str,
+    normalized_capability: &str,
+    args: &Value,
+) -> Option<&'a PlannerCapabilityMapping> {
+    let mappings = registry.planner_capabilities(skill);
+    if let Some(mapping) = mappings
+        .iter()
+        .find(|mapping| mapping.name == normalized_capability)
+    {
+        return Some(mapping);
+    }
+
+    if let Some((capability_skill, capability_action)) = normalized_capability.split_once('.') {
+        if registry_skill_name_matches(registry, skill, capability_skill) {
+            if let Some(mapping) = registry_mapping_for_action(mappings, capability_action) {
+                return Some(mapping);
+            }
+        }
+    }
+
+    let canonical = registry.resolve_canonical(normalized_capability)?;
+    if canonical != skill {
+        return None;
+    }
+    let requested_action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|action| !action.is_empty())
+        .map(normalize_capability_name)?;
+    registry_mapping_for_action(mappings, &requested_action)
+}
+
+fn registry_skill_name_matches(
+    registry: &SkillsRegistry,
+    skill: &str,
+    capability_skill: &str,
+) -> bool {
+    capability_skill == skill
+        || registry
+            .resolve_canonical(capability_skill)
+            .as_deref()
+            .is_some_and(|canonical| canonical == skill)
+}
+
+fn registry_mapping_for_action<'a>(
+    mappings: &'a [PlannerCapabilityMapping],
+    requested_action: &str,
+) -> Option<&'a PlannerCapabilityMapping> {
+    let requested_action = normalize_capability_name(requested_action);
+    mappings.iter().find(|mapping| {
+        mapping
+            .action
+            .as_deref()
+            .map(normalize_capability_name)
+            .as_deref()
+            == Some(requested_action.as_str())
     })
 }
 

@@ -1305,6 +1305,124 @@ pub(super) fn service_status_deterministic_plan_result(
     None
 }
 
+pub(super) fn structured_dry_run_response_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output || loop_state.round_no > 1 {
+        return None;
+    }
+    let route_tokens = format!("{}\n{}", route.route_reason, route.resolved_intent);
+    if task_control_cancel_dry_run_tokens_present(&route_tokens) {
+        return Some(build_plan_result(
+            goal,
+            "deterministic:task_control_cancel_dry_run_contract",
+            PlanKind::Single,
+            &[AgentAction::Respond {
+                content: serde_json::json!({
+                    "schema_version": 1,
+                    "semantic_kind": "task_control_cancel_dry_run",
+                    "would_mutate": false,
+                    "required_fields": ["task_id", "state", "can_cancel"],
+                    "cancel_request": {
+                        "action": "cancel",
+                        "dry_run": true,
+                        "task_id": null
+                    },
+                    "precondition_fields": {
+                        "state": "running_or_queued",
+                        "can_cancel": true
+                    },
+                    "result_projection_fields": {
+                        "state": "cancel_requested_or_canceled",
+                        "can_cancel": false,
+                        "can_poll": true,
+                        "db_status": "canceled_or_terminal",
+                        "last_heartbeat_ts": "optional",
+                        "checkpoint_id": "optional"
+                    },
+                    "execution_policy": {
+                        "call_task_cancel_api": false,
+                        "call_task_control_cancel": false
+                    }
+                })
+                .to_string(),
+            }],
+        ));
+    }
+    if async_job_dry_run_tokens_present(&route_tokens) {
+        return Some(build_plan_result(
+            goal,
+            "deterministic:async_job_poll_contract_dry_run",
+            PlanKind::Single,
+            &[AgentAction::Respond {
+                content: serde_json::json!({
+                    "schema_version": 1,
+                    "semantic_kind": "async_job_poll_contract_dry_run",
+                    "would_mutate": false,
+                    "adapter_result": {
+                        "type": "pending_async_job",
+                        "job_id": "opaque_async_job_id",
+                        "status": "poll_pending",
+                        "poll_async_job": "poll_async_job",
+                        "next_check_after": "duration_or_timestamp",
+                        "poll_after_seconds": "number",
+                        "expires_at": "rfc3339_timestamp",
+                        "cancel_ref": "optional_cancel_reference",
+                        "message_key": "stable_i18n_message_key"
+                    },
+                    "worker_loop": {
+                        "entrypoint": "poll_async_job",
+                        "poll_key": "job_id",
+                        "next_check_after": "adapter_result.next_check_after",
+                        "expires_at": "adapter_result.expires_at",
+                        "message_key": "adapter_result.message_key",
+                        "terminal_statuses": ["succeeded", "failed", "expired", "cancelled"],
+                        "final_step": "verify_finalize"
+                    },
+                    "execution_policy": {
+                        "start_real_job": false,
+                        "persist_job": false,
+                        "poll_external_job": false
+                    }
+                })
+                .to_string(),
+            }],
+        ));
+    }
+    None
+}
+
+fn task_control_cancel_dry_run_tokens_present(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    let has_explicit_cancel_action = normalized.contains("task_control.cancel")
+        || normalized.contains("cancel_all")
+        || normalized.contains("cancel_one");
+    let has_task_control_cancel_contract = normalized.contains("task_control")
+        && normalized.contains("task_id")
+        && normalized.contains("state")
+        && normalized.contains("can_cancel")
+        && (normalized.contains("cancel") || normalized.contains("cancel_requested"));
+    (has_explicit_cancel_action || has_task_control_cancel_contract)
+        && has_dry_run_machine_token(&normalized)
+}
+
+fn async_job_dry_run_tokens_present(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    (normalized.contains("pending_async_job")
+        || normalized.contains("async_job_protocol")
+        || normalized.contains("poll_async_job"))
+        && has_dry_run_machine_token(&normalized)
+}
+
+fn has_dry_run_machine_token(normalized: &str) -> bool {
+    normalized.contains("dry_run")
+        || normalized.contains("dry-run")
+        || normalized.contains("would_mutate=false")
+}
+
 pub(super) fn task_control_get_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1344,6 +1462,58 @@ pub(super) fn task_control_get_deterministic_plan_result(
     None
 }
 
+pub(super) fn task_control_list_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || !task_control_available_for_plan(state)
+        || !route_mentions_task_control_list(route)
+    {
+        return None;
+    }
+    let action_name = if route_mentions_task_control_get(route) {
+        "list_with_first_detail"
+    } else {
+        "list"
+    };
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: serde_json::json!({"action": action_name}),
+    };
+    if let AgentAction::CallSkill { skill, args } = &action {
+        if !crate::contract_matrix::action_policy_for_output_contract(
+            Some(&route.output_contract),
+            skill,
+            args,
+        )
+        .is_some_and(|policy| policy.is_allowed())
+        {
+            return None;
+        }
+    }
+    let actions = vec![
+        action,
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    Some(build_plan_result(
+        goal,
+        "deterministic:task_control_list_observation",
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 pub(super) fn web_search_summary_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1361,7 +1531,8 @@ pub(super) fn web_search_summary_deterministic_plan_result(
         return None;
     }
 
-    let query = web_search_query_from_route(route).unwrap_or_else(|| user_text.trim().to_string());
+    let query = web_search_query_from_route(route, user_text)
+        .unwrap_or_else(|| user_text.trim().to_string());
     if query.is_empty() {
         return None;
     }
@@ -1409,30 +1580,204 @@ pub(super) fn web_search_summary_deterministic_plan_result(
     ))
 }
 
+pub(super) fn browser_http_url_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WebPageSummary
+        || !skill_available_for_plan(state, "browser_web")
+        || !skill_available_for_plan(state, "http_basic")
+        || !route_mentions_any_machine_token(route, &["browser_web", "browser_web.open_extract"])
+        || !route_mentions_any_machine_token(route, &["http_basic", "http_basic.get"])
+    {
+        return None;
+    }
+    let url = service_status_url_locator(route, user_text)?;
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "browser_web".to_string(),
+            args: serde_json::json!({
+                "action": "open_extract",
+                "url": url.clone(),
+                "content_mode": "main_text",
+                "max_text_chars": 4000,
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "http_basic".to_string(),
+            args: serde_json::json!({
+                "action": "get",
+                "url": url,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    Some(build_plan_result(
+        goal,
+        "deterministic:browser_http_url_observation",
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+pub(super) fn config_risk_preview_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigRiskAssessment
+        || !skill_available_for_plan(state, "config_edit")
+        || !skill_available_for_plan(state, "config_basic")
+    {
+        return None;
+    }
+    let parsed = parse_config_change_preview(user_text, route, auto_locator_path)?;
+    let mut actions = Vec::new();
+    if git_basic_available_for_plan(state) {
+        actions.push(AgentAction::CallTool {
+            tool: "git_basic".to_string(),
+            args: serde_json::json!({"action": "status"}),
+        });
+    }
+    let mut plan_args = serde_json::Map::new();
+    plan_args.insert(
+        "action".to_string(),
+        Value::String("plan_config_change".to_string()),
+    );
+    plan_args.insert("path".to_string(), Value::String(parsed.path.clone()));
+    plan_args.insert(
+        "field_path".to_string(),
+        Value::String(parsed.field_path.clone()),
+    );
+    plan_args.insert("value".to_string(), parsed.value.clone());
+    plan_args.insert("operation".to_string(), Value::String("set".to_string()));
+    if let Some(format) = structured_config_format_for_path(&parsed.path) {
+        plan_args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    actions.push(AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(plan_args),
+    });
+    let mut guard_args = serde_json::Map::new();
+    guard_args.insert(
+        "action".to_string(),
+        Value::String("guard_rustclaw_config".to_string()),
+    );
+    guard_args.insert("path".to_string(), Value::String(parsed.path.clone()));
+    if let Some(format) = structured_config_format_for_path(&parsed.path) {
+        guard_args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    actions.push(AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: Value::Object(guard_args),
+    });
+    let evidence_refs = (1..=actions.len())
+        .map(|idx| format!("step_{idx}"))
+        .collect::<Vec<_>>();
+    actions.push(AgentAction::SynthesizeAnswer { evidence_refs });
+    actions.push(AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    });
+    Some(build_plan_result(
+        goal,
+        "deterministic:config_risk_preview_plan_guard",
+        PlanKind::Incremental,
+        &actions,
+    ))
+}
+
 fn task_control_available_for_plan(state: &AppState) -> bool {
-    let enabled_skills = state.get_skills_list();
-    enabled_skills.is_empty() || enabled_skills.contains("task_control")
+    skill_available_for_plan(state, "task_control")
 }
 
 fn web_search_extract_available_for_plan(state: &AppState) -> bool {
-    let enabled_skills = state.get_skills_list();
-    enabled_skills.is_empty() || enabled_skills.contains("web_search_extract")
+    skill_available_for_plan(state, "web_search_extract")
 }
 
-fn web_search_query_from_route(route: &RouteResult) -> Option<String> {
-    [
-        route.output_contract.locator_hint.as_str(),
-        route.resolved_intent.as_str(),
-    ]
-    .into_iter()
-    .map(str::trim)
-    .find(|value| !value.is_empty())
-    .map(ToString::to_string)
+fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains(skill)
+}
+
+fn web_search_query_from_route(route: &RouteResult, user_text: &str) -> Option<String> {
+    route
+        .output_contract
+        .locator_hint
+        .trim()
+        .split_once("query=")
+        .and_then(|(_, value)| nonempty_search_query(value))
+        .or_else(|| first_quoted_search_query(user_text))
+        .or_else(|| first_quoted_search_query(&route.resolved_intent))
+        .or_else(|| nonempty_search_query(&route.output_contract.locator_hint))
+        .or_else(|| nonempty_search_query(&route.resolved_intent))
+}
+
+fn first_quoted_search_query(text: &str) -> Option<String> {
+    for quote in ['"', '`', '\''] {
+        let mut parts = text.split(quote);
+        while let Some(_) = parts.next() {
+            if let Some(candidate) = parts.next().and_then(nonempty_search_query) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn nonempty_search_query(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 200
+        || value.starts_with("http://")
+        || value.starts_with("https://")
+        || value.contains('\n')
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn route_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> bool {
+    tokens
+        .into_iter()
+        .any(|token| route_mentions_machine_token(route, token))
 }
 
 fn route_mentions_task_control_list(route: &RouteResult) -> bool {
     route_reason_has_marker(route, "capability_ref=task_control.list")
         || route_reason_has_marker(route, "task_control.list")
+        || route_mentions_machine_token(route, "task_control.list")
+}
+
+fn route_mentions_task_control_get(route: &RouteResult) -> bool {
+    route_reason_has_marker(route, "capability_ref=task_control.get")
+        || route_reason_has_marker(route, "task_control.get")
+        || route_mentions_machine_token(route, "task_control.get")
+}
+
+fn route_mentions_machine_token(route: &RouteResult, token: &str) -> bool {
+    let token = token.to_ascii_lowercase();
+    [route.route_reason.as_str(), route.resolved_intent.as_str()]
+        .into_iter()
+        .any(|text| text.to_ascii_lowercase().contains(&token))
 }
 
 fn first_task_id_token(route: &RouteResult, user_text: &str) -> Option<String> {

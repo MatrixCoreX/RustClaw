@@ -1425,6 +1425,9 @@ pub(super) async fn run_agent_with_loop_seeded(
                 policy.answer_verifier_retry_limit,
                 crate::truncate_for_log(&verifier.answer_incomplete_reason)
             );
+            if try_recover_latest_synthesis_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
             if try_recover_log_analyze_answer_verifier_gap(user_text, &mut reply) {
                 return Ok(reply);
             }

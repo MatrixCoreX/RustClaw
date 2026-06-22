@@ -359,6 +359,78 @@ fn explicit_document_targets_win_over_workspace_log_analyze() {
 }
 
 #[test]
+fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
+    let root = TempDirGuard::new("explicit_log_doc_targets");
+    let logs_dir = root.path.join("logs");
+    let docs_dir = root.path.join("docs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    fs::create_dir_all(&docs_dir).expect("create docs dir");
+    fs::write(
+        logs_dir.join("app.log"),
+        "WARN slow request\nERROR failed request\n",
+    )
+    .expect("write log");
+    fs::write(
+        docs_dir.join("service_notes.md"),
+        "# Service Notes\n\nCheck logs first.\n",
+    )
+    .expect("write doc");
+    let log_path = "logs/app.log";
+    let doc_path = "docs/service_notes.md";
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = format!("{log_path} | {doc_path}");
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = format!("summarize {log_path} and {doc_path}");
+    let user_text = format!("Analyze {log_path}; parse {doc_path}; then synthesize.");
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "summarize explicit log and doc targets",
+        Some(&route),
+        &LoopState::new(1),
+        &user_text,
+        None,
+        Some(root.path.to_string_lossy().as_ref()),
+    )
+    .expect("explicit log and doc targets should produce bounded reads");
+
+    assert_eq!(plan.steps.len(), 4);
+    let read_paths = plan
+        .steps
+        .iter()
+        .filter_map(|step| step.to_agent_action())
+        .filter_map(|action| match action {
+            AgentAction::CallTool { tool, args }
+                if tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_text_range") =>
+            {
+                args.get("path")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(read_paths.len(), 2);
+    assert!(read_paths.iter().any(|path| path.ends_with(log_path)));
+    assert!(read_paths.iter().any(|path| path.ends_with(doc_path)));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+    ));
+}
+
+#[test]
 fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     let root = TempDirGuard::new("generic_doc_parse_synthesis");
     let readme = root.path.join("README.md");

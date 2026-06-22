@@ -240,6 +240,161 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations() {
+    let state = test_state();
+    let task = claimed_task("task-compound-observation-synth");
+    let partial_table = "| name | score |\n| --- | --- |\n| beta | 12 |";
+    let synthesis = "Log section reports warn=2 and error=1. Document section reports Service Notes. Markdown table ranks beta above gamma and alpha.";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push(partial_table.to_string());
+    loop_state.last_user_visible_respond = Some(partial_table.to_string());
+    loop_state.last_publishable_synthesis_output = Some(partial_table.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "log_analyze",
+        r#"{"keyword_counts":{"warn":2,"error":1},"path":"logs/app.log"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "doc_parse",
+        r##"{"extra":{"content_excerpt":"# Service Notes\nbody","path":"docs/service_notes.md"}}"##,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", synthesis));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_4", "respond", partial_table));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "compound observation",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_structured_json_synthesis_for_compound_observations() {
+    let state = test_state();
+    let task = claimed_task("task-compound-structured-json-synth");
+    let raw_archive_listing = "nested/config.ini\nnotes.txt";
+    let synthesis = r#"{"archive":{"entries":["notes.txt","nested/config.ini"],"member":{"content":"fixture archive notes","name":"notes.txt"}},"database":{"tables":["orders","service_logs","users"]}}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .delivery_messages
+        .push(raw_archive_listing.to_string());
+    loop_state.last_user_visible_respond = Some(raw_archive_listing.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "archive_basic",
+        r#"{"extra":{"action":"list","entries":[{"name":"notes.txt"},{"name":"nested/config.ini"}]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "archive_basic",
+        r#"{"extra":{"action":"read","member":"notes.txt","content":"fixture archive notes\n"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "db_basic",
+        r#"{"extra":{"action":"list_tables","result":{"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}}}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_4", "synthesize_answer", synthesis));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_5", "respond", raw_archive_listing));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "list archive entries, read member, and list database tables",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-compound-route-locator-synth");
+    let partial_table = "| name | score |\n| --- | --- |\n| beta | 12 |";
+    let synthesis = "### 1. Log analysis\n\nWARN count is 2 and ERROR count is 1.\n\n### 2. Service Notes\n\nThe document describes a small control panel and troubleshooting order.\n\n### 3. Markdown table\n\n| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push(partial_table.to_string());
+    loop_state.last_user_visible_respond = Some(partial_table.to_string());
+    loop_state.last_publishable_synthesis_output = Some(partial_table.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "log_analyze",
+        r#"{"keyword_counts":{"warn":2,"error":1},"path":"logs/app.log"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", partial_table));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "compound observation",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() {
     let state = test_state();
     let task = claimed_task("task-raw-read-delivery-synthesis");

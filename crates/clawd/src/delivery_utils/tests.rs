@@ -425,6 +425,26 @@ fn sync_output_payload_strips_preamble_before_markdown_table() {
 }
 
 #[test]
+fn sync_output_payload_preserves_model_language_summary_before_markdown_table() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "Log analysis reports WARN=2 and ERROR=1.\n\nService notes describe the control panel.\n\n| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |".to_string();
+    let mut messages = vec![text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert!(text.starts_with("Log analysis reports"));
+    assert!(text.contains("Service notes"));
+    assert!(text.contains("| beta | 12 |"));
+    assert_eq!(messages, vec![text]);
+}
+
+#[test]
 fn directory_lookup_contract_does_not_replace_synthesized_answer() {
     let mut state = test_state_with_i18n(&[]);
     let isolated = TempDirGuard::new("directory_lookup_preserve_answer");

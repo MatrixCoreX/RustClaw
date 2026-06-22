@@ -773,9 +773,9 @@ pub(super) fn replace_scalar_path_anchor_respond_only_with_stat_paths(
 
 #[derive(Debug, Clone)]
 pub(super) struct ParsedConfigChangePreview {
-    path: String,
-    field_path: String,
-    value: Value,
+    pub(super) path: String,
+    pub(super) field_path: String,
+    pub(super) value: Value,
 }
 
 pub(super) fn rewrite_config_change_preview_to_config_edit_plan(

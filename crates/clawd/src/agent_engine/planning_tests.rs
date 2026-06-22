@@ -13,10 +13,11 @@ use super::{
     archive_database_aggregate_deterministic_plan_result,
     archive_list_auto_locator_deterministic_plan_result, archive_pack_deterministic_plan_result,
     archive_read_deterministic_plan_result, archive_unpack_deterministic_plan_result,
-    broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
-    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
-    can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
-    compact_skill_playbook_from_prompt,
+    broaden_default_read_range_for_structured_text, browser_http_url_deterministic_plan_result,
+    build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
+    build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
+    classify_planning_prompt_class, compact_skill_playbook_from_prompt,
+    config_risk_preview_deterministic_plan_result,
     content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     content_excerpt_summary_directory_log_slice_deterministic_plan_result,
@@ -92,10 +93,11 @@ use super::{
     strip_terminal_placeholder_respond_for_exact_listing_contract,
     strip_unresolved_template_reads_after_inventory_dir,
     structural_contract_deterministic_plan_overrides_literal_command_guard,
-    structured_field_selectors, structured_keys_deterministic_plan_result,
+    structured_dry_run_response_deterministic_plan_result, structured_field_selectors,
+    structured_keys_deterministic_plan_result,
     structured_scalar_field_auto_locator_deterministic_plan_result,
-    task_control_get_deterministic_plan_result, web_search_summary_deterministic_plan_result,
-    LoopState, PlanningPromptClass,
+    task_control_get_deterministic_plan_result, task_control_list_deterministic_plan_result,
+    web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,
 };
 use crate::agent_engine::{CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG};
 use crate::{
@@ -509,6 +511,8 @@ mod kb_chain;
 mod log_excerpt_quantity_and_skill_policy;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
 mod missing_paths_and_multi_target_metadata;
+#[path = "planning_tests/nl_failure_regressions.rs"]
+mod nl_failure_regressions;
 #[path = "planning_tests/scalar_count_and_hidden_entries.rs"]
 mod scalar_count_and_hidden_entries;
 #[path = "planning_tests/scalar_path_and_inventory_repair.rs"]

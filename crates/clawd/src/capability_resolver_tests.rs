@@ -196,6 +196,64 @@ fn registry_resolves_crypto_positions_capability() {
 }
 
 #[test]
+fn registry_resolves_bare_skill_capability_by_machine_action() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "task_control",
+        json!({"action": "list", "limit": 5}),
+    );
+    let action = action.expect("bare task_control with machine action should resolve");
+    match action {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "task_control");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+            assert_eq!(args.get("limit").and_then(Value::as_i64), Some(5));
+        }
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "task_control");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:task_control"));
+}
+
+#[test]
+fn registry_resolves_fully_qualified_skill_action_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "browser_web.open_extract",
+        json!({"url": "https://example.com"}),
+    );
+    let action = action.expect("registry skill.action capability should resolve");
+    match action {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "browser_web");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("open_extract")
+            );
+            assert_eq!(
+                args.get("url").and_then(Value::as_str),
+                Some("https://example.com")
+            );
+        }
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "browser_web.open_extract");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:browser_web"));
+}
+
+#[test]
 fn registry_resolves_doc_parse_bare_capability() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

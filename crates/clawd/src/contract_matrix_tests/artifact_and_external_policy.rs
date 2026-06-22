@@ -340,6 +340,32 @@ fn content_excerpt_summary_allows_log_analyze_for_log_paths() {
 }
 
 #[test]
+fn content_excerpt_summary_allows_inline_transform_evidence() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "docs/service_notes.md".to_string(),
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        }),
+        "transform",
+        &serde_json::json!({
+            "action": "transform_data",
+            "data": [{"name":"alpha","score":7},{"name":"beta","score":12}],
+            "ops": [{"op":"sort","by":"score","order":"desc"}],
+            "output_format": "md_table"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "transform.transform_data");
+    assert_eq!(policy.contract_match, "content_excerpt_summary");
+}
+
+#[test]
 fn content_excerpt_summary_allows_health_check_field_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {

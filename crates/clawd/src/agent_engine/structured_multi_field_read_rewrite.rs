@@ -844,7 +844,20 @@ pub(super) fn parse_config_change_value_after_field(
     let field_lower = field_path.to_ascii_lowercase();
     let field_idx = lower.find(&field_lower)?;
     let suffix = user_text.get(field_idx + field_path.len()..)?;
-    config_value_candidate_tokens(suffix).find_map(parse_config_value_token)
+    let clause = suffix
+        .split(|ch: char| matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n' | '\r'))
+        .next()
+        .unwrap_or(suffix);
+    let mut string_value = None;
+    for token in config_value_candidate_tokens(clause) {
+        if let Some(value) = parse_config_value_token(token) {
+            if !value.is_string() {
+                return Some(value);
+            }
+            string_value = Some(value);
+        }
+    }
+    string_value
 }
 
 pub(super) fn config_value_candidate_tokens(text: &str) -> impl Iterator<Item = String> + '_ {
@@ -898,6 +911,12 @@ pub(super) fn parse_config_value_token(token: String) -> Option<Value> {
         if let Some(number) = serde_json::Number::from_f64(value) {
             return Some(Value::Number(number));
         }
+    }
+    if token
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':'))
+    {
+        return Some(Value::String(token));
     }
     None
 }

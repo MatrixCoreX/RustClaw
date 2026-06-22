@@ -54,6 +54,7 @@ struct SkillInput {
     action: String,
     index: Option<usize>,
     task_id: Option<String>,
+    dry_run: bool,
 }
 
 #[derive(Debug)]
@@ -137,6 +138,9 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .to_ascii_lowercase();
     let action = match action.as_str() {
         "list" | "query" | "status" => "list",
+        "list_with_first_detail" | "list_and_get_first" | "sample_detail" => {
+            "list_with_first_detail"
+        }
         "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
@@ -145,13 +149,17 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         }
     }
     .to_string();
+    let dry_run = obj
+        .get("dry_run")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let index = obj
         .get("index")
         .or_else(|| obj.get("task_number"))
         .or_else(|| obj.get("number"))
         .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n.max(0) as u64)))
         .map(|v| v as usize);
-    if action == "cancel_one" && index.unwrap_or(0) == 0 {
+    if action == "cancel_one" && index.unwrap_or(0) == 0 && !dry_run {
         return Err("cancel_one requires index >= 1".to_string());
     }
     let task_id = obj
@@ -162,12 +170,18 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
     if action == "get" && task_id.is_none() {
-        return Err("get requires task_id".to_string());
+        return Ok(SkillInput {
+            action,
+            index,
+            task_id,
+            dry_run,
+        });
     }
     Ok(SkillInput {
         action,
         index,
         task_id,
+        dry_run,
     })
 }
 
@@ -202,11 +216,36 @@ fn execute(
                     task_list_extra(&tasks),
                 ))
             }
+            "list_with_first_detail" => {
+                let tasks = fetch_active_tasks(
+                    &client,
+                    &base_url,
+                    user_id,
+                    chat_id,
+                    &request_id,
+                    user_key.as_deref(),
+                )
+                .await?;
+                let detail = if let Some(first) = tasks.first() {
+                    Some(
+                        fetch_task_detail(&client, &base_url, &first.task_id, user_key.as_deref())
+                            .await?,
+                    )
+                } else {
+                    None
+                };
+                let extra = task_list_with_first_detail_extra(&tasks, detail.as_ref());
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
             "get" => {
-                let task_id = input
-                    .task_id
-                    .as_deref()
-                    .ok_or_else(|| "get requires task_id".to_string())?;
+                let Some(task_id) = input.task_id.as_deref() else {
+                    let extra = task_detail_input_status_extra("missing_task_id", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                if !is_task_id_shape(task_id) {
+                    let extra = task_detail_input_status_extra("invalid_task_id", Some(task_id));
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
                 let detail =
                     fetch_task_detail(&client, &base_url, task_id, user_key.as_deref()).await?;
                 Ok(SkillOutput::structured(
@@ -215,6 +254,10 @@ fn execute(
                 ))
             }
             "cancel_all" => {
+                if input.dry_run {
+                    let extra = cancel_dry_run_extra("cancel_all", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
                 let tasks = fetch_active_tasks(
                     &client,
                     &base_url,
@@ -240,6 +283,10 @@ fn execute(
             }
             "cancel_one" => {
                 let index = input.index.unwrap_or(0);
+                if input.dry_run {
+                    let extra = cancel_dry_run_extra("cancel_one", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
                 let task = cancel_one_task(
                     &client,
                     &base_url,
@@ -475,6 +522,61 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
     })
 }
 
+fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&Value>) -> Value {
+    let list = task_list_extra(tasks);
+    let selected_task_id = tasks.first().map(|task| task.task_id.as_str());
+    let detail_extra = detail.map(|detail| {
+        task_detail_extra(
+            detail
+                .get("task_id")
+                .and_then(Value::as_str)
+                .or(selected_task_id)
+                .unwrap_or_default(),
+            detail,
+        )
+    });
+    let lifecycle = detail_extra
+        .as_ref()
+        .and_then(|value| value.get("lifecycle"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let db_status = detail_extra
+        .as_ref()
+        .and_then(|value| value.get("db_status"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let lifecycle_field_presence = json!({
+        "state": lifecycle.get("state").is_some(),
+        "can_poll": lifecycle.get("can_poll").is_some(),
+        "can_cancel": lifecycle.get("can_cancel").is_some(),
+        "last_heartbeat_ts": lifecycle.get("last_heartbeat_ts").is_some(),
+        "checkpoint_id": lifecycle.get("checkpoint_id").is_some(),
+        "db_status": !db_status.is_null(),
+    });
+    let detail_available = detail_extra.is_some();
+    let count = tasks.len();
+    json!({
+        "schema_version": 1,
+        "action": "list_with_first_detail",
+        "status": if count == 0 { "empty" } else { "ok" },
+        "count": count,
+        "selected_task_id": selected_task_id,
+        "list": list,
+        "detail": detail_extra.unwrap_or(Value::Null),
+        "field_value": {
+            "action": "list_with_first_detail",
+            "status": if count == 0 { "empty" } else { "ok" },
+            "count": count,
+            "selected_task_id": selected_task_id,
+            "detail_available": detail_available,
+            "list_item_fields": ["index", "task_id", "kind", "status", "summary", "age_seconds"],
+            "db_status": db_status,
+            "lifecycle": lifecycle,
+            "lifecycle_field_presence": lifecycle_field_presence,
+        },
+    })
+}
+
 fn render_task_detail(detail: &Value) -> String {
     serde_json::to_string(&task_detail_extra(
         detail
@@ -506,6 +608,74 @@ fn task_detail_extra(task_id: &str, detail: &Value) -> Value {
             "lifecycle": detail.get("lifecycle").cloned().unwrap_or(Value::Null),
         },
     })
+}
+
+fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value {
+    json!({
+        "schema_version": 1,
+        "action": "get",
+        "status": status,
+        "task_id": task_id,
+        "db_status": Value::Null,
+        "lifecycle": {
+            "state": status,
+            "can_poll": false,
+            "can_cancel": false,
+            "last_heartbeat_ts": Value::Null,
+            "checkpoint_id": Value::Null,
+        },
+        "field_value": {
+            "action": "get",
+            "status": status,
+            "task_id": task_id,
+            "db_status": Value::Null,
+            "state": status,
+            "can_poll": false,
+            "can_cancel": false,
+            "last_heartbeat_ts": Value::Null,
+            "checkpoint_id": Value::Null,
+        },
+    })
+}
+
+fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value {
+    json!({
+        "schema_version": 1,
+        "action": action,
+        "status": "dry_run",
+        "would_mutate": false,
+        "task_id": task_id,
+        "required_fields": ["task_id", "state", "can_cancel"],
+        "precondition_fields": {
+            "state": "running_or_queued",
+            "can_cancel": true,
+        },
+        "result_projection_fields": {
+            "state": "cancel_requested_or_canceled",
+            "can_cancel": false,
+            "can_poll": true,
+            "db_status": "canceled_or_terminal",
+            "last_heartbeat_ts": "optional",
+            "checkpoint_id": "optional",
+        },
+        "field_value": {
+            "action": action,
+            "status": "dry_run",
+            "would_mutate": false,
+            "task_id": task_id,
+            "state": "running_or_queued",
+            "can_cancel": true,
+            "can_poll": true,
+        },
+    })
+}
+
+fn is_task_id_shape(task_id: &str) -> bool {
+    task_id.len() == 36
+        && task_id.char_indices().all(|(idx, ch)| match idx {
+            8 | 13 | 18 | 23 => ch == '-',
+            _ => ch.is_ascii_hexdigit(),
+        })
 }
 
 fn render_cancel_all(tasks: Vec<ActiveTaskItem>, canceled: usize) -> String {

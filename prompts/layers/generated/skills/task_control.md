@@ -18,6 +18,7 @@
 
 ## Actions (from interface)
 - `list` - List current unfinished tasks (`running` + `queued`) for this user/chat.
+- `list_with_first_detail` - List current unfinished tasks and, when at least one exists, fetch detail for the first listed task so lifecycle field visibility can be answered from structured data.
 - `get` - Query one task detail by stable `task_id`, including `data.lifecycle` machine fields when available.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
@@ -25,9 +26,10 @@
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `get`, `cancel_all`, `cancel_one`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`. |
 | `task_id` | required for `get` | string | - | Stable RustClaw task id, usually a UUID. |
 | `index` | required for `cancel_one` | number | - | 1-based active-task index. |
+| `dry_run` | optional for cancel actions | boolean | `false` | Return a no-mutation cancellation preview with required fields and projected lifecycle fields. |
 
 Notes:
 
@@ -36,7 +38,8 @@ Notes:
 
 ## Error Contract (from interface)
 - Unknown action -> readable error text.
-- `get` without `task_id` -> readable error text.
+- `get` without `task_id` -> structured `status=missing_task_id` with lifecycle field slots.
+- `get` with an invalid `task_id` shape -> structured `status=invalid_task_id` with lifecycle field slots.
 - `cancel_one` without valid `index` -> readable error text.
 - Invalid index -> readable error text telling the user to query tasks first.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
@@ -75,11 +78,35 @@ Response text example:
 {"schema_version":1,"action":"get","task_id":"00000000-0000-4000-8000-000000000000","db_status":"succeeded","lifecycle":{"state":"succeeded","can_poll":true,"can_cancel":false}}
 ```
 
+### list_with_first_detail
+
+Request:
+```json
+{"request_id":"r6","args":{"action":"list_with_first_detail"},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"list_with_first_detail","status":"ok","count":1,"selected_task_id":"00000000-0000-4000-8000-000000000000","field_value":{"detail_available":true,"db_status":"running","lifecycle_field_presence":{"state":true,"can_poll":true,"can_cancel":true,"last_heartbeat_ts":true,"checkpoint_id":false}}}
+```
+
 ### cancel_one
 
 Request:
 ```json
 {"request_id":"r3","args":{"action":"cancel_one","index":2},"user_id":1,"chat_id":2}
+```
+
+### cancel dry-run
+
+Request:
+```json
+{"request_id":"r5","args":{"action":"cancel_all","dry_run":true},"user_id":1,"chat_id":2}
+```
+
+Response text example:
+```json
+{"schema_version":1,"action":"cancel_all","status":"dry_run","would_mutate":false,"required_fields":["task_id","state","can_cancel"],"result_projection_fields":{"state":"cancel_requested_or_canceled","can_cancel":false,"can_poll":true,"db_status":"canceled_or_terminal"}}
 ```
 
 ## Output Contract
