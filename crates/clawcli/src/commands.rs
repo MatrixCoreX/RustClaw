@@ -490,6 +490,128 @@ pub(crate) fn run_cancel_index(
     Ok(())
 }
 
+pub(crate) fn run_skills(base_url: &str, key: &str, config: bool, json_output: bool) -> Result<()> {
+    let path = if config { "/skills/config" } else { "/skills" };
+    let body = get_v1_json(base_url, key, path, "skills")?;
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    } else {
+        print_skill_table(&body);
+    }
+    Ok(())
+}
+
+pub(crate) fn run_capabilities(base_url: &str, key: &str, json_output: bool) -> Result<()> {
+    let body = get_v1_json(base_url, key, "/skills/config", "capabilities")?;
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    } else {
+        print_capability_table(&body);
+    }
+    Ok(())
+}
+
+fn get_v1_json(
+    base_url: &str,
+    key: &str,
+    path: &str,
+    context_label: &str,
+) -> Result<serde_json::Value> {
+    let url = format!("{}{}", client::base_v1(base_url), path);
+    let resp = client::make_client()?
+        .get(&url)
+        .header("x-rustclaw-key", key)
+        .send()
+        .with_context(|| format!("request {context_label} failed"))?;
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .with_context(|| format!("parse {context_label} response"))?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "{} returned {}: {:?}",
+            context_label,
+            status,
+            body.get("error")
+        );
+    }
+    Ok(body)
+}
+
+fn print_skill_table(body: &serde_json::Value) {
+    let items = skill_items(body);
+    println!(
+        "{:<30} {:<10} {:<12} {:<8} {:<8} description",
+        "skill", "kind", "planner", "risk", "available"
+    );
+    for item in items {
+        let name = value_token(item.get("name"));
+        let kind = value_token(item.get("kind"));
+        let planner_kind = value_token(item.get("planner_kind"));
+        let risk = value_token(item.get("risk_level"));
+        let available = value_token(item.get("runtime_available"));
+        let description = truncate_display_token(&value_token(item.get("description")), 80);
+        println!(
+            "{:<30} {:<10} {:<12} {:<8} {:<8} {}",
+            name, kind, planner_kind, risk, available, description
+        );
+    }
+}
+
+fn print_capability_table(body: &serde_json::Value) {
+    let items = skill_items(body);
+    println!(
+        "{:<30} {:<40} {:<30} {:<8} available",
+        "skill", "planner_capabilities", "capabilities", "risk"
+    );
+    for item in items {
+        let planner_capabilities = join_string_array(item.get("planner_capabilities"));
+        let capabilities = join_string_array(item.get("capabilities"));
+        if planner_capabilities.is_empty() && capabilities.is_empty() {
+            continue;
+        }
+        let name = value_token(item.get("name"));
+        let risk = value_token(item.get("risk_level"));
+        let available = value_token(item.get("runtime_available"));
+        println!(
+            "{:<30} {:<40} {:<30} {:<8} {}",
+            name,
+            truncate_display_token(&planner_capabilities, 40),
+            truncate_display_token(&capabilities, 30),
+            risk,
+            available
+        );
+    }
+}
+
+fn skill_items(body: &serde_json::Value) -> &[serde_json::Value] {
+    body.pointer("/data/skill_items")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn join_string_array(value: Option<&serde_json::Value>) -> String {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn run_reload_skills(base_url: &str, key: &str) -> Result<()> {
     let url = format!("{}/admin/reload-skills", client::base_v1(base_url));
     let resp = client::make_client()?
