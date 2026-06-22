@@ -2,6 +2,8 @@
 use serde_json::json;
 use serde_json::Value;
 
+use crate::task_lifecycle::{AsyncJobRef, AsyncJobStatus};
+
 pub(crate) const ASYNC_POLL_ADAPTER_RESULT_KEY: &str = "async_poll_adapter_result";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +98,128 @@ pub(crate) fn async_poll_adapter_status(value: &Value) -> Option<&str> {
         .iter()
         .any(|candidate| candidate.as_token() == status)
         .then_some(status)
+}
+
+pub(crate) fn parse_pending_async_job_ref_from_extra(
+    extra: Option<&Value>,
+    error_prefix: &str,
+) -> Result<Option<AsyncJobRef>, String> {
+    let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
+        return Ok(None);
+    };
+    if candidate.get("text").is_some() || candidate.get("error_text").is_some() {
+        return Err(machine_error(error_prefix, "user_text_fields_forbidden"));
+    }
+    let Some(status) = parse_pending_async_job_status(candidate) else {
+        return Err(machine_error(error_prefix, "unsupported_status"));
+    };
+    if !matches!(status, AsyncJobStatus::Accepted | AsyncJobStatus::Running) {
+        return Err(machine_error(error_prefix, "non_pending_status"));
+    }
+    let job = AsyncJobRef {
+        job_id: required_machine_string(candidate, "job_id").unwrap_or_default(),
+        status,
+        poll_after_seconds: candidate
+            .get("poll_after_seconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        expires_at: candidate
+            .get("expires_at")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        cancel_ref: required_machine_string(candidate, "cancel_ref").unwrap_or_default(),
+        message_key: required_machine_string(candidate, "message_key").unwrap_or_default(),
+    };
+    let missing = job.missing_required_fields();
+    if !missing.is_empty() {
+        return Err(format!(
+            "{error_prefix}: missing_required_fields={}",
+            missing.join("|")
+        ));
+    }
+    Ok(Some(job))
+}
+
+pub(crate) fn parse_pending_async_job_poll_adapter_from_extra(
+    extra: Option<&Value>,
+    error_prefix: &str,
+) -> Result<Option<Value>, String> {
+    let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
+        return Ok(None);
+    };
+    let Some(adapter) = candidate
+        .get("poll_adapter")
+        .or_else(|| extra.and_then(|extra| extra.get("poll_adapter")))
+    else {
+        return Ok(None);
+    };
+    if adapter.get("text").is_some() || adapter.get("error_text").is_some() {
+        return Err(machine_error(
+            error_prefix,
+            "poll_adapter_user_text_fields_forbidden",
+        ));
+    }
+    let adapter_kind = adapter
+        .get("adapter_kind")
+        .or_else(|| adapter.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| machine_error(error_prefix, "poll_adapter_kind_missing"))?;
+    if adapter_kind != "skill_poll" {
+        return Err(machine_error(error_prefix, "unsupported_poll_adapter_kind"));
+    }
+    adapter
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| machine_error(error_prefix, "poll_adapter_skill_name_missing"))?;
+    if let Some(args) = adapter.get("args") {
+        if !args.is_object() || args.get("text").is_some() || args.get("error_text").is_some() {
+            return Err(machine_error(error_prefix, "poll_adapter_args_invalid"));
+        }
+    }
+    Ok(Some(adapter.clone()))
+}
+
+fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {
+    let extra = extra?;
+    extra
+        .get("pending_async_job")
+        .or_else(|| extra.get("async_job"))
+        .or_else(|| {
+            let kind = extra
+                .get("type")
+                .or_else(|| extra.get("kind"))
+                .and_then(Value::as_str)
+                .map(str::trim);
+            (kind == Some("pending_async_job")).then_some(extra)
+        })
+}
+
+fn parse_pending_async_job_status(value: &Value) -> Option<AsyncJobStatus> {
+    match value.get("status").and_then(Value::as_str).map(str::trim)? {
+        "accepted" => Some(AsyncJobStatus::Accepted),
+        "running" => Some(AsyncJobStatus::Running),
+        "succeeded" => Some(AsyncJobStatus::Succeeded),
+        "failed" => Some(AsyncJobStatus::Failed),
+        "expired" => Some(AsyncJobStatus::Expired),
+        _ => None,
+    }
+}
+
+fn required_machine_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn machine_error(error_prefix: &str, reason: &str) -> String {
+    format!("{error_prefix}: {reason}")
 }
 
 #[cfg(test)]
