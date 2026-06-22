@@ -828,6 +828,7 @@ fn read_nni_heartbeat_error_records(
     let parsed: toml::Value =
         toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
     let mut records = parse_nni_heartbeat_error_records(&parsed);
+    records.extend(read_nni_heartbeat_error_records_from_log(state)?);
     let last_error = parsed
         .get("nni")
         .and_then(|value| value.get("last_heartbeat_error"))
@@ -863,6 +864,14 @@ fn read_nni_heartbeat_error_records(
             );
         }
     }
+    records.sort_by(|left, right| {
+        let ts_order = right
+            .created_at_ts
+            .unwrap_or_default()
+            .cmp(&left.created_at_ts.unwrap_or_default());
+        ts_order.then_with(|| right.id.cmp(&left.id))
+    });
+    records.truncate(NNI_HEARTBEAT_ERROR_HISTORY_LIMIT);
     Ok(records)
 }
 
@@ -881,10 +890,20 @@ fn clear_nni_heartbeat_error_records(state: &AppState) -> anyhow::Result<Value> 
     output = upsert_section_key_line(&output, "nni", "last_heartbeat_network_failures", "0");
     output = upsert_section_key_line(&output, "nni", "heartbeat_error_records", "[]");
     write_runtime_config_file(state, &output)?;
+    rewrite_nni_log_without_event_kinds(
+        state,
+        &[
+            "heartbeat_error_record",
+            "heartbeat_failed",
+            "heartbeat_tick_error",
+            "heartbeat_network_retry",
+        ],
+    )?;
     Ok(json!({
         "status": "nni_heartbeat_errors_cleared",
         "deleted_records": existing_count,
         "config_path": path.display().to_string(),
+        "log_path": nni_log_path(state).display().to_string(),
     }))
 }
 
@@ -932,27 +951,39 @@ fn parse_nni_heartbeat_error_record(value: &toml::Value) -> Option<NniHeartbeatE
     })
 }
 
-fn render_nni_heartbeat_error_records(records: &[NniHeartbeatErrorRecord]) -> String {
-    let values = records
+fn read_nni_heartbeat_error_records_from_log(
+    state: &AppState,
+) -> anyhow::Result<Vec<NniHeartbeatErrorRecord>> {
+    Ok(read_nni_log_payloads(state, "heartbeat_error_record")?
+        .into_iter()
+        .filter_map(|payload| serde_json::from_value::<NniHeartbeatErrorRecord>(payload).ok())
+        .collect())
+}
+
+fn record_nni_heartbeat_error_event(
+    state: &AppState,
+    error: &str,
+    created_at_ts: Option<u64>,
+    network: bool,
+) {
+    let next_id = read_nni_heartbeat_error_records(state)
+        .unwrap_or_default()
         .iter()
-        .map(|record| {
-            let mut table = toml::map::Map::new();
-            table.insert(
-                "id".to_string(),
-                toml::Value::Integer(i64::try_from(record.id).unwrap_or(i64::MAX)),
-            );
-            if let Some(created_at_ts) = record.created_at_ts {
-                table.insert(
-                    "created_at_ts".to_string(),
-                    toml::Value::Integer(i64::try_from(created_at_ts).unwrap_or(i64::MAX)),
-                );
-            }
-            table.insert("error".to_string(), toml::Value::String(record.error.clone()));
-            table.insert("network".to_string(), toml::Value::Boolean(record.network));
-            toml::Value::Table(table)
-        })
-        .collect::<Vec<_>>();
-    toml::Value::Array(values).to_string()
+        .map(|record| record.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let record = NniHeartbeatErrorRecord {
+        id: next_id,
+        created_at_ts,
+        error: error.to_string(),
+        network,
+    };
+    append_nni_log_event_best_effort(
+        state,
+        "heartbeat_error_record",
+        serde_json::to_value(record).unwrap_or_else(|_| json!({})),
+    );
 }
 
 fn write_nni_config(
@@ -996,8 +1027,6 @@ fn write_nni_heartbeat_status(
 ) -> anyhow::Result<NniConfigResponse> {
     let path = state.skill_rt.workspace_root.join("configs/config.toml");
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
-    let parsed: toml::Value =
-        toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
     let mut output = raw;
     if let Some(ts) = heartbeat_at_ts {
         output = upsert_section_key_line(&output, "nni", "last_heartbeat_at_ts", &ts.to_string());
@@ -1027,30 +1056,7 @@ fn write_nni_heartbeat_status(
         &error_at_ts.unwrap_or_default().to_string(),
     );
     if let Some(error) = error.map(str::trim).filter(|value| !value.is_empty()) {
-        let mut records = parse_nni_heartbeat_error_records(&parsed);
-        let next_id = records
-            .iter()
-            .map(|record| record.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
-        records.insert(
-            0,
-            NniHeartbeatErrorRecord {
-                id: next_id,
-                created_at_ts: error_at_ts,
-                error: error.to_string(),
-                network: error_network.unwrap_or(false),
-            },
-        );
-        records.truncate(NNI_HEARTBEAT_ERROR_HISTORY_LIMIT);
-        let rendered_records = render_nni_heartbeat_error_records(&records);
-        output = upsert_section_key_line(
-            &output,
-            "nni",
-            "heartbeat_error_records",
-            &rendered_records,
-        );
+        record_nni_heartbeat_error_event(state, error, error_at_ts, error_network.unwrap_or(false));
     }
     write_runtime_config_file(state, &output)?;
     read_nni_config(state)
@@ -1070,7 +1076,11 @@ pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
             if let Err(err) = nni_heartbeat_tick(&state).await {
-                tracing::warn!("nni heartbeat tick failed: {err}");
+                append_nni_log_event_best_effort(
+                    &state,
+                    "heartbeat_tick_error",
+                    json!({"error": err.to_string()}),
+                );
             }
             tokio::time::sleep(Duration::from_secs(NNI_HEARTBEAT_POLL_SECONDS)).await;
         }
@@ -1146,13 +1156,14 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
             record.signature_present = true;
             record.challenge_present = true;
             record_nni_request_event(state, record);
-            tracing::info!(
-                "nni heartbeat accepted: ts={} count={} node={}",
-                heartbeat_ts,
-                heartbeat_count,
-                data.get("node_url")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("")
+            append_nni_log_event_best_effort(
+                state,
+                "heartbeat_accepted",
+                json!({
+                    "heartbeat_ts": heartbeat_ts,
+                    "heartbeat_count": heartbeat_count,
+                    "node_url": data.get("node_url").and_then(Value::as_str).unwrap_or(""),
+                }),
             );
         }
         Err(err) => {
@@ -1177,6 +1188,15 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
             record.error_code = Some(nni_error_code_from_message(&err.to_string()));
             record.created_at_ts = Some(now);
             record_nni_request_event(state, record);
+            append_nni_log_event_best_effort(
+                state,
+                "heartbeat_failed",
+                json!({
+                    "error": err.to_string(),
+                    "error_code": nni_error_code_from_message(&err.to_string()),
+                    "network": err.network,
+                }),
+            );
             return Err(err.into());
         }
     }
@@ -1192,9 +1212,14 @@ async fn run_nni_heartbeat_with_network_retries(
         match run_nni_heartbeat_once(state, node_urls).await {
             Ok(data) => return Ok(data),
             Err(err) if err.network && attempt < NNI_HEARTBEAT_NETWORK_RETRY_LIMIT => {
-                tracing::warn!(
-                    "nni heartbeat network attempt {attempt}/{} failed: {err}",
-                    NNI_HEARTBEAT_NETWORK_RETRY_LIMIT
+                append_nni_log_event_best_effort(
+                    state,
+                    "heartbeat_network_retry",
+                    json!({
+                        "attempt": attempt,
+                        "retry_limit": NNI_HEARTBEAT_NETWORK_RETRY_LIMIT,
+                        "error": err.to_string(),
+                    }),
                 );
                 last_error = Some(err);
                 tokio::time::sleep(Duration::from_secs(
