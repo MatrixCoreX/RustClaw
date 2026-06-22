@@ -360,6 +360,7 @@ Important lifecycle details:
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
+- Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; current runtime uses `tasks.updated_at` plus checkpoint `resume_executor` machine fields, so new database lease columns are deferred until multi-worker claims require them.
 
 ## Main Components
 
