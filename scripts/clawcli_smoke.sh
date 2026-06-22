@@ -69,6 +69,18 @@ if [[ -n "${RUSTCLAW_CLI_SMOKE_CANCEL_TASK_ID:-}" ]]; then
   run_cli cancel-task "$RUSTCLAW_CLI_SMOKE_CANCEL_TASK_ID" >/dev/null
 fi
 
+if [[ -n "${RUSTCLAW_CLI_SMOKE_RESUME_TASK_ID:-}" ]]; then
+  echo "SMOKE resume-task"
+  run_cli resume-task "$RUSTCLAW_CLI_SMOKE_RESUME_TASK_ID" >/dev/null
+fi
+
+if [[ -n "${RUSTCLAW_CLI_SMOKE_PAUSE_TASK_ID:-}" ]]; then
+  echo "SMOKE pause-task"
+  run_cli pause-task \
+    "$RUSTCLAW_CLI_SMOKE_PAUSE_TASK_ID" \
+    --pause-seconds "${RUSTCLAW_CLI_SMOKE_PAUSE_SECONDS:-3600}" >/dev/null
+fi
+
 if [[ -n "${RUSTCLAW_CLI_SMOKE_RUN_SKILL:-}" ]]; then
   echo "SMOKE run-skill"
   run_cli run-skill \

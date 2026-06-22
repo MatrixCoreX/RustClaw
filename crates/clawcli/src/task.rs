@@ -253,3 +253,60 @@ pub(crate) fn cancel_task_by_id(
     }
     Ok(body)
 }
+
+pub(crate) fn resume_task_by_id(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+) -> Result<serde_json::Value> {
+    task_control_by_id(
+        base_url,
+        key,
+        "/tasks/resume-by-task-id",
+        "resume-task",
+        json!({ "task_id": task_id }),
+    )
+}
+
+pub(crate) fn pause_task_by_id(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    pause_seconds: u64,
+) -> Result<serde_json::Value> {
+    task_control_by_id(
+        base_url,
+        key,
+        "/tasks/pause-by-task-id",
+        "pause-task",
+        json!({
+            "task_id": task_id,
+            "pause_seconds": pause_seconds,
+        }),
+    )
+}
+
+fn task_control_by_id(
+    base_url: &str,
+    key: &str,
+    path: &str,
+    operation: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let url = format!("{}{}", client::base_v1(base_url), path);
+    let resp = client::make_client()?
+        .post(&url)
+        .header("x-rustclaw-key", key)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+        .with_context(|| format!("{operation} request failed"))?;
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .with_context(|| format!("parse {operation} response"))?;
+    if !status.is_success() {
+        anyhow::bail!("{operation} returned {}: {:?}", status, body.get("error"));
+    }
+    Ok(body)
+}

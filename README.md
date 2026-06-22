@@ -352,6 +352,7 @@ Important lifecycle details:
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
 - Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
 - `clawcli get` and `clawcli watch` render lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
+- `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl`.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
@@ -610,7 +611,7 @@ Focused long-tail closed-loop entries:
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
-- `RUSTCLAW_CLI_SMOKE_KEY=... bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch; optional env vars enable active/cancel/run-skill coverage.
+- `RUSTCLAW_CLI_SMOKE_KEY=... bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch; optional env vars enable active/cancel/pause/resume/run-skill coverage.
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
 
