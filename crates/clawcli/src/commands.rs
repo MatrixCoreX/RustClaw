@@ -26,9 +26,37 @@ pub(crate) fn run_health(base_url: &str, key: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn run_submit(base_url: &str, key: &str, text: &str) -> Result<()> {
+pub(crate) fn run_submit(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    wait: bool,
+    detach: bool,
+    json_output: bool,
+    interval_ms: u64,
+) -> Result<()> {
+    if wait && detach {
+        anyhow::bail!("submit_wait_detach_conflict");
+    }
     let task_id = task::submit_ask(base_url, key, text)?;
-    println!("task_id: {}", task_id);
+    if wait {
+        let task = wait_for_terminal_task(base_url, key, &task_id, interval_ms)?;
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&task.raw_data)?);
+        } else {
+            print_task_status(&task, false, &[]);
+        }
+    } else if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "task_id": task_id,
+                "detached": true,
+            }))?
+        );
+    } else {
+        println!("task_id: {}", task_id);
+    }
     Ok(())
 }
 
@@ -73,6 +101,22 @@ pub(crate) fn run_get(
             .with_context(|| format!("write events output failed: path={}", path.display()))?;
     }
     Ok(())
+}
+
+fn wait_for_terminal_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    interval_ms: u64,
+) -> Result<task::TaskStatusView> {
+    let interval = Duration::from_millis(interval_ms.max(100));
+    loop {
+        let task = task::get_task_status(base_url, key, task_id)?;
+        if task.is_terminal() {
+            return Ok(task);
+        }
+        std::thread::sleep(interval);
+    }
 }
 
 pub(crate) fn run_watch(
