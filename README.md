@@ -353,6 +353,7 @@ Important lifecycle details:
 - Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
 - `clawcli get` and `clawcli watch` render lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
+- `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl`.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.

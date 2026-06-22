@@ -183,6 +183,37 @@ pub(crate) fn run_watch(
     Ok(())
 }
 
+pub(crate) fn run_events(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    event_types: &[String],
+    jsonl_output: bool,
+) -> Result<()> {
+    let task = task::get_task_status(base_url, key, task_id)?;
+    let requested_event_types = event_types
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let events = filtered_events(&task, &requested_event_types);
+    for event in events {
+        if jsonl_output {
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "task_id": &task.task_id,
+                    "event_type": &event.event_type,
+                    "line": &event.line,
+                }))?
+            );
+        } else {
+            println!("event: {}", event.line);
+        }
+    }
+    Ok(())
+}
+
 fn print_task_status(
     task: &task::TaskStatusView,
     include_events: bool,
@@ -214,6 +245,16 @@ fn filtered_event_lines(
     task: &task::TaskStatusView,
     requested_event_types: &[String],
 ) -> Vec<String> {
+    filtered_events(task, requested_event_types)
+        .into_iter()
+        .map(|event| format!("event: {}", event.line))
+        .collect()
+}
+
+fn filtered_events<'a>(
+    task: &'a task::TaskStatusView,
+    requested_event_types: &[String],
+) -> Vec<&'a crate::events::TaskEventLine> {
     task.events
         .iter()
         .filter(|event| {
@@ -222,7 +263,6 @@ fn filtered_event_lines(
                     .iter()
                     .any(|requested| requested == &event.event_type.to_ascii_lowercase())
         })
-        .map(|event| format!("event: {}", event.line))
         .collect()
 }
 
@@ -232,6 +272,7 @@ pub(crate) fn run_active(
     user_id: i64,
     chat_id: i64,
     exclude_task_id: Option<String>,
+    json_output: bool,
 ) -> Result<()> {
     let url = format!("{}/tasks/active", client::base_v1(base_url));
     let payload = json!({
@@ -248,14 +289,68 @@ pub(crate) fn run_active(
         .context("list active tasks failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse active response")?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&body).unwrap_or_default()
-    );
     if !status.is_success() {
         anyhow::bail!("active returned {}: {:?}", status, body.get("error"));
     }
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    } else {
+        print_active_task_table(&body);
+    }
     Ok(())
+}
+
+fn print_active_task_table(body: &serde_json::Value) {
+    let tasks = body
+        .pointer("/data/tasks")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    println!(
+        "{:<5} {:<36} {:<10} {:<12} {:<8} summary",
+        "idx", "task_id", "status", "lifecycle", "age_s"
+    );
+    for task in tasks {
+        let index = value_token(task.get("index"));
+        let task_id = value_token(task.get("task_id"));
+        let status = value_token(task.get("status"));
+        let lifecycle = task
+            .get("lifecycle")
+            .and_then(|value| value.get("state"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let age_seconds = value_token(task.get("age_seconds"));
+        let summary = truncate_display_token(&value_token(task.get("summary")), 80);
+        println!(
+            "{:<5} {:<36} {:<10} {:<12} {:<8} {}",
+            index, task_id, status, lifecycle, age_seconds, summary
+        );
+    }
+}
+
+fn value_token(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(value)) => value.trim().to_string(),
+        Some(serde_json::Value::Number(value)) => value.to_string(),
+        Some(serde_json::Value::Bool(value)) => value.to_string(),
+        Some(
+            serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_),
+        )
+        | None => String::new(),
+    }
+}
+
+fn truncate_display_token(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
 }
 
 pub(crate) fn run_cancel(

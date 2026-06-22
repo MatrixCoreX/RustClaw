@@ -88,6 +88,15 @@ enum Command {
         jsonl: bool,
     },
 
+    /// Print task event stream from GET /v1/tasks/:task_id.
+    Events {
+        task_id: String,
+        #[arg(long = "event-type")]
+        event_types: Vec<String>,
+        #[arg(long)]
+        jsonl: bool,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -96,6 +105,8 @@ enum Command {
         chat_id: i64,
         #[arg(long)]
         exclude_task_id: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 
     /// POST /v1/tasks/cancel
@@ -196,13 +207,29 @@ fn main() -> Result<()> {
                 *jsonl,
             )
         }
+        Command::Events {
+            task_id,
+            event_types,
+            jsonl,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_events(base_url, k, task_id, event_types, *jsonl)
+        }
         Command::Active {
             user_id,
             chat_id,
             exclude_task_id,
+            json,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_active(base_url, k, *user_id, *chat_id, exclude_task_id.clone())
+            commands::run_active(
+                base_url,
+                k,
+                *user_id,
+                *chat_id,
+                exclude_task_id.clone(),
+                *json,
+            )
         }
         Command::Cancel {
             user_id,
