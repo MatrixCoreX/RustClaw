@@ -138,6 +138,16 @@ enum Command {
     /// POST /v1/tasks/cancel-by-task-id
     CancelTask { task_id: String },
 
+    /// POST /v1/tasks/resume-by-task-id
+    ResumeTask { task_id: String },
+
+    /// POST /v1/tasks/pause-by-task-id
+    PauseTask {
+        task_id: String,
+        #[arg(long, default_value_t = 3600)]
+        pause_seconds: u64,
+    },
+
     /// POST /v1/tasks/cancel-one by active task index.
     CancelIndex {
         #[arg(long)]
@@ -292,6 +302,17 @@ fn main() -> Result<()> {
         Command::CancelTask { task_id } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_cancel_task(base_url, k, task_id)
+        }
+        Command::ResumeTask { task_id } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_resume_task(base_url, k, task_id)
+        }
+        Command::PauseTask {
+            task_id,
+            pause_seconds,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_pause_task(base_url, k, task_id, *pause_seconds)
         }
         Command::CancelIndex {
             user_id,

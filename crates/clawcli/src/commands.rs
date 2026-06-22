@@ -336,6 +336,23 @@ pub(crate) fn run_cancel_task(base_url: &str, key: &str, task_id: &str) -> Resul
     Ok(())
 }
 
+pub(crate) fn run_resume_task(base_url: &str, key: &str, task_id: &str) -> Result<()> {
+    let body = task::resume_task_by_id(base_url, key, task_id)?;
+    output::print_json_pretty(&body);
+    Ok(())
+}
+
+pub(crate) fn run_pause_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    pause_seconds: u64,
+) -> Result<()> {
+    let body = task::pause_task_by_id(base_url, key, task_id, pause_seconds)?;
+    output::print_json_pretty(&body);
+    Ok(())
+}
+
 pub(crate) fn run_cancel_index(
     base_url: &str,
     key: &str,
