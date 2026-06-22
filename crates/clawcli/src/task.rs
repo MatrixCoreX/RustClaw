@@ -115,16 +115,42 @@ pub(crate) fn submit_resume_ask(
     )
 }
 
+pub(crate) fn submit_run_skill(
+    base_url: &str,
+    key: &str,
+    skill_name: &str,
+    args: Value,
+) -> Result<String> {
+    submit_task_with_kind_payload(
+        base_url,
+        key,
+        "run_skill",
+        json!({
+            "skill_name": skill_name,
+            "args": args,
+        }),
+    )
+}
+
 fn submit_ask_with_payload(
     base_url: &str,
     key: &str,
+    payload: serde_json::Value,
+) -> Result<String> {
+    submit_task_with_kind_payload(base_url, key, "ask", payload)
+}
+
+fn submit_task_with_kind_payload(
+    base_url: &str,
+    key: &str,
+    kind: &str,
     payload: serde_json::Value,
 ) -> Result<String> {
     let url = format!("{}/tasks", client::base_v1(base_url));
     let body = json!({
         "user_key": key,
         "channel": "ui",
-        "kind": "ask",
+        "kind": kind,
         "payload": payload
     });
     let resp = client::make_client()?
