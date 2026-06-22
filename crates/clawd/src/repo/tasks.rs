@@ -51,16 +51,6 @@ pub(crate) struct ClaimedPausedCheckpointResumeExecutor {
     pub(crate) task_checkpoint: crate::task_lifecycle::TaskCheckpoint,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskAdminTarget {
-    pub(crate) task_id: String,
-    pub(crate) user_id: i64,
-    pub(crate) chat_id: i64,
-    pub(crate) user_key: Option<String>,
-    pub(crate) channel: String,
-    pub(crate) status: String,
-}
-
 pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
     let db = state
         .core
@@ -1324,109 +1314,6 @@ fn resume_entrypoint_token(entrypoint: crate::task_lifecycle::ResumeEntrypoint) 
         crate::task_lifecycle::ResumeEntrypoint::AwaitUserInput => "await_user_input",
         crate::task_lifecycle::ResumeEntrypoint::VerifyAndFinalize => "verify_and_finalize",
     }
-}
-
-pub(crate) fn cancel_tasks_for_user_chat(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    exclude_task_id: Option<&str>,
-) -> anyhow::Result<i64> {
-    let now = now_ts();
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-
-    let mut stmt = db.prepare(
-        "UPDATE tasks
-         SET status = 'canceled',
-             error_text = COALESCE(error_text, 'Canceled by user'),
-             updated_at = ?1
-         WHERE user_id = ?2
-           AND chat_id = ?3
-           AND status IN ('queued', 'running')
-           AND (?4 IS NULL OR task_id <> ?4)",
-    )?;
-    let exclude_task_id = normalized_optional_task_id(exclude_task_id);
-    let affected = stmt.execute(params![now, user_id, chat_id, exclude_task_id.as_deref()])?;
-    Ok(affected as i64)
-}
-
-pub(crate) fn cancel_one_task_for_user_chat(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    task_id: &str,
-) -> anyhow::Result<i64> {
-    let now = now_ts();
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "UPDATE tasks
-         SET status = 'canceled',
-             error_text = COALESCE(error_text, 'Canceled by user'),
-             updated_at = ?1
-         WHERE user_id = ?2
-           AND chat_id = ?3
-           AND task_id = ?4
-           AND status IN ('queued', 'running')",
-    )?;
-    let affected = stmt.execute(params![now, user_id, chat_id, task_id])?;
-    Ok(affected as i64)
-}
-
-pub(crate) fn get_task_admin_target(
-    state: &AppState,
-    task_id: &str,
-) -> anyhow::Result<Option<TaskAdminTarget>> {
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, status
-         FROM tasks
-         WHERE task_id = ?1
-         LIMIT 1",
-    )?;
-    let target = stmt
-        .query_row(params![task_id], |row| {
-            Ok(TaskAdminTarget {
-                task_id: row.get(0)?,
-                user_id: row.get(1)?,
-                chat_id: row.get(2)?,
-                user_key: row.get(3)?,
-                channel: row.get(4)?,
-                status: row.get(5)?,
-            })
-        })
-        .optional()?;
-    Ok(target)
-}
-
-pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Result<i64> {
-    let now = now_ts();
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "UPDATE tasks
-         SET status = 'canceled',
-             error_text = COALESCE(error_text, 'user_cancelled'),
-             updated_at = ?1
-         WHERE task_id = ?2
-           AND status IN ('queued', 'running')",
-    )?;
-    let affected = stmt.execute(params![now, task_id])?;
-    Ok(affected as i64)
 }
 
 pub(crate) fn get_task_query_record(

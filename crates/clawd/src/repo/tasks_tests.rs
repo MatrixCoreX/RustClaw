@@ -2,13 +2,17 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    cancel_task_by_id, claim_due_paused_checkpoint_task_internal,
-    claim_ready_paused_checkpoint_resume_executor_internal, get_task_admin_target,
-    get_task_query_record, list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    claim_due_paused_checkpoint_task_internal,
+    claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
+    list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal,
+};
+use crate::repo::{
+    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
+    get_task_admin_target,
 };
 
 fn state_with_tasks_table() -> crate::AppState {
@@ -204,6 +208,21 @@ fn get_task_admin_target_and_cancel_task_by_id_use_machine_fields() {
     let (status, error_text) = stored_task_status_and_error(&state, &task_id);
     assert_eq!(status, "canceled");
     assert_eq!(error_text.as_deref(), Some("user_cancelled"));
+    let result = stored_result_json(&state, &task_id);
+    assert_eq!(result["status_code"], "user_cancelled");
+    assert_eq!(result["error_code"], "user_cancelled");
+    assert_eq!(result["terminal_reason"], "user_cancelled");
+    assert_eq!(result["message_key"], "clawd.task.cancelled");
+    assert_eq!(result["task_lifecycle"]["state"], "cancelled");
+    assert_eq!(
+        result["task_lifecycle"]["terminal_reason"],
+        "user_cancelled"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["message_key"],
+        "clawd.task.cancelled"
+    );
+    assert_eq!(result["task_lifecycle"]["can_cancel"], false);
 }
 
 #[test]
@@ -217,6 +236,53 @@ fn cancel_task_by_id_does_not_touch_terminal_tasks() {
     let (status, error_text) = stored_task_status_and_error(&state, &task_id);
     assert_eq!(status, "succeeded");
     assert_eq!(error_text, None);
+}
+
+#[test]
+fn cancel_one_task_for_user_chat_writes_machine_lifecycle() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "queued", None, 1234);
+
+    let canceled = cancel_one_task_for_user_chat(&state, 42, 7, &task_id).expect("cancel one task");
+
+    assert_eq!(canceled, 1);
+    let (status, error_text) = stored_task_status_and_error(&state, &task_id);
+    assert_eq!(status, "canceled");
+    assert_eq!(error_text.as_deref(), Some("user_cancelled"));
+    let result = stored_result_json(&state, &task_id);
+    assert_eq!(result["task_lifecycle"]["state"], "cancelled");
+    assert_eq!(
+        result["task_lifecycle"]["terminal_reason"],
+        "user_cancelled"
+    );
+    assert_eq!(result["task_lifecycle"]["source"], "task_admin_cancel");
+}
+
+#[test]
+fn cancel_tasks_for_user_chat_writes_machine_lifecycle_and_honors_exclude() {
+    let state = state_with_tasks_table();
+    let cancel_id = Uuid::new_v4().to_string();
+    let excluded_id = Uuid::new_v4().to_string();
+    insert_task(&state, &cancel_id, "running", None, 1234);
+    insert_task(&state, &excluded_id, "running", None, 1234);
+
+    let canceled =
+        cancel_tasks_for_user_chat(&state, 42, 7, Some(&excluded_id)).expect("cancel tasks");
+
+    assert_eq!(canceled, 1);
+    let (status, error_text) = stored_task_status_and_error(&state, &cancel_id);
+    assert_eq!(status, "canceled");
+    assert_eq!(error_text.as_deref(), Some("user_cancelled"));
+    let result = stored_result_json(&state, &cancel_id);
+    assert_eq!(result["task_lifecycle"]["state"], "cancelled");
+    assert_eq!(
+        result["task_lifecycle"]["terminal_reason"],
+        "user_cancelled"
+    );
+    let (excluded_status, excluded_error) = stored_task_status_and_error(&state, &excluded_id);
+    assert_eq!(excluded_status, "running");
+    assert_eq!(excluded_error, None);
 }
 
 #[test]
