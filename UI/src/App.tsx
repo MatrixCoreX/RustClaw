@@ -110,6 +110,21 @@ interface TaskQueryResponse {
   lifecycle?: TaskLifecycleProjection | null;
 }
 
+interface ActiveTaskItem {
+  index: number;
+  task_id: string;
+  kind: string;
+  status: string;
+  summary: string;
+  age_seconds: number;
+  lifecycle?: TaskLifecycleProjection | null;
+}
+
+interface ActiveTasksResponse {
+  count: number;
+  tasks: ActiveTaskItem[];
+}
+
 interface SubmitTaskResponse {
   task_id: string;
 }
@@ -952,6 +967,95 @@ function taskSummaryRoot(result: TaskQueryResponse): unknown {
   return getPathValue(result.result_json, ["task_journal", "summary"]);
 }
 
+function taskTraceEvents(result: TaskQueryResponse): Record<string, unknown>[] {
+  const value = getPathValue(taskTraceRoot(result), ["event_stream"]);
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+}
+
+function traceEventPayload(event: Record<string, unknown>): Record<string, unknown> | null {
+  const payload = event.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
+}
+
+function traceEventMeta(event: Record<string, unknown>): string[] {
+  const payload = traceEventPayload(event);
+  const meta: string[] = [];
+  const seq = typeof event.seq === "number" || typeof event.seq === "string" ? String(event.seq) : "";
+  if (seq) meta.push(`seq=${seq}`);
+  const eventType = typeof event.event_type === "string" ? event.event_type.trim() : "";
+  if (eventType) meta.push(`type=${eventType}`);
+  if (!payload) return meta;
+  for (const key of [
+    "status",
+    "state",
+    "error_kind",
+    "failure_attribution",
+    "owner_layer",
+    "stage",
+    "decision",
+    "reason_code",
+    "role",
+    "execution_mode",
+    "write_enabled",
+    "external_publish_enabled",
+    "failure_isolated",
+    "child_run_id",
+    "objective_present",
+    "objective_char_count",
+    "context_ref_count",
+    "allowed_capability_count",
+    "skill",
+    "tool_or_skill",
+    "step_id",
+    "action_kind",
+    "action_ref",
+    "requested_capability",
+    "requested_action_ref",
+    "resolved_tool_or_skill",
+    "resolved_capability",
+    "resolution_source",
+    "output_evidence_count",
+    "artifact_ref_count",
+    "prompt_label",
+    "llm_call_count",
+    "elapsed_ms",
+    "provider_attempt_count",
+    "provider_retry_count",
+    "provider_retryable_error_count",
+    "provider_final_error_count",
+    "prompt_truncation_count",
+    "prompt_bytes_before_max",
+    "prompt_bytes_budget_min",
+    "prompt_bytes_after_max",
+    "prompt_truncated_bytes_total",
+    "checkpoint_id",
+    "poll_ref",
+    "final_status",
+    "final_stop_signal",
+  ]) {
+    const value = payload[key];
+    if ((typeof value === "string" && value.trim()) || typeof value === "number" || typeof value === "boolean") {
+      meta.push(`${key}=${String(value)}`);
+    }
+  }
+  const childTraceMergeStatus = stringAt(payload, ["child_run_summary", "trace_merge_status"]);
+  if (childTraceMergeStatus) meta.push(`child_trace_merge_status=${childTraceMergeStatus}`);
+  const childResultStatus = stringAt(payload, ["child_run_summary", "result_status"]);
+  if (childResultStatus) meta.push(`child_result_status=${childResultStatus}`);
+  const childRequestState = stringAt(payload, ["child_request", "state"]);
+  if (childRequestState) meta.push(`child_request_state=${childRequestState}`);
+  const schedulerStatus = stringAt(payload, ["scheduler", "status"]);
+  if (schedulerStatus) meta.push(`scheduler_status=${schedulerStatus}`);
+  const schedulerReasonCode = stringAt(payload, ["scheduler", "reason_code"]);
+  if (schedulerReasonCode) meta.push(`scheduler_reason_code=${schedulerReasonCode}`);
+  const mergeStrategy = stringAt(payload, ["merge_contract", "strategy"]);
+  if (mergeStrategy) meta.push(`merge_strategy=${mergeStrategy}`);
+  const mergeStatus = stringAt(payload, ["merge_contract", "child_trace_merge_status"]);
+  if (mergeStatus) meta.push(`merge_status=${mergeStatus}`);
+  return meta;
+}
+
 function taskPermissionRoot(result: TaskQueryResponse): unknown {
   return (
     getPathValue(taskSummaryRoot(result), ["verify_result", "permission_decision"]) ??
@@ -1289,6 +1393,17 @@ export default function App() {
   const [taskResult, setTaskResult] = useState<TaskQueryResponse | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [trackingTaskId, setTrackingTaskId] = useState<string | null>(null);
+  const [activeTasks, setActiveTasks] = useState<ActiveTaskItem[]>([]);
+  const [activeTasksLoading, setActiveTasksLoading] = useState(false);
+  const [activeTasksError, setActiveTasksError] = useState<string | null>(null);
+  const [activeTasksLastUpdated, setActiveTasksLastUpdated] = useState<number | null>(null);
+  const [resumeDrafts, setResumeDrafts] = useState<Record<string, string>>({});
+  const [resumeSubmittingTaskId, setResumeSubmittingTaskId] = useState<string | null>(null);
+  const [resumeTaskMessage, setResumeTaskMessage] = useState<string | null>(null);
+  const [resumeTaskError, setResumeTaskError] = useState<string | null>(null);
+  const [cancelingTaskIndex, setCancelingTaskIndex] = useState<number | null>(null);
+  const [cancelTaskMessage, setCancelTaskMessage] = useState<string | null>(null);
+  const [cancelTaskError, setCancelTaskError] = useState<string | null>(null);
 
   const [interactionKind, setInteractionKind] = useState<"ask" | "run_skill">("ask");
   const [interactionChannel, setInteractionChannel] = useState<ChannelName>("ui");
@@ -3730,6 +3845,57 @@ export default function App() {
     return false;
   }, [multimodalConfigData, multimodalDraft]);
 
+  const formatMultimodalToken = (token: string) =>
+    token
+      .split(/[._-]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" / ");
+
+  const renderMultimodalModelMeta = (key: (typeof MULTIMODAL_KEYS)[number]) => {
+    const item = multimodalConfigData?.[key];
+    if (!item) return null;
+    const capabilityBadges = (item.capabilities ?? []).map(formatMultimodalToken);
+    const modelOptions = (item.available_models ?? []).filter(Boolean);
+    const visibleModels = modelOptions.slice(0, 4);
+    const metaBadges: string[] = [];
+    if (item.risk_level) metaBadges.push(`${t("风险", "Risk")}: ${item.risk_level}`);
+    if (item.dry_run_supported !== undefined && item.dry_run_supported !== null) {
+      metaBadges.push(item.dry_run_supported ? t("支持 dry-run", "Dry-run supported") : t("不支持 dry-run", "No dry-run"));
+    }
+    if (item.external_provider !== undefined && item.external_provider !== null) {
+      metaBadges.push(
+        item.external_provider
+          ? t("额度/阻断由外部厂商管理", "Quota/blockers managed by provider")
+          : t("本地或内置能力", "Local or built-in capability"),
+      );
+    }
+    if (item.api_key_configured) {
+      metaBadges.push(item.api_key_masked ? `${t("密钥", "Key")}: ${item.api_key_masked}` : t("密钥已配置", "Key configured"));
+    }
+    if (capabilityBadges.length === 0 && modelOptions.length === 0 && metaBadges.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 pl-[7.5rem] text-[11px] text-white/55 max-sm:pl-0">
+        {capabilityBadges.map((capability) => (
+          <span key={`capability-${key}-${capability}`} className="rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-sky-100/85">
+            {capability}
+          </span>
+        ))}
+        {visibleModels.length > 0 ? (
+          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">
+            {t("可选模型", "Models")}: {visibleModels.join(", ")}
+            {modelOptions.length > visibleModels.length ? ` +${modelOptions.length - visibleModels.length}` : ""}
+          </span>
+        ) : null}
+        {metaBadges.map((badge) => (
+          <span key={`meta-${key}-${badge}`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
+            {badge}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
     if (!silent) {
       setWorkspaceUpdateLoading(true);
@@ -3982,6 +4148,46 @@ export default function App() {
     return body.data;
   };
 
+  const fetchActiveTasks = async (silent = false): Promise<ActiveTaskItem[]> => {
+    if (interactionUserId == null || interactionChatId == null) {
+      if (!silent) {
+        setActiveTasksError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
+      }
+      return [];
+    }
+    if (!silent) {
+      setActiveTasksLoading(true);
+      setActiveTasksError(null);
+    }
+    try {
+      const res = await apiFetch(`/v1/tasks/active`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: interactionUserId,
+          chat_id: interactionChatId,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<ActiveTasksResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `任务列表读取失败 (${res.status})`);
+      }
+      const tasks = body.data.tasks ?? [];
+      setActiveTasks(tasks);
+      setActiveTasksError(null);
+      setActiveTasksLastUpdated(Date.now());
+      return tasks;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setActiveTasksError(message);
+      return [];
+    } finally {
+      if (!silent) {
+        setActiveTasksLoading(false);
+      }
+    }
+  };
+
   const queryTaskById = async (id: string, resetBeforeLoad = true): Promise<TaskQueryResponse | null> => {
     if (!id.trim()) return null;
     if (resetBeforeLoad) {
@@ -4010,6 +4216,108 @@ export default function App() {
     setTaskLoading(true);
     await queryTaskById(taskId, false);
     setTaskLoading(false);
+  };
+
+  const submitResumeForTask = async (resumeTaskId: string) => {
+    const text = (resumeDrafts[resumeTaskId] ?? "").trim();
+    if (!text) {
+      setResumeTaskMessage(null);
+      setResumeTaskError(t("请先填写要继续发送的内容。", "Enter the follow-up text first."));
+      return;
+    }
+    setResumeSubmittingTaskId(resumeTaskId);
+    setResumeTaskMessage(null);
+    setResumeTaskError(null);
+    try {
+      const payload: Record<string, unknown> = {
+        text,
+        resume_task_id: resumeTaskId,
+        resume_trigger: "user_followup",
+      };
+      const adapterName = interactionAdapter.trim();
+      if (adapterName) {
+        payload.adapter = adapterName;
+      }
+      const body: Record<string, unknown> = {
+        channel: interactionChannel,
+        kind: "ask",
+        payload,
+        ...(activeUserKey ? { user_key: activeUserKey } : {}),
+        ...activeIdentityIds,
+      };
+      const externalUserId = interactionExternalUserId.trim();
+      if (externalUserId) {
+        body.external_user_id = externalUserId;
+      }
+      const externalChatId = interactionExternalChatId.trim();
+      if (externalChatId) {
+        body.external_chat_id = externalChatId;
+      }
+
+      const res = await apiFetch(`/v1/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const resp = (await res.json()) as ApiResponse<SubmitTaskResponse>;
+      if (!res.ok || !resp.ok || !resp.data?.task_id) {
+        throw new Error(resp.error || `resume submit failed (${res.status})`);
+      }
+
+      setResumeDrafts((prev) => {
+        const next = { ...prev };
+        delete next[resumeTaskId];
+        return next;
+      });
+      setResumeTaskMessage(t("已提交继续执行请求。", "Resume request submitted."));
+      setInteractionSubmittedTaskId(resp.data.task_id);
+      setTaskId(resp.data.task_id);
+      setTrackingTaskId(resp.data.task_id);
+      setTaskResult(null);
+      setTaskError(null);
+      void fetchActiveTasks(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown";
+      setResumeTaskError(message);
+    } finally {
+      setResumeSubmittingTaskId(null);
+    }
+  };
+
+  const cancelActiveTask = async (item: ActiveTaskItem) => {
+    if (interactionUserId == null || interactionChatId == null) {
+      setCancelTaskMessage(null);
+      setCancelTaskError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
+      return;
+    }
+    setCancelingTaskIndex(item.index);
+    setCancelTaskMessage(null);
+    setCancelTaskError(null);
+    try {
+      const res = await apiFetch(`/v1/tasks/cancel-one`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: interactionUserId,
+          chat_id: interactionChatId,
+          index: item.index,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `cancel task failed (${res.status})`);
+      }
+      setCancelTaskMessage(t("任务取消请求已提交。", "Task cancel request submitted."));
+      await fetchActiveTasks(true);
+      if (taskResult?.task_id === item.task_id) {
+        void queryTaskById(item.task_id, false);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown";
+      setCancelTaskError(message);
+    } finally {
+      setCancelingTaskIndex(null);
+    }
   };
 
   const submitInteractionTask = async () => {
@@ -4071,6 +4379,7 @@ export default function App() {
       setTrackingTaskId(resp.data.task_id);
       setTaskResult(null);
       setTaskError(null);
+      void fetchActiveTasks(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setInteractionError(message);
@@ -4416,6 +4725,18 @@ export default function App() {
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingTaskId, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (currentPage !== "tasks") return;
+    if (interactionUserId == null || interactionChatId == null) return;
+    void fetchActiveTasks(true);
+    const interval = window.setInterval(() => {
+      void fetchActiveTasks(true);
+    }, 5000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, interactionUserId, interactionChatId]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -5526,6 +5847,7 @@ export default function App() {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
+  const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const isDashboardPage = currentPage === "dashboard";
   const factoryResetCanConfirm =
     factoryResetCountdown <= 0 &&
@@ -8198,6 +8520,7 @@ export default function App() {
                                   onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
                                 />
                               </div>
+                              {renderMultimodalModelMeta(key)}
                             </div>
                           ))}
                         </div>
@@ -8244,6 +8567,7 @@ export default function App() {
                                   onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
                                 />
                               </div>
+                              {renderMultimodalModelMeta(key)}
                             </div>
                           ))}
                         </div>
@@ -8289,6 +8613,7 @@ export default function App() {
                                   onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
                                 />
                               </div>
+                              {renderMultimodalModelMeta(key)}
                             </div>
                           ))}
                         </div>
@@ -8334,6 +8659,7 @@ export default function App() {
                                   onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
                                 />
                               </div>
+                              {renderMultimodalModelMeta(key)}
                             </div>
                           ))}
                         </div>
@@ -9110,6 +9436,162 @@ export default function App() {
           {currentPage === "tasks" ? (
             <>
               <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="theme-kicker text-[10px] uppercase tracking-[0.3em]">{t("任务 inbox", "Task inbox")}</p>
+                    <h3 className="mt-2 text-lg font-semibold">{t("正在处理的任务", "Active tasks")}</h3>
+                    <p className="mt-1 text-sm text-white/55">
+                      {activeTasks.length > 0
+                        ? t(`当前有 ${activeTasks.length} 个任务还在排队或执行。`, `${activeTasks.length} task(s) are queued or running.`)
+                        : t("当前没有排队或执行中的任务。", "No queued or running tasks right now.")}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeTasksLastUpdated ? (
+                      <span className="text-xs text-white/45">{t("更新时间", "Updated")}: {toLocalTime(activeTasksLastUpdated)}</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void fetchActiveTasks()}
+                      disabled={activeTasksLoading || interactionUserId == null || interactionChatId == null}
+                      className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {activeTasksLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("刷新任务", "Refresh tasks")}
+                    </button>
+                  </div>
+                </div>
+                {activeTasksError ? (
+                  <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {t("任务列表读取失败", "Task list failed")}: {activeTasksError}
+                  </p>
+                ) : null}
+                {resumeTaskError ? (
+                  <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {t("继续执行失败", "Resume failed")}: {resumeTaskError}
+                  </p>
+                ) : null}
+                {resumeTaskMessage ? (
+                  <p className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+                    {resumeTaskMessage}
+                  </p>
+                ) : null}
+                {cancelTaskError ? (
+                  <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {t("取消失败", "Cancel failed")}: {cancelTaskError}
+                  </p>
+                ) : null}
+                {cancelTaskMessage ? (
+                  <p className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+                    {cancelTaskMessage}
+                  </p>
+                ) : null}
+                <div className="mt-4 space-y-3">
+                  {activeTasks.length === 0 ? (
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/55">
+                      {t("提交任务后，这里会显示排队、执行、等待恢复和后台轮询状态。", "After submitting tasks, queued, running, resumable, and background polling states appear here.")}
+                    </div>
+                  ) : (
+                    activeTasks.map((item) => {
+                      const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
+                      return (
+                        <div key={item.task_id} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">#{item.index}</span>
+                                <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{lifecycleView.stateLabel}</span>
+                                <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">{item.kind}</span>
+                                <span className="text-xs text-white/45">{formatDuration(item.age_seconds)}</span>
+                              </div>
+                              <p className="mt-2 break-words text-sm text-white/85">{item.summary || item.task_id}</p>
+                              <p className="mt-1 break-all font-mono text-[11px] text-white/40">{item.task_id}</p>
+                              <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-white/55">
+                                {lifecycleView.meta.slice(0, 4).map((meta) => (
+                                  <span key={`${item.task_id}-${meta}`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1">
+                                    {meta}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTaskId(item.task_id);
+                                  void queryTaskById(item.task_id);
+                                }}
+                                className="theme-secondary-btn px-3 py-2 text-xs"
+                              >
+                                {t("查看详情", "View details")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void cancelActiveTask(item)}
+                                disabled={
+                                  cancelingTaskIndex === item.index ||
+                                  interactionUserId == null ||
+                                  interactionChatId == null ||
+                                  item.lifecycle?.can_cancel === false
+                                }
+                                className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {cancelingTaskIndex === item.index ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <X className="h-3.5 w-3.5" />
+                                )}
+                                {t("取消", "Cancel")}
+                              </button>
+                            </div>
+                          </div>
+                          {item.lifecycle?.state === "needs_user" ? (
+                            <div className="mt-3 rounded-lg border border-amber-400/25 bg-amber-500/10 p-3">
+                              <label className="block space-y-2">
+                                <span className="text-xs font-medium text-amber-50">
+                                  {t("补充确认内容", "Follow-up input")}
+                                </span>
+                                <textarea
+                                  className="theme-input min-h-20"
+                                  value={resumeDrafts[item.task_id] ?? ""}
+                                  onChange={(e) =>
+                                    setResumeDrafts((prev) => ({
+                                      ...prev,
+                                      [item.task_id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder={t("输入确认或补充说明后继续执行", "Enter confirmation or follow-up text to continue")}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => void submitResumeForTask(item.task_id)}
+                                disabled={resumeSubmittingTaskId === item.task_id || !(resumeDrafts[item.task_id] ?? "").trim()}
+                                className="theme-accent-btn mt-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {resumeSubmittingTaskId === item.task_id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <MessageCircle className="h-3.5 w-3.5" />
+                                )}
+                                {t("继续执行", "Resume")}
+                              </button>
+                            </div>
+                          ) : null}
+                          <details className="mt-3 rounded-lg border border-white/10 bg-[#12151f] px-3 py-2">
+                            <summary className="cursor-pointer text-xs text-white/55">{t("生命周期机器字段", "Lifecycle machine fields")}</summary>
+                            <pre className="mt-2 max-h-44 overflow-auto text-[11px] text-white/70">
+                              {JSON.stringify(item.lifecycle ?? null, null, 2)}
+                            </pre>
+                          </details>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <h3 className="mb-4 text-lg font-semibold">{t("手动提交一条任务", "Submit a task manually")}</h3>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
@@ -9301,6 +9783,39 @@ export default function App() {
                         </div>
                       </div>
                     ) : null}
+                    {taskResult.lifecycle?.state === "needs_user" ? (
+                      <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-3">
+                        <label className="block space-y-2">
+                          <span className="text-xs font-medium text-amber-50">
+                            {t("补充确认内容", "Follow-up input")}
+                          </span>
+                          <textarea
+                            className="theme-input min-h-20"
+                            value={resumeDrafts[taskResult.task_id] ?? ""}
+                            onChange={(e) =>
+                              setResumeDrafts((prev) => ({
+                                ...prev,
+                                [taskResult.task_id]: e.target.value,
+                              }))
+                            }
+                            placeholder={t("输入确认或补充说明后继续执行", "Enter confirmation or follow-up text to continue")}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void submitResumeForTask(taskResult.task_id)}
+                          disabled={resumeSubmittingTaskId === taskResult.task_id || !(resumeDrafts[taskResult.task_id] ?? "").trim()}
+                          className="theme-accent-btn mt-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {resumeSubmittingTaskId === taskResult.task_id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <MessageCircle className="h-3.5 w-3.5" />
+                          )}
+                          {t("继续执行", "Resume")}
+                        </button>
+                      </div>
+                    ) : null}
                     {taskPermissionView ? (
                       <div
                         className={`mt-4 rounded-xl border px-3 py-3 ${
@@ -9353,6 +9868,47 @@ export default function App() {
                           ) : null}
                         </div>
                       </div>
+                    ) : null}
+                    {taskEvents.length > 0 ? (
+                      <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-white/65">
+                          {t("工具事件", "Tool events")} · {taskEvents.length}
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          {taskEvents.slice(0, 12).map((event, index) => {
+                            const meta = traceEventMeta(event);
+                            const eventType = typeof event.event_type === "string" ? event.event_type : `event_${index + 1}`;
+                            return (
+                              <div key={`${eventType}-${index}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {meta.length > 0 ? (
+                                    meta.map((item) => (
+                                      <span key={item} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-white/70">
+                                        {item}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-white/70">
+                                      {eventType}
+                                    </span>
+                                  )}
+                                </div>
+                                <details className="mt-2">
+                                  <summary className="cursor-pointer text-[11px] text-white/45">{t("原始事件", "Raw event")}</summary>
+                                  <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-black/30 p-2 text-[11px] text-white/70">
+                                    {JSON.stringify(event, null, 2)}
+                                  </pre>
+                                </details>
+                              </div>
+                            );
+                          })}
+                          {taskEvents.length > 12 ? (
+                            <p className="text-[11px] text-white/40">
+                              {t(`还有 ${taskEvents.length - 12} 条事件在技术 JSON 中。`, `${taskEvents.length - 12} more event(s) are in Technical JSON.`)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </details>
                     ) : null}
                     <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
                       <summary className="cursor-pointer text-xs font-medium text-white/65">

@@ -9,6 +9,7 @@
 
 ## Capability Summary (from interface)
 - `video_generate` creates provider-backed video generation tasks and can optionally wait, retrieve, and save the generated video file.
+- It supports async provider jobs: `generate` with `wait_for_completion=false` returns `extra.pending_async_job`, and `poll` returns `extra.async_poll_adapter_result` for clawd checkpoint resume.
 - The first live adapter is MiniMax-compatible; other provider slots are available for dry-run, planning, compatible gateways, and future native adapters.
 - It supports text-to-video, image-to-video, and first/last-frame video through structured input fields.
 - It returns machine-readable task/file metadata in `extra`; success `text` is a file/task marker, not a sentence template.
@@ -23,6 +24,7 @@
 
 ## Actions (from interface)
 - `generate`: create a video task; optionally wait and download the video file.
+- `poll`: query an existing provider video task once and return a machine-readable async poll adapter result.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -39,9 +41,20 @@
 | generate | `vendor` | no | string | config default | Provider key such as `minimax`, `mimo`, `custom`, or another configured vendor. |
 | generate | `model` | no | string | config default | Video generation model for the selected provider. |
 | generate | `max_poll_seconds` | no | integer | config default | Max polling window for async completion. |
+| poll | `task_id` | yes | string | - | Provider video task id returned by `generate`. |
+| poll | `job_id` | no | string | derived | RustClaw async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
+| poll | `vendor` | no | string | config default | Provider key used to query the task. |
+| poll | `model` | no | string | config default | Model metadata preserved in final result. |
+| poll | `poll_after_seconds` | no | integer | config poll interval | Suggested next poll delay when the task is still pending. |
+| poll | `expires_at` | no | integer(epoch seconds) | derived | Expiry deadline for async resume. |
+| poll | `download` | no | boolean | config default | If true and the task succeeded, retrieve and save the video file. |
+| poll | `output_path` | no | string(path) | auto | Workspace output path for downloaded video. |
+| poll | `dry_run` | no | boolean | `false` | Return a mock adapter result without provider calls. |
+| poll | `mock_status` / `mock_file_id` | no | string | - | Dry-run-only provider status/file metadata for tests and smoke checks. |
 
 ## Error Contract (from interface)
 - Missing/empty `prompt`.
+- Missing/empty `task_id` for `poll`.
 - Unsupported vendor, duration, resolution, or path outside workspace.
 - Missing API key for live generation.
 - Provider create/query/retrieve/download failures.
@@ -65,6 +78,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"outputs":[]},"error_text":null}
+```
+
+### Example 3
+Request:
+```json
+{"request_id":"demo-3","args":{"action":"poll","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","dry_run":true,"mock_status":"Processing"}}
+```
+Response:
+```json
+{"request_id":"demo-3","status":"ok","text":"VIDEO_TASK:106916112212032","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","status":"Processing","async_poll_adapter_result":{"job_id":"provider:video_generate:minimax:106916112212032","status":"running","poll_after_seconds":5,"expires_at":1999999999,"message_key":"clawd.task.async_job_pending"}},"error_text":null}
 ```
 
 ## Output Contract

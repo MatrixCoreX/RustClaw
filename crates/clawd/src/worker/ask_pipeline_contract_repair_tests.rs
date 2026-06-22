@@ -338,6 +338,42 @@ fn generic_path_content_grounded_summary_repair_uses_content_summary_contract() 
 }
 
 #[test]
+fn generic_path_content_repair_preserves_command_summary_marker_contract() {
+    let mut route = executable_filename_route();
+    route.route_reason =
+        "explicit_command_requires_command_output_summary_execution; command_result_synthesis"
+            .to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/run".to_string();
+    route.wants_file_delivery = false;
+
+    let repaired = repair_generic_path_content_grounded_summary_contract(&mut route);
+
+    assert!(repaired);
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
+    assert!(route_reason_has_marker(
+        &route,
+        "command_observation_marker_contract_repaired"
+    ));
+    assert!(!route_reason_has_marker(
+        &route,
+        "generic_path_content_grounded_summary_contract_repaired"
+    ));
+}
+
+#[test]
 fn generic_path_content_grounded_summary_repair_preserves_strict_contract() {
     let mut route = executable_filename_route();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;

@@ -43,6 +43,65 @@ fn demo_task_contract() -> Value {
     })
 }
 
+fn claimed_run_skill_task(task_id: &str) -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("anon:42:7".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "run_skill".to_string(),
+        payload_json: json!({
+            "skill_name": "run_cmd",
+            "args": {
+                "command": "sleep 1; echo RUSTCLAW_ASYNC_TEST",
+                "async_start": true,
+            }
+        })
+        .to_string(),
+    }
+}
+
+fn insert_running_task(state: &crate::AppState, task: &crate::ClaimedTask) {
+    let db = state.core.db.get().expect("get db");
+    let now = crate::now_ts();
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', NULL, NULL, ?8, ?8)",
+        rusqlite::params![
+            task.task_id,
+            task.user_id,
+            task.chat_id,
+            task.user_key,
+            task.channel,
+            task.kind,
+            task.payload_json,
+            now,
+        ],
+    )
+    .expect("insert running task");
+}
+
+fn task_status_and_result(state: &crate::AppState, task_id: &str) -> (String, serde_json::Value) {
+    let db = state.core.db.get().expect("get db");
+    let (status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select task result");
+    (
+        status,
+        serde_json::from_str(&raw_result).expect("parse result_json"),
+    )
+}
+
 #[test]
 fn direct_run_skill_observation_records_redacted_extra_evidence() {
     let token = "sk-test_abcdefghijklmnopqrstuvwxyz1234567890";
@@ -152,6 +211,63 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
             .pointer("/task_contract/effect")
             .and_then(Value::as_str),
         Some("observe")
+    );
+}
+
+#[tokio::test]
+async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_run_skill_task("task-direct-async-start");
+    insert_running_task(&state, &task);
+    let payload: Value = serde_json::from_str(&task.payload_json).expect("payload");
+    let now = crate::now_ts_u64() as i64;
+    let outcome = crate::skills::SkillRunOutcome {
+        text: json!({
+            "job_id": "local_process:job-1",
+            "message_key": "clawd.task.async_job_started",
+            "status": "accepted",
+        })
+        .to_string(),
+        notify: Some(false),
+        validation: None,
+        extra: Some(json!({
+            "schema_version": 1,
+            "source": "builtin_success_extra",
+            "action": "async_start",
+            "pending_async_job": {
+                "job_id": "local_process:job-1",
+                "status": "accepted",
+                "poll_after_seconds": 5,
+                "expires_at": now + 60,
+                "cancel_ref": "local_process:/tmp/rustclaw-job-1",
+                "message_key": "clawd.task.async_job_pending"
+            }
+        })),
+    };
+
+    super::finalize_run_skill_result(&state, &task, &payload, "run_cmd", Ok(outcome))
+        .await
+        .expect("finalize");
+
+    let (status, result) = task_status_and_result(&state, &task.task_id);
+    assert_eq!(status, "running");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        result["task_lifecycle"]["source"],
+        "direct_run_skill_async_start_adapter"
+    );
+    assert_eq!(
+        result["task_checkpoint"]["resume_entrypoint"],
+        serde_json::to_value(crate::task_lifecycle::ResumeEntrypoint::PollAsyncJob)
+            .expect("resume entrypoint")
+    );
+    assert_eq!(
+        result["task_checkpoint"]["pending_async_job"]["job_id"],
+        "local_process:job-1"
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["final_stop_signal"],
+        "async_job_checkpoint_waiting"
     );
 }
 

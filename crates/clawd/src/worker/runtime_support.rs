@@ -463,24 +463,28 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
         .worker
         .worker_running_recovery_check_interval_seconds
         .max(10);
-    {
+    let should_run_stale_recovery = {
         let mut guard = state
             .worker
             .last_running_recovery_check_ts
             .lock()
             .map_err(|_| anyhow!("running recovery lock poisoned"))?;
         if now.saturating_sub(*guard) < interval {
-            return Ok(());
+            false
+        } else {
+            *guard = now;
+            true
         }
-        *guard = now;
-    }
-    let recovered = recover_stale_running_tasks_by_no_progress(state)?;
-    if !recovered.is_empty() {
-        warn!(
-            "runtime stale-running recovery applied: converted {} running tasks to timeout (no_progress_timeout={}s)",
-            recovered.len(),
-            state.worker.worker_running_no_progress_timeout_seconds
-        );
+    };
+    if should_run_stale_recovery {
+        let recovered = recover_stale_running_tasks_by_no_progress(state)?;
+        if !recovered.is_empty() {
+            warn!(
+                "runtime stale-running recovery applied: converted {} running tasks to timeout (no_progress_timeout={}s)",
+                recovered.len(),
+                state.worker.worker_running_no_progress_timeout_seconds
+            );
+        }
     }
     let lease_seconds = interval.max(60) as i64;
     let due_paused = repo::list_due_paused_checkpoint_tasks_internal(state, now as i64, 50)?;
@@ -974,11 +978,14 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
                         )?,
                     }
                 } else if claimed.executor_action == "poll_async_job" {
-                    match super::async_poll_executor::execute_async_poll_dispatch_result(
+                    match super::async_poll_executor::execute_async_poll_dispatch_result_with_state(
+                        state,
                         &claimed,
                         now as i64,
                         lease_seconds,
-                    ) {
+                    )
+                    .await
+                    {
                         Some(result_payload) => record_concrete_paused_checkpoint_resume_dispatch_result(
                             state,
                             &claimed,

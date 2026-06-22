@@ -43,6 +43,18 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
             .and_then(serde_json::Value::as_str),
         Some("not_found")
     );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/repair_class")
+            .and_then(serde_json::Value::as_str),
+        Some("loop_bounded_recovery")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/next_recovery_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("wait_background")
+    );
     assert!(value
         .pointer("/0/repair_signal/forbidden_repeat_fingerprint")
         .and_then(serde_json::Value::as_str)
@@ -143,6 +155,24 @@ fn attempt_ledger_records_verifier_retry_instruction() {
             .and_then(serde_json::Value::as_bool),
         Some(true)
     );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/repair_class")
+            .and_then(serde_json::Value::as_str),
+        Some("loop_bounded_recovery")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/next_recovery_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("replan")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/missing_evidence/0")
+            .and_then(serde_json::Value::as_str),
+        Some("content_excerpt")
+    );
 }
 
 #[test]
@@ -202,10 +232,17 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
         Some(serde_json::json!({
             "decision": "rejected_not_allowed",
             "action": "run_cmd",
+            "original_action_ref": "run_cmd",
+            "replacement_action_ref": "fs_basic.list_dir",
             "contract_match": "file_names",
             "preferred_actions": ["fs_basic.list_dir"],
             "required_evidence": ["candidates"],
             "final_answer_shape": "name_list",
+            "permission_decision": {
+                "allowed": false,
+                "denied_by_policy": true,
+                "owner_layer": "skill_execution_preflight"
+            },
         })),
     );
     loop_state
@@ -250,6 +287,38 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
             .pointer("/0/repair_signal/failure_attribution")
             .and_then(serde_json::Value::as_str),
         Some("contract_gap")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/repair_class")
+            .and_then(serde_json::Value::as_str),
+        Some("permission_contract_repair")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/next_recovery_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("needs_user")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/failed_action_ref")
+            .and_then(serde_json::Value::as_str),
+        Some("run_cmd")
+    );
+    assert_eq!(
+        value
+            .pointer(
+                "/0/repair_signal/repair_envelope/contract_failure_policy/replacement_action_ref"
+            )
+            .and_then(serde_json::Value::as_str),
+        Some("fs_basic.list_dir")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/permission_decision/denied_by_policy")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
     );
     assert_eq!(
         value
@@ -303,6 +372,66 @@ fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
             .pointer("/0/missing_evidence/0")
             .and_then(serde_json::Value::as_str),
         Some("command_output")
+    );
+}
+
+#[test]
+fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let err = crate::skills::structured_skill_error_from_parts(
+        "image_generate",
+        "provider_retryable_response",
+        "provider retryable response",
+        None,
+        Some(serde_json::json!({
+            "provider": "minimax",
+            "provider_error_class": "rate_limited",
+            "external_provider_blocked": true,
+            "retry_after_seconds": 60
+        })),
+    );
+    super::record_attempt(
+        &mut loop_state,
+        "image_generate",
+        "action=generate",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let ledger = build_attempt_ledger_compact(&loop_state);
+    let value = ledger_value(&ledger);
+
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/repair_class")
+            .and_then(serde_json::Value::as_str),
+        Some("loop_bounded_recovery")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/next_recovery_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("wait_background")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/provider_status/provider")
+            .and_then(serde_json::Value::as_str),
+        Some("minimax")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/provider_status/status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("rate_limited")
+    );
+    assert_eq!(
+        value
+            .pointer("/0/repair_signal/repair_envelope/provider_status/retry_after_seconds")
+            .and_then(serde_json::Value::as_i64),
+        Some(60)
     );
 }
 

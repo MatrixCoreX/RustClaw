@@ -675,6 +675,18 @@ fn answer_verifier_summary_json(summary: &TaskJournalAnswerVerifierSummary) -> V
         "should_retry": summary.should_retry,
         "retry_instruction": crate::truncate_for_log(&summary.retry_instruction),
         "confidence": summary.confidence,
+        "repair_signal": answer_verifier_repair_signal_json(summary),
+    })
+}
+
+fn answer_verifier_repair_signal_json(summary: &TaskJournalAnswerVerifierSummary) -> Option<Value> {
+    summary.high_confidence_retry_gap().then(|| {
+        crate::repair_signal::RepairSignal::from_answer_verifier_parts(
+            &summary.missing_evidence_fields,
+            summary.should_retry,
+            summary.confidence,
+        )
+        .to_json()
     })
 }
 
@@ -760,11 +772,17 @@ fn verifier_issue_repair_signal_json(
     plan: Option<&crate::PlanResult>,
     route: Option<&crate::RouteResult>,
 ) -> Value {
+    let rejected_action = plan
+        .and_then(|plan| plan.steps.iter().find(|step| step.step_id == issue.step_id))
+        .and_then(|step| {
+            plan_step_action_ref(step, route).or_else(|| plan_step_fallback_action_ref(step))
+        });
     crate::repair_signal::RepairSignal::from_verifier_issue_parts(
         &issue.step_id,
         issue.kind,
         &issue.detail,
     )
+    .with_rejected_action(rejected_action)
     .with_forbidden_repeat_fingerprint(verifier_issue_forbidden_repeat_fingerprint(
         issue, plan, route,
     ))
@@ -1087,11 +1105,16 @@ fn artifact_refs_from_step_output(output: Option<&str>) -> Vec<Value> {
         return Vec::new();
     };
     let mut refs = Vec::new();
-    collect_artifact_refs(&value, &mut refs, 0);
+    collect_artifact_refs(&value, &mut refs, 0, false);
     refs
 }
 
-fn collect_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {
+fn collect_artifact_refs(
+    value: &Value,
+    refs: &mut Vec<Value>,
+    depth: usize,
+    allow_string_leaf: bool,
+) {
     if refs.len() >= 8 || depth > 3 {
         return;
     }
@@ -1109,34 +1132,69 @@ fn collect_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {
                     push_artifact_ref(refs, key, path);
                 }
             }
-            for key in ["paths", "files", "artifacts", "outputs"] {
+            for key in [
+                "paths",
+                "file_paths",
+                "artifact_paths",
+                "files",
+                "artifacts",
+            ] {
                 if let Some(items) = map.get(key).and_then(Value::as_array) {
                     for item in items {
-                        collect_artifact_refs(item, refs, depth + 1);
+                        collect_artifact_refs(item, refs, depth + 1, true);
                         if refs.len() >= 8 {
                             return;
                         }
                     }
                 }
             }
-            for item in map.values() {
-                collect_artifact_refs(item, refs, depth + 1);
-                if refs.len() >= 8 {
-                    return;
+            for key in ["extra", "result", "data", "metadata", "payload"] {
+                if let Some(item) = map.get(key) {
+                    collect_artifact_refs(item, refs, depth + 1, false);
+                    if refs.len() >= 8 {
+                        return;
+                    }
                 }
             }
         }
         Value::Array(items) => {
             for item in items {
-                collect_artifact_refs(item, refs, depth + 1);
+                collect_artifact_refs(item, refs, depth + 1, allow_string_leaf);
                 if refs.len() >= 8 {
                     return;
                 }
             }
         }
-        Value::String(path) => push_artifact_ref(refs, "value", path),
+        Value::String(path) if allow_string_leaf && artifact_string_looks_like_path(path) => {
+            push_artifact_ref(refs, "value", path)
+        }
+        Value::String(_) => {}
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
+}
+
+fn artifact_string_looks_like_path(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    if value.contains(['\n', '\r']) {
+        return false;
+    }
+    if value == "." || value == ".." {
+        return true;
+    }
+    if value.starts_with('/') || value.starts_with("./") || value.starts_with("../") {
+        return true;
+    }
+    if value.starts_with("~/") || value.contains('/') || value.contains('\\') {
+        return true;
+    }
+    let file_name = value.rsplit(['/', '\\']).next().unwrap_or(value);
+    file_name.starts_with('.') && file_name.len() > 1
+        || file_name.contains('.')
+            && !file_name.ends_with('.')
+            && file_name.chars().all(|ch| !ch.is_whitespace())
 }
 
 fn push_artifact_ref(refs: &mut Vec<Value>, field: &str, path: &str) {

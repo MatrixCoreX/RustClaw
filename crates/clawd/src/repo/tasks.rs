@@ -1095,10 +1095,38 @@ pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
         );
     }
     obj.insert("resume_execution_plan".to_string(), plan_payload);
+    for key in [
+        "resume_executor_handoff",
+        "resume_executor_handoff_claim",
+        "resume_executor_handoff_dispatch",
+        "resume_executor_dispatch_claim",
+        "resume_executor_dispatch_result",
+        "resume_executor_result_projection_claim",
+        "resume_executor_result_projection",
+    ] {
+        obj.remove(key);
+    }
     if let Some(executor_obj) = obj
         .get_mut("resume_executor")
         .and_then(serde_json::Value::as_object_mut)
     {
+        for key in [
+            "dispatch_state",
+            "dispatch_execution_state",
+            "dispatched_at",
+            "dispatch_claimed_at",
+            "dispatch_claim_expires_at",
+            "handoff_claimed_at",
+            "handoff_claim_expires_at",
+            "executor_result_status",
+            "executor_result_at",
+            "result_projection_state",
+            "result_projection_claimed_at",
+            "result_projection_claim_expires_at",
+            "projected_at",
+        ] {
+            executor_obj.remove(key);
+        }
         executor_obj.insert(
             "execution_plan_action".to_string(),
             serde_json::json!(plan_action),

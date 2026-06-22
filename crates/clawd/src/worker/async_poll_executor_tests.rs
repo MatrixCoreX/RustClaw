@@ -1,5 +1,26 @@
 use serde_json::json;
 
+struct TempDirGuard {
+    path: std::path::PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_{prefix}_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 fn async_poll_claimed_dispatch(
     adapter_result: Option<serde_json::Value>,
 ) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
@@ -83,6 +104,37 @@ fn async_poll_claimed_dispatch(
         }),
         task_checkpoint: checkpoint,
     }
+}
+
+#[test]
+fn async_poll_local_process_job_dir_becomes_terminal_result() {
+    let dir = TempDirGuard::new("async_poll_local_process");
+    std::fs::write(dir.path.join("exit_code"), "0\n").expect("write exit code");
+    std::fs::write(dir.path.join("stdout"), "async-ok\n").expect("write stdout");
+    std::fs::write(dir.path.join("stderr"), "").expect("write stderr");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:test-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", dir.path.display());
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("local process poll completed payload");
+
+    assert_eq!(payload["executor_result_status"], "async_poll_completed");
+    assert_eq!(payload["adapter_status"], "succeeded");
+    assert_eq!(
+        payload["final_result_json"]["source"],
+        "local_process_async_job"
+    );
+    assert_eq!(payload["final_result_json"]["exit_code"], 0);
+    assert_eq!(payload["final_result_json"]["stdout"], "async-ok\n");
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
 }
 
 #[test]

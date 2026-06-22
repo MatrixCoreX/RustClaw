@@ -169,7 +169,7 @@ use output_sqlite::{
 #[path = "observed_output_process_service.rs"]
 mod output_process_service;
 use output_process_service::{
-    latest_process_basic_service_status_direct_answer_candidate,
+    latest_process_basic_service_status_direct_answer_candidate, process_basic_observed_candidate,
     process_basic_port_list_should_use_llm_synthesis,
     process_basic_service_status_direct_answer_candidate,
     service_control_status_direct_answer_candidate, service_control_summary_candidate,
@@ -193,6 +193,8 @@ const OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/observed_answer_fallback_prompt.md");
 const OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH: &str =
     "prompts/observed_answer_fallback_prompt.md";
+const OBSERVED_ANSWER_FALLBACK_COMPACT_PROMPT_LOGICAL_PATH: &str =
+    "prompts/observed_answer_fallback_compact_prompt.md";
 const MARKET_QUOTE_SCALAR_SEMANTIC_TAG: &str = "market_quote_scalar";
 
 fn render_observed_vars(mut text: String, vars: &[(&str, &str)]) -> String {
@@ -250,6 +252,10 @@ fn direct_free_text_conflicts_with_request_language(
     request_language_hint: &str,
 ) -> bool {
     crate::language_policy::text_language_conflicts_with_hint(candidate, request_language_hint)
+}
+
+fn observed_answer_language_compatible(candidate: &str, request_language_hint: &str) -> bool {
+    !direct_free_text_conflicts_with_request_language(candidate, request_language_hint)
 }
 
 fn read_range_candidate_looks_structured_artifact(candidate: &str) -> bool {
@@ -595,6 +601,9 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                     .ok()
                     .and_then(|value| archive_basic_observed_candidate(&value))
             });
+    }
+    if skill == "process_basic" {
+        return process_basic_observed_candidate(body);
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let value = structured_observed_body_value(&value);
@@ -1108,6 +1117,47 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
     .to_string()
 }
 
+fn observed_answer_fallback_prompt_logical_path(
+    agent_run_context: Option<&AgentRunContext>,
+    observed_block: &str,
+) -> &'static str {
+    if observed_answer_fallback_can_use_compact_prompt(agent_run_context, observed_block) {
+        OBSERVED_ANSWER_FALLBACK_COMPACT_PROMPT_LOGICAL_PATH
+    } else {
+        OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH
+    }
+}
+
+fn observed_answer_fallback_can_use_compact_prompt(
+    agent_run_context: Option<&AgentRunContext>,
+    observed_block: &str,
+) -> bool {
+    const MAX_COMPACT_OBSERVED_BLOCK_BYTES: usize = 12_000;
+    if observed_block.len() > MAX_COMPACT_OBSERVED_BLOCK_BYTES {
+        return false;
+    }
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.delivery_required
+        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+    {
+        return false;
+    }
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+            | crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::ServiceStatus
+            | crate::OutputSemanticKind::ExecutionFailedStep
+            | crate::OutputSemanticKind::DockerPs
+            | crate::OutputSemanticKind::DockerImages
+            | crate::OutputSemanticKind::DockerLogs
+            | crate::OutputSemanticKind::DockerContainerLifecycle
+    )
+}
+
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -1198,11 +1248,11 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         crate::language_policy::task_response_language_hint(state, task, user_text);
     let user_request_for_prompt = crate::language_policy::task_original_user_text(task)
         .unwrap_or_else(|| user_text.trim().to_string());
+    let prompt_logical_path =
+        observed_answer_fallback_prompt_logical_path(agent_run_context, &observed_block);
     let (prompt_template, prompt_source) =
-        match crate::bootstrap::load_required_prompt_template_for_state(
-            state,
-            OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH,
-        ) {
+        match crate::bootstrap::load_required_prompt_template_for_state(state, prompt_logical_path)
+        {
             Ok(resolved) => resolved,
             Err(err) => {
                 tracing::warn!(
@@ -1361,6 +1411,15 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         );
         answer.clear();
     }
+    let language_compatible = observed_answer_language_compatible(&answer, &request_language_hint);
+    if !answer.is_empty() && !language_compatible {
+        tracing::info!(
+            "observed_answer_fallback_reject_language_mismatch task_id={} language_hint={} answer={}",
+            task.task_id,
+            request_language_hint,
+            crate::truncate_for_log(&answer)
+        );
+    }
     if !answer.is_empty() {
         let prefer_english = crate::fallback::fallback_prefers_english_for_language_hint(
             state,
@@ -1394,6 +1453,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     let qualified = !answer.is_empty()
         && !parsed.needs_clarify
         && !direct_passthrough_disallowed
+        && language_compatible
         && (parsed.qualified || semantically_publishable);
     Ok(Some((
         answer,

@@ -34,7 +34,7 @@ minimal_basic_skill_coverage|fs_config_readonly_matrix_zh|covers:fs_basic,config
 
 minimal_basic_skill_coverage|fs_sandbox_mutation_cycle_zh|covers:fs_basic,write_file,make_dir,remove_file;requires_tool_call=true;local_side_effect|在 tmp/nl_basic_skill_coverage_case 创建目录，写入 note.txt 内容为 alpha，追加一行 beta，读取文件确认两行都存在，然后删除这个临时目录；只汇总每一步的结构化结果。|expect=note.txt
 
-minimal_basic_skill_coverage|explicit_shell_process_ports_en|covers:run_cmd,process_basic;requires_tool_call=true;local_readonly|Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.|expect=/home/guagua/rustclaw
+minimal_basic_skill_coverage|explicit_shell_process_ports_en|covers:run_cmd,process_basic;requires_tool_call=true;local_readonly|Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.|expect=clawd
 
 minimal_basic_skill_coverage|git_package_status_zh|covers:git_basic,package_manager;requires_tool_call=true;local_readonly|检查当前仓库 git 分支、工作区变更文件数量和最近 1 条提交；再检测系统包管理器类型；用不超过 5 行回答。|expect=main
 

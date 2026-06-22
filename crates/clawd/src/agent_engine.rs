@@ -5,6 +5,7 @@ use std::path::Path;
 use tracing::{debug, info, warn};
 
 mod arg_resolver;
+mod async_start_checkpoint;
 mod attempt_ledger;
 mod dispatch_support;
 mod execution_loop;
@@ -23,6 +24,7 @@ mod planning_route_markers;
 mod planning_structured_field_exact;
 mod prepare_round;
 mod skill_execution;
+mod subagent_runtime;
 mod support;
 
 pub(crate) fn explicit_command_segment_for_policy(
@@ -54,7 +56,8 @@ pub(crate) use self::support::append_delivery_message;
 use self::support::{
     action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
     encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
-    registry_idempotency_guard_attribution, AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
+    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
@@ -136,6 +139,8 @@ const CLAWD_USER_NAMED_OUTPUT_PATH_ARG: &str = "_clawd_user_named_output_path";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
+const LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str =
+    "prompts/lightweight_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
@@ -566,6 +571,7 @@ pub(crate) struct LoopState {
     pub(crate) latest_validation_result: Option<Value>,
     pub(crate) task_lifecycle: Option<Value>,
     pub(crate) task_checkpoint: Option<Value>,
+    pub(crate) task_observations: Vec<Value>,
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
     pub(crate) last_recipe_progress_scope:
         Option<crate::execution_recipe::ExecutionRecipeTargetScope>,

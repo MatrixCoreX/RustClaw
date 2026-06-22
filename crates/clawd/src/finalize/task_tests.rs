@@ -1,13 +1,13 @@
 use super::{
     answer_text_is_machine_json_payload, answer_verifier_failure_machine_line,
     answer_verifier_failure_observed_facts, answer_verifier_forces_task_failure,
+    answer_verifier_retry_applicable, answer_verifier_retry_observed_trace,
     answer_verifier_should_force_task_failure, ask_runtime_failure_machine_payload,
     assistant_memory_source_text, delivery_path_gap_should_finalize_as_clarify,
     deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
-    direct_chat_answer_verifier_retry_applicable, drop_execution_summaries_when_delivery_is_scalar,
-    failed_task_lifecycle_payload, journal_has_missing_file_search_evidence,
-    machine_payload_observed_facts, non_failure_final_status,
-    normalize_existing_file_delivery_token_answer,
+    drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
+    journal_has_missing_file_search_evidence, machine_payload_observed_facts,
+    non_failure_final_status, normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
@@ -147,7 +147,85 @@ fn pure_chat_agent_loop_verifier_gap_triggers_direct_retry() {
         confidence: 0.9,
     };
 
-    assert!(direct_chat_answer_verifier_retry_applicable(
+    assert!(answer_verifier_retry_applicable(
+        &route, &journal, &verifier,
+    ));
+}
+
+#[test]
+fn observed_tool_evidence_verifier_gap_triggers_direct_retry() {
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            r#"{"entries":[{"name":"notes.txt"}],"content":{"notes.txt":"alpha"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "db_basic",
+            r#"{"tables":["app_meta"],"schema_version":3}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "synthesize_answer",
+            "partial answer",
+        ));
+    let verifier = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["field_value".to_string(), "output_format".to_string()],
+        answer_incomplete_reason: "candidate omitted observed values".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed step outputs".to_string(),
+        confidence: 0.93,
+    };
+
+    assert!(answer_verifier_retry_applicable(
+        &route, &journal, &verifier,
+    ));
+    let observed_trace = answer_verifier_retry_observed_trace(&journal);
+    assert!(observed_trace.contains("archive_basic"));
+    assert!(observed_trace.contains("db_basic"));
+    assert!(observed_trace.contains("schema_version"));
+}
+
+#[test]
+fn observed_tool_evidence_retry_ignores_failed_tool_step() {
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize observed evidence");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_1",
+            "archive_basic",
+            crate::executor::StepExecutionStatus::Error,
+            None,
+            Some(r#"{"error_kind":"permission_denied"}"#.to_string()),
+        ));
+    let verifier = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["field_value".to_string()],
+        answer_incomplete_reason: "candidate omitted observed values".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed step outputs".to_string(),
+        confidence: 0.93,
+    };
+
+    assert!(!answer_verifier_retry_applicable(
         &route, &journal, &verifier,
     ));
 }

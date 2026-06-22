@@ -725,7 +725,14 @@ fn schedule_invocation_metadata_contains_required_keys() {
     let keys: std::collections::HashSet<_> = meta.iter().map(|(k, _)| k.as_str()).collect();
     assert!(keys.contains("schedule_triggered"));
     assert!(keys.contains("schedule_job_id"));
+    assert!(keys.contains("automation_ref"));
+    assert!(keys.contains("automation_kind"));
     assert!(keys.contains("invocation_source"));
+    assert!(keys.contains("resume_trigger"));
+    assert!(keys.contains("resume_directive"));
+    assert!(keys.contains("thread_resume"));
+    assert!(keys.contains("thread_resume_source"));
+    assert!(keys.contains("automation_checkpoint_required"));
     assert!(keys.contains("scheduled"));
     let job_id = meta
         .iter()
@@ -737,6 +744,32 @@ fn schedule_invocation_metadata_contains_required_keys() {
         .find(|(k, _)| *k == "invocation_source")
         .map(|(_, v)| v);
     assert_eq!(src.and_then(|v| v.as_str()), Some("schedule"));
+    let automation_ref = meta
+        .iter()
+        .find(|(k, _)| *k == "automation_ref")
+        .map(|(_, v)| v);
+    assert_eq!(automation_ref.and_then(|v| v.as_str()), Some("job_abc123"));
+    let automation_kind = meta
+        .iter()
+        .find(|(k, _)| *k == "automation_kind")
+        .map(|(_, v)| v);
+    assert_eq!(
+        automation_kind.and_then(|v| v.as_str()),
+        Some("scheduled_job")
+    );
+    let resume_trigger = meta
+        .iter()
+        .find(|(k, _)| *k == "resume_trigger")
+        .map(|(_, v)| v);
+    assert_eq!(
+        resume_trigger.and_then(|v| v.as_str()),
+        Some("scheduled_wakeup")
+    );
+    let thread_resume = meta
+        .iter()
+        .find(|(k, _)| *k == "thread_resume")
+        .map(|(_, v)| v);
+    assert_eq!(thread_resume.and_then(|v| v.as_bool()), Some(true));
 }
 
 // ---------- §7.5: TEST_FREEZE_NOW_ENV 解析与冻结行为 ----------

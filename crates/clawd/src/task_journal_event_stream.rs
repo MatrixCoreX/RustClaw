@@ -1,6 +1,9 @@
 use serde_json::{json, Value};
 
-use super::{TaskJournal, TaskJournalFinalStatus};
+use super::{
+    capability_resolution_source, next_requested_capability, requested_capability_sequence,
+    step_action_kind, TaskJournal, TaskJournalFinalStatus,
+};
 
 fn task_event_json(seq: &mut u64, event_type: &'static str, payload: Value) -> Value {
     *seq += 1;
@@ -34,29 +37,79 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             }),
         ));
     }
+    append_provider_call_events(&mut seq, &mut events, journal);
+    let mut requested = requested_capability_sequence(journal);
     for (index, step) in journal.step_results.iter().enumerate() {
+        let requested = next_requested_capability(&mut requested, step);
+        let action_kind = step_action_kind(step, requested.as_ref());
+        let step_trace = super::step_trace_json(step, requested.as_ref(), None);
         events.push(task_event_json(
             &mut seq,
             "tool_step",
             json!({
                 "index": index,
                 "step_id": step.step_id,
+                "action_kind": action_kind,
                 "skill": step.skill,
+                "requested_action_type": requested.as_ref().map(|value| value.action_type.as_str()),
+                "requested_capability": requested.as_ref().map(|value| value.capability.as_str()),
+                "requested_action_ref": requested
+                    .as_ref()
+                    .and_then(|value| value.action_ref.as_deref()),
+                "executed_skill": step.skill,
+                "resolved_tool_or_skill": step.skill,
+                "resolved_capability": requested
+                    .as_ref()
+                    .filter(|value| value.action_type == "call_capability")
+                    .map(|value| value.capability.as_str()),
+                "resolution_source": requested
+                    .as_ref()
+                    .map(|value| capability_resolution_source(&value.action_type))
+                    .unwrap_or("step_trace_compat"),
                 "status": step.status.as_str(),
+                "error_kind": step_trace.get("error_kind"),
+                "failure_attribution": step_trace.get("failure_attribution"),
+                "output_evidence_count": step_trace.get("output_evidence_count"),
+                "artifact_ref_count": step_trace.get("artifact_ref_count"),
+                "artifact_refs": step_trace.get("artifact_refs").cloned().unwrap_or_else(|| json!([])),
                 "started_at": step.started_at,
                 "finished_at": step.finished_at,
             }),
         ));
     }
     for (index, observation) in journal.task_observations.iter().enumerate() {
-        events.push(task_event_json(
-            &mut seq,
-            "task_observation",
-            json!({
-                "index": index,
-                "observation": observation,
-            }),
-        ));
+        if observation
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("agent_hooks")
+        {
+            let mut payload = observation.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("index".to_string(), json!(index));
+            }
+            events.push(task_event_json(&mut seq, "agent_hook", payload));
+        } else if observation
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("subagent_runtime")
+        {
+            let mut payload = observation.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("index".to_string(), json!(index));
+            }
+            events.push(task_event_json(&mut seq, "subagent", payload));
+        } else {
+            events.push(task_event_json(
+                &mut seq,
+                "task_observation",
+                json!({
+                    "index": index,
+                    "observation": observation,
+                }),
+            ));
+        }
     }
     if journal.final_status.is_some() || journal.final_stop_signal.is_some() {
         events.push(task_event_json(
@@ -70,4 +123,45 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         ));
     }
     events
+}
+
+fn append_provider_call_events(seq: &mut u64, events: &mut Vec<Value>, journal: &TaskJournal) {
+    let Some(by_prompt) = journal.task_metrics.by_prompt.as_ref() else {
+        return;
+    };
+    let mut entries: Vec<(&String, &crate::LlmPromptBucket)> = by_prompt.iter().collect();
+    entries.sort_by(|a, b| {
+        b.1.count
+            .cmp(&a.1.count)
+            .then_with(|| b.1.elapsed_ms.cmp(&a.1.elapsed_ms))
+            .then_with(|| a.0.cmp(b.0))
+    });
+    for (prompt_label, bucket) in entries {
+        if bucket.count == 0
+            && bucket.provider_attempt_count == 0
+            && bucket.prompt_truncation_count == 0
+        {
+            continue;
+        }
+        events.push(task_event_json(
+            seq,
+            "provider_call",
+            json!({
+                "prompt_label": prompt_label,
+                "llm_call_count": bucket.count,
+                "elapsed_ms": bucket.elapsed_ms,
+                "provider_attempt_count": bucket.provider_attempt_count,
+                "provider_retry_count": bucket.provider_retry_count,
+                "provider_retryable_error_count": bucket.provider_retryable_error_count,
+                "provider_final_error_count": bucket.provider_final_error_count,
+                "provider_last_retry_error_kinds": bucket.provider_last_retry_error_kinds,
+                "provider_final_error_kinds": bucket.provider_final_error_kinds,
+                "prompt_truncation_count": bucket.prompt_truncation_count,
+                "prompt_bytes_before_max": bucket.prompt_bytes_before_max,
+                "prompt_bytes_budget_min": bucket.prompt_bytes_budget_min,
+                "prompt_bytes_after_max": bucket.prompt_bytes_after_max,
+                "prompt_truncated_bytes_total": bucket.prompt_truncated_bytes_total,
+            }),
+        ));
+    }
 }

@@ -117,6 +117,61 @@ fn build_from_loop_state_records_rollout_switches() {
 }
 
 #[test]
+fn build_from_loop_state_records_task_observations() {
+    let task = ClaimedTask {
+        task_id: "task-observations".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut loop_state = LoopState::new(2);
+    loop_state.task_observations.push(serde_json::json!({
+        "schema_version": 1,
+        "owner_layer": "agent_hooks",
+        "stage": "pre_tool_use",
+        "decision": "allow",
+        "reason_code": "pre_tool_use_allowed",
+        "action_ref": "fs_basic.list_dir"
+    }));
+
+    let journal = build_from_loop_state(
+        &task,
+        "test",
+        &loop_state,
+        None,
+        None,
+        true,
+        "ok",
+        TaskJournalFinalStatus::Success,
+    );
+
+    assert_eq!(journal.task_observations.len(), 3);
+    assert_eq!(
+        journal.task_observations[0]
+            .pointer("/owner_layer")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_hooks")
+    );
+    assert_eq!(
+        journal.task_observations[1]
+            .pointer("/stage")
+            .and_then(serde_json::Value::as_str),
+        Some("stop")
+    );
+    assert_eq!(
+        journal.task_observations[2]
+            .pointer("/stage")
+            .and_then(serde_json::Value::as_str),
+        Some("session_end")
+    );
+}
+
+#[test]
 fn build_from_loop_state_persists_lifecycle_checkpoint_projection() {
     let task = ClaimedTask {
         task_id: "task-checkpoint".to_string(),

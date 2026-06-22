@@ -13,15 +13,17 @@ use super::{
     archive_database_aggregate_deterministic_plan_result,
     archive_list_auto_locator_deterministic_plan_result, archive_pack_deterministic_plan_result,
     archive_read_deterministic_plan_result, archive_unpack_deterministic_plan_result,
-    broaden_default_read_range_for_structured_text, browser_http_url_deterministic_plan_result,
-    build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
-    build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-    classify_planning_prompt_class, compact_skill_playbook_from_prompt,
-    config_risk_preview_deterministic_plan_result,
+    async_job_start_deterministic_plan_result, broaden_default_read_range_for_structured_text,
+    browser_http_url_deterministic_plan_result, build_lightweight_skill_playbooks_text,
+    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
+    can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
+    clawcli_resume_surface_deterministic_plan_result, compact_lightweight_incremental_goal_context,
+    compact_skill_playbook_from_prompt, config_risk_preview_deterministic_plan_result,
     content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     content_excerpt_summary_directory_log_slice_deterministic_plan_result,
-    contract_hint_preferred_action_deterministic_plan_result, contract_scoped_planner_skill_scope,
+    contract_hint_preferred_action_deterministic_plan_result,
+    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     directory_compare_locator_deterministic_plan_result,
     directory_entry_groups_auto_locator_deterministic_plan_result,
     directory_purpose_auto_locator_deterministic_plan_result,
@@ -37,7 +39,8 @@ use super::{
     generic_directory_auto_locator_observation_plan,
     generic_path_content_log_analyze_deterministic_plan_result,
     generic_path_content_log_analyze_target_path, git_repository_state_deterministic_plan_result,
-    has_pre_observation_structured_output_shape,
+    has_pre_observation_structured_output_shape, hook_permission_surface_deterministic_plan_result,
+    http_download_artifact_deterministic_plan_result, incremental_prompt_spec_for_class,
     inject_structural_extension_filter_for_directory_inventory,
     inject_synthesize_answer_for_bare_placeholder_respond,
     inline_json_transform_deterministic_plan_result, is_bare_last_output_placeholder,
@@ -96,6 +99,7 @@ use super::{
     structured_dry_run_response_deterministic_plan_result, structured_field_selectors,
     structured_keys_deterministic_plan_result,
     structured_scalar_field_auto_locator_deterministic_plan_result,
+    subagent_review_boundary_surface_deterministic_plan_result,
     task_control_get_deterministic_plan_result, task_control_list_deterministic_plan_result,
     web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,
 };
@@ -513,6 +517,8 @@ mod log_excerpt_quantity_and_skill_policy;
 mod missing_paths_and_multi_target_metadata;
 #[path = "planning_tests/nl_failure_regressions.rs"]
 mod nl_failure_regressions;
+#[path = "planning_tests/runtime_surface_plans.rs"]
+mod runtime_surface_plans;
 #[path = "planning_tests/scalar_count_and_hidden_entries.rs"]
 mod scalar_count_and_hidden_entries;
 #[path = "planning_tests/scalar_path_and_inventory_repair.rs"]

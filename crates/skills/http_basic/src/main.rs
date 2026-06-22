@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::blocking::Client;
+use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -153,16 +155,56 @@ fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), S
         .map_err(|err| format!("http request failed: {err}"))?;
     let status = resp.status().as_u16();
     let success = resp.status().is_success();
-    let text = resp
-        .text()
+    let content_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let body = resp
+        .bytes()
         .map_err(|err| format!("read response failed: {err}"))?;
-    let preview = if text.len() > 8000 {
-        &text[..8000]
+    let text = String::from_utf8_lossy(&body);
+    let preview = bounded_preview(&text, 8000);
+    let artifact = if optional_bool(obj, "download").unwrap_or(false)
+        || obj
+            .get("output_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+    {
+        let workspace =
+            workspace_root().map_err(|err| format!("resolve workspace failed: {err}"))?;
+        let output_path = resolve_output_path(
+            &workspace,
+            "document/http/download",
+            obj.get("output_path").and_then(Value::as_str),
+        )?;
+        ensure_parent_dir(&output_path)?;
+        std::fs::write(&output_path, &body).map_err(|err| format!("write output failed: {err}"))?;
+        Some(HttpArtifact {
+            output_path: output_path.to_string_lossy().to_string(),
+            size_bytes: body.len() as u64,
+            content_type,
+        })
     } else {
-        &text
+        None
     };
 
-    Ok(http_observation(action, url, status, success, preview))
+    Ok(http_observation(
+        action,
+        url,
+        status,
+        success,
+        &preview,
+        artifact.as_ref(),
+    ))
+}
+
+#[derive(Debug)]
+struct HttpArtifact {
+    output_path: String,
+    size_bytes: u64,
+    content_type: Option<String>,
 }
 
 fn http_observation(
@@ -171,18 +213,85 @@ fn http_observation(
     status: u16,
     success_status: bool,
     preview: &str,
+    artifact: Option<&HttpArtifact>,
 ) -> (String, Value) {
-    let output = format!("status={status}\n{preview}");
-    (
-        output.clone(),
-        json!({
-            "action": action,
-            "url": url,
-            "status_code": status,
-            "success_status": success_status,
-            "body_preview": preview,
-        }),
-    )
+    let output = match artifact {
+        Some(artifact) => format!(
+            "status={status}\noutput_path={}\n{preview}",
+            artifact.output_path
+        ),
+        None => format!("status={status}\n{preview}"),
+    };
+    let mut extra = json!({
+        "action": action,
+        "url": url,
+        "status_code": status,
+        "success_status": success_status,
+        "body_preview": preview,
+    });
+    if let (Some(obj), Some(artifact)) = (extra.as_object_mut(), artifact) {
+        obj.insert("downloaded".to_string(), json!(true));
+        obj.insert("output_path".to_string(), json!(artifact.output_path));
+        obj.insert("artifact_path".to_string(), json!(artifact.output_path));
+        obj.insert("size_bytes".to_string(), json!(artifact.size_bytes));
+        if let Some(content_type) = artifact.content_type.as_deref() {
+            obj.insert("content_type".to_string(), json!(content_type));
+        }
+    }
+    (output.clone(), extra)
+}
+
+fn optional_bool(obj: &serde_json::Map<String, Value>, key: &str) -> Option<bool> {
+    obj.get(key).and_then(Value::as_bool)
+}
+
+fn bounded_preview(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+fn workspace_root() -> Result<PathBuf, std::io::Error> {
+    std::env::current_dir()
+}
+
+fn resolve_output_path(
+    workspace_root: &Path,
+    default_dir: &str,
+    requested: Option<&str>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = requested.map(str::trim).filter(|value| !value.is_empty()) {
+        let out = normalize_workspace_path(workspace_root, path)?;
+        return Ok(out);
+    }
+    Ok(workspace_root
+        .join(default_dir)
+        .join(format!("http-{}.body", unix_ts())))
+}
+
+fn normalize_workspace_path(workspace_root: &Path, raw_path: &str) -> Result<PathBuf, String> {
+    let p = Path::new(raw_path);
+    let out = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        workspace_root.join(p)
+    };
+    if !out.starts_with(workspace_root) {
+        return Err("output_path is outside workspace".to_string());
+    }
+    Ok(out)
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "output path has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|err| format!("create output dir failed: {err}"))
+}
+
+fn unix_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 <!--
 Purpose: lightweight first-round planner for bounded local execution intents that are still planner-owned.
 Component: clawd (`crates/clawd/src/agent_engine/planning.rs`) `LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH`
-Version: 2026-04-30.1
+ Version: 2026-06-23.1
 -->
 
 You are compiling a lightweight local execution plan.
@@ -75,6 +75,7 @@ Core rules:
 
 Execution preferences:
 - If the user explicitly supplies a concrete shell/system command and asks to run/execute it or return its command result/output, preserve that command through `run_cmd`. Do not replace the command with a higher-level semantic skill even when the observable result would be similar.
+- **Background/async process policy:** For a long-running or background operation that should be resumed, polled, or checkpointed by RustClaw, call `run_cmd` with `async_start=true` plus bounded `poll_after_seconds` / `expires_in_seconds` when useful. Never synthesize runtime fields such as `checkpoint_id`, `poll_ref`, `next_check_after`, or `status=background` from shell output. POSIX shell detachment (`nohup <command> > <log> 2>&1 &`) is only for explicit shell-level service launches that do not need runtime checkpoint/resume, and still needs a separate validation probe.
 - For ordered command/tool requests where the user asks for per-step success/failure, comparison, or failed-step judgment, emit one observation step per independent command/action instead of merging them with `&&`. Preserve a compound command only when the user supplied that compound command as the command itself.
 - If `Goal/context` or `Turn analysis` carries `semantic_kind=execution_failed_step`, ground the final answer in all ordered execution observations. Do not synthesize from only `last_output`; either use evidence refs for every ordered step or let the runtime finalizer deliver the strict failed-step answer.
 - When the request semantically asks for exact raw file lines, a bounded line slice, or a preview without document understanding, prefer `fs_basic` with `action="read_text_range"`.

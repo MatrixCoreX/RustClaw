@@ -408,6 +408,13 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "timeout_seconds",
                     "idle_timeout_seconds",
                     "max_output_bytes",
+                    "async_start",
+                    "poll_after_seconds",
+                    "expires_in_seconds",
+                    "_clawd_async_job_id",
+                    "_clawd_async_job_dir",
+                    "_clawd_async_poll_after_seconds",
+                    "_clawd_async_expires_at",
                 ],
             )?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
@@ -475,6 +482,57 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .and_then(|v| v.as_u64())
                 .and_then(|v| usize::try_from(v).ok())
                 .unwrap_or(state.skill_rt.cmd_max_output_bytes);
+            let async_start = map
+                .get("async_start")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            if !async_start
+                && run_cmd_claims_runtime_checkpoint_without_async_start(&sanitized_command)
+            {
+                return Err(builtin_error(
+                    "run_cmd",
+                    "async_start_required",
+                    "run_cmd_async_start_required",
+                    None,
+                    None,
+                    Some(serde_json::json!({
+                        "message_key": "clawd.run_cmd.async_start_required",
+                        "required_args": [
+                            "async_start",
+                            "poll_after_seconds",
+                            "expires_in_seconds"
+                        ],
+                        "detected_machine_fields": run_cmd_checkpoint_claim_markers(&sanitized_command),
+                        "has_background_operator": command_has_shell_background_operator(&sanitized_command)
+                    })),
+                ));
+            }
+            if async_start {
+                let job_id = required_string(map, "_clawd_async_job_id")?;
+                let job_dir = required_string(map, "_clawd_async_job_dir")?;
+                return start_async_command(
+                    &cwd_path,
+                    &sanitized_command,
+                    state.skill_rt.max_cmd_length,
+                    crate::skills::task_allows_sudo(state, task),
+                    &job_id,
+                    Path::new(&job_dir),
+                )
+                .await
+                .map_err(|err| match err {
+                    RunSafeCommandError::Policy(text) => text,
+                    RunSafeCommandError::Command(failure) => {
+                        let extra = failure.extra(&sanitized_command, &cwd_path);
+                        super::structured_skill_error_from_parts(
+                            "run_cmd",
+                            failure.kind,
+                            &failure.message,
+                            Some(std::env::consts::OS),
+                            Some(extra),
+                        )
+                    }
+                });
+            }
             run_safe_command_detailed(
                 &cwd_path,
                 &sanitized_command,
@@ -668,6 +726,69 @@ fn background_followup_is_safe(remainder: &str) -> bool {
     ["disown", "echo ", "printf ", ":"]
         .into_iter()
         .any(|prefix| lower == prefix.trim_end() || lower.starts_with(prefix))
+}
+
+fn command_has_shell_background_operator(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for (idx, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if in_single || in_double || ch != '&' {
+            continue;
+        }
+
+        let prev = idx.checked_sub(1).and_then(|pos| bytes.get(pos)).copied();
+        let next = bytes.get(idx + 1).copied();
+        if prev == Some(b'&')
+            || next == Some(b'&')
+            || prev == Some(b'>')
+            || next == Some(b'>')
+            || next.is_some_and(|value| value.is_ascii_digit())
+        {
+            continue;
+        }
+        return true;
+    }
+
+    false
+}
+
+fn run_cmd_checkpoint_claim_markers(command: &str) -> Vec<&'static str> {
+    let lower = command.to_ascii_lowercase();
+    [
+        ("checkpoint_id", "checkpoint_id"),
+        ("poll_ref", "poll_ref"),
+        ("next_check_after", "next_check_after"),
+        ("status_background", "status=background"),
+        ("status_background", "\"status\":\"background\""),
+        ("pending_async_job", "pending_async_job"),
+    ]
+    .into_iter()
+    .filter_map(|(field, token)| lower.contains(token).then_some(field))
+    .collect()
+}
+
+fn run_cmd_claims_runtime_checkpoint_without_async_start(command: &str) -> bool {
+    command_has_shell_background_operator(command)
+        && run_cmd_checkpoint_claim_markers(command).len() >= 2
 }
 
 fn suggested_command_from_args(map: &serde_json::Map<String, Value>) -> Option<String> {
@@ -1227,6 +1348,94 @@ async fn run_safe_command_detailed(
             .with_output(exit_code, stdout_text, stderr_text, output_truncated),
         ))
     }
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+async fn start_async_command(
+    cwd: &Path,
+    command: &str,
+    max_cmd_length: usize,
+    allow_sudo: bool,
+    job_id: &str,
+    job_dir: &Path,
+) -> Result<String, RunSafeCommandError> {
+    if command.len() > max_cmd_length {
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "invalid_input",
+            "command too long",
+        )));
+    }
+    if command.trim().is_empty() {
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "invalid_input",
+            "empty command",
+        )));
+    }
+    if !allow_sudo && command.split_whitespace().any(|part| part == "sudo") {
+        return Err(RunSafeCommandError::Policy(
+            crate::skills::policy_block_error(
+                "sudo_not_allowed",
+                vec!["command_requested_sudo: true".to_string()],
+                vec![
+                    "policy_code:sudo_not_allowed".to_string(),
+                    "required_capability:admin_sudo".to_string(),
+                ],
+            ),
+        ));
+    }
+    std::fs::create_dir_all(job_dir).map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_dir_create_failed",
+            format!("{}:{err}", "async_job_dir_create_failed"),
+        ))
+    })?;
+    let stdout_path = job_dir.join("stdout");
+    let stderr_path = job_dir.join("stderr");
+    let exit_code_path = job_dir.join("exit_code");
+    let started_path = job_dir.join("started_at");
+    let finished_path = job_dir.join("finished_at");
+    let run_script_path = job_dir.join("run.sh");
+    let script = format!(
+        "#!/usr/bin/env bash\nset +e\nprintf '%s\\n' \"$(date +%s)\" > {}\nbash -lc {} > {} 2> {}\ncode=$?\nprintf '%s\\n' \"$code\" > {}\nprintf '%s\\n' \"$(date +%s)\" > {}\n",
+        shell_single_quote(&started_path.display().to_string()),
+        shell_single_quote(command),
+        shell_single_quote(&stdout_path.display().to_string()),
+        shell_single_quote(&stderr_path.display().to_string()),
+        shell_single_quote(&exit_code_path.display().to_string()),
+        shell_single_quote(&finished_path.display().to_string()),
+    );
+    std::fs::write(&run_script_path, script).map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_script_write_failed",
+            format!("{}:{err}", "async_job_script_write_failed"),
+        ))
+    })?;
+    let mut cmd = Command::new("bash");
+    cmd.arg(&run_script_path)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd.kill_on_drop(false);
+    let child = cmd.spawn().map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_spawn_failed",
+            format!("{}:{err}", "async_job_spawn_failed"),
+        ))
+    })?;
+    if let Some(pid) = child.id() {
+        let _ = std::fs::write(job_dir.join("pid"), pid.to_string());
+    }
+    drop(child);
+    Ok(serde_json::json!({
+        "status": "accepted",
+        "job_id": job_id,
+        "message_key": "clawd.task.async_job_started",
+    })
+    .to_string())
 }
 
 #[derive(Debug, Deserialize)]

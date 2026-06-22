@@ -398,6 +398,226 @@ fn well_known_port_service_hint(port: &str) -> Option<&'static str> {
     }
 }
 
+pub(super) fn process_basic_observed_candidate(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(port_value) = process_basic_port_list_observation_value(&value) {
+            return process_basic_port_list_observed_candidate(port_value);
+        }
+        if let Some(ps_value) = process_basic_ps_observation_value(&value) {
+            return process_basic_ps_observed_candidate(ps_value);
+        }
+    }
+    if !process_basic_port_rows(trimmed).is_empty() {
+        return process_basic_port_text_observed_candidate(trimmed);
+    }
+    process_basic_ps_text_observed_candidate(trimmed)
+}
+
+fn process_basic_json_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn process_basic_json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(serde_json::Value::as_u64)
+}
+
+fn push_process_basic_optional_field(
+    lines: &mut Vec<String>,
+    prefix: &str,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        lines.push(format!("{prefix}.{key}={value}"));
+    }
+}
+
+fn process_basic_port_list_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    let mut lines = vec!["process_basic.port_list".to_string()];
+    push_process_basic_optional_field(
+        &mut lines,
+        "port_list",
+        "platform",
+        process_basic_json_string(value, "platform"),
+    );
+    push_process_basic_optional_field(
+        &mut lines,
+        "port_list",
+        "command_tool",
+        process_basic_json_string(value, "command_tool"),
+    );
+    for key in [
+        "listener_count",
+        "public_listener_count",
+        "localhost_listener_count",
+    ] {
+        if let Some(count) = process_basic_json_u64(value, key) {
+            lines.push(format!("port_list.{key}={count}"));
+        }
+    }
+    for key in ["public_ports", "ports"] {
+        if let Some(values) = process_basic_string_array(value, key) {
+            lines.push(format!("port_list.{key}={}", values.join(",")));
+        }
+    }
+    let listeners = process_basic_notable_listener_values(value);
+    for (idx, listener) in listeners.iter().enumerate() {
+        let row = idx + 1;
+        let prefix = format!("listener.{row}");
+        push_process_basic_optional_field(
+            &mut lines,
+            &prefix,
+            "port",
+            process_basic_json_string(listener, "port"),
+        );
+        push_process_basic_optional_field(
+            &mut lines,
+            &prefix,
+            "endpoint",
+            process_basic_json_string(listener, "local_endpoint"),
+        );
+        push_process_basic_optional_field(
+            &mut lines,
+            &prefix,
+            "bind_scope",
+            process_basic_json_string(listener, "bind_scope"),
+        );
+        push_process_basic_optional_field(
+            &mut lines,
+            &prefix,
+            "process",
+            process_basic_json_string(listener, "process_name"),
+        );
+        if let Some(pid) = listener.get("pid").and_then(serde_json::Value::as_i64) {
+            lines.push(format!("{prefix}.pid={pid}"));
+        }
+    }
+    (lines.len() > 1).then(|| lines.join("\n"))
+}
+
+fn process_basic_notable_listener_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    let public_listeners = value
+        .get("public_listeners")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let listeners = value
+        .get("listeners")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let source = if public_listeners.is_empty() {
+        listeners
+    } else {
+        public_listeners
+    };
+    source.into_iter().take(8).collect()
+}
+
+fn process_basic_string_array(value: &serde_json::Value, key: &str) -> Option<Vec<String>> {
+    let values = value
+        .get(key)?
+        .as_array()?
+        .iter()
+        .filter_map(|item| {
+            item.as_str()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
+}
+
+fn process_basic_ps_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    let output = value
+        .get("output")
+        .or_else(|| value.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or_default();
+    let observation = process_basic_ps_status_observation(&value.to_string())?;
+    let mut lines = vec!["process_basic.ps".to_string()];
+    lines.push(format!("ps.status={}", observation.status));
+    lines.push(format!("ps.running={}", observation.running));
+    lines.push(format!("ps.match_count={}", observation.match_count));
+    if let Some(exit_code) = observation.exit_code {
+        lines.push(format!("ps.exit_code={exit_code}"));
+    }
+    if let Some(filter) = observation.filter {
+        lines.push(format!("ps.filter={filter}"));
+    }
+    if let Some(target) = observation.target {
+        lines.push(format!("ps.target={target}"));
+    }
+    process_basic_ps_rows_observed_lines(output, &mut lines);
+    Some(lines.join("\n"))
+}
+
+fn process_basic_ps_text_observed_candidate(body: &str) -> Option<String> {
+    let observation = process_basic_ps_status_observation(body)?;
+    let mut lines = vec!["process_basic.ps".to_string()];
+    lines.push(format!("ps.status={}", observation.status));
+    lines.push(format!("ps.running={}", observation.running));
+    lines.push(format!("ps.match_count={}", observation.match_count));
+    if let Some(filter) = observation.filter.or(observation.target) {
+        lines.push(format!("ps.target={filter}"));
+    }
+    process_basic_ps_rows_observed_lines(body, &mut lines);
+    Some(lines.join("\n"))
+}
+
+fn process_basic_ps_rows_observed_lines(output: &str, lines: &mut Vec<String>) {
+    let rows = process_basic_table_rows(output);
+    for (idx, row) in rows
+        .iter()
+        .filter_map(|row| process_basic_ps_row(row))
+        .take(8)
+        .enumerate()
+    {
+        let row_no = idx + 1;
+        lines.push(format!(
+            "process.{row_no}.pid={} process.{row_no}.cpu={} process.{row_no}.mem={} process.{row_no}.comm={}",
+            row.pid, row.cpu, row.mem, row.comm
+        ));
+    }
+    if rows.len() > 8 {
+        lines.push(format!("ps.rows_truncated_after=8"));
+    }
+}
+
+fn process_basic_port_text_observed_candidate(body: &str) -> Option<String> {
+    let rows = process_basic_port_rows(body);
+    if rows.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["process_basic.port_list".to_string()];
+    lines.push(format!("port_list.listener_count={}", rows.len()));
+    for (idx, row) in rows.iter().take(8).enumerate() {
+        let row_no = idx + 1;
+        let prefix = format!("listener.{row_no}");
+        lines.push(format!("{prefix}.port={}", row.port));
+        lines.push(format!("{prefix}.endpoint={}", row.local));
+        if let Some(process) = row.process.as_deref().filter(|value| !value.is_empty()) {
+            lines.push(format!("{prefix}.process={process}"));
+        }
+    }
+    if rows.len() > 8 {
+        lines.push("port_list.rows_truncated_after=8".to_string());
+    }
+    Some(lines.join("\n"))
+}
+
 pub(super) fn process_basic_service_status_direct_answer_candidate(
     state: Option<&AppState>,
     body: &str,

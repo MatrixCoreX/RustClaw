@@ -133,6 +133,18 @@ pub(super) fn markdown_code_span_command_segment(text: &str) -> Option<&str> {
     }
 }
 
+pub(super) fn embedded_markdown_code_span_command_segment(text: &str) -> Option<&str> {
+    let text = text.trim();
+    let open = text.find('`')?;
+    let rest = &text[open + '`'.len_utf8()..];
+    let close = rest.find('`')?;
+    let command = rest[..close].trim();
+    if command.is_empty() || literal_command_segment_has_unresolved_template(command) {
+        return None;
+    }
+    Some(command)
+}
+
 pub(super) fn structural_command_argument_token(token: &str) -> bool {
     let token = token.trim_matches(|ch: char| {
         ch.is_ascii_punctuation() && !matches!(ch, '-' | '_' | '.' | '/' | '\\' | '~' | '=')
@@ -473,16 +485,22 @@ pub(super) fn configured_explicit_command_candidate_from_text(
             let segment = explicit_command_segment_before_followup(tail).or_else(|| {
                 allow_whole_tail.then(|| {
                     markdown_code_span_command_segment(tail)
+                        .or_else(|| embedded_markdown_code_span_command_segment(tail))
                         .or_else(|| whole_explicit_command_tail(tail))
                         .or_else(|| standalone_command_segment_before_freeform_tail(runtime, tail))
                         .or_else(|| path_command_segment_before_freeform_tail(tail))
                 })?
             })?;
-            let segment = markdown_code_span_command_segment(segment).unwrap_or(segment);
+            let segment = markdown_code_span_command_segment(segment)
+                .or_else(|| embedded_markdown_code_span_command_segment(segment))
+                .unwrap_or(segment);
             let command = configured_standalone_command_sequence_from_segment(runtime, segment)
                 .unwrap_or_else(|| {
                     crate::bootstrap::config_loaders::trim_command_text(segment.to_string())
                 });
+            if command.contains('`') || literal_command_segment_has_unresolved_template(&command) {
+                return None;
+            }
             let freeform_followup = tail.get(segment.len()..).unwrap_or_default();
             looks_like_concrete_command_tail(&command).then(|| ExplicitCommandCandidate {
                 command,
@@ -643,10 +661,12 @@ pub(super) fn prefixed_shellish_command_segment_from_tail(
         .filter_map(|prefix| strip_configured_command_prefix(text, prefix))
         .filter_map(|tail| {
             let segment = markdown_code_span_command_segment(tail)
+                .or_else(|| embedded_markdown_code_span_command_segment(tail))
                 .or_else(|| explicit_command_segment_before_followup(tail))
                 .or_else(|| whole_explicit_command_tail(tail))?;
             let command = crate::bootstrap::config_loaders::trim_command_text(segment.to_string());
             if literal_command_segment_has_unresolved_template(&command)
+                || command.contains('`')
                 || !looks_like_concrete_command_tail(&command)
                 || (!allow_bare_token
                     && !command
@@ -958,6 +978,61 @@ pub(super) fn mark_explicit_literal_run_cmd_actions(
         .collect()
 }
 
+pub(super) fn normalize_single_explicit_literal_run_cmd_command(
+    actions: Vec<AgentAction>,
+    exact_command: Option<&str>,
+) -> Vec<AgentAction> {
+    let Some(exact_command) = exact_command
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    else {
+        return actions;
+    };
+    let run_cmd_count = actions
+        .iter()
+        .filter(|action| action_skill_is_run_cmd(action))
+        .count();
+    if run_cmd_count != 1 {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, mut args } => {
+                if skill.trim().eq_ignore_ascii_case("run_cmd") {
+                    if let Some(obj) = args.as_object_mut() {
+                        let current = obj.get("command").and_then(Value::as_str).map(str::trim);
+                        if current != Some(exact_command) {
+                            obj.insert(
+                                "command".to_string(),
+                                Value::String(exact_command.to_string()),
+                            );
+                            info!("plan_rewrite_explicit_literal_run_cmd_command");
+                        }
+                    }
+                }
+                AgentAction::CallSkill { skill, args }
+            }
+            AgentAction::CallTool { tool, mut args } => {
+                if tool.trim().eq_ignore_ascii_case("run_cmd") {
+                    if let Some(obj) = args.as_object_mut() {
+                        let current = obj.get("command").and_then(Value::as_str).map(str::trim);
+                        if current != Some(exact_command) {
+                            obj.insert(
+                                "command".to_string(),
+                                Value::String(exact_command.to_string()),
+                            );
+                            info!("plan_rewrite_explicit_literal_run_cmd_command");
+                        }
+                    }
+                }
+                AgentAction::CallTool { tool, args }
+            }
+            other => other,
+        })
+        .collect()
+}
+
 pub(super) fn planned_run_cmds_are_verbatim_user_commands(
     actions: &[AgentAction],
     original_user_text: &str,
@@ -1018,6 +1093,8 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
         .iter()
         .any(|action| action_is_run_cmd(state, action))
     {
+        let actions =
+            normalize_single_explicit_literal_run_cmd_command(actions, exact_command.as_deref());
         return mark_explicit_literal_run_cmd_actions(
             actions,
             literal_command_failure_can_replan(route_result),
@@ -1170,6 +1247,8 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         actions,
     );
     let actions =
+        ensure_run_cmd_async_start_for_runtime_async_job_contract(state, route_result, actions);
+    let actions =
         apply_scalar_count_contract_filter_to_count_entries_actions(route_result, actions);
     let explicit_command_request = route_allows_explicit_command_preservation(route_result)
         && original_user_text.or(Some(user_text)).is_some_and(|text| {
@@ -1265,6 +1344,112 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     let actions =
         rewrite_backend_identity_metadata_respond_to_runtime_identity(state, route_result, actions);
     apply_scalar_count_contract_filter_to_count_entries_actions(route_result, actions)
+}
+
+fn ensure_run_cmd_async_start_for_runtime_async_job_contract(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_requests_runtime_async_job_contract(route) {
+        return actions;
+    }
+    let mut changed = false;
+    let actions = actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, mut args } => {
+                if state.resolve_canonical_skill_name(&skill) == "run_cmd"
+                    && ensure_run_cmd_async_start_args(&mut args)
+                {
+                    changed = true;
+                }
+                AgentAction::CallSkill { skill, args }
+            }
+            AgentAction::CallTool { tool, mut args } => {
+                if state.resolve_canonical_skill_name(&tool) == "run_cmd"
+                    && ensure_run_cmd_async_start_args(&mut args)
+                {
+                    changed = true;
+                }
+                AgentAction::CallTool { tool, args }
+            }
+            other => other,
+        })
+        .collect();
+    if changed {
+        info!("plan_inject_run_cmd_async_start_for_async_job_contract");
+    }
+    actions
+}
+
+fn ensure_run_cmd_async_start_args(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let Some(command) = obj
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    else {
+        return false;
+    };
+    if run_cmd_command_claims_runtime_async_metadata(command) {
+        return false;
+    }
+    let mut changed = false;
+    if obj.get("async_start").and_then(Value::as_bool) != Some(true) {
+        obj.insert("async_start".to_string(), Value::Bool(true));
+        changed = true;
+    }
+    if !obj.contains_key("poll_after_seconds") {
+        obj.insert("poll_after_seconds".to_string(), Value::from(2));
+        changed = true;
+    }
+    if !obj.contains_key("expires_in_seconds") {
+        obj.insert("expires_in_seconds".to_string(), Value::from(600));
+        changed = true;
+    }
+    changed
+}
+
+fn run_cmd_command_claims_runtime_async_metadata(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    [
+        "checkpoint_id",
+        "poll_ref",
+        "next_check_after",
+        "status=background",
+        "pending_async_job",
+        "job_id=",
+    ]
+    .iter()
+    .any(|token| command.contains(token))
+}
+
+fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
+    [
+        route.route_reason.as_str(),
+        route.resolved_intent.as_str(),
+        route.output_contract.locator_hint.as_str(),
+    ]
+    .into_iter()
+    .map(str::to_ascii_lowercase)
+    .any(|text| {
+        [
+            "async_job_protocol",
+            "pending_async_job",
+            "poll_async_job",
+            "required_job_fields=",
+            "checkpoint_states=",
+        ]
+        .iter()
+        .any(|token| text.contains(token))
+    })
 }
 
 fn rewrite_backend_identity_metadata_respond_to_runtime_identity(

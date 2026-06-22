@@ -445,6 +445,49 @@ fn detached_background_detection_ignores_common_redirections() {
     ));
 }
 
+#[test]
+fn runtime_checkpoint_claim_detection_requires_real_background_operator() {
+    assert!(super::run_cmd_claims_runtime_checkpoint_without_async_start(
+        "OUTFILE=/tmp/async.out; sleep 2 > \"$OUTFILE\" 2>&1 & PID=$!; echo checkpoint_id=job-$PID; echo poll_ref=$OUTFILE; echo next_check_after=2s"
+    ));
+    assert!(super::run_cmd_claims_runtime_checkpoint_without_async_start(
+        "nohup bash -c 'sleep 2 && echo done' >/tmp/demo.log 2>&1 & PID=$!; printf '{\"checkpoint_id\":\"ckpt-%s\",\"poll_ref\":\"pid:%s\",\"next_check_after\":2}\\n' \"$PID\" \"$PID\""
+    ));
+    assert!(
+        !super::run_cmd_claims_runtime_checkpoint_without_async_start(
+            "printf '%s\\n' 'checkpoint_id=demo poll_ref=/tmp/demo next_check_after=2s'"
+        )
+    );
+    assert!(!super::run_cmd_claims_runtime_checkpoint_without_async_start(
+        "curl 'http://127.0.0.1:8787/?a=1&b=2' && echo checkpoint_id=demo && echo poll_ref=/tmp/demo"
+    ));
+}
+
+#[tokio::test]
+async fn run_cmd_rejects_shell_faked_runtime_checkpoint_without_async_start() {
+    let root = TempDirGuard::new("run_cmd_faked_checkpoint");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "OUTFILE=/tmp/async.out; sleep 2 > \"$OUTFILE\" 2>&1 & PID=$!; echo checkpoint_id=job-$PID; echo poll_ref=$OUTFILE; echo next_check_after=2s"
+        }),
+    )
+    .await
+    .expect_err("fake checkpoint shell should be rejected");
+
+    assert!(
+        err.contains("\"error_kind\":\"async_start_required\""),
+        "{err}"
+    );
+    assert!(
+        err.contains("\"message_key\":\"clawd.run_cmd.async_start_required\""),
+        "{err}"
+    );
+}
+
 #[tokio::test]
 async fn run_safe_command_detaches_background_http_server() {
     let root = TempDirGuard::new("run_cmd_detach_http_server");

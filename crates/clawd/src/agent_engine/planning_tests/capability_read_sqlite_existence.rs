@@ -306,6 +306,26 @@ fn contract_scoped_planner_skill_scope_uses_allowed_action_skills() {
 }
 
 #[test]
+fn lightweight_contract_scope_caps_broad_command_summary_to_preferred_skills() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+
+    assert!(contract_scoped_planner_skill_scope(Some(&route)).is_none());
+
+    let scope =
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)).expect("lightweight scope");
+    assert!(scope.len() <= 8);
+    assert!(scope.contains("run_cmd"));
+    assert!(scope.contains("process_basic"));
+    assert!(scope.contains("system_basic"));
+    assert!(!scope.contains("kb"));
+    assert!(!scope.contains("archive_basic"));
+}
+
+#[test]
 fn contract_scoped_planner_skill_scope_leaves_unclassified_routes_open() {
     let route = base_route_result();
 

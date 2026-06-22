@@ -22,6 +22,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod agent_engine;
+mod agent_hooks;
 mod agent_runtime_contract;
 mod answer_verifier;
 mod app_helpers;
@@ -61,6 +62,7 @@ mod pipeline_types;
 mod post_route_policy;
 mod prompt_utils;
 mod providers;
+mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;
 mod routing_context;

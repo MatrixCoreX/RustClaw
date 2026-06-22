@@ -10,11 +10,20 @@ impl SubagentRole {
         &[Self::Observe, Self::Review, Self::Test]
     }
 
-    fn as_token(self) -> &'static str {
+    pub(crate) fn as_token(self) -> &'static str {
         match self {
             Self::Observe => "observe",
             Self::Review => "review",
             Self::Test => "test",
+        }
+    }
+
+    pub(crate) fn parse_token(value: &str) -> Option<Self> {
+        match value.trim() {
+            "observe" => Some(Self::Observe),
+            "review" => Some(Self::Review),
+            "test" => Some(Self::Test),
+            _ => None,
         }
     }
 }

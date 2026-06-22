@@ -579,9 +579,90 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) extra: Option<Value>,
 }
 
+fn prepare_builtin_run_cmd_async_start_args(workspace_root: &Path, args: &mut Value) {
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+    if !obj
+        .get("async_start")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let job_uuid = uuid::Uuid::new_v4().to_string();
+    let job_id = ["local_process", job_uuid.as_str()].join(":");
+    let job_dir = workspace_root
+        .join(".rustclaw")
+        .join("async_jobs")
+        .join(&job_uuid);
+    let poll_after_seconds = obj
+        .get("poll_after_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(5)
+        .clamp(1, 3600);
+    let expires_in_seconds = obj
+        .get("expires_in_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(3600)
+        .clamp(1, 86_400);
+    let expires_at = (crate::now_ts_u64() as i64).saturating_add(expires_in_seconds as i64);
+    obj.insert("_clawd_async_job_id".to_string(), json!(job_id));
+    obj.insert(
+        "_clawd_async_job_dir".to_string(),
+        json!(job_dir.display().to_string()),
+    );
+    obj.insert(
+        "_clawd_async_poll_after_seconds".to_string(),
+        json!(poll_after_seconds),
+    );
+    obj.insert("_clawd_async_expires_at".to_string(), json!(expires_at));
+}
+
 fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) -> Option<Value> {
     let obj = args.as_object()?;
     match skill_name {
+        "run_cmd" => {
+            if !obj
+                .get("async_start")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            let job_id = obj
+                .get("_clawd_async_job_id")
+                .and_then(Value::as_str)?
+                .trim();
+            let job_dir = obj
+                .get("_clawd_async_job_dir")
+                .and_then(Value::as_str)?
+                .trim();
+            let poll_after_seconds = obj
+                .get("_clawd_async_poll_after_seconds")
+                .and_then(Value::as_u64)
+                .unwrap_or(5);
+            let expires_at = obj
+                .get("_clawd_async_expires_at")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            if job_id.is_empty() || job_dir.is_empty() || expires_at <= 0 {
+                return None;
+            }
+            Some(json!({
+                "schema_version": 1,
+                "source": "builtin_success_extra",
+                "action": "async_start",
+                "pending_async_job": {
+                    "job_id": job_id,
+                    "status": "accepted",
+                    "poll_after_seconds": poll_after_seconds,
+                    "expires_at": expires_at,
+                    "cancel_ref": format!("local_process:{}", job_dir),
+                    "message_key": "clawd.task.async_job_pending"
+                }
+            }))
+        }
         "write_file" => {
             let path = obj.get("path").and_then(Value::as_str)?.trim();
             if path.is_empty() {
@@ -1263,6 +1344,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     match kind {
         SkillKind::Builtin => {
+            if skill_name == "run_cmd" {
+                prepare_builtin_run_cmd_async_start_args(&state.skill_rt.workspace_root, &mut args);
+            }
             let extra = builtin_success_extra(&state.skill_rt.workspace_root, &skill_name, &args);
             return execute_builtin_skill_for_task(state, task, &skill_name, &args)
                 .await

@@ -38,6 +38,13 @@ __ATTEMPT_LEDGER__
 Malformed planner output to repair:
 __RAW_PLAN__
 
+Repair boundary:
+- This prompt is loop-bounded recovery only. It repairs malformed planner output after the agent loop has observed a structured failure, verifier issue, tool status, provider blocker, permission decision, or checkpoint state.
+- Treat `Attempt ledger` entries and their `repair_signal.repair_envelope` objects as the authoritative repair input. Prefer `repair_source`, `repair_class`, `issue_codes`, `missing_evidence`, `failed_action_ref`, `blocked_action_ref`, `observed_action_refs`, `permission_decision`, `contract_failure_policy`, `provider_status`, `retryable`, `no_progress_count`, `attempt_fingerprint`, `side_effect_fingerprint`, `checkpoint_id`, `resume_entrypoint`, `next_recovery_kind`, `message_key`, and `error_code` over free-form error text.
+- Use the current user request only as goal context. Do not infer a new repair class from user-language phrases, examples, labels, or localized wording.
+- If the envelope says permission is denied, confirmation is required, dry-run is required, the provider is blocked, a checkpoint should resume later, or retry is not allowed, do not repair into an equivalent bypass action.
+- If the envelope is missing or incomplete, repair conservatively from schema-valid tool/skill contracts and the attempt ledger. Do not invent a natural-language reply template as a substitute for missing machine evidence.
+
 Return exactly one JSON object:
 {
   "steps": [ <AgentAction JSON>, ... ]
@@ -80,6 +87,7 @@ Repair rules:
 - If the repair trigger is `greenfield_requires_artifact_creation`, a validate-only or readback-only plan is still invalid. Add a concrete creation step first.
 - If the raw planner output is plain prose, malformed JSON, a partial tool sketch, or mixed content, convert it into the smallest valid `steps` array that correctly handles the user request.
 - Treat `Attempt ledger` as the authoritative machine record of prior attempts. Prefer `repair_signal`, `action_ref`, `args_fingerprint`, `status`, `error_code`, `exit_code`, `missing_evidence`, `verifier_reason_code`, `retry_allowed`, `forbidden_repeat_signature`, and `contract_policy.required_evidence` over free-form text.
+- Treat `repair_signal.repair_envelope.next_recovery_kind` as the preferred recovery boundary. Use `replan` only for a materially different safe plan, `clarify`/`needs_user` only when a required target or approval is missing, `wait_background` for provider/tool/job/checkpoint waits, and `terminal_failure` when the envelope marks the issue as unrecoverable.
 - A repaired plan after failure must differ materially from a failed prior attempt. `retry_instruction` may guide the next attempt, but it must not override `repair_signal.retryable=false`, `retry_allowed=false`, or repeat a `repair_signal.forbidden_repeat_fingerprint` / `forbidden_repeat_signature` unless the ledger marks the prior failure as transient.
 - Treat registry metadata in the tool spec/playbooks (`retryable`, `requires_confirmation`, `capabilities`, and `validation_actions`) as capability policy. Do not repair a stable non-retryable blocker into another equivalent attempt. Prefer clarification, a grounded failure, or a materially different safe capability only when the user goal still has a valid fallback.
 - Treat the runtime environment block above as authoritative when repairing command or path-related steps. Keep command syntax, path style, env-var syntax, shell builtins, and executable choices compatible with that OS/shell.

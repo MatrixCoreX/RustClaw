@@ -1387,7 +1387,12 @@ pub(super) async fn handle_synthesize_answer_action(
                     agent_run_context,
                 )
                 .await
-                .map(|(answer, _summary)| answer)
+                .and_then(|(answer, summary)| {
+                    (summary.disposition
+                        == Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+                        && summary.completion_ok == Some(true))
+                    .then_some(answer)
+                })
                 .filter(|answer| !answer.trim().is_empty());
             if let Some(answer) = synthesized {
                 return Ok(answer);

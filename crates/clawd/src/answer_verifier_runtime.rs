@@ -1138,8 +1138,7 @@ pub(super) fn task_contract_prompt_block(task_contract: &TaskContract) -> String
 }
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {
-    let contract_matrix_trace =
-        crate::contract_matrix::trace_snapshot_for_output_contract(&route_result.output_contract);
+    let contract_matrix_trace = verifier_contract_matrix_prompt_trace(route_result);
     serde_json::to_string_pretty(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
         "requires_content_evidence": route_result.output_contract.requires_content_evidence,
@@ -1151,6 +1150,26 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
         "contract_matrix": contract_matrix_trace,
     }))
     .unwrap_or_else(|_| "{}".to_string())
+}
+
+fn verifier_contract_matrix_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
+    let mut trace =
+        crate::contract_matrix::trace_snapshot_for_output_contract(&route_result.output_contract)?;
+    if let Some(obj) = trace.as_object_mut() {
+        obj.remove("trace_policy");
+        obj.remove("observation_extractors");
+        obj.remove("observation_sources");
+        obj.remove("artifact_kind");
+        obj.remove("channel_visibility");
+        obj.insert(
+            "compact_line".to_string(),
+            serde_json::Value::String(
+                crate::contract_matrix::compact_prompt_line_for_route(route_result)
+                    .unwrap_or_default(),
+            ),
+        );
+    }
+    Some(trace)
 }
 
 pub(super) fn provider_safe_excerpt_hash(text: &str) -> String {

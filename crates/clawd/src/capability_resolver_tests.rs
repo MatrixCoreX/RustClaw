@@ -23,6 +23,23 @@ fn state_with_workspace_registry() -> crate::AppState {
     state
 }
 
+fn state_without_registry_with_skills(skills: &[&str]) -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let enabled = skills
+        .iter()
+        .map(|skill| (*skill).to_string())
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: None,
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    state
+}
+
 #[test]
 fn resolves_filesystem_list_entries_to_fs_basic() {
     let action = resolve_static_capability_action(
@@ -143,7 +160,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
 
 #[test]
 fn capability_resolution_record_covers_resolved_mapping() {
-    let state = crate::AppState::test_default_with_fixture_provider();
+    let state = state_without_registry_with_skills(&["fs_basic"]);
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
         "filesystem.list_entries",
@@ -159,16 +176,28 @@ fn capability_resolution_record_covers_resolved_mapping() {
     assert!(matches!(
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
-            | "capability_resolver_static_mapping_resolved"
+            | "capability_resolver_static_compat_resolved"
     ));
     assert_eq!(record.outcome, "resolved");
-    assert!(matches!(record.source, "registry" | "static"));
+    assert!(matches!(record.source, "registry" | "static_compat"));
     assert_eq!(record.capability_ref, "filesystem.list_entries");
     assert!(matches!(
         record.resolved_ref.as_deref(),
         Some("tool:fs_basic") | Some("skill:fs_basic")
     ));
     assert!(record.planner_kind.is_some());
+}
+
+#[test]
+fn workspace_registry_does_not_use_static_compat_for_ambiguous_bare_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) =
+        resolve_capability_action_with_record_for_state(&state, "config_basic", json!({}));
+
+    assert!(action.is_none());
+    assert_eq!(record.reason_code, "capability_resolver_unresolved");
+    assert_eq!(record.source, "none");
+    assert_eq!(record.capability_ref, "config_basic");
 }
 
 #[test]
@@ -282,6 +311,170 @@ fn registry_resolves_doc_parse_bare_capability() {
     );
     assert_eq!(record.source, "registry");
     assert_eq!(record.capability_ref, "doc_parse");
+}
+
+#[test]
+fn registry_resolves_terminal_layer_representative_capabilities() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        (
+            "filesystem.list_entries",
+            json!({"path": "."}),
+            "tool:fs_basic",
+        ),
+        (
+            "system.run_command",
+            json!({"command": "pwd"}),
+            "skill:run_cmd",
+        ),
+        ("git.status", json!({}), "tool:git_basic"),
+        (
+            "web.search_results",
+            json!({"query": "rustclaw"}),
+            "tool:web_search_extract",
+        ),
+        (
+            "config.read_field",
+            json!({"path": "configs/config.toml", "field_path": "skills.registry_path"}),
+            "tool:config_basic",
+        ),
+        ("process.ps", json!({}), "tool:process_basic"),
+        (
+            "service.status",
+            json!({"target": "clawd"}),
+            "tool:service_control",
+        ),
+        (
+            "task_control.list",
+            json!({"limit": 5}),
+            "tool:task_control",
+        ),
+        (
+            "image_vision.describe",
+            json!({"images": ["fixtures/image.png"]}),
+            "skill:image_vision",
+        ),
+        (
+            "audio.transcribe",
+            json!({"audio_path": "fixtures/audio.wav"}),
+            "skill:audio_transcribe",
+        ),
+        (
+            "video.generate",
+            json!({"prompt": "test"}),
+            "skill:video_generate",
+        ),
+        (
+            "music.generate",
+            json!({"prompt": "test"}),
+            "skill:music_generate",
+        ),
+    ];
+
+    for (capability, args, expected_ref) in cases {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+        assert!(action.is_some(), "{capability} should resolve");
+        assert_eq!(
+            record.reason_code, "capability_resolver_registry_mapping_resolved",
+            "{capability} should resolve through registry"
+        );
+        assert_eq!(record.source, "registry");
+        assert_eq!(record.capability_ref, capability);
+        assert_eq!(record.resolved_ref.as_deref(), Some(expected_ref));
+    }
+}
+
+#[test]
+fn registry_resolves_legacy_machine_capability_aliases_before_static_fallback() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        ("system.run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
+        (
+            "filesystem.stat_path",
+            json!({"path": "."}),
+            "tool:fs_basic",
+        ),
+        ("filesystem.list_dir", json!({"path": "."}), "tool:fs_basic"),
+        (
+            "filesystem.read_file",
+            json!({"path": "README.md"}),
+            "tool:fs_basic",
+        ),
+        (
+            "fs_basic.read_range",
+            json!({"path": "README.md"}),
+            "tool:fs_basic",
+        ),
+        (
+            "fs_basic.read_file",
+            json!({"path": "README.md"}),
+            "tool:fs_basic",
+        ),
+        (
+            "filesystem.find_files",
+            json!({"root": ".", "pattern": "*.rs"}),
+            "tool:fs_basic",
+        ),
+        (
+            "filesystem.search_text",
+            json!({"root": ".", "query": "TaskJournal"}),
+            "tool:fs_basic",
+        ),
+        (
+            "filesystem.create_dir",
+            json!({"path": "/tmp/rustclaw-test"}),
+            "tool:fs_basic",
+        ),
+        (
+            "filesystem.delete_path",
+            json!({"path": "/tmp/rustclaw-test"}),
+            "tool:fs_basic",
+        ),
+        (
+            "config.plan_config_change",
+            json!({"field_path": "llm.default_vendor", "value": "minimax"}),
+            "tool:config_edit",
+        ),
+        (
+            "config.guard_config",
+            json!({"path": "configs/config.toml"}),
+            "tool:config_edit",
+        ),
+        (
+            "system_basic.extract_field",
+            json!({"path": "configs/config.toml", "field_path": "server.listen"}),
+            "tool:system_basic",
+        ),
+        (
+            "system_basic.read_text_range",
+            json!({"path": "README.md"}),
+            "tool:system_basic",
+        ),
+        (
+            "transform",
+            json!({"records": [{"score": 1}], "ops": [{"op": "sort", "by": "score"}]}),
+            "tool:transform",
+        ),
+        (
+            "data.transform_records",
+            json!({"records": [{"score": 1}], "ops": [{"op": "sort", "by": "score"}]}),
+            "tool:transform",
+        ),
+    ];
+
+    for (capability, args, expected_ref) in cases {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+        assert!(action.is_some(), "{capability} should resolve");
+        assert_eq!(
+            record.reason_code, "capability_resolver_registry_mapping_resolved",
+            "{capability} should resolve through registry before static fallback"
+        );
+        assert_eq!(record.source, "registry");
+        assert_eq!(record.capability_ref, capability);
+        assert_eq!(record.resolved_ref.as_deref(), Some(expected_ref));
+    }
 }
 
 #[test]

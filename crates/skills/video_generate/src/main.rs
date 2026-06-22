@@ -207,6 +207,27 @@ fn execute(
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("generate");
+    match action {
+        "generate" => execute_generate(cfg, workspace_root, args),
+        "poll" => execute_poll(cfg, workspace_root, obj),
+        _ => Err(format!("unsupported action: {action}")),
+    }
+}
+
+fn execute_generate(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), String> {
+    let obj = args
+        .as_object()
+        .ok_or_else(|| "args must be object".to_string())?;
     let requested_vendor = obj.get("vendor").and_then(Value::as_str);
     let vendor = select_vendor(
         requested_vendor,
@@ -339,28 +360,32 @@ fn execute(
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {provider_name} client failed: {err}"))?;
-    let task_id = create_video_task(&client, provider, &payload)?;
-    let wait_for_completion = optional_bool(obj, "wait_for_completion").unwrap_or(true);
-    if !wait_for_completion {
-        return Ok(video_task_response(
-            "submitted",
-            &task_id,
-            provider_name,
-            &model,
-            adapter_kind,
-            None,
-            None,
-            None,
-        ));
-    }
-
     let poll_interval_ms = cfg_poll_interval_ms(&cfg.video_generation);
+    let poll_after_seconds = poll_after_seconds_from_interval_ms(poll_interval_ms);
     let max_poll_seconds = obj
         .get("max_poll_seconds")
         .and_then(Value::as_u64)
         .or(cfg.video_generation.max_poll_seconds)
         .unwrap_or(600)
         .clamp(5, 900);
+    let should_download = optional_bool(obj, "download")
+        .or(cfg.video_generation.download_on_success)
+        .unwrap_or(true);
+    let output_path_string = output_path.to_string_lossy().to_string();
+    let task_id = create_video_task(&client, provider, &payload)?;
+    let wait_for_completion = optional_bool(obj, "wait_for_completion").unwrap_or(true);
+    if !wait_for_completion {
+        return Ok(video_pending_task_response(
+            &task_id,
+            provider_name,
+            &model,
+            adapter_kind,
+            poll_after_seconds,
+            max_poll_seconds,
+            should_download,
+            &output_path_string,
+        ));
+    }
     let query = poll_video_task(
         &client,
         provider,
@@ -396,9 +421,6 @@ fn execute(
         .get("file_id")
         .and_then(value_to_string)
         .ok_or_else(|| "minimax video success response missing file_id".to_string())?;
-    let should_download = optional_bool(obj, "download")
-        .or(cfg.video_generation.download_on_success)
-        .unwrap_or(true);
     if !should_download {
         return Ok(video_task_response(
             &status,
@@ -437,6 +459,14 @@ fn cfg_poll_interval_ms(cfg: &VideoGenerationConfig) -> u64 {
     cfg.poll_interval_ms.unwrap_or(5_000).clamp(500, 60_000)
 }
 
+fn poll_after_seconds_from_interval_ms(poll_interval_ms: u64) -> u64 {
+    poll_interval_ms.div_ceil(1000).max(1)
+}
+
+fn provider_video_job_id(provider: &str, task_id: &str) -> String {
+    format!("provider:video_generate:{provider}:{task_id}")
+}
+
 fn video_task_response(
     status: &str,
     task_id: &str,
@@ -459,6 +489,422 @@ fn video_task_response(
             "output_path": output_path,
             "outputs": [],
             "query": query.unwrap_or(Value::Null),
+        }),
+    )
+}
+
+fn video_pending_task_response(
+    task_id: &str,
+    provider: &str,
+    model: &str,
+    model_kind: VideoAdapterKind,
+    poll_after_seconds: u64,
+    max_poll_seconds: u64,
+    download: bool,
+    output_path: &str,
+) -> (String, Value) {
+    let job_id = provider_video_job_id(provider, task_id);
+    let expires_at = (unix_ts() as i64).saturating_add(max_poll_seconds as i64);
+    (
+        format!("VIDEO_TASK:{task_id}"),
+        json!({
+            "provider": provider,
+            "model": model,
+            "model_kind": adapter_kind_name(model_kind),
+            "task_id": task_id,
+            "status": "submitted",
+            "file_id": Value::Null,
+            "output_path": output_path,
+            "outputs": [],
+            "pending_async_job": {
+                "job_id": job_id,
+                "status": "accepted",
+                "poll_after_seconds": poll_after_seconds,
+                "expires_at": expires_at,
+                "cancel_ref": job_id,
+                "message_key": "clawd.task.async_job_pending",
+                "poll_adapter": {
+                    "kind": "skill_poll",
+                    "skill_name": "video_generate",
+                    "args": {
+                        "action": "poll",
+                        "task_id": task_id,
+                        "job_id": job_id,
+                        "vendor": provider,
+                        "model": model,
+                        "download": download,
+                        "output_path": output_path,
+                        "poll_after_seconds": poll_after_seconds,
+                        "expires_at": expires_at
+                    }
+                }
+            },
+        }),
+    )
+}
+
+fn execute_poll(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let requested_vendor = obj.get("vendor").and_then(Value::as_str);
+    let vendor = select_vendor(
+        requested_vendor,
+        cfg.video_generation.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    );
+    let provider_name = vendor_name(vendor);
+    let provider_cfg = resolved_vendor_config(cfg, vendor);
+    let model = obj
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| cfg.video_generation.default_model.as_deref())
+        .or_else(|| first_model(vendor_models(&cfg.video_generation, vendor)))
+        .or_else(|| first_model(cfg.video_generation.models.as_ref()))
+        .or_else(|| provider_cfg.as_ref().map(|config| config.model.as_str()))
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let adapter_kind = adapter_kind_for(vendor, provider_cfg.as_ref());
+    let task_id = obj
+        .get("task_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "task_id is required".to_string())?;
+    let job_id = obj
+        .get("job_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| provider_video_job_id(provider_name, task_id));
+    let poll_after_seconds = obj
+        .get("poll_after_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            poll_after_seconds_from_interval_ms(cfg_poll_interval_ms(&cfg.video_generation))
+        })
+        .clamp(1, 3600);
+    let expires_at = obj
+        .get("expires_at")
+        .and_then(Value::as_i64)
+        .unwrap_or_else(|| {
+            (unix_ts() as i64).saturating_add(
+                cfg.video_generation
+                    .max_poll_seconds
+                    .unwrap_or(600)
+                    .clamp(5, 900) as i64,
+            )
+        });
+    if expires_at <= unix_ts() as i64 {
+        return Ok(video_poll_response(
+            task_id,
+            &job_id,
+            provider_name,
+            &model,
+            adapter_kind,
+            poll_after_seconds,
+            expires_at,
+            video_poll_adapter_result(
+                &job_id,
+                "expired",
+                poll_after_seconds,
+                expires_at,
+                None,
+                Some("async_poll_expired"),
+                Some("clawd.task.async_poll_expired"),
+            ),
+            json!({"status": "expired"}),
+        ));
+    }
+    if optional_bool(obj, "dry_run").unwrap_or(false) {
+        let status = obj
+            .get("mock_status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("running");
+        let query = json!({
+            "status": status,
+            "file_id": obj.get("mock_file_id").cloned().unwrap_or(Value::Null),
+        });
+        let adapter_result = adapter_result_from_video_query(
+            workspace_root,
+            cfg.video_generation
+                .default_output_dir
+                .as_deref()
+                .unwrap_or("video/download"),
+            obj,
+            task_id,
+            &job_id,
+            provider_name,
+            &model,
+            adapter_kind,
+            poll_after_seconds,
+            expires_at,
+            query.clone(),
+            true,
+            optional_bool(obj, "download").unwrap_or(true),
+            None,
+        )?;
+        return Ok(video_poll_response(
+            task_id,
+            &job_id,
+            provider_name,
+            &model,
+            adapter_kind,
+            poll_after_seconds,
+            expires_at,
+            adapter_result,
+            query,
+        ));
+    }
+
+    let provider = provider_cfg
+        .as_ref()
+        .ok_or_else(|| format!("{provider_name} config missing"))?;
+    if !matches!(adapter_kind, VideoAdapterKind::MiniMaxNative) {
+        return Err(format!(
+            "{provider_name} video adapter is not available; configure adapter_kind=minimax_compatible only for MiniMax-compatible endpoints"
+        ));
+    }
+    check_api_key(provider_name, &provider.api_key)?;
+    let timeout_seconds = provider
+        .timeout_seconds
+        .or(cfg.video_generation.timeout_seconds)
+        .unwrap_or(120)
+        .clamp(5, 900);
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|err| format!("build {provider_name} client failed: {err}"))?;
+    let query = query_video_task(&client, provider, task_id)?;
+    let should_download = optional_bool(obj, "download")
+        .or(cfg.video_generation.download_on_success)
+        .unwrap_or(true);
+    let download_url = if query
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|status| status == "Success")
+        && should_download
+    {
+        let file_id = query
+            .get("file_id")
+            .and_then(value_to_string)
+            .ok_or_else(|| "minimax video success response missing file_id".to_string())?;
+        let output_path = resolve_output_path(
+            workspace_root,
+            cfg.video_generation
+                .default_output_dir
+                .as_deref()
+                .unwrap_or("video/download"),
+            obj.get("output_path").and_then(Value::as_str),
+        )?;
+        let url = retrieve_file_url(&client, provider, &file_id)?;
+        download_to_path(&client, &url, &output_path)?;
+        Some(url)
+    } else {
+        None
+    };
+    let adapter_result = adapter_result_from_video_query(
+        workspace_root,
+        cfg.video_generation
+            .default_output_dir
+            .as_deref()
+            .unwrap_or("video/download"),
+        obj,
+        task_id,
+        &job_id,
+        provider_name,
+        &model,
+        adapter_kind,
+        poll_after_seconds,
+        expires_at,
+        query.clone(),
+        false,
+        should_download,
+        download_url,
+    )?;
+    Ok(video_poll_response(
+        task_id,
+        &job_id,
+        provider_name,
+        &model,
+        adapter_kind,
+        poll_after_seconds,
+        expires_at,
+        adapter_result,
+        query,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn adapter_result_from_video_query(
+    workspace_root: &Path,
+    default_output_dir: &str,
+    obj: &Map<String, Value>,
+    task_id: &str,
+    job_id: &str,
+    provider: &str,
+    model: &str,
+    model_kind: VideoAdapterKind,
+    poll_after_seconds: u64,
+    expires_at: i64,
+    query: Value,
+    dry_run: bool,
+    should_download: bool,
+    download_url: Option<String>,
+) -> Result<Value, String> {
+    let status = query
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if status == "Fail" {
+        return Ok(video_poll_adapter_result(
+            job_id,
+            "failed",
+            poll_after_seconds,
+            expires_at,
+            Some(json!({
+                "schema_version": 1,
+                "source": "video_generate_poll_adapter",
+                "provider": provider,
+                "model": model,
+                "model_kind": adapter_kind_name(model_kind),
+                "task_id": task_id,
+                "status": status,
+                "query": query,
+            })),
+            Some("provider_video_job_failed"),
+            Some("clawd.task.async_poll_adapter_failed"),
+        ));
+    }
+    if status != "Success" {
+        return Ok(video_poll_adapter_result(
+            job_id,
+            if status == "Queueing" {
+                "accepted"
+            } else {
+                "running"
+            },
+            poll_after_seconds,
+            expires_at,
+            None,
+            None,
+            Some("clawd.task.async_job_pending"),
+        ));
+    }
+    let file_id = query
+        .get("file_id")
+        .and_then(value_to_string)
+        .ok_or_else(|| "minimax video success response missing file_id".to_string())?;
+    let output_path = resolve_output_path(
+        workspace_root,
+        default_output_dir,
+        obj.get("output_path").and_then(Value::as_str),
+    )?;
+    let output = output_path.to_string_lossy().to_string();
+    let mut final_result = json!({
+        "schema_version": 1,
+        "source": "video_generate_poll_adapter",
+        "provider": provider,
+        "model": model,
+        "model_kind": adapter_kind_name(model_kind),
+        "task_id": task_id,
+        "status": status,
+        "file_id": file_id,
+        "output_path": output,
+        "outputs": [],
+        "query": query,
+        "dry_run": dry_run,
+    });
+    if should_download {
+        if let Some(obj) = final_result.as_object_mut() {
+            obj.insert(
+                "outputs".to_string(),
+                json!([{"type":"video_file","path": output}]),
+            );
+            if let Some(download_url) = download_url {
+                obj.insert("download_url".to_string(), json!(download_url));
+            }
+        }
+    }
+    Ok(video_poll_adapter_result(
+        job_id,
+        "succeeded",
+        poll_after_seconds,
+        expires_at,
+        Some(final_result),
+        None,
+        Some("clawd.task.async_job_completed"),
+    ))
+}
+
+fn video_poll_adapter_result(
+    job_id: &str,
+    status: &str,
+    poll_after_seconds: u64,
+    expires_at: i64,
+    payload: Option<Value>,
+    error_code: Option<&str>,
+    message_key: Option<&str>,
+) -> Value {
+    let mut result = json!({
+        "job_id": job_id,
+        "status": status,
+        "poll_after_seconds": poll_after_seconds,
+        "expires_at": expires_at,
+        "message_key": message_key.unwrap_or("clawd.task.async_job_pending"),
+    });
+    if let Some(obj) = result.as_object_mut() {
+        match status {
+            "succeeded" => {
+                if let Some(payload) = payload.filter(Value::is_object) {
+                    obj.insert("final_result_json".to_string(), payload);
+                }
+            }
+            "failed" | "expired" => {
+                if let Some(error_code) = error_code {
+                    obj.insert("error_code".to_string(), json!(error_code));
+                }
+                if let Some(payload) = payload.filter(Value::is_object) {
+                    obj.insert("failure_result_json".to_string(), payload);
+                }
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn video_poll_response(
+    task_id: &str,
+    job_id: &str,
+    provider: &str,
+    model: &str,
+    model_kind: VideoAdapterKind,
+    poll_after_seconds: u64,
+    expires_at: i64,
+    adapter_result: Value,
+    query: Value,
+) -> (String, Value) {
+    (
+        format!("VIDEO_TASK:{task_id}"),
+        json!({
+            "provider": provider,
+            "model": model,
+            "model_kind": adapter_kind_name(model_kind),
+            "task_id": task_id,
+            "job_id": job_id,
+            "status": query.get("status").cloned().unwrap_or(Value::Null),
+            "poll_after_seconds": poll_after_seconds,
+            "expires_at": expires_at,
+            "query": query,
+            "async_poll_adapter_result": adapter_result,
         }),
     )
 }

@@ -1063,6 +1063,92 @@ fn direct_answer_defers_wrapped_process_basic_port_status_to_synthesis() {
 }
 
 #[test]
+fn observed_entries_compact_wrapped_process_basic_port_list() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "process_basic",
+        &serde_json::json!({
+            "extra": {
+                "action": "port_list",
+                "command_tool": "ss",
+                "exit_code": 0,
+                "listener_count": 3,
+                "public_listener_count": 2,
+                "localhost_listener_count": 1,
+                "ports": ["80", "8787", "46225"],
+                "public_ports": ["80", "8787"],
+                "public_listeners": [
+                    {
+                        "bind_scope": "all_interfaces",
+                        "local_endpoint": "0.0.0.0:80",
+                        "pid": null,
+                        "port": "80",
+                        "process_name": null
+                    },
+                    {
+                        "bind_scope": "all_interfaces",
+                        "local_endpoint": "0.0.0.0:8787",
+                        "pid": 2308287,
+                        "port": "8787",
+                        "process_name": "clawd"
+                    }
+                ],
+                "listeners": [],
+                "output": "exit=0\nState Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:((\"clawd\",pid=2308287,fd=31))"
+            },
+            "text": "exit=0\nState Recv-Q Send-Q Local Address:Port Peer Address:PortProcess"
+        })
+        .to_string(),
+    ));
+
+    let entries = observed_output_entries(&loop_state);
+    let joined = entries.join("\n");
+
+    assert!(joined.contains("process_basic.port_list"));
+    assert!(joined.contains("listener.2.port=8787"));
+    assert!(joined.contains("listener.2.process=clawd"));
+    assert!(joined.contains("listener.2.pid=2308287"));
+    assert!(!joined.contains("State Recv-Q"));
+    assert!(!joined.contains("users:((\"clawd\""));
+}
+
+#[test]
+fn observed_entries_compact_wrapped_process_basic_ps() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "process_basic",
+        &serde_json::json!({
+            "extra": {
+                "action": "ps",
+                "exit_code": 0,
+                "filter": null,
+                "limit": 30,
+                "match_count": 3,
+                "process_count": 3,
+                "running": true,
+                "status": "running",
+                "output": "exit=0\nPID PPID %CPU %MEM COMM\n111 1 9.1 0.2 chrome\n222 1 0.7 0.4 clawd\n333 1 0.1 0.1 helper",
+                "platform": "linux"
+            },
+            "text": "exit=0\nPID PPID %CPU %MEM COMM\n111 1 9.1 0.2 chrome\n222 1 0.7 0.4 clawd\n333 1 0.1 0.1 helper"
+        })
+        .to_string(),
+    ));
+
+    let entries = observed_output_entries(&loop_state);
+    let joined = entries.join("\n");
+
+    assert!(joined.contains("process_basic.ps"));
+    assert!(joined.contains("ps.match_count=3"));
+    assert!(joined.contains("process.2.pid=222"));
+    assert!(joined.contains("process.2.comm=clawd"));
+    assert!(!joined.contains("PID PPID"));
+    assert!(!joined.contains("exit=0"));
+}
+
+#[test]
 fn direct_answer_keeps_wrapped_process_basic_port_status_scalar_count() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

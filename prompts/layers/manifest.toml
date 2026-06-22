@@ -31,6 +31,15 @@ overlay = ["prompts/layers/overlays/loop_incremental_plan_prompt.md"]
 vendor_patch = "execution/common.md"
 
 [[prompts]]
+logical_path = "prompts/lightweight_incremental_plan_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/lightweight_incremental_plan_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
 logical_path = "prompts/plan_repair_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",
@@ -288,3 +297,8 @@ overlay = ["prompts/layers/overlays/delivery_text_classifier_prompt.md"]
 logical_path = "prompts/observed_answer_fallback_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/observed_answer_fallback_prompt.md"]
+
+[[prompts]]
+logical_path = "prompts/observed_answer_fallback_compact_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/observed_answer_fallback_compact_prompt.md"]

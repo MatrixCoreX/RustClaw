@@ -1,0 +1,351 @@
+use serde_json::{json, Value};
+
+use super::*;
+
+#[test]
+fn trace_json_includes_pollable_machine_event_stream() {
+    let mut journal = TaskJournal::for_task("task-events", "ask", "inspect");
+    journal.record_task_lifecycle(json!({
+        "state": "background",
+        "next_action_kind": "poll_async_job",
+        "next_action_ref": "job-1"
+    }));
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "inspect".to_string(),
+        plan_result: Some(test_plan(
+            crate::PlanKind::Single,
+            vec![test_plan_step(
+                "step_1",
+                "call_capability",
+                "filesystem.list_entries",
+                json!({"path": "."}),
+            )],
+        )),
+        ..Default::default()
+    });
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "fs_basic",
+        r#"{"status":"ok","output_path":"reports/out.txt"}"#,
+    ));
+    journal.push_task_observation(json!({"source": "fs_basic", "status": "ok"}));
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event_types = events
+        .iter()
+        .filter_map(|event| event.get("event_type").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        event_types,
+        vec![
+            "task_lifecycle",
+            "agent_round",
+            "tool_step",
+            "task_observation",
+            "task_final"
+        ]
+    );
+    assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        events[2].pointer("/payload/status").and_then(Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/action_kind")
+            .and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/requested_capability")
+            .and_then(Value::as_str),
+        Some("filesystem.list_entries")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/resolved_tool_or_skill")
+            .and_then(Value::as_str),
+        Some("fs_basic")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/resolution_source")
+            .and_then(Value::as_str),
+        Some("capability_resolver")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/artifact_ref_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/artifact_refs/0/ref")
+            .and_then(Value::as_str),
+        Some("reports/out.txt")
+    );
+}
+
+#[test]
+fn trace_json_projects_provider_prompt_metrics_as_provider_events() {
+    let mut journal = TaskJournal::for_task("task-provider-events", "ask", "inspect");
+    let mut by_prompt = std::collections::HashMap::new();
+    by_prompt.insert(
+        "normalizer".to_string(),
+        crate::LlmPromptBucket {
+            count: 1,
+            elapsed_ms: 42,
+            provider_attempt_count: 3,
+            provider_retry_count: 2,
+            provider_retryable_error_count: 2,
+            provider_final_error_count: 1,
+            provider_last_retry_error_kinds: std::collections::BTreeMap::from([(
+                "timeout".to_string(),
+                1,
+            )]),
+            provider_final_error_kinds: std::collections::BTreeMap::from([(
+                "rate_limited".to_string(),
+                1,
+            )]),
+            prompt_truncation_count: 1,
+            prompt_bytes_before_max: Some(157_037),
+            prompt_bytes_budget_min: Some(125_200),
+            prompt_bytes_after_max: Some(125_180),
+            prompt_truncated_bytes_total: 31_857,
+        },
+    );
+    journal.record_llm_by_prompt(by_prompt);
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("provider_call"))
+        .expect("provider_call event");
+
+    assert_eq!(
+        event
+            .pointer("/payload/prompt_label")
+            .and_then(Value::as_str),
+        Some("normalizer")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/provider_attempt_count")
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/provider_final_error_kinds/rate_limited")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/prompt_bytes_after_max")
+            .and_then(Value::as_u64),
+        Some(125_180)
+    );
+}
+
+#[test]
+fn trace_json_projects_http_download_artifact_ref_to_tool_event() {
+    let mut journal = TaskJournal::for_task("task-http-artifact", "ask", "download");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "http_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "get",
+                    "downloaded": true,
+                    "output_path": "document/http/download/api.body",
+                    "artifact_path": "document/http/download/api.body",
+                    "size_bytes": 128
+                },
+                "text": "status=200\noutput_path=document/http/download/api.body"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    assert_eq!(
+        trace
+            .pointer("/step_results/0/artifact_ref_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        trace
+            .pointer("/step_results/0/artifact_refs/0/ref")
+            .and_then(Value::as_str),
+        Some("document/http/download/api.body")
+    );
+    let event = trace
+        .pointer("/event_stream")
+        .and_then(Value::as_array)
+        .and_then(|events| {
+            events
+                .iter()
+                .find(|event| event.get("event_type").and_then(Value::as_str) == Some("tool_step"))
+        })
+        .expect("tool_step event");
+    assert_eq!(
+        event
+            .pointer("/payload/artifact_refs/0/ref")
+            .and_then(Value::as_str),
+        Some("document/http/download/api.body")
+    );
+}
+
+#[test]
+fn trace_json_projects_agent_hook_observations_as_hook_events() {
+    let mut journal = TaskJournal::for_task("task-hook-events", "ask", "inspect");
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "owner_layer": "agent_hooks",
+        "stage": "pre_tool_use",
+        "decision": "allow",
+        "reason_code": "pre_tool_use_allowed",
+        "action_ref": "fs_basic.list_dir",
+        "tool_or_skill": "fs_basic"
+    }));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+
+    assert_eq!(
+        events[0].get("event_type").and_then(Value::as_str),
+        Some("agent_hook")
+    );
+    assert_eq!(
+        events[0]
+            .pointer("/payload/decision")
+            .and_then(Value::as_str),
+        Some("allow")
+    );
+    assert_eq!(
+        events[0]
+            .pointer("/payload/action_ref")
+            .and_then(Value::as_str),
+        Some("fs_basic.list_dir")
+    );
+}
+
+#[test]
+fn trace_json_projects_tool_step_error_machine_fields() {
+    let mut journal = TaskJournal::for_task("task-error-events", "ask", "inspect");
+    journal.step_results.push(TaskJournalStepTrace::new(
+        "step_1",
+        "archive_basic",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some(
+            r#"__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"contract_action_rejected","error_text":"blocked","text":null}"#
+                .to_string(),
+        ),
+    ));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("tool_step"))
+        .expect("tool_step event");
+
+    assert_eq!(
+        event.pointer("/payload/error_kind").and_then(Value::as_str),
+        Some("contract_action_rejected")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/failure_attribution")
+            .and_then(Value::as_str),
+        Some("contract_gap")
+    );
+}
+
+#[test]
+fn trace_json_projects_subagent_observations_as_subagent_events() {
+    let mut journal = TaskJournal::for_task("task-subagent", "ask", "subagent");
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_runtime",
+        "status": "accepted",
+        "role": "review",
+        "child_run_summary": {
+            "status": "completed",
+            "result_status": "completed",
+            "trace_merge_status": "merged"
+        },
+        "child_result": {
+            "status": "completed",
+            "outcome_code": "subagent_inline_readonly_completed"
+        },
+        "write_enabled": false,
+        "external_publish_enabled": false,
+    }));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("subagent"))
+        .expect("subagent event");
+
+    assert_eq!(
+        event
+            .pointer("/payload/owner_layer")
+            .and_then(Value::as_str),
+        Some("subagent_runtime")
+    );
+    assert_eq!(
+        event.pointer("/payload/role").and_then(Value::as_str),
+        Some("review")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/write_enabled")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/external_publish_enabled")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/child_result/outcome_code")
+            .and_then(Value::as_str),
+        Some("subagent_inline_readonly_completed")
+    );
+}

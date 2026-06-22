@@ -1,7 +1,9 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::AppState;
+
+const ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS: usize = 64_000;
 
 fn resume_context_body(value: &Value) -> &Value {
     value.get("resume_context").unwrap_or(value)
@@ -194,7 +196,7 @@ fn resume_context_failed_structured_skill_error(
         })
 }
 
-pub(super) fn direct_chat_answer_verifier_retry_applicable(
+pub(super) fn answer_verifier_retry_applicable(
     route_result: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
@@ -217,10 +219,57 @@ pub(super) fn direct_chat_answer_verifier_retry_applicable(
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery
         && journal.step_results.is_empty();
-    active_text_rewrite || pure_chat_agent_loop
+    let observed_tool_evidence = !route_result.needs_clarify
+        && !route_result.wants_file_delivery
+        && !route_result.output_contract.delivery_required
+        && journal_has_successful_non_terminal_step(journal)
+        && !journal_has_failed_non_terminal_step(journal);
+    active_text_rewrite || pure_chat_agent_loop || observed_tool_evidence
 }
 
-pub(super) async fn retry_direct_chat_answer_after_verifier(
+fn journal_has_successful_non_terminal_step(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !step_is_terminal_planner_action(step.skill.as_str())
+    })
+}
+
+fn journal_has_failed_non_terminal_step(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().any(|step| {
+        step.status != crate::executor::StepExecutionStatus::Ok
+            && !step_is_terminal_planner_action(step.skill.as_str())
+    })
+}
+
+fn step_is_terminal_planner_action(skill: &str) -> bool {
+    matches!(
+        skill,
+        "respond" | "synthesize_answer" | "think" | "answer_verifier"
+    )
+}
+
+pub(super) fn answer_verifier_retry_observed_trace(
+    journal: &crate::task_journal::TaskJournal,
+) -> String {
+    let trace = journal.to_trace_json();
+    let compact = json!({
+        "step_results": trace.get("step_results").cloned().unwrap_or_else(|| json!([])),
+        "task_observations": trace.get("task_observations").cloned().unwrap_or_else(|| json!([])),
+        "evidence_coverage": trace.get("evidence_coverage").cloned().unwrap_or(Value::Null),
+        "finalizer_summary": trace.get("finalizer_summary").cloned().unwrap_or(Value::Null),
+        "answer_verifier_summary": trace.get("answer_verifier_summary").cloned().unwrap_or(Value::Null),
+    });
+    let serialized = serde_json::to_string(&compact).unwrap_or_else(|_| "{}".to_string());
+    if serialized.len() <= ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS {
+        return serialized;
+    }
+    let mut out =
+        crate::utf8_safe_prefix(&serialized, ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS).to_string();
+    out.push_str("...(truncated)");
+    out
+}
+
+pub(super) async fn retry_answer_after_verifier(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
@@ -234,22 +283,24 @@ pub(super) async fn retry_direct_chat_answer_after_verifier(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("<none>");
+    let observed_trace = answer_verifier_retry_observed_trace(journal);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let prompt = format!(
-        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Preserve the most recent generated output's factual scope and evidence boundary. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in Current task context.",
+        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
         state.policy.command_intent.default_locale,
         user_request.trim(),
         context,
+        observed_trace,
         rejected_answer.trim(),
         verifier.answer_incomplete_reason.trim(),
         verifier.retry_instruction.trim(),
     );
-    const PROMPT_SOURCE: &str = "inline:answer_verifier_direct_chat_retry";
+    const PROMPT_SOURCE: &str = "inline:answer_verifier_retry";
     crate::log_prompt_render(
         state,
         &task.task_id,
-        "answer_verifier_direct_chat_retry",
+        "answer_verifier_retry",
         PROMPT_SOURCE,
         None,
     );
@@ -267,7 +318,7 @@ pub(super) async fn retry_direct_chat_answer_after_verifier(
         }
         Err(err) => {
             warn!(
-                "answer_verifier_direct_chat_retry_failed task_id={} err={}",
+                "answer_verifier_retry_failed task_id={} err={}",
                 task.task_id, err
             );
             None

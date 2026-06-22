@@ -745,10 +745,18 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
         pending_async_job: None,
         repair_signal: loop_state.last_stop_signal.as_ref().map(|signal| {
-            json!({
-                "kind": "agent_loop_stop_signal",
-                "signal": signal,
-            })
+            crate::repair_signal::RepairSignal::from_checkpoint_resume_parts(
+                &checkpoint_id,
+                ResumeEntrypoint::NextPlannerRound,
+                signal,
+            )
+            .with_loop_budget(
+                loop_state.round_no,
+                loop_state.max_rounds,
+                loop_state.consecutive_no_progress,
+                true,
+            )
+            .to_json()
         }),
         resume_entrypoint: ResumeEntrypoint::NextPlannerRound,
     };
@@ -765,6 +773,99 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,
+        },
+        "task_checkpoint": checkpoint.to_machine_json(),
+    })
+}
+
+fn action_args_keys(args: &Value) -> Vec<String> {
+    let Some(obj) = args.as_object() else {
+        return Vec::new();
+    };
+    let mut keys = obj.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
+
+pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    resume_reason: &str,
+    now_ts: i64,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+) -> Value {
+    let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
+    let pending_action = json!({
+        "schema_version": 1,
+        "kind": "agent_hook_pre_tool_use",
+        "tool_or_skill": tool_or_skill,
+        "action_ref": action_ref,
+        "args_keys": action_args_keys(args),
+        "resume_expected": "user_followup",
+    });
+    let checkpoint = TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.clone(),
+        boundary_context: json!({
+            "schema_version": 1,
+            "source": "agent_hooks",
+            "stage": "pre_tool_use",
+            "decision": "require_confirmation",
+            "task_id": task.task_id,
+            "resume_reason": resume_reason,
+            "tool_or_skill": tool_or_skill,
+            "action_ref": action_ref,
+            "message_key": "clawd.agent_hook.confirmation_required",
+        }),
+        last_successful_round: (loop_state.round_no > 0)
+            .then_some(saturating_u32(loop_state.round_no)),
+        last_successful_step: loop_state
+            .executed_step_results
+            .iter()
+            .rev()
+            .find(|step| step.is_ok())
+            .map(|step| step.step_id.clone()),
+        pending_action: Some(pending_action),
+        observations: checkpoint_step_observations(loop_state),
+        evidence_refs: loop_state
+            .executed_step_results
+            .iter()
+            .filter(|step| step.is_ok())
+            .map(|step| step.step_id.clone())
+            .collect::<Vec<_>>(),
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: completed_side_effect_refs(loop_state),
+        budget: CheckpointBudgetCounters {
+            round: saturating_u32(loop_state.round_no),
+            step: saturating_u32(loop_state.total_steps_executed),
+            llm_calls: 0,
+            tool_calls: saturating_u32(loop_state.tool_calls_total),
+            elapsed_ms: 0,
+        },
+        attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: ResumeEntrypoint::AwaitUserInput,
+    };
+
+    json!({
+        "progress_messages": loop_state.progress_messages,
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": TaskLifecycleState::NeedsUser,
+            "source": "agent_hooks",
+            "resume_reason": resume_reason,
+            "checkpoint_id": checkpoint_id,
+            "can_poll": true,
+            "can_cancel": true,
+            "last_heartbeat_ts": now_ts,
+            "message_key": "clawd.agent_hook.confirmation_required",
+            "stage": "pre_tool_use",
+            "decision": "require_confirmation",
+            "tool_or_skill": tool_or_skill,
+            "action_ref": action_ref,
         },
         "task_checkpoint": checkpoint.to_machine_json(),
     })
@@ -809,6 +910,54 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         debug!(
             "checkpoint progress published task_id={} reason={}",
             task.task_id, resume_reason
+        );
+    }
+}
+
+pub(super) fn publish_agent_loop_user_input_checkpoint_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    resume_reason: &str,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+) {
+    let now_ts = crate::now_ts_u64() as i64;
+    let payload = build_agent_loop_user_input_checkpoint_progress_payload(
+        task,
+        loop_state,
+        resume_reason,
+        now_ts,
+        tool_or_skill,
+        action_ref,
+        args,
+    );
+    if let Some(checkpoint_id) = payload
+        .pointer("/task_lifecycle/checkpoint_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+    {
+        loop_state
+            .output_vars
+            .insert("agent_loop.checkpoint_id".to_string(), checkpoint_id);
+    }
+    loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
+    loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
+    loop_state.output_vars.insert(
+        "agent_loop.resume_reason".to_string(),
+        resume_reason.to_string(),
+    );
+    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
+    {
+        warn!(
+            "run_agent_with_tools: task_id={} publish user-input checkpoint failed: {}",
+            task.task_id, err
+        );
+    } else {
+        debug!(
+            "user-input checkpoint progress published task_id={} reason={} action_ref={}",
+            task.task_id, resume_reason, action_ref
         );
     }
 }

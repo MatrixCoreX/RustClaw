@@ -40,6 +40,29 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
+fn record_session_start_hooks(task: &ClaimedTask, user_text: &str, loop_state: &mut LoopState) {
+    let mut session_start =
+        crate::agent_hooks::session_start_outcome().to_machine_json("agent_loop");
+    if let Some(obj) = session_start.as_object_mut() {
+        obj.insert("task_id".to_string(), json!(task.task_id));
+        obj.insert("task_kind".to_string(), json!(task.kind));
+        obj.insert("task_channel".to_string(), json!(task.channel));
+    }
+    loop_state.task_observations.push(session_start);
+
+    let mut prompt_submit =
+        crate::agent_hooks::user_prompt_submit_outcome().to_machine_json("agent_loop");
+    if let Some(obj) = prompt_submit.as_object_mut() {
+        obj.insert("task_id".to_string(), json!(task.task_id));
+        obj.insert(
+            "input_char_count".to_string(),
+            json!(user_text.chars().count()),
+        );
+        obj.insert("input_byte_count".to_string(), json!(user_text.len()));
+    }
+    loop_state.task_observations.push(prompt_submit);
+}
+
 fn terminal_user_answer_stop_signal(loop_state: &LoopState) -> Option<&'static str> {
     has_authoritative_delivery(loop_state).then_some("terminal_user_answer_ready")
 }
@@ -1283,6 +1306,7 @@ pub(super) async fn run_agent_with_loop_seeded(
     let base_policy = load_agent_loop_guard_policy(state);
     let mut loop_state = LoopState::new(base_policy.max_rounds.max(1));
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
+    record_session_start_hooks(task, user_text, &mut loop_state);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         initial_execution_recipe_spec(goal, user_text, agent_run_context),
     );

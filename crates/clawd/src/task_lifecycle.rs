@@ -32,6 +32,17 @@ pub(crate) enum ResumeEntrypoint {
     VerifyAndFinalize,
 }
 
+impl ResumeEntrypoint {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::NextPlannerRound => "next_planner_round",
+            Self::PollAsyncJob => "poll_async_job",
+            Self::AwaitUserInput => "await_user_input",
+            Self::VerifyAndFinalize => "verify_and_finalize",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ResumeTrigger {
@@ -285,18 +296,23 @@ pub(crate) fn paused_checkpoint_recovery_status(
         .unwrap_or_default()
         .trim()
         .to_string();
-    if !lifecycle_state_token_is_paused(&state) {
+    let needs_user_input = state == "needs_user";
+    if !lifecycle_state_token_is_paused(&state) && !needs_user_input {
         return PausedCheckpointRecoveryStatus::NotPaused;
     }
-    let Some(next_check_after) = lifecycle.get("next_check_after").and_then(Value::as_i64) else {
-        return PausedCheckpointRecoveryStatus::InvalidPausedCheckpoint;
-    };
     let Some(checkpoint_id) = lifecycle
         .get("checkpoint_id")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+    else {
+        return PausedCheckpointRecoveryStatus::InvalidPausedCheckpoint;
+    };
+    let Some(next_check_after) = lifecycle
+        .get("next_check_after")
+        .and_then(Value::as_i64)
+        .or_else(|| needs_user_input.then_some(now_ts))
     else {
         return PausedCheckpointRecoveryStatus::InvalidPausedCheckpoint;
     };

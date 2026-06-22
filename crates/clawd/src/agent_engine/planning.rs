@@ -17,9 +17,10 @@ use super::planning_prompt::compact_skill_playbook_from_prompt;
 use super::planning_prompt::{
     build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
-    classify_planning_prompt_class, contract_scoped_planner_skill_scope,
-    ensure_required_contract_block_present, round1_prompt_spec_for_class, runtime_os_label,
-    runtime_shell_label, PlanningPromptClass,
+    classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
+    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
+    ensure_required_contract_block_present, incremental_prompt_spec_for_class,
+    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
 };
 #[cfg(test)]
 use super::planning_registry_preference::registry_preferred_skill_matches_route;
@@ -45,8 +46,7 @@ use super::{
         route_allows_structured_candidate_read_target_repair,
         route_has_unresolved_clarify_or_locator_marker, route_reason_has_structural_marker,
     },
-    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH,
-    LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
+    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult};
 
@@ -91,6 +91,8 @@ mod preferred_structured_action;
 mod read_range_action;
 #[path = "runtime_status_scalar_plan.rs"]
 mod runtime_status_scalar_plan;
+#[path = "runtime_surface_plan.rs"]
+mod runtime_surface_plan;
 #[path = "scalar_compare_observation.rs"]
 mod scalar_compare_observation;
 #[path = "scalar_count_deterministic_plan.rs"]
@@ -131,6 +133,7 @@ use media_artifact_plan::*;
 use preferred_structured_action::*;
 use read_range_action::*;
 use runtime_status_scalar_plan::*;
+use runtime_surface_plan::*;
 use scalar_compare_observation::*;
 use scalar_count_deterministic_plan::*;
 use scalar_count_explicit_path::*;
@@ -308,6 +311,46 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_runtime_status_scalar_info_fallback"
     );
     return_deterministic_plan!(
+        http_download_artifact_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_http_download_artifact"
+    );
+    return_deterministic_plan!(
+        hook_permission_surface_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_hook_permission_surface"
+    );
+    return_deterministic_plan!(
+        clawcli_resume_surface_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_clawcli_resume_surface"
+    );
+    return_deterministic_plan!(
+        subagent_review_boundary_surface_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_subagent_review_boundary_surface"
+    );
+    return_deterministic_plan!(
         browser_http_url_deterministic_plan_result(
             state,
             goal,
@@ -340,6 +383,16 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_task_control_get"
+    );
+    return_deterministic_plan!(
+        async_job_start_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_async_job_start"
     );
     return_deterministic_plan!(
         service_status_deterministic_plan_result(
@@ -696,7 +749,11 @@ pub(super) async fn plan_round_actions(
     } else {
         "<omitted: lightweight_execution>".to_string()
     };
-    let contract_skill_scope = contract_scoped_planner_skill_scope(route_result);
+    let contract_skill_scope = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+        contract_scoped_planner_skill_scope(route_result)
+    } else {
+        contract_scoped_lightweight_planner_skill_scope(route_result)
+    };
     let skill_playbooks = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         build_skill_playbooks_text_scoped(state, task, contract_skill_scope.as_ref())
     } else {
@@ -771,19 +828,26 @@ pub(super) async fn plan_round_actions(
             .map(|s| crate::truncate_for_log(s))
             .or_else(|| loop_state.delivery_messages.last().cloned())
             .unwrap_or_else(|| "(none)".to_string());
+        let (prompt_name, prompt_logical_path) = incremental_prompt_spec_for_class(planning_class);
         let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
             state,
-            LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+            prompt_logical_path,
         )
         .map_err(|e| e.to_string())?;
+        let effective_goal = if matches!(planning_class, PlanningPromptClass::LightweightExecution)
+        {
+            compact_lightweight_incremental_goal_context(goal)
+        } else {
+            goal.to_string()
+        };
         (
-            "loop_incremental_plan_prompt",
+            prompt_name,
             resolved.source,
             resolved.version,
             build_incremental_plan_prompt(
                 &resolved.template,
                 &user_request_for_prompt,
-                goal,
+                &effective_goal,
                 &turn_analysis,
                 &tool_spec_template,
                 &skill_playbooks,

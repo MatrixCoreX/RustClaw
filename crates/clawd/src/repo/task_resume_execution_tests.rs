@@ -1079,6 +1079,274 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
 }
 
 #[test]
+fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
+    let state = state_with_tasks_table();
+    let now = 10_000;
+    let checkpoint_id = "ckpt-async-retry";
+    let task_id = "async-retry-terminal";
+    let stale_retry = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "background",
+            "checkpoint_id": checkpoint_id,
+            "resume_reason": "async_poll_rescheduled",
+            "resume_due": true,
+            "resume_wait_seconds": 0,
+            "next_check_after": now,
+            "resume_executor": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "poll_scheduled",
+                "resume_trigger": "worker_recovery",
+                "resume_directive": "poll_async_job",
+                "job_id": "local_process:retry-job",
+                "poll_after_seconds": 1,
+                "expires_at": now + 300,
+                "cancel_ref": "local_process:/tmp/retry-job",
+                "message_key": "clawd.task.async_job_pending",
+                "executor_result_status": "async_poll_rescheduled",
+                "result_projection_state": "project_async_poll_rescheduled"
+            },
+            "resume_execution_plan": {
+                "schema_version": 1,
+                "task_id": task_id,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job"
+            },
+            "resume_executor_handoff": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending"
+            },
+            "resume_executor_handoff_dispatch": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job"
+            },
+            "resume_executor_dispatch_result": {
+                "schema_version": 1,
+                "task_id": task_id,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job",
+                "executor_result_status": "async_poll_rescheduled",
+                "result_projection_state": "project_async_poll_rescheduled",
+                "recorded_at": now - 1
+            },
+            "resume_executor_result_projection": {
+                "schema_version": 1,
+                "task_id": task_id,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job",
+                "executor_result_status": "async_poll_rescheduled",
+                "result_projection_state": "project_async_poll_rescheduled",
+                "projection_result_status": "rescheduled",
+                "projected_at": now - 1
+            }
+        },
+        "task_checkpoint": checkpoint_json(
+            checkpoint_id,
+            vec!["run_skill:run_cmd:async_job:local_process:retry-job"]
+        )
+    });
+    insert_task(&state, task_id, "running", Some(&stale_retry), now - 10);
+
+    let claimed_executor = claim_ready_paused_checkpoint_resume_executor_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "poll_scheduled",
+        now + 1,
+        30,
+    )
+    .expect("claim retry executor")
+    .expect("retry executor claimed");
+    let plan_payload = json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "checkpoint_id": checkpoint_id,
+        "executor_action": "poll_async_job",
+        "executor_state": claimed_executor.executor_state,
+        "resume_directive": claimed_executor.resume_directive,
+        "resume_trigger": claimed_executor.resume_trigger,
+        "job_id": "local_process:retry-job",
+        "poll_after_seconds": 1,
+        "expires_at": now + 300,
+        "cancel_ref": "local_process:/tmp/retry-job",
+        "message_key": "clawd.task.async_job_pending"
+    });
+    assert!(record_paused_checkpoint_resume_execution_plan_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        &plan_payload,
+        now + 2,
+    )
+    .expect("record retry plan"));
+    let plan_recorded = stored_result_json(&state, task_id);
+    let plan_lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
+        "running",
+        Some(&plan_recorded),
+        None,
+    );
+    for key in [
+        "resume_executor_handoff",
+        "resume_executor_handoff_dispatch",
+        "resume_executor_dispatch_result",
+        "resume_executor_result_projection",
+    ] {
+        assert!(
+            plan_lifecycle.get(key).is_none(),
+            "new execution plan must clear stale {key}"
+        );
+    }
+    assert!(plan_lifecycle["resume_executor"]
+        .get("executor_result_status")
+        .is_none());
+
+    let handoff_payload = json!({
+        "schema_version": 1,
+        "checkpoint_id": checkpoint_id,
+        "executor_state": "executing_async_poll",
+        "executor_action": "poll_async_job",
+        "executor_status": "async_poll_adapter_pending"
+    });
+    assert!(record_planned_paused_checkpoint_resume_handoff_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        &handoff_payload,
+        now + 3,
+    )
+    .expect("record retry handoff"));
+    claim_handoff_paused_checkpoint_resume_execution_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        now + 4,
+        20,
+    )
+    .expect("claim retry handoff")
+    .expect("retry handoff claimed");
+    let dispatch_payload = json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "checkpoint_id": checkpoint_id,
+        "executor_state": "executing_async_poll",
+        "executor_action": "poll_async_job",
+        "executor_status": "async_poll_adapter_pending",
+        "dispatch_state": "ready_to_poll_async_job"
+    });
+    assert!(
+        record_claimed_handoff_paused_checkpoint_resume_dispatch_internal(
+            &state,
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            &dispatch_payload,
+            now + 5,
+        )
+        .expect("record retry dispatch")
+    );
+    claim_dispatched_paused_checkpoint_resume_execution_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        now + 6,
+        20,
+    )
+    .expect("claim retry dispatch")
+    .expect("retry dispatch claimed");
+    let completed_payload = json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "checkpoint_id": checkpoint_id,
+        "executor_state": "executing_async_poll",
+        "executor_action": "poll_async_job",
+        "executor_status": "async_poll_adapter_pending",
+        "dispatch_state": "ready_to_poll_async_job",
+        "executor_result_status": "async_poll_completed",
+        "result_projection_state": "project_async_poll_completed",
+        "final_result_json": {
+            "status": "ok",
+            "output": "RUSTCLAW_ASYNC_RETRY_DONE"
+        }
+    });
+    assert!(
+        record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal(
+            &state,
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            &completed_payload,
+            now + 7,
+        )
+        .expect("record terminal retry result")
+    );
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now + 8,
+        20,
+    )
+    .expect("claim terminal projection")
+    .expect("terminal projection claimed");
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_completed",
+            &completed_payload,
+            now + 9,
+        )
+        .expect("record terminal projection")
+    );
+
+    let (status, error_text, result) = stored_task_status_error_result(&state, task_id);
+    assert_eq!(status, "succeeded");
+    assert_eq!(error_text, None);
+    assert_eq!(result["output"], "RUSTCLAW_ASYNC_RETRY_DONE");
+    assert_eq!(result["task_lifecycle"]["state"], "succeeded");
+}
+
+#[test]
 fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload() {
     let state = state_with_tasks_table();
     let now = 9_000;

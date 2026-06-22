@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::repo;
+use crate::{repo, AppState};
 
 pub(super) fn execute_async_poll_dispatch_result(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
@@ -11,10 +11,38 @@ pub(super) fn execute_async_poll_dispatch_result(
         return None;
     }
     let job_id = poll_job_id(claimed)?;
-    let adapter_result = async_poll_adapter_result(claimed, job_id)?;
+    let owned_adapter_result = local_process_async_poll_adapter_result(claimed, job_id, now_ts);
+    let adapter_result = owned_adapter_result
+        .as_ref()
+        .or_else(|| async_poll_adapter_result(claimed, job_id))?;
     async_poll_dispatch_result_payload_from_adapter_result(
         claimed,
         adapter_result,
+        job_id,
+        now_ts,
+        default_retry_after_seconds,
+    )
+}
+
+pub(super) async fn execute_async_poll_dispatch_result_with_state(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    now_ts: i64,
+    default_retry_after_seconds: i64,
+) -> Option<Value> {
+    if let Some(payload) =
+        execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
+    {
+        return Some(payload);
+    }
+    if !claimed_async_poll_dispatch_ready(claimed) {
+        return None;
+    }
+    let job_id = poll_job_id(claimed)?;
+    let adapter_result = skill_poll_async_adapter_result(state, claimed, job_id).await?;
+    async_poll_dispatch_result_payload_from_adapter_result(
+        claimed,
+        &adapter_result,
         job_id,
         now_ts,
         default_retry_after_seconds,
@@ -69,6 +97,235 @@ fn async_poll_adapter_result<'a>(
             crate::async_job_contract::async_poll_adapter_result_matches_job(value, job_id)
         })
     })
+}
+
+fn local_process_async_poll_adapter_result(
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    job_id: &str,
+    now_ts: i64,
+) -> Option<Value> {
+    if !job_id.starts_with("local_process:") {
+        return None;
+    }
+    let job = claimed.task_checkpoint.pending_async_job.as_ref()?;
+    let job_dir = job.cancel_ref.strip_prefix("local_process:")?.trim();
+    if job_dir.is_empty() {
+        return None;
+    }
+    let job_dir = std::path::Path::new(job_dir);
+    let expires_at = job.expires_at;
+    let exit_code_path = job_dir.join("exit_code");
+    if !exit_code_path.exists() {
+        return Some(json!({
+            "job_id": job_id,
+            "status": if now_ts >= expires_at { "expired" } else { "running" },
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": expires_at,
+            "message_key": job.message_key,
+        }));
+    }
+    let exit_code_text = std::fs::read_to_string(&exit_code_path).ok()?;
+    let exit_code = exit_code_text.trim().parse::<i32>().ok()?;
+    let stdout = read_bounded_utf8(&job_dir.join("stdout"), 32 * 1024);
+    let stderr = read_bounded_utf8(&job_dir.join("stderr"), 32 * 1024);
+    let output = combine_local_process_output(&stdout, &stderr);
+    if exit_code == 0 {
+        Some(json!({
+            "job_id": job_id,
+            "status": "succeeded",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": expires_at,
+            "message_key": job.message_key,
+            "final_result_json": {
+                "schema_version": 1,
+                "source": "local_process_async_job",
+                "job_id": job_id,
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "output": output,
+            }
+        }))
+    } else {
+        Some(json!({
+            "job_id": job_id,
+            "status": "failed",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": expires_at,
+            "error_code": "local_process_nonzero_exit",
+            "message_key": "clawd.task.async_job_failed",
+            "failure_result_json": {
+                "schema_version": 1,
+                "source": "local_process_async_job",
+                "job_id": job_id,
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "output": output,
+            }
+        }))
+    }
+}
+
+fn read_bounded_utf8(path: &std::path::Path, max_bytes: usize) -> String {
+    let Ok(bytes) = std::fs::read(path) else {
+        return String::new();
+    };
+    let limit = bytes.len().min(max_bytes);
+    let mut text = String::from_utf8_lossy(&bytes[..limit]).to_string();
+    if bytes.len() > limit {
+        text.push_str("...");
+    }
+    text
+}
+
+fn combine_local_process_output(stdout: &str, stderr: &str) -> String {
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("stdout:\n{}\n\nstderr:\n{}", stdout.trim(), stderr.trim()),
+        (true, true) => String::new(),
+    }
+}
+
+async fn skill_poll_async_adapter_result(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    job_id: &str,
+) -> Option<Value> {
+    let adapter = claimed
+        .task_checkpoint
+        .boundary_context
+        .get("async_poll_adapter")
+        .filter(|value| value.is_object())?;
+    if adapter.get("text").is_some() || adapter.get("error_text").is_some() {
+        return Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_text_fields_forbidden",
+            "clawd.task.async_poll_adapter_failed",
+            None,
+        ));
+    }
+    let adapter_kind = adapter
+        .get("adapter_kind")
+        .or_else(|| adapter.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if adapter_kind != Some("skill_poll") {
+        return Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_kind_unsupported",
+            "clawd.task.async_poll_adapter_failed",
+            None,
+        ));
+    }
+    let Some(skill_name) = adapter
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_missing_skill_name",
+            "clawd.task.async_poll_adapter_failed",
+            None,
+        ));
+    };
+    let mut args = adapter
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| json!({"action": "poll"}));
+    let Some(obj) = args.as_object_mut() else {
+        return Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_args_invalid",
+            "clawd.task.async_poll_adapter_failed",
+            None,
+        ));
+    };
+    if obj.get("text").is_some() || obj.get("error_text").is_some() {
+        return Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_args_text_fields_forbidden",
+            "clawd.task.async_poll_adapter_failed",
+            None,
+        ));
+    }
+    obj.entry("action".to_string()).or_insert(json!("poll"));
+    obj.entry("job_id".to_string()).or_insert(json!(job_id));
+
+    match crate::run_skill_with_runner_outcome(state, &claimed.task, skill_name, args).await {
+        Ok(outcome) => {
+            let Some(extra) = outcome.extra else {
+                return Some(skill_poll_failed_adapter_result(
+                    job_id,
+                    "skill_poll_adapter_result_missing",
+                    "clawd.task.async_poll_adapter_failed",
+                    Some(json!({
+                        "source": "skill_poll_adapter",
+                        "skill_name": skill_name,
+                        "error_kind": "missing_extra",
+                    })),
+                ));
+            };
+            if let Some(result) = skill_poll_adapter_result_from_extra(&extra, job_id) {
+                return Some(result);
+            }
+            Some(skill_poll_failed_adapter_result(
+                job_id,
+                "skill_poll_adapter_result_invalid",
+                "clawd.task.async_poll_adapter_failed",
+                Some(json!({
+                    "source": "skill_poll_adapter",
+                    "skill_name": skill_name,
+                    "error_kind": "invalid_adapter_result",
+                })),
+            ))
+        }
+        Err(_) => Some(skill_poll_failed_adapter_result(
+            job_id,
+            "skill_poll_adapter_execution_failed",
+            "clawd.task.async_poll_adapter_failed",
+            Some(json!({
+                "source": "skill_poll_adapter",
+                "skill_name": skill_name,
+                "error_kind": "execution_failed",
+            })),
+        )),
+    }
+}
+
+fn skill_poll_adapter_result_from_extra(extra: &Value, job_id: &str) -> Option<Value> {
+    extra
+        .get(crate::async_job_contract::ASYNC_POLL_ADAPTER_RESULT_KEY)
+        .or(Some(extra))
+        .filter(|value| {
+            crate::async_job_contract::async_poll_adapter_result_matches_job(value, job_id)
+        })
+        .cloned()
+}
+
+fn skill_poll_failed_adapter_result(
+    job_id: &str,
+    error_code: &str,
+    message_key: &str,
+    failure_result_json: Option<Value>,
+) -> Value {
+    let mut result = json!({
+        "job_id": job_id,
+        "status": "failed",
+        "error_code": error_code,
+        "message_key": message_key,
+    });
+    if let (Some(obj), Some(failure)) = (
+        result.as_object_mut(),
+        failure_result_json.filter(Value::is_object),
+    ) {
+        obj.insert("failure_result_json".to_string(), failure);
+    }
+    result
 }
 
 fn async_poll_dispatch_result_payload_from_adapter_result(

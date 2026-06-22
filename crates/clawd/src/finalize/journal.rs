@@ -93,6 +93,33 @@ pub(crate) fn build_from_loop_state(
     for step in &loop_state.executed_step_results {
         journal.push_step_result(step);
     }
+    for observation in &loop_state.task_observations {
+        journal.push_task_observation(observation.clone());
+    }
+    let mut stop_observation =
+        crate::agent_hooks::stop_outcome(final_status.as_str()).to_machine_json("agent_loop");
+    if let Some(obj) = stop_observation.as_object_mut() {
+        obj.insert(
+            "final_status".to_string(),
+            serde_json::json!(final_status.as_str()),
+        );
+        if let Some(stop_signal) = loop_state.last_stop_signal.as_deref() {
+            obj.insert(
+                "final_stop_signal".to_string(),
+                serde_json::json!(stop_signal),
+            );
+        }
+    }
+    journal.push_task_observation(stop_observation);
+    let mut session_end = crate::agent_hooks::session_end_outcome(final_status.as_str())
+        .to_machine_json("agent_loop");
+    if let Some(obj) = session_end.as_object_mut() {
+        obj.insert(
+            "final_status".to_string(),
+            serde_json::json!(final_status.as_str()),
+        );
+    }
+    journal.push_task_observation(session_end);
     if let Some(summary) = finalizer_summary {
         journal.record_finalizer_summary(summary);
     } else {

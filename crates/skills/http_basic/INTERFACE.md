@@ -24,6 +24,8 @@
 | all | `expect_success` | no | boolean | `false` | Runtime validation hint: require a 2xx status when the step is meant as validation. |
 | all | `expect_contains` | no | string | - | Runtime validation hint: require the response body preview to contain this text. |
 | all | `accept_non_success` | no | boolean | `false` | Runtime validation hint: allow non-2xx responses when validating `expect_contains`. |
+| all | `download` | no | boolean | `false` | Save the response body to a workspace-local artifact path. |
+| all | `output_path` | no | string | `document/http/download/http-<ts>.body` | Workspace-local destination path; absolute paths must still stay inside the current workspace. |
 | `post_json` | `body` | no | object/array/scalar | - | JSON payload for POST request. |
 
 ## Error Contract
@@ -31,7 +33,8 @@
 - Network, timeout, or response-read failures should return readable error text.
 - Invalid JSON body serialization errors should be surfaced explicitly.
 - HTTP responses with non-2xx status codes are successful observations, not transport failures.
-- Received responses mirror structured metadata into `extra`, including `action`, `url`, `status_code`, `success_status`, and `body_preview`.
+- `output_path` outside the current workspace is rejected.
+- Received responses mirror structured metadata into `extra`, including `action`, `url`, `status_code`, `success_status`, `body_preview`, and optional artifact fields.
 
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; HTTP status evidence must come from `extra.status_code` and `extra.success_status`.
@@ -41,6 +44,10 @@
   - `status_code`: integer HTTP status code; evidence role `status`.
   - `success_status`: boolean 2xx status flag; evidence role `status`.
   - `body_preview`: string bounded response preview; evidence role `field_value` only when the user requested response content or a validation condition.
+  - `downloaded`: boolean present when response body was written to disk.
+  - `output_path` / `artifact_path`: workspace-local saved response path when `download=true` or `output_path` is provided; evidence role `artifact_ref`.
+  - `size_bytes`: byte size of the saved response body.
+  - `content_type`: response content type when available.
 - Sensitive fields: URLs, headers, and body previews can contain tokens or private data. Provider-facing traces should redact headers and prefer body excerpt/hash/keys.
 - Error responses include readable `error_text`; top-level `error_kind` should be used when available.
 
