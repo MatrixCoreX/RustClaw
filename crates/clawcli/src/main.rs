@@ -5,6 +5,7 @@ mod chat;
 mod client;
 mod commands;
 mod events;
+mod output;
 mod task;
 
 use anyhow::Result;
