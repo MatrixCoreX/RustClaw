@@ -2,9 +2,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    claim_due_paused_checkpoint_task_internal,
-    claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    cancel_task_by_id, claim_due_paused_checkpoint_task_internal,
+    claim_ready_paused_checkpoint_resume_executor_internal, get_task_admin_target,
+    get_task_query_record, list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,
@@ -73,6 +73,19 @@ fn stored_result_json(state: &crate::AppState, task_id: &str) -> serde_json::Val
         )
         .expect("select result_json");
     serde_json::from_str(&raw).expect("parse result_json")
+}
+
+fn stored_task_status_and_error(
+    state: &crate::AppState,
+    task_id: &str,
+) -> (String, Option<String>) {
+    let db = state.core.db.get().expect("get db");
+    db.query_row(
+        "SELECT status, error_text FROM tasks WHERE task_id = ?1",
+        rusqlite::params![task_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .expect("select task status")
 }
 
 fn checkpoint_json(
@@ -168,6 +181,42 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["resume_reason"], "async_job_poll");
     assert_eq!(lifecycle["pending_job_ref"], "job-17");
     assert_eq!(lifecycle["last_heartbeat_ts"], 2222);
+}
+
+#[test]
+fn get_task_admin_target_and_cancel_task_by_id_use_machine_fields() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "running", None, 1234);
+
+    let target = get_task_admin_target(&state, &task_id)
+        .expect("lookup target")
+        .expect("target exists");
+    assert_eq!(target.task_id, task_id);
+    assert_eq!(target.user_id, 42);
+    assert_eq!(target.chat_id, 7);
+    assert_eq!(target.user_key.as_deref(), Some("test-key"));
+    assert_eq!(target.channel, "ui");
+    assert_eq!(target.status, "running");
+
+    let canceled = cancel_task_by_id(&state, &target.task_id).expect("cancel task");
+    assert_eq!(canceled, 1);
+    let (status, error_text) = stored_task_status_and_error(&state, &task_id);
+    assert_eq!(status, "canceled");
+    assert_eq!(error_text.as_deref(), Some("user_cancelled"));
+}
+
+#[test]
+fn cancel_task_by_id_does_not_touch_terminal_tasks() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "succeeded", None, 1234);
+
+    let canceled = cancel_task_by_id(&state, &task_id).expect("cancel task");
+    assert_eq!(canceled, 0);
+    let (status, error_text) = stored_task_status_and_error(&state, &task_id);
+    assert_eq!(status, "succeeded");
+    assert_eq!(error_text, None);
 }
 
 #[test]
