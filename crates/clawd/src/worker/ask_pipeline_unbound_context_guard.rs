@@ -147,8 +147,7 @@ pub(super) fn task_control_route_can_plan_without_locator(
 pub(super) fn restore_explicit_extension_assess_gap_to_command_summary(
     route_result: &mut crate::RouteResult,
 ) -> bool {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if !(route_result.is_execute_gate() || route_result.is_clarify_gate())
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -157,6 +156,9 @@ pub(super) fn restore_explicit_extension_assess_gap_to_command_summary(
         return false;
     }
 
+    route_result.needs_clarify = false;
+    route_result.clarify_question.clear();
+    route_result.set_execute_gate();
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();

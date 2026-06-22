@@ -111,6 +111,37 @@ fn contract_repair_supported_archive_path(path: &str) -> bool {
     path.ends_with(".zip") || path.ends_with(".tar.gz") || path.ends_with(".tgz")
 }
 
+fn contract_repair_sqlite_database_path(path: &str) -> bool {
+    let path = path.trim().to_ascii_lowercase();
+    path.ends_with(".sqlite") || path.ends_with(".sqlite3") || path.ends_with(".db")
+}
+
+fn surface_has_supported_archive_and_sqlite_targets(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    let mut has_archive = false;
+    let mut has_sqlite = false;
+    for candidate in req_surface
+        .filename_candidates
+        .iter()
+        .map(String::as_str)
+        .chain(
+            req_surface
+                .locator_target_pair
+                .as_ref()
+                .into_iter()
+                .flat_map(|(left, right)| [left.as_str(), right.as_str()]),
+        )
+    {
+        has_archive |= contract_repair_supported_archive_path(candidate);
+        has_sqlite |= contract_repair_sqlite_database_path(candidate);
+        if has_archive && has_sqlite {
+            return true;
+        }
+    }
+    false
+}
+
 pub(super) fn archive_read_contract_from_surface(
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
@@ -125,6 +156,10 @@ pub(super) fn archive_read_contract_from_surface(
                 | OutputSemanticKind::None
         )
     {
+        return None;
+    }
+
+    if surface_has_supported_archive_and_sqlite_targets(req_surface) {
         return None;
     }
 

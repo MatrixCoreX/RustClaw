@@ -581,6 +581,80 @@ fn structural_alias_ack_uses_update_key_when_alias_existed() {
 }
 
 #[test]
+fn structural_alias_ack_defers_memory_rule_when_machine_literal_would_be_dropped() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.memory.alias_remembered".to_string(),
+        "alias remembered via i18n".to_string(),
+    );
+    let mut route = chat_route_for_gate();
+    route.should_refresh_long_term_memory = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "alias_bindings": [{
+                    "alias": "provider_blocker",
+                    "target": "external_blocker"
+                }]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(structural_alias_binding_ack(
+        &state,
+        Some(&ctx),
+        "Keep provider_blocker as the visible machine token for this memory rule.",
+        "Remember this provider quota classification rule.",
+        "en",
+    )
+    .is_none());
+}
+
+#[test]
+fn structural_alias_ack_accepts_memory_rule_candidate_with_machine_literal() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    route.resolved_intent =
+        "Store provider quota classification rule\nanswer_candidate: provider_blocker"
+            .to_string();
+    route.should_refresh_long_term_memory = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "alias_bindings": [{
+                    "alias": "provider_blocker",
+                    "target": "external_blocker"
+                }]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    let reply = structural_alias_binding_ack(
+        &state,
+        Some(&ctx),
+        "Keep provider_blocker as the visible machine token for this memory rule.",
+        "Store provider quota classification rule\nanswer_candidate: provider_blocker",
+        "en",
+    )
+    .expect("machine-literal candidate should stay eligible");
+
+    assert_eq!(reply.text, "provider_blocker");
+    assert!(reply.messages.is_empty());
+}
+
+#[test]
 fn structural_alias_ack_rejects_recall_question_without_memory_update_contract() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let mut route = chat_route_for_gate();

@@ -419,6 +419,49 @@ fn archive_read_member_repairs_content_excerpt_drift_contract() {
 }
 
 #[test]
+fn archive_read_member_repair_preserves_archive_sqlite_compound_contract() {
+    let req = concat!(
+        "列出 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 的成员并读取 notes.txt；",
+        "再查看 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的表列表。"
+    );
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    assert!(surface
+        .filename_candidates
+        .iter()
+        .any(|candidate| candidate.ends_with(".zip")));
+    assert!(surface
+        .filename_candidates
+        .iter()
+        .any(|candidate| candidate.ends_with(".sqlite")));
+
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_ne!(reason, Some("archive_read_member_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ContentExcerptSummary
+    );
+}
+
+#[test]
 fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
     let req = "读取 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 中 notes.txt 的内容片段并简短总结";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);

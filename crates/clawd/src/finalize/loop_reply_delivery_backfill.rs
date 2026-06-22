@@ -195,22 +195,22 @@ pub(super) fn backfill_delivery_from_last_outputs(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if let Some(ref last_synthesis_output) = loop_state.last_publishable_synthesis_output {
-            if !last_synthesis_output.trim().is_empty() {
-                append_delivery_message(
-                    &task.task_id,
-                    &mut loop_state.delivery_messages,
-                    last_synthesis_output.clone(),
-                );
-                loop_state.last_user_visible_respond = Some(last_synthesis_output.clone());
-                log_deterministic_delivery_record(
-                    &task.task_id,
-                    "final_result_use_synthesis_output",
-                    "backfilled",
-                    agent_run_context,
-                    loop_state.executed_step_results.len(),
-                );
-            }
+        if let Some(last_synthesis_output) =
+            valid_publishable_synthesis_output(loop_state).map(str::to_string)
+        {
+            append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                last_synthesis_output.clone(),
+            );
+            loop_state.last_user_visible_respond = Some(last_synthesis_output);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "final_result_use_synthesis_output",
+                "backfilled",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
         }
     }
 
@@ -294,12 +294,7 @@ pub(super) fn replace_placeholder_delivery_with_synthesis(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
 ) {
-    let Some(synthesis) = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    else {
+    let Some(synthesis) = valid_publishable_synthesis_output(loop_state).map(str::to_string) else {
         return;
     };
     let Some(last_delivery) = loop_state.delivery_messages.last().map(String::as_str) else {
@@ -317,9 +312,9 @@ pub(super) fn replace_placeholder_delivery_with_synthesis(
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
-        synthesis.to_string(),
+        synthesis.clone(),
     );
-    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(synthesis);
 }
 
 pub(super) fn replace_raw_read_delivery_with_synthesis(
@@ -338,21 +333,15 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
         )
         || (route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
             && route.output_contract.response_shape == crate::OutputResponseShape::Strict)
-        || !latest_publishable_synthesis_step_matches(loop_state)
     {
         return false;
     }
-    let Some(synthesis) = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    else {
+    let Some(synthesis) = valid_publishable_synthesis_output(loop_state).map(str::to_string) else {
         return false;
     };
-    if crate::finalize::looks_like_planner_artifact(synthesis)
-        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
-        || crate::finalize::parse_delivery_token(synthesis).is_some()
+    if crate::finalize::looks_like_planner_artifact(&synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(&synthesis)
+        || crate::finalize::parse_delivery_token(&synthesis).is_some()
     {
         return false;
     }
@@ -374,9 +363,9 @@ pub(super) fn replace_raw_read_delivery_with_synthesis(
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
-        synthesis.to_string(),
+        synthesis.clone(),
     );
-    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(synthesis);
     true
 }
 
@@ -388,25 +377,17 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || !latest_publishable_synthesis_step_matches(loop_state)
-    {
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
         return false;
     }
     if !route_expects_synthesis_over_raw_observation(route) {
         return false;
     }
-    let Some(synthesis) = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    else {
+    let Some(synthesis) = valid_publishable_synthesis_output(loop_state).map(str::to_string) else {
         return false;
     };
-    if crate::finalize::looks_like_planner_artifact(synthesis)
-        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
+    if crate::finalize::looks_like_planner_artifact(&synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(&synthesis)
     {
         return false;
     }
@@ -431,13 +412,16 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
-        synthesis.to_string(),
+        synthesis.clone(),
     );
-    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(synthesis);
     true
 }
 
 pub(super) fn valid_publishable_synthesis_output(loop_state: &LoopState) -> Option<&str> {
+    if let Some(synthesis) = latest_publishable_synthesis_step_output(loop_state) {
+        return Some(synthesis);
+    }
     if !latest_publishable_synthesis_step_matches(loop_state) {
         return None;
     }
@@ -446,6 +430,21 @@ pub(super) fn valid_publishable_synthesis_output(loop_state: &LoopState) -> Opti
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
+}
+
+pub(super) fn latest_publishable_synthesis_step_output(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "synthesize_answer")
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| {
+            !output.is_empty()
+                && planned_delivery_is_publishable_model_language_answer(output)
+                && !crate::finalize::is_execution_summary_message(output)
+        })
 }
 
 pub(super) fn latest_contractual_synthesis_output(loop_state: &LoopState) -> Option<&str> {

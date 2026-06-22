@@ -177,10 +177,10 @@ use delivery_backfill::{
     backfill_delivery_from_last_outputs, candidate_matches_successful_external_observation,
     current_delivery_is_latest_publishable_synthesis, delivery_is_raw_read_observation,
     last_respond_matches_single_line_observation, latest_contractual_synthesis_output,
-    replace_placeholder_delivery_with_synthesis, replace_raw_observation_delivery_with_synthesis,
-    replace_raw_read_delivery_with_synthesis, route_expects_synthesis_over_raw_observation,
-    step_output_is_read_range, strict_raw_command_output_exact_observation_answer,
-    valid_publishable_synthesis_output,
+    latest_publishable_synthesis_step_output, replace_placeholder_delivery_with_synthesis,
+    replace_raw_observation_delivery_with_synthesis, replace_raw_read_delivery_with_synthesis,
+    route_expects_synthesis_over_raw_observation, step_output_is_read_range,
+    strict_raw_command_output_exact_observation_answer, valid_publishable_synthesis_output,
 };
 
 #[path = "loop_reply_contract_enforce.rs"]
@@ -426,6 +426,153 @@ fn replace_raw_passthrough_delivery_with_publishable_synthesis(
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn prefer_latest_synthesis_for_compound_observation_delivery(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+        )
+    {
+        return false;
+    }
+    if output_contract_requests_exact_delivery(route) {
+        return false;
+    }
+    if !route.output_contract.requires_content_evidence
+        && !route_expects_synthesis_over_raw_observation(route)
+    {
+        return false;
+    }
+    let current = final_answer_text_from_delivery(delivery_messages)
+        .trim()
+        .to_string();
+    let Some(synthesis) = latest_publishable_synthesis_step_output(loop_state)
+        .or_else(|| latest_contractual_synthesis_output(loop_state))
+        .or_else(|| latest_publishable_terminal_language_output(loop_state))
+        .map(str::trim)
+        .filter(|text| {
+            planned_delivery_is_publishable_model_language_answer(text)
+                || structured_compound_synthesis_can_replace_current_delivery(
+                    route, loop_state, &current, text,
+                )
+        })
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    if current.is_empty() || current == synthesis {
+        return false;
+    }
+    let synthesis_is_structured_json = delivery_message_is_json_container(&synthesis);
+    let current_chars = current.chars().count();
+    let synthesis_chars = synthesis.chars().count();
+    if !synthesis_is_structured_json
+        && synthesis_chars <= current_chars + 80
+        && synthesis_chars.saturating_mul(4) <= current_chars.saturating_mul(5)
+    {
+        return false;
+    }
+
+    delivery_messages.clear();
+    delivery_messages.push(synthesis.clone());
+    loop_state.delivery_messages.clear();
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        synthesis.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(synthesis);
+    *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: loop_state.executed_step_results.len(),
+        ..Default::default()
+    });
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "compound_observation_latest_synthesis",
+        "replaced",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
+
+fn structured_compound_synthesis_can_replace_current_delivery(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    current: &str,
+    synthesis: &str,
+) -> bool {
+    let current = current.trim();
+    let synthesis = synthesis.trim();
+    if current.is_empty()
+        || synthesis.is_empty()
+        || delivery_message_is_json_container(current)
+        || !delivery_message_is_json_container(synthesis)
+        || crate::finalize::looks_like_planner_artifact(synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
+        || crate::finalize::is_execution_summary_message(synthesis)
+        || output_contract_requests_exact_delivery(route)
+        || route.output_contract.delivery_required
+    {
+        return false;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    ) {
+        return false;
+    }
+    let observation_count = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "respond" | "synthesize_answer" | "think" | "answer_verifier"
+                )
+        })
+        .count();
+    observation_count >= 2
+}
+
+fn latest_publishable_terminal_language_output(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok())
+        .filter(|step| matches!(step.skill.as_str(), "synthesize_answer" | "respond"))
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| {
+            !output.is_empty()
+                && planned_delivery_is_publishable_model_language_answer(output)
+                && !crate::finalize::is_execution_summary_message(output)
+        })
 }
 
 pub(crate) async fn finalize_loop_reply(
@@ -1382,6 +1529,13 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
+    prefer_latest_synthesis_for_compound_observation_delivery(
+        task,
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+        &mut finalizer_summary,
+    );
     if let Some(rendered) = compose_recent_artifacts_machine_field_delivery(
         state,
         task,
@@ -1413,6 +1567,13 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         Some(user_text),
         &mut delivery_deduped,
+    );
+    prefer_latest_synthesis_for_compound_observation_delivery(
+        task,
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+        &mut finalizer_summary,
     );
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);

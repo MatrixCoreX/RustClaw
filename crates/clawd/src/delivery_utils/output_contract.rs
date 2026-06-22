@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{AppState, IntentOutputContract, OutputResponseShape};
+use crate::{AppState, IntentOutputContract, OutputResponseShape, OutputSemanticKind};
 
 use super::file_delivery::resolve_file_delivery_target_with_hint;
 use super::types::localize_delivery_message_for_request;
@@ -103,6 +103,14 @@ fn strip_preamble_before_markdown_table(text: &str) -> String {
     lines[table_start..].join("\n").trim().to_string()
 }
 
+fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputContract) -> bool {
+    if output_contract.semantic_kind == OutputSemanticKind::None {
+        return true;
+    }
+    !crate::contract_matrix::final_answer_shape_for_output_contract(output_contract)
+        .is_some_and(|shape| shape.allows_model_language())
+}
+
 pub(super) fn enforce_output_contract(
     state: &AppState,
     user_request: &str,
@@ -110,7 +118,9 @@ pub(super) fn enforce_output_contract(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
-    *normalized_text = strip_preamble_before_markdown_table(normalized_text);
+    if should_strip_preamble_before_markdown_table(output_contract) {
+        *normalized_text = strip_preamble_before_markdown_table(normalized_text);
+    }
     match output_contract.response_shape {
         OutputResponseShape::OneSentence
             if output_contract
@@ -317,7 +327,9 @@ pub(crate) fn sync_output_payload(
     }
 
     let mut canonical = canonical_output_text(normalized_text, normalized_messages);
-    canonical = strip_preamble_before_markdown_table(&canonical);
+    if should_strip_preamble_before_markdown_table(output_contract) {
+        canonical = strip_preamble_before_markdown_table(&canonical);
+    }
     if file_contract {
         if let Some(path) = existing_file_path_literal(&canonical) {
             canonical = format!("FILE:{}", path.display());

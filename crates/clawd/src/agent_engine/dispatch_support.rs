@@ -874,6 +874,19 @@ pub(super) fn handle_respond_action(
         );
     }
     register_step_output(loop_state, global_step, step_in_round, "respond", &text);
+    if !text.is_empty() {
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: format!("step_{global_step}"),
+                skill: "respond".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some(text.clone()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+    }
     *loop_state
         .successful_action_fingerprints
         .entry(fingerprint.to_string())

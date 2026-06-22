@@ -416,6 +416,9 @@ fn extension_assess_gap_command_summary_does_not_repair_to_directory_purpose() {
 #[test]
 fn extension_assess_gap_directory_contract_restores_to_command_summary() {
     let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.clarify_question = "clarify".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "*.csv".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
@@ -443,6 +446,9 @@ fn extension_assess_gap_directory_contract_restores_to_command_summary() {
     assert!(route
         .route_reason
         .contains("extension_assess_gap_contract_restored_to_command_output_summary"));
+    assert!(!route.needs_clarify);
+    assert!(route.clarify_question.is_empty());
+    assert!(route.is_execute_gate());
 }
 
 #[test]

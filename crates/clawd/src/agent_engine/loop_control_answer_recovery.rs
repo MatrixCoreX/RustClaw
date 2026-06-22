@@ -954,6 +954,172 @@ pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
     true
 }
 
+pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    let Some(verifier) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+        return false;
+    }
+    let Some(candidate) = latest_successful_terminal_answer(journal) else {
+        return false;
+    };
+    if !latest_terminal_candidate_can_recover_answer_gap(route, journal, reply, &candidate) {
+        return false;
+    }
+    let answer = candidate.answer;
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer.clone();
+    reply.messages = vec![answer];
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_latest_synthesis");
+    true
+}
+
+struct TerminalAnswerCandidate {
+    source_skill: &'static str,
+    answer: String,
+}
+
+fn latest_successful_terminal_answer(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<TerminalAnswerCandidate> {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+                && step.status == crate::executor::StepExecutionStatus::Ok
+                && step
+                    .output_excerpt
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|text| !text.is_empty())
+        })
+        .and_then(|step| {
+            let source_skill = match step.skill.as_str() {
+                "respond" => "respond",
+                "synthesize_answer" => "synthesize_answer",
+                _ => return None,
+            };
+            let answer = step.output_excerpt.as_deref()?.trim();
+            if answer.is_empty()
+                || crate::finalize::looks_like_planner_artifact(answer)
+                || crate::finalize::looks_like_internal_trace_artifact(answer)
+                || crate::finalize::is_execution_summary_message(answer)
+            {
+                return None;
+            }
+            Some(TerminalAnswerCandidate {
+                source_skill,
+                answer: answer.to_string(),
+            })
+        })
+}
+
+fn latest_terminal_candidate_can_recover_answer_gap(
+    route: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    reply: &AskReply,
+    candidate: &TerminalAnswerCandidate,
+) -> bool {
+    if crate::answer_verifier::structurally_satisfies_answer_contract(
+        route,
+        journal,
+        &candidate.answer,
+    ) {
+        return true;
+    }
+    if reply.text.trim() == candidate.answer.trim() {
+        return false;
+    }
+    match candidate.source_skill {
+        "respond" => route_allows_latest_respond_retry_recovery(route, journal),
+        "synthesize_answer" => route_allows_latest_synthesis_retry_recovery(route, journal),
+        _ => false,
+    }
+}
+
+fn route_allows_latest_synthesis_retry_recovery(
+    route: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if !crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| shape.allows_model_language())
+    {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+            && step
+                .output_excerpt
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
+fn route_allows_latest_respond_retry_recovery(
+    route: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || !route.output_contract.requires_content_evidence
+    {
+        return false;
+    }
+    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+            && step
+                .output_excerpt
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
 pub(super) fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
     if route
         .output_contract

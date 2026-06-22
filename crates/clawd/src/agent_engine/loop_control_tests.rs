@@ -14,9 +14,10 @@ use super::{
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
-    try_recover_http_health_answer_verifier_gap, try_recover_local_health_answer_verifier_gap,
-    try_recover_log_analyze_answer_verifier_gap, try_recover_recent_artifacts_answer_verifier_gap,
-    try_recover_rss_news_answer_verifier_gap, try_recover_structured_count_answer_verifier_gap,
+    try_recover_http_health_answer_verifier_gap, try_recover_latest_synthesis_answer_verifier_gap,
+    try_recover_local_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,
+    try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
+    try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
@@ -933,64 +934,6 @@ fn alias_prebound_scalar_output_format_gap_recovers_markdown_heading() {
 }
 
 #[test]
-fn answer_verifier_exhaustion_marks_reply_failure() {
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    journal.record_final_answer("old answer");
-    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "expected exactly five paths".to_string(),
-        should_retry: true,
-        retry_instruction: "select five paths".to_string(),
-        confidence: 0.95,
-    };
-    journal.answer_verifier_summary = Some(verifier.clone());
-    let mut reply = AskReply::non_llm("old answer".to_string())
-        .with_messages(vec![
-            "**Execution**\n1. Ran tool `fs_basic`.".to_string(),
-            "old answer".to_string(),
-        ])
-        .with_task_journal(journal);
-
-    mark_reply_failed_after_answer_verifier_exhausted("Find five paths", &mut reply, &verifier);
-
-    assert!(reply.should_fail_task);
-    assert_eq!(reply.messages.len(), 2);
-    assert!(reply.messages[0].starts_with("**Execution**"));
-    let payload: serde_json::Value =
-        serde_json::from_str(&reply.text).expect("structured verifier failure payload");
-    assert_eq!(
-        payload
-            .get("message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("answer_verifier_required_evidence_block")
-    );
-    assert_eq!(
-        payload
-            .get("reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("answer_verifier_required_evidence_block")
-    );
-    assert_eq!(
-        payload
-            .pointer("/missing_evidence_fields/0")
-            .and_then(serde_json::Value::as_str),
-        Some("output_format")
-    );
-    let journal = reply.task_journal.as_ref().expect("journal");
-    assert_eq!(
-        journal.final_status,
-        Some(crate::task_journal::TaskJournalFinalStatus::Failure)
-    );
-    assert_eq!(journal.final_answer.as_deref(), Some(reply.text.as_str()));
-    assert_eq!(
-        journal.final_failure_attribution.as_deref(),
-        Some("contract_gap")
-    );
-}
-
-#[test]
 fn language_only_output_format_gap_keeps_best_model_answer_success() {
     let mut route = route_result(OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = false;
@@ -1900,6 +1843,9 @@ fn boundary_context_keeps_migration_class_unselected_by_default() {
 
 #[path = "loop_control_tests/boundary_context_direct_gate.rs"]
 mod boundary_context_direct_gate;
+
+#[path = "loop_control_tests/answer_verifier_exhaustion.rs"]
+mod answer_verifier_exhaustion;
 
 #[path = "loop_control_tests/local_health_recovery.rs"]
 mod local_health_recovery;

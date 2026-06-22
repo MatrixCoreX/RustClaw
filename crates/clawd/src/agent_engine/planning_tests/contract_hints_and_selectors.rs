@@ -740,6 +740,32 @@ fn command_output_summary_task_id_token_uses_task_control_get_plan() {
 }
 
 #[test]
+fn content_presence_task_control_list_get_marker_uses_first_detail_plan() {
+    let state = test_state_with_enabled_skills(&["task_control"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route.route_reason =
+        "capability_ref=task_control.list capability_ref=task_control.get".to_string();
+    route.resolved_intent = "field_selector=lifecycle_field_presence".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = task_control_list_deterministic_plan_result(
+        &state,
+        "observe task lifecycle field presence",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("task_control list/get machine markers should use deterministic observation");
+
+    assert_eq!(plan.steps.len(), 3);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "task_control", "list_with_first_detail");
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
+}
+
+#[test]
 fn command_output_summary_does_not_shortcut_to_explicit_file_read_plan() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
@@ -1209,6 +1235,89 @@ fn package_manager_dry_run_ignores_auto_locator_path_when_package_token_is_struc
         Some(vec!["jq"])
     );
     assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
+fn structured_dry_run_response_emits_task_cancel_machine_contract() {
+    let mut route = base_route_result();
+    route.route_reason = "semantic=task_control.cancel mode=dry_run would_mutate=false".to_string();
+    route.resolved_intent = "capability=task_control.cancel action=cancel_one".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run task cancel",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("machine dry-run cancel tokens should produce structured response");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected structured respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("task_control_cancel_dry_run")
+    );
+    assert_eq!(
+        value.get("would_mutate").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .pointer("/result_projection_fields/can_cancel")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .pointer("/execution_policy/call_task_cancel_api")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn structured_dry_run_response_emits_async_job_poll_contract() {
+    let mut route = base_route_result();
+    route.route_reason = "semantic=async_job_protocol mode=dry_run would_mutate=false".to_string();
+    route.resolved_intent =
+        "adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run async job protocol",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("machine dry-run async tokens should produce structured response");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected structured respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("async_job_poll_contract_dry_run")
+    );
+    assert_eq!(
+        value.get("would_mutate").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .pointer("/adapter_result/type")
+            .and_then(Value::as_str),
+        Some("pending_async_job")
+    );
+    assert_eq!(
+        value
+            .pointer("/worker_loop/entrypoint")
+            .and_then(Value::as_str),
+        Some("poll_async_job")
+    );
 }
 
 #[test]

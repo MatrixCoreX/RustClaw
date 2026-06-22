@@ -187,6 +187,10 @@ pub(super) async fn plan_round_actions(
     }
 
     return_deterministic_plan!(
+        structured_dry_run_response_deterministic_plan_result(goal, route_result, loop_state),
+        "plan_deterministic_structured_dry_run_response"
+    );
+    return_deterministic_plan!(
         inline_json_transform_deterministic_plan_result(
             goal,
             state,
@@ -244,6 +248,17 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_contract_hint_preferred_action"
     );
     return_deterministic_plan!(
+        config_risk_preview_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+            auto_locator_path,
+        ),
+        "plan_deterministic_config_risk_preview"
+    );
+    return_deterministic_plan!(
         package_docker_readonly_probe_deterministic_plan_result(
             state,
             goal,
@@ -293,6 +308,16 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_runtime_status_scalar_info_fallback"
     );
     return_deterministic_plan!(
+        browser_http_url_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_browser_http_url"
+    );
+    return_deterministic_plan!(
         web_search_summary_deterministic_plan_result(
             state,
             goal,
@@ -301,6 +326,10 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_web_search_summary"
+    );
+    return_deterministic_plan!(
+        task_control_list_deterministic_plan_result(state, goal, route_result, loop_state),
+        "plan_deterministic_task_control_list"
     );
     return_deterministic_plan!(
         task_control_get_deterministic_plan_result(

@@ -769,7 +769,7 @@ fn explicit_content_read_supported_target(path: &str) -> bool {
         .map(|extension| {
             matches!(
                 extension.trim().to_ascii_lowercase().as_str(),
-                "md" | "txt" | "json" | "toml" | "yaml" | "yml" | "rs" | "csv"
+                "md" | "txt" | "log" | "json" | "toml" | "yaml" | "yml" | "rs" | "csv"
             )
         })
         .unwrap_or(false)

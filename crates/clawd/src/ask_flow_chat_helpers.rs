@@ -220,6 +220,13 @@ pub(super) fn structural_alias_binding_ack(
             return Some(ask_reply_with_chat_process(answer, language_hint));
         }
     }
+    if memory_ack_should_defer_for_current_turn_machine_literals(
+        route_result,
+        prompt,
+        resolved_prompt_for_execution,
+    ) {
+        return None;
+    }
     if let Some(answer) = alias_state_patch_ack_answer(state, ctx, language_hint) {
         return Some(AskReply::non_llm(answer));
     }
@@ -232,6 +239,32 @@ pub(super) fn structural_alias_binding_ack(
     };
     normalizer_memory_ack_answer_candidate(route_result)
         .map(|answer| ask_reply_with_chat_process(answer, language_hint))
+}
+
+fn memory_ack_should_defer_for_current_turn_machine_literals(
+    route_result: &crate::RouteResult,
+    prompt: &str,
+    resolved_prompt_for_execution: &str,
+) -> bool {
+    if !route_result.should_refresh_long_term_memory {
+        return false;
+    }
+    let mut literals = current_turn_machine_literals(prompt);
+    for literal in current_turn_machine_literals(resolved_prompt_for_execution) {
+        if !literals.iter().any(|existing| existing == &literal) {
+            literals.push(literal);
+        }
+    }
+    if literals.is_empty() {
+        return false;
+    }
+    let Some(candidate) = normalizer_memory_ack_answer_candidate(route_result) else {
+        return true;
+    };
+    let candidate = candidate.to_ascii_lowercase();
+    !literals
+        .iter()
+        .all(|literal| candidate.contains(&literal.to_ascii_lowercase()))
 }
 
 pub(super) fn normalizer_memory_ack_answer_candidate(

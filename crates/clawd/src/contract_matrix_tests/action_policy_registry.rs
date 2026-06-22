@@ -743,6 +743,34 @@ fn service_status_allows_task_control_list_observation() {
 }
 
 #[test]
+fn content_presence_allows_task_control_lifecycle_field_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::ContentPresenceCheck,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "task_control",
+        &serde_json::json!({
+            "action": "list_with_first_detail",
+        }),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "task_control.list_with_first_detail");
+    assert_eq!(policy.contract_match, "content_presence_check");
+    assert!(policy
+        .required_evidence
+        .contains(&"field_value".to_string()));
+    assert!(policy
+        .evidence_expression
+        .any_of
+        .contains(&"field_value".to_string()));
+}
+
+#[test]
 fn command_output_summary_allows_task_control_get_observation() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -818,6 +846,45 @@ fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
         assert_eq!(policy.decision, ActionPolicyDecision::Allowed, "{action}");
         assert_eq!(policy.contract_match, "config_mutation");
     }
+}
+
+#[test]
+fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
+    let contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ConfigRiskAssessment,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "configs/config.toml".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let preview_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "config_edit",
+        &serde_json::json!({
+            "action": "plan_config_change",
+            "path": "configs/config.toml",
+            "field_path": "llm.selected_vendor",
+            "value": "minimax",
+        }),
+    )
+    .expect("preview policy decision");
+    assert_eq!(preview_policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(preview_policy.action_key, "config_edit.plan_config_change");
+    assert_eq!(preview_policy.contract_match, "config_risk_assessment");
+
+    let git_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "git_basic",
+        &serde_json::json!({
+            "action": "status",
+            "path": ".",
+        }),
+    )
+    .expect("git policy decision");
+    assert_eq!(git_policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(git_policy.action_key, "git_basic.status");
+    assert_eq!(git_policy.contract_match, "config_risk_assessment");
 }
 
 #[test]
