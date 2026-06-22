@@ -35,6 +35,17 @@ pub(super) struct CancelTaskByIdRequest {
     task_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct ResumeTaskByIdRequest {
+    task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PauseTaskByIdRequest {
+    task_id: String,
+    pause_seconds: Option<u64>,
+}
+
 fn authorize_task_admin_request(
     state: &AppState,
     headers: &HeaderMap,
@@ -120,6 +131,44 @@ fn task_admin_target_matches_identity(
         .is_some_and(|task_key| task_key == normalized_key)
 }
 
+fn authorized_task_admin_target_by_id(
+    state: &AppState,
+    headers: &HeaderMap,
+    task_id: &str,
+) -> Result<crate::TaskAdminTarget, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    let (identity, normalized_key) = require_task_admin_identity(state, headers)?;
+    let task_id = task_id.trim();
+    if task_id.is_empty() {
+        return Err(super::api_err::<serde_json::Value>(
+            StatusCode::BAD_REQUEST,
+            "task_id_required",
+        ));
+    }
+    let target = match crate::get_task_admin_target(state, task_id) {
+        Ok(Some(target)) => target,
+        Ok(None) => {
+            return Err(super::api_err::<serde_json::Value>(
+                StatusCode::NOT_FOUND,
+                "task_not_found",
+            ));
+        }
+        Err(err) => {
+            error!("task_admin_target_lookup_failed err={}", err);
+            return Err(super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_lookup_failed",
+            ));
+        }
+    };
+    if !task_admin_target_matches_identity(&target, &identity, &normalized_key) {
+        return Err(super::api_err::<serde_json::Value>(
+            StatusCode::FORBIDDEN,
+            "task_owner_mismatch",
+        ));
+    }
+    Ok(target)
+}
+
 pub(super) async fn list_active_tasks(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -154,30 +203,10 @@ pub(super) async fn cancel_task_by_id(
     headers: HeaderMap,
     Json(req): Json<CancelTaskByIdRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let (identity, normalized_key) = match require_task_admin_identity(&state, &headers) {
-        Ok(identity) => identity,
+    let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
+        Ok(target) => target,
         Err(resp) => return resp,
     };
-    let task_id = req.task_id.trim();
-    if task_id.is_empty() {
-        return super::api_err::<serde_json::Value>(StatusCode::BAD_REQUEST, "task_id_required");
-    }
-    let target = match crate::get_task_admin_target(&state, task_id) {
-        Ok(Some(target)) => target,
-        Ok(None) => {
-            return super::api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "task_not_found");
-        }
-        Err(err) => {
-            error!("Cancel task by id lookup failed: {}", err);
-            return super::api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "task_lookup_failed",
-            );
-        }
-    };
-    if !task_admin_target_matches_identity(&target, &identity, &normalized_key) {
-        return super::api_err::<serde_json::Value>(StatusCode::FORBIDDEN, "task_owner_mismatch");
-    }
     if !matches!(target.status.as_str(), "queued" | "running") {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_active");
     }
@@ -196,6 +225,67 @@ pub(super) async fn cancel_task_by_id(
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_cancel_failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn resume_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ResumeTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    if target.status.as_str() != "running" {
+        return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable");
+    }
+    match crate::repo::resume_task_by_id(&state, &target.task_id) {
+        Ok(Some(update)) => super::api_ok(json!({
+            "status": "task_resume_requested",
+            "task_id": update.task_id,
+            "checkpoint_id": update.checkpoint_id,
+            "task_lifecycle": update.lifecycle,
+        })),
+        Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable"),
+        Err(err) => {
+            error!("task_resume_by_id_failed err={}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_resume_failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn pause_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<PauseTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    if target.status.as_str() != "running" {
+        return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable");
+    }
+    match crate::repo::pause_task_by_id(&state, &target.task_id, req.pause_seconds.unwrap_or(3600))
+    {
+        Ok(Some(update)) => super::api_ok(json!({
+            "status": "task_pause_requested",
+            "task_id": update.task_id,
+            "checkpoint_id": update.checkpoint_id,
+            "task_lifecycle": update.lifecycle,
+        })),
+        Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable"),
+        Err(err) => {
+            error!("task_pause_by_id_failed err={}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_pause_failed",
             )
         }
     }

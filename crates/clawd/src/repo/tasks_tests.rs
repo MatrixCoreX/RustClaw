@@ -12,7 +12,7 @@ use super::{
 };
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    get_task_admin_target,
+    get_task_admin_target, pause_task_by_id, resume_task_by_id,
 };
 
 fn state_with_tasks_table() -> crate::AppState {
@@ -283,6 +283,94 @@ fn cancel_tasks_for_user_chat_writes_machine_lifecycle_and_honors_exclude() {
     let (excluded_status, excluded_error) = stored_task_status_and_error(&state, &excluded_id);
     assert_eq!(excluded_status, "running");
     assert_eq!(excluded_error, None);
+}
+
+#[test]
+fn resume_task_by_id_marks_checkpoint_due_without_restart() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let checkpoint_id = "ckpt-resume-now";
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "test",
+            "checkpoint_id": checkpoint_id,
+            "next_check_after": 4_000_000_000_i64
+        },
+        "task_checkpoint": checkpoint_json(checkpoint_id, vec!["side-effect-1"])
+    });
+    insert_task(&state, &task_id, "running", Some(&result), 1234);
+
+    let update = resume_task_by_id(&state, &task_id)
+        .expect("resume task")
+        .expect("task resumable");
+
+    assert_eq!(update.task_id, task_id);
+    assert_eq!(update.checkpoint_id, checkpoint_id);
+    assert_eq!(update.lifecycle["resume_due"], true);
+    assert_eq!(update.lifecycle["resume_wait_seconds"], 0);
+    assert_eq!(
+        update.lifecycle["message_key"],
+        "clawd.task.resume_requested"
+    );
+    let stored = stored_result_json(&state, &task_id);
+    assert_eq!(stored["task_lifecycle"]["resume_due"], true);
+    assert_eq!(stored["task_lifecycle"]["resume_wait_seconds"], 0);
+    assert_eq!(
+        stored["task_checkpoint"]["completed_side_effect_refs"][0],
+        "side-effect-1"
+    );
+}
+
+#[test]
+fn pause_task_by_id_delays_existing_checkpoint_only() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let checkpoint_id = "ckpt-pause-existing";
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "background",
+            "source": "test",
+            "checkpoint_id": checkpoint_id,
+            "next_check_after": 1
+        },
+        "task_checkpoint": checkpoint_json(checkpoint_id, vec![])
+    });
+    insert_task(&state, &task_id, "running", Some(&result), 1234);
+
+    let update = pause_task_by_id(&state, &task_id, 120)
+        .expect("pause task")
+        .expect("task pauseable");
+
+    assert_eq!(update.checkpoint_id, checkpoint_id);
+    assert_eq!(update.lifecycle["resume_due"], false);
+    assert_eq!(update.lifecycle["resume_wait_seconds"], 120);
+    assert_eq!(
+        update.lifecycle["message_key"],
+        "clawd.task.pause_requested"
+    );
+}
+
+#[test]
+fn pause_task_by_id_rejects_running_task_without_checkpoint() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(
+        &state,
+        &task_id,
+        "running",
+        Some(&json!({"text": "working"})),
+        1234,
+    );
+
+    let update = pause_task_by_id(&state, &task_id, 120).expect("pause task");
+
+    assert!(update.is_none());
+    let (status, error_text) = stored_task_status_and_error(&state, &task_id);
+    assert_eq!(status, "running");
+    assert_eq!(error_text, None);
 }
 
 #[test]

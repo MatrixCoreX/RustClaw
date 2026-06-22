@@ -153,7 +153,7 @@ pub(crate) use repo::{
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
-    list_active_tasks,
+    list_active_tasks, pause_task_by_id, resume_task_by_id,
 };
 pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
@@ -744,6 +744,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/cancel", post(cancel_tasks))
         .route("/tasks/cancel-one", post(cancel_one_task))
         .route("/tasks/cancel-by-task-id", post(cancel_task_by_id_handler))
+        .route("/tasks/resume-by-task-id", post(resume_task_by_id))
+        .route("/tasks/pause-by-task-id", post(pause_task_by_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 
