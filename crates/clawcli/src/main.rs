@@ -41,6 +41,14 @@ enum Command {
     Submit {
         #[arg(short, long)]
         text: String,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
     },
 
     /// Continue an existing task through a user_followup payload.
@@ -136,9 +144,15 @@ fn main() -> Result<()> {
             chat::run_chat(base_url, k)
         }
         Command::Health => commands::run_health(base_url, key.as_deref()),
-        Command::Submit { text } => {
+        Command::Submit {
+            text,
+            wait,
+            detach,
+            json,
+            interval_ms,
+        } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_submit(base_url, k, text)
+            commands::run_submit(base_url, k, text, *wait, *detach, *json, *interval_ms)
         }
         Command::Resume { task_id, text } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
