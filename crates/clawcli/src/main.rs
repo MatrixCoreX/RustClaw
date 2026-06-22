@@ -149,6 +149,20 @@ enum Command {
         exclude_task_id: Option<String>,
     },
 
+    /// GET /v1/skills or /v1/skills/config.
+    Skills {
+        #[arg(long)]
+        config: bool,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show registry capability metadata from /v1/skills/config.
+    Capabilities {
+        #[arg(long)]
+        json: bool,
+    },
+
     /// POST /v1/admin/reload-skills
     ReloadSkills,
 }
@@ -293,6 +307,14 @@ fn main() -> Result<()> {
                 *index,
                 exclude_task_id.clone(),
             )
+        }
+        Command::Skills { config, json } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_skills(base_url, k, *config, *json)
+        }
+        Command::Capabilities { json } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_capabilities(base_url, k, *json)
         }
         Command::ReloadSkills => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
