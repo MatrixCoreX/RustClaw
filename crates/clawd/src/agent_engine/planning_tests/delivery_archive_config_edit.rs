@@ -485,6 +485,7 @@ fn archive_basic_pack_alias_args_normalize_to_contract() {
 #[test]
 fn config_change_preview_read_plan_rewrites_to_config_edit_plan() {
     let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();

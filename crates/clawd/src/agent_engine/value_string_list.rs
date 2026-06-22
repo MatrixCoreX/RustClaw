@@ -1097,6 +1097,9 @@ pub(super) fn service_status_deterministic_plan_result(
     {
         return None;
     }
+    if route_requests_runtime_async_job_contract(route) {
+        return None;
+    }
     if let Some(url) = service_status_url_locator(route, user_text) {
         let action = AgentAction::CallSkill {
             skill: "http_basic".to_string(),
@@ -1303,6 +1306,40 @@ pub(super) fn service_status_deterministic_plan_result(
         }
     }
     None
+}
+
+pub(super) fn async_job_start_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.has_tool_or_skill_output
+        || !route.is_execute_gate()
+        || !route_requests_runtime_async_job_contract(route)
+        || !run_cmd_available_for_plan(state)
+    {
+        return None;
+    }
+    let command = explicit_command_segment(&state.policy.command_intent, &route.resolved_intent)
+        .or_else(|| explicit_command_segment(&state.policy.command_intent, user_text))?;
+    let action = AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({
+            "command": command,
+            "async_start": true,
+            "poll_after_seconds": 2,
+            "expires_in_seconds": 600
+        }),
+    };
+    Some(build_plan_result(
+        goal,
+        "deterministic:async_job_start_run_cmd",
+        PlanKind::Single,
+        &[action],
+    ))
 }
 
 pub(super) fn structured_dry_run_response_deterministic_plan_result(
@@ -1771,6 +1808,15 @@ fn route_mentions_task_control_get(route: &RouteResult) -> bool {
     route_reason_has_marker(route, "capability_ref=task_control.get")
         || route_reason_has_marker(route, "task_control.get")
         || route_mentions_machine_token(route, "task_control.get")
+}
+
+fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
+    route_reason_has_marker(route, "async_job_protocol")
+        || route_reason_has_marker(route, "required_job_fields=")
+        || route_reason_has_marker(route, "checkpoint_states=")
+        || ["async_job_protocol", "pending_async_job", "poll_async_job"]
+            .into_iter()
+            .any(|token| route_mentions_machine_token(route, token))
 }
 
 fn route_mentions_machine_token(route: &RouteResult, token: &str) -> bool {

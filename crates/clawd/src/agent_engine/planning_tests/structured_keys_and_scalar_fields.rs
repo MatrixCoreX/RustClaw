@@ -1016,6 +1016,53 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
 }
 
 #[test]
+fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.requires_content_evidence = true;
+    let loop_state = LoopState::new(1);
+    let original_request = "Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.";
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "the explicit shell command `pwd`"}),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &loop_state,
+        "run pwd and summarize process or port evidence",
+        Some(original_request),
+        None,
+        actions,
+    );
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "run_cmd"
+                && args.get("command").and_then(Value::as_str) == Some("pwd")
+                && args.get(CLAWD_LITERAL_COMMAND_ARG) == Some(&json!(true))
+    ));
+}
+
+#[test]
 fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];

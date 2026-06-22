@@ -561,6 +561,110 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
 }
 
 #[test]
+fn async_job_protocol_prefers_run_cmd_async_start_over_service_status_shortcut() {
+    let state = test_state_with_enabled_skills(&["process_basic", "run_cmd"]);
+    let mut route = base_route_result();
+    route.resolved_intent = "async_job_protocol: run `sleep 2 && echo RUSTCLAW_ASYNC_SMOKE`; adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
+    route.route_reason = "async_job_protocol required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key checkpoint_states=waiting|background".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+
+    let plan = async_job_start_deterministic_plan_result(
+        &state,
+        "start async job",
+        Some(&route),
+        &LoopState::new(1),
+        &route.resolved_intent,
+    )
+    .expect("async job machine contract should start runtime async command");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::CallSkill { skill, args } = action else {
+        panic!("expected run_cmd action, got {action:?}");
+    };
+    assert_eq!(skill, "run_cmd");
+    assert_eq!(
+        args.get("command").and_then(Value::as_str),
+        Some("sleep 2 && echo RUSTCLAW_ASYNC_SMOKE")
+    );
+    assert_eq!(args.get("async_start").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        args.get("poll_after_seconds").and_then(Value::as_u64),
+        Some(2)
+    );
+}
+
+#[test]
+fn async_job_protocol_without_command_skips_service_status_shortcut() {
+    let state = test_state_with_enabled_skills(&["process_basic", "run_cmd"]);
+    let mut route = base_route_result();
+    route.resolved_intent =
+        "async_job_protocol adapter_result.type=pending_async_job next_step=poll_async_job"
+            .to_string();
+    route.route_reason = "async_job_protocol required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key checkpoint_states=waiting|background".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+
+    assert!(service_status_deterministic_plan_result(
+        &state,
+        "start async job",
+        Some(&route),
+        &LoopState::new(1),
+        "start runtime async job",
+    )
+    .is_none());
+}
+
+#[test]
+fn async_job_protocol_injects_async_start_into_planned_run_cmd() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.resolved_intent =
+        "async_job_protocol adapter_result.type=pending_async_job next_step=poll_async_job"
+            .to_string();
+    route.route_reason = "async_job_protocol required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key checkpoint_states=waiting|background".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({"command":"sleep 2 && echo RUSTCLAW_ASYNC_SMOKE"}),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "start runtime async job",
+        Some("start runtime async job"),
+        Some("start runtime async job"),
+        None,
+        actions,
+    );
+
+    let [AgentAction::CallSkill { skill, args }] = normalized.as_slice() else {
+        panic!("expected single run_cmd action, got {normalized:?}");
+    };
+    assert_eq!(skill, "run_cmd");
+    assert_eq!(
+        args.get("command").and_then(Value::as_str),
+        Some("sleep 2 && echo RUSTCLAW_ASYNC_SMOKE")
+    );
+    assert_eq!(args.get("async_start").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        args.get("poll_after_seconds").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        args.get("expires_in_seconds").and_then(Value::as_u64),
+        Some(600)
+    );
+}
+
+#[test]
 fn service_status_process_request_without_machine_filter_does_not_use_ambient_process_table() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
@@ -659,6 +763,42 @@ fn service_status_url_request_uses_http_basic_plan() {
     assert_eq!(
         args.get("url").and_then(Value::as_str),
         Some("http://127.0.0.1:8787/v1/health")
+    );
+}
+
+#[test]
+fn http_download_artifact_contract_uses_http_basic_download_plan() {
+    let state = test_state_with_enabled_skills(&["http_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "document/http/download/nl-codex-parity-example.body".to_string();
+    route.resolved_intent = "https://example.com".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = http_download_artifact_deterministic_plan_result(
+        &state,
+        "download URL artifact",
+        Some(&route),
+        &loop_state,
+        "https://example.com",
+    )
+    .expect("URL plus output path contract should use http_basic download");
+
+    assert_eq!(plan.steps.len(), 3);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "http_basic", "get");
+    assert_eq!(
+        args.get("url").and_then(Value::as_str),
+        Some("https://example.com")
+    );
+    assert_eq!(args.get("download").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        args.get("output_path").and_then(Value::as_str),
+        Some("document/http/download/nl-codex-parity-example.body")
     );
 }
 
@@ -1516,6 +1656,29 @@ fn date_run_cmd_rewrites_to_system_basic_current_time() {
         args.get("kind").and_then(Value::as_str),
         Some("current_time")
     );
+}
+
+#[test]
+fn runtime_status_run_cmd_rewrite_preserves_literal_command_flag() {
+    let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({
+            "command": "pwd",
+            CLAWD_LITERAL_COMMAND_ARG: true,
+        }),
+    }];
+
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+
+    match &rewritten[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "run_cmd");
+            assert_eq!(args.get("command").and_then(Value::as_str), Some("pwd"));
+            assert_eq!(args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
+        }
+        other => panic!("expected literal run_cmd action, got {other:?}"),
+    }
 }
 
 #[test]

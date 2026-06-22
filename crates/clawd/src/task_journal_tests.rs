@@ -16,6 +16,11 @@ mod skill_output_evidence;
 #[path = "task_journal_tests/contract_coverage_tests.rs"]
 mod contract_coverage;
 
+#[path = "task_journal_tests/answer_verifier_envelope.rs"]
+mod answer_verifier_envelope;
+#[path = "task_journal_tests/event_stream_hooks.rs"]
+mod event_stream_hooks;
+
 fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
@@ -1118,6 +1123,12 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
             .and_then(Value::as_str),
         Some("clawd.verify.missing_required_arg")
     );
+    assert_eq!(
+        round
+            .pointer("/repair_signals/0/repair_envelope/failed_action_ref")
+            .and_then(Value::as_str),
+        Some("fs.read_text_range")
+    );
     let forbidden_repeat = round
         .pointer("/repair_signals/0/forbidden_repeat_fingerprint")
         .and_then(Value::as_str)
@@ -1259,52 +1270,6 @@ fn trace_json_matches_repeated_round_step_ids_by_execution_order_and_skill() {
     assert_eq!(
         steps[3].get("requested_action_ref").and_then(Value::as_str),
         Some("http_basic.get")
-    );
-}
-
-#[test]
-fn trace_json_includes_pollable_machine_event_stream() {
-    let mut journal = TaskJournal::for_task("task-events", "ask", "inspect");
-    journal.record_task_lifecycle(json!({
-        "state": "background",
-        "next_action_kind": "poll_async_job",
-        "next_action_ref": "job-1"
-    }));
-    journal.rounds.push(TaskJournalRoundTrace {
-        round_no: 1,
-        goal: "inspect".to_string(),
-        ..Default::default()
-    });
-    journal
-        .step_results
-        .push(TaskJournalStepTrace::ok("step_1", "fs_basic", "ok"));
-    journal.push_task_observation(json!({"source": "fs_basic", "status": "ok"}));
-    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-
-    let trace = journal.to_trace_json();
-    let events = trace
-        .get("event_stream")
-        .and_then(Value::as_array)
-        .expect("event_stream");
-    let event_types = events
-        .iter()
-        .filter_map(|event| event.get("event_type").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        event_types,
-        vec![
-            "task_lifecycle",
-            "agent_round",
-            "tool_step",
-            "task_observation",
-            "task_final"
-        ]
-    );
-    assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
-    assert_eq!(
-        events[2].pointer("/payload/status").and_then(Value::as_str),
-        Some("ok")
     );
 }
 
@@ -1624,6 +1589,55 @@ fn trace_json_distinguishes_requested_tool_from_executed_skill() {
     assert_eq!(
         step.get("retry_fingerprint_status").and_then(Value::as_str),
         Some("not_recorded_in_step_trace")
+    );
+}
+
+#[test]
+fn trace_json_artifact_refs_ignore_multiline_command_output_strings() {
+    let mut journal = TaskJournal::for_task("task-artifact-refs", "ask", "inspect");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "process_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "output_path": "reports/out.txt",
+                "extra": {
+                    "action": "ps",
+                    "output": "exit=0\nPID PPID %CPU %MEM COMM\n1272532 3209 0.7 0.3 clawd",
+                    "text": "exit=0\nState Recv-Q Send-Q Local Address:Port"
+                },
+                "text": "exit=0\nPID PPID %CPU %MEM COMM"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let trace = journal.to_trace_json();
+    let step = trace
+        .pointer("/step_results/0")
+        .and_then(Value::as_object)
+        .expect("step trace");
+    let refs = step
+        .get("artifact_refs")
+        .and_then(Value::as_array)
+        .expect("artifact refs");
+
+    assert_eq!(refs.len(), 1);
+    assert_eq!(
+        refs[0].get("ref").and_then(Value::as_str),
+        Some("reports/out.txt")
+    );
+    assert!(
+        !refs.iter().any(|item| {
+            item.get("ref")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.contains("PID PPID") || value.contains("State Recv-Q"))
+        }),
+        "raw command output must not be projected as an artifact ref: {refs:?}"
     );
 }
 

@@ -317,6 +317,51 @@ async fn builtin_write_file_outcome_exposes_structured_extra() {
     );
 }
 
+#[tokio::test]
+async fn builtin_run_cmd_async_start_outcome_exposes_pending_async_job_extra() {
+    let root = TempDirGuard::new("builtin_run_cmd_async_start_extra");
+    let mut state = test_state("zh-CN");
+    install_real_registry(&mut state);
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let outcome = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "run_cmd",
+        json!({
+            "command": "sleep 0.05; echo async-ok",
+            "cwd": ".",
+            "async_start": true,
+            "poll_after_seconds": 1,
+            "expires_in_seconds": 30
+        }),
+    )
+    .await
+    .expect("run_cmd async start outcome");
+
+    let extra = outcome.extra.expect("async start extra");
+    let job = extra
+        .get("pending_async_job")
+        .expect("pending async job extra");
+    assert_eq!(job["status"], "accepted");
+    assert_eq!(job["poll_after_seconds"], 1);
+    assert_eq!(job["message_key"], "clawd.task.async_job_pending");
+    assert!(
+        job["job_id"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("local_process:")),
+        "job: {job}"
+    );
+    assert!(
+        job["cancel_ref"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("local_process:")),
+        "job: {job}"
+    );
+    assert!(outcome.text.contains("\"status\":\"accepted\""));
+}
+
 fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
     let db = state.core.db.get().expect("db pool");
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)

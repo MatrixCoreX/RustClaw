@@ -820,25 +820,30 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        let active_text_followup_route_repair = apply_active_text_followup_route_repair(
-            req,
-            session_snapshot,
-            &mut turn_type,
-            &mut target_task_policy,
-            attachment_processing_required,
-            &mut legacy_normalizer_decision,
-            &mut execution_finalize_style,
-            &mut needs_clarify,
-            schedule_kind,
-            out.should_refresh_long_term_memory,
-            &mut wants_file_delivery,
-            &mut output_contract,
-            state_patch.as_ref(),
-            resolved_existing_directory_from_current_request(state, req).is_some()
-                || resolved_directory_pair_from_current_request(state, req).is_some(),
-            active_text_answer_candidate_repair_applied,
-            &mut out.answer_candidate,
-        );
+        let active_text_followup_route_repair =
+            (!crate::agent_engine::agent_loop_semantic_authority_enabled(state))
+                .then(|| {
+                    apply_active_text_followup_route_repair(
+                        req,
+                        session_snapshot,
+                        &mut turn_type,
+                        &mut target_task_policy,
+                        attachment_processing_required,
+                        &mut legacy_normalizer_decision,
+                        &mut execution_finalize_style,
+                        &mut needs_clarify,
+                        schedule_kind,
+                        out.should_refresh_long_term_memory,
+                        &mut wants_file_delivery,
+                        &mut output_contract,
+                        state_patch.as_ref(),
+                        resolved_existing_directory_from_current_request(state, req).is_some()
+                            || resolved_directory_pair_from_current_request(state, req).is_some(),
+                        active_text_answer_candidate_repair_applied,
+                        &mut out.answer_candidate,
+                    )
+                })
+                .flatten();
         if let Some(repair_reason) = active_text_followup_route_repair {
             clarify_question.clear();
             force_current_request_resolved_intent = true;

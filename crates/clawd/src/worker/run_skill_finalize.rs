@@ -2,8 +2,14 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use tracing::{error, info};
 
+use crate::task_lifecycle::{
+    AsyncJobRef, AsyncJobStatus, CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint,
+    TaskLifecycleState,
+};
 use crate::{repo, AppState};
 use claw_core::skill_registry::{OutputKind, PlannerCapabilityEffect, SkillRiskLevel};
+
+const DIRECT_RUN_SKILL_ASYNC_SOURCE: &str = "direct_run_skill_async_start_adapter";
 
 async fn finalize_run_skill_canceled(task: &crate::ClaimedTask, skill_name: &str) -> Result<()> {
     info!(
@@ -347,6 +353,239 @@ fn external_skill_admission_trace(state: &AppState, skill_name: &str) -> Option<
     }))
 }
 
+fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {
+    let extra = extra?;
+    extra
+        .get("pending_async_job")
+        .or_else(|| extra.get("async_job"))
+        .or_else(|| {
+            let kind = extra
+                .get("type")
+                .or_else(|| extra.get("kind"))
+                .and_then(Value::as_str)
+                .map(str::trim);
+            (kind == Some("pending_async_job")).then_some(extra)
+        })
+}
+
+fn direct_run_skill_async_job_status(value: &Value) -> Option<AsyncJobStatus> {
+    match value.get("status").and_then(Value::as_str).map(str::trim)? {
+        "accepted" => Some(AsyncJobStatus::Accepted),
+        "running" => Some(AsyncJobStatus::Running),
+        "succeeded" => Some(AsyncJobStatus::Succeeded),
+        "failed" => Some(AsyncJobStatus::Failed),
+        "expired" => Some(AsyncJobStatus::Expired),
+        _ => None,
+    }
+}
+
+fn required_machine_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn pending_async_job_ref_from_extra(extra: Option<&Value>) -> Result<Option<AsyncJobRef>, String> {
+    let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
+        return Ok(None);
+    };
+    if candidate.get("text").is_some() || candidate.get("error_text").is_some() {
+        return Err("direct_run_skill_async_job_invalid: user_text_fields_forbidden".to_string());
+    }
+    let Some(status) = direct_run_skill_async_job_status(candidate) else {
+        return Err("direct_run_skill_async_job_invalid: unsupported_status".to_string());
+    };
+    if !matches!(status, AsyncJobStatus::Accepted | AsyncJobStatus::Running) {
+        return Err("direct_run_skill_async_job_invalid: non_pending_status".to_string());
+    }
+    let job = AsyncJobRef {
+        job_id: required_machine_string(candidate, "job_id").unwrap_or_default(),
+        status,
+        poll_after_seconds: candidate
+            .get("poll_after_seconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        expires_at: candidate
+            .get("expires_at")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        cancel_ref: required_machine_string(candidate, "cancel_ref").unwrap_or_default(),
+        message_key: required_machine_string(candidate, "message_key").unwrap_or_default(),
+    };
+    let missing = job.missing_required_fields();
+    if !missing.is_empty() {
+        return Err(format!(
+            "direct_run_skill_async_job_invalid: missing_required_fields={}",
+            missing.join("|")
+        ));
+    }
+    Ok(Some(job))
+}
+
+fn pending_async_job_poll_adapter_from_extra(
+    extra: Option<&Value>,
+) -> Result<Option<Value>, String> {
+    let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
+        return Ok(None);
+    };
+    let Some(adapter) = candidate
+        .get("poll_adapter")
+        .or_else(|| extra.and_then(|extra| extra.get("poll_adapter")))
+    else {
+        return Ok(None);
+    };
+    if adapter.get("text").is_some() || adapter.get("error_text").is_some() {
+        return Err(
+            "direct_run_skill_async_job_invalid: poll_adapter_user_text_fields_forbidden"
+                .to_string(),
+        );
+    }
+    let adapter_kind = adapter
+        .get("adapter_kind")
+        .or_else(|| adapter.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "direct_run_skill_async_job_invalid: poll_adapter_kind_missing".to_string()
+        })?;
+    if adapter_kind != "skill_poll" {
+        return Err(
+            "direct_run_skill_async_job_invalid: unsupported_poll_adapter_kind".to_string(),
+        );
+    }
+    adapter
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "direct_run_skill_async_job_invalid: poll_adapter_skill_name_missing".to_string()
+        })?;
+    if let Some(args) = adapter.get("args") {
+        if !args.is_object() || args.get("text").is_some() || args.get("error_text").is_some() {
+            return Err(
+                "direct_run_skill_async_job_invalid: poll_adapter_args_invalid".to_string(),
+            );
+        }
+    }
+    Ok(Some(adapter.clone()))
+}
+
+fn direct_run_skill_async_checkpoint_payload(
+    task: &crate::ClaimedTask,
+    skill_name: &str,
+    clean_text: &str,
+    job: &AsyncJobRef,
+    poll_adapter: Option<&Value>,
+    now_ts: i64,
+) -> Value {
+    let checkpoint_id = format!("run-skill:{}:async-job:{}", task.task_id, job.job_id);
+    let mut boundary_context = json!({
+        "schema_version": 1,
+        "source": DIRECT_RUN_SKILL_ASYNC_SOURCE,
+        "task_id": task.task_id,
+        "skill": skill_name,
+        "execution_surface": "worker/run_skill_finalize",
+    });
+    if let (Some(obj), Some(adapter)) = (
+        boundary_context.as_object_mut(),
+        poll_adapter.filter(|value| value.is_object()),
+    ) {
+        obj.insert("async_poll_adapter".to_string(), adapter.clone());
+    }
+    let checkpoint = TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.clone(),
+        boundary_context,
+        last_successful_round: None,
+        last_successful_step: Some("run_skill".to_string()),
+        pending_action: None,
+        observations: vec![json!({
+            "step_id": "run_skill",
+            "skill": skill_name,
+            "status": "ok",
+            "has_output": !clean_text.trim().is_empty(),
+            "has_error": false,
+            "async_job_id": job.job_id,
+        })],
+        evidence_refs: vec!["run_skill".to_string()],
+        artifact_refs: Vec::new(),
+        completed_side_effect_refs: vec![format!(
+            "run_skill:{skill_name}:async_job:{}",
+            job.job_id
+        )],
+        budget: CheckpointBudgetCounters {
+            round: 0,
+            step: 1,
+            llm_calls: 0,
+            tool_calls: 1,
+            elapsed_ms: 0,
+        },
+        attempt_ledger: None,
+        pending_async_job: Some(job.clone()),
+        repair_signal: None,
+        resume_entrypoint: ResumeEntrypoint::PollAsyncJob,
+    };
+    json!({
+        "text": clean_text,
+        "delivery_meta": {
+            "mode": "single_step_skill_async_start",
+            "label": "step",
+            "skill_name": skill_name,
+        },
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": TaskLifecycleState::Waiting,
+            "source": DIRECT_RUN_SKILL_ASYNC_SOURCE,
+            "resume_reason": "pending_async_job",
+            "next_check_after": now_ts.saturating_add(job.poll_after_seconds as i64).max(now_ts + 1),
+            "checkpoint_id": checkpoint_id,
+            "poll_ref": job.job_id,
+            "cancel_ref": job.cancel_ref,
+            "poll_after_seconds": job.poll_after_seconds,
+            "async_job_expires_at": job.expires_at,
+            "async_job_message_key": job.message_key,
+            "can_poll": true,
+            "can_cancel": true,
+            "last_heartbeat_ts": now_ts,
+        },
+        "task_checkpoint": checkpoint.to_machine_json(),
+    })
+}
+
+fn direct_run_skill_pending_async_checkpoint_result(
+    task: &crate::ClaimedTask,
+    skill_name: &str,
+    clean_text: &str,
+    journal: &mut crate::task_journal::TaskJournal,
+    extra: Option<&Value>,
+) -> Result<Option<Value>, String> {
+    let Some(job) = pending_async_job_ref_from_extra(extra)? else {
+        return Ok(None);
+    };
+    let poll_adapter = pending_async_job_poll_adapter_from_extra(extra)?;
+    let payload = direct_run_skill_async_checkpoint_payload(
+        task,
+        skill_name,
+        clean_text,
+        &job,
+        poll_adapter.as_ref(),
+        crate::now_ts_u64() as i64,
+    );
+    if let Some(lifecycle) = payload.get("task_lifecycle").cloned() {
+        journal.record_task_lifecycle(lifecycle);
+    }
+    if let Some(checkpoint) = payload.get("task_checkpoint").cloned() {
+        journal.record_task_checkpoint(checkpoint);
+    }
+    journal.record_final_stop_signal("async_job_checkpoint_waiting");
+    Ok(Some(journal.attach_to_result(payload)))
+}
+
 async fn finalize_run_skill_success(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -400,6 +639,52 @@ async fn finalize_run_skill_success(
         &clean_text,
         &[],
     ));
+    let pending_checkpoint_result = match direct_run_skill_pending_async_checkpoint_result(
+        task,
+        skill_name,
+        &clean_text,
+        &mut journal,
+        outcome.extra.as_ref(),
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            finalize_run_skill_failure(state, task, payload, skill_name, &err).await?;
+            return Ok(());
+        }
+    };
+    if let Some(result) = pending_checkpoint_result {
+        repo::update_task_progress_result(state, &task.task_id, &result.to_string())?;
+        let _ = repo::insert_audit_log(
+            state,
+            Some(task.user_id),
+            "run_skill",
+            Some(
+                &json!({
+                    "task_id": task.task_id,
+                    "chat_id": task.chat_id,
+                    "skill_name": skill_name,
+                    "status": "waiting",
+                    "resume_reason": "pending_async_job"
+                })
+                .to_string(),
+            ),
+            None,
+        );
+        info!("{}", crate::LOG_CALL_WRAP);
+        info!(
+            "task_call_end task_id={} kind=run_skill status=waiting skill={} resume_reason=pending_async_job",
+            task.task_id,
+            skill_name
+        );
+        info!(
+            "task_journal_summary task_id={} kind=run_skill phase=async_wait {}",
+            task.task_id,
+            journal.to_log_json()
+        );
+        info!("{}", crate::LOG_CALL_WRAP);
+        state.clear_task_llm_call_count(&task.task_id);
+        return Ok(());
+    }
     journal.record_final_answer(&clean_text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     if outcome.notify.unwrap_or(true) {

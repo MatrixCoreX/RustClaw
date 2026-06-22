@@ -73,6 +73,45 @@ fn skill_extra_requests_user_input(extra: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn record_hook_outcome_observation(
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    global_step: usize,
+    step_in_round: usize,
+    outcome: &crate::agent_hooks::HookOutcome,
+) {
+    let mut payload = outcome.to_machine_json(normalized_skill);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("global_step".to_string(), json!(global_step));
+        obj.insert("step_in_round".to_string(), json!(step_in_round));
+        obj.insert("round_no".to_string(), json!(loop_state.round_no));
+    }
+    loop_state.task_observations.push(payload);
+}
+
+fn record_post_tool_use_observation(
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    action_args: &Value,
+    global_step: usize,
+    step_in_round: usize,
+    step_status: crate::executor::StepExecutionStatus,
+) {
+    let outcome = crate::agent_hooks::post_tool_use_outcome(
+        normalized_skill,
+        action_args,
+        step_status.as_str(),
+    );
+    let mut payload = outcome.to_machine_json(normalized_skill);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("global_step".to_string(), json!(global_step));
+        obj.insert("step_in_round".to_string(), json!(step_in_round));
+        obj.insert("round_no".to_string(), json!(loop_state.round_no));
+        obj.insert("step_status".to_string(), json!(step_status.as_str()));
+    }
+    loop_state.task_observations.push(payload);
+}
+
 fn matrix_admitted_external_evidence_output(
     state: &AppState,
     normalized_skill: &str,
@@ -1011,6 +1050,17 @@ async fn handle_skill_step_success(
             .as_deref(),
         &journal_step_execution,
     );
+    if stop_signal.is_none() {
+        stop_signal = super::async_start_checkpoint::publish_pending_async_job_start_checkpoint(
+            state,
+            task,
+            loop_state,
+            normalized_skill,
+            global_step,
+            step_in_round,
+            structured_extra,
+        )?;
+    }
     // Raw skill output stays trace/evidence unless the skill explicitly marks it as a user-input prompt.
     let ended_with_user_visible_output =
         stop_signal.as_deref() == Some("skill_requires_user_input");
@@ -1262,6 +1312,20 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    if normalized_skill == "subagent" {
+        let stop_signal = super::subagent_runtime::record_subagent_action_from_args(
+            loop_state,
+            global_step,
+            step_in_round,
+            &exec_args,
+        )
+        .map(str::to_string);
+        return Ok(SkillActionOutcome {
+            ended_with_user_visible_output: false,
+            stop_signal,
+            continue_in_round: false,
+        });
+    }
     if let Some(err) = contract_matrix_action_policy_error(
         state,
         loop_state,
@@ -1323,6 +1387,44 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
+    let pre_tool_use_outcome =
+        crate::agent_hooks::pre_tool_use_outcome_for_state(state, normalized_skill, &exec_args);
+    record_hook_outcome_observation(
+        loop_state,
+        normalized_skill,
+        global_step,
+        step_in_round,
+        &pre_tool_use_outcome,
+    );
+    if pre_tool_use_outcome.decision == "require_confirmation" {
+        super::publish_agent_loop_user_input_checkpoint_progress(
+            state,
+            task,
+            loop_state,
+            "hook_confirmation_required",
+            normalized_skill,
+            &pre_tool_use_outcome.action_ref,
+            &exec_args,
+        );
+        return Ok(SkillActionOutcome {
+            ended_with_user_visible_output: false,
+            stop_signal: Some("hook_confirmation_required".to_string()),
+            continue_in_round: false,
+        });
+    }
+    if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
         crate::highlight_tag("skill"),
@@ -1362,6 +1464,14 @@ pub(super) async fn execute_prepared_skill_action(
         .ok()
         .and_then(|slot| slot.clone());
     let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
+    record_post_tool_use_observation(
+        loop_state,
+        normalized_skill,
+        &exec_args,
+        global_step,
+        step_in_round,
+        step_execution.status,
+    );
     let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
         state,
         normalized_skill,

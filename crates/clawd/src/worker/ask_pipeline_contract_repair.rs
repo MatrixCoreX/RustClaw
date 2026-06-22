@@ -118,6 +118,9 @@ pub(super) fn repair_summary_only_content_excerpt_with_summary_contract(
 pub(super) fn repair_generic_path_content_grounded_summary_contract(
     route_result: &mut crate::RouteResult,
 ) -> bool {
+    if repair_command_observation_marker_contract(route_result) {
+        return true;
+    }
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
@@ -154,6 +157,43 @@ pub(super) fn repair_generic_path_content_grounded_summary_contract(
         route_result,
         "generic_path_content_grounded_summary_contract_repaired",
     );
+    true
+}
+
+fn repair_command_observation_marker_contract(route_result: &mut crate::RouteResult) -> bool {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+    {
+        return false;
+    }
+    let semantic_kind = if super::route_reason_has_marker(
+        route_result,
+        "explicit_command_requires_command_output_summary_execution",
+    ) || super::route_reason_has_marker(
+        route_result,
+        "command_payload_requires_command_output_summary_execution",
+    ) {
+        crate::OutputSemanticKind::CommandOutputSummary
+    } else if super::route_reason_has_marker(
+        route_result,
+        "explicit_command_requires_fresh_execution",
+    ) || super::route_reason_has_marker(
+        route_result,
+        "command_payload_requires_raw_output_execution",
+    ) {
+        crate::OutputSemanticKind::RawCommandOutput
+    } else {
+        return false;
+    };
+
+    route_result.output_contract.semantic_kind = semantic_kind;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    super::append_route_reason(route_result, "command_observation_marker_contract_repaired");
     true
 }
 

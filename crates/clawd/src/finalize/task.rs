@@ -9,16 +9,17 @@ use crate::{repo, AppState};
 mod task_resume;
 
 use task_resume::{
-    direct_chat_answer_verifier_retry_applicable, resume_context_execution_summary_messages,
+    answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
     resume_failure_is_structured_service_status_result,
-    resume_failure_is_unbound_path_lookup_clarify_result, retry_direct_chat_answer_after_verifier,
+    resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
     text_looks_like_missing_file_target,
 };
 
 #[cfg(test)]
 use task_resume::{
-    resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
+    answer_verifier_retry_observed_trace, resume_context_has_directory_lookup_failure,
+    resume_context_path_batch_facts_are_missing_only,
 };
 
 fn ask_result_payload(
@@ -1346,15 +1347,12 @@ pub(crate) async fn finalize_ask_result(
                     .await
                 };
                 if let Some(answer_verifier) = answer_verifier {
-                    let direct_chat_retry = direct_chat_answer_verifier_retry_applicable(
-                        route_result,
-                        &journal,
-                        &answer_verifier,
-                    );
+                    let answer_verifier_retry =
+                        answer_verifier_retry_applicable(route_result, &journal, &answer_verifier);
                     let retry_verifier_input = answer_verifier.clone();
                     journal.record_answer_verifier_summary(answer_verifier);
-                    if direct_chat_retry {
-                        if let Some(retried_answer) = retry_direct_chat_answer_after_verifier(
+                    if answer_verifier_retry {
+                        if let Some(retried_answer) = retry_answer_after_verifier(
                             state,
                             task,
                             prompt,

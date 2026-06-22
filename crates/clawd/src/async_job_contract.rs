@@ -78,7 +78,7 @@ pub(crate) fn async_job_protocol_hint_line() -> String {
         .collect::<Vec<_>>()
         .join("|");
     format!(
-        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|expires_at|final_result_json|failure_result_json|error_code|message_key;user_text_fields_forbidden:text|error_text"
+        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;poll_adapter_kinds:skill_poll;adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|expires_at|final_result_json|failure_result_json|error_code|message_key;user_text_fields_forbidden:text|error_text"
     )
 }
 
@@ -120,6 +120,7 @@ pub(crate) fn async_job_contract_json() -> Value {
             "cancel_ref",
             "message_key"
         ],
+        "poll_adapter_kinds": ["skill_poll"],
         "adapter_result_key": ASYNC_POLL_ADAPTER_RESULT_KEY,
         "adapter_result_fields": [
             "job_id",

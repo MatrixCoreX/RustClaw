@@ -1,9 +1,10 @@
 use super::{
     action_fingerprint, action_fingerprint_for_policy, append_delivery_message,
-    build_agent_loop_checkpoint_progress_payload, collect_execution_recipe_progress_hints,
-    execution_recipe_phase_progress_key, load_agent_loop_guard_policy, AgentLoopGuardPolicy,
-    AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile, LoopRecipeOverrides,
-    RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+    build_agent_loop_checkpoint_progress_payload,
+    build_agent_loop_user_input_checkpoint_progress_payload,
+    collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
+    load_agent_loop_guard_policy, AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope,
+    LoopBudgetProfile, LoopRecipeOverrides, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
 };
 use crate::agent_engine::{seed_loop_state_for_agent_run, LoopState};
 use crate::execution_recipe::{
@@ -219,6 +220,146 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["signal"],
         "max_rounds"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_class"],
+        "checkpoint_resume_repair"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["checkpoint_id"],
+        payload["task_checkpoint"]["checkpoint_id"]
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
+        2
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["repair_attempt"],
+        2
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["max_attempts"],
+        2
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["no_progress_count"],
+        0
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["budget_exhausted"],
+        true
+    );
+}
+
+#[test]
+fn user_input_checkpoint_payload_records_hook_confirmation_state() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.tool_calls_total = 1;
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "read_file".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("{\"status\":\"ok\"}".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+    let payload = build_agent_loop_user_input_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "hook_confirmation_required",
+        1_781_800_001,
+        "package_manager",
+        "package_manager.install",
+        &serde_json::json!({
+            "action": "install",
+            "package": "example",
+            "token": "redacted-by-caller"
+        }),
+    );
+
+    assert_eq!(payload["task_lifecycle"]["state"], "needs_user");
+    assert_eq!(
+        payload["task_lifecycle"]["resume_reason"],
+        "hook_confirmation_required"
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["next_action_kind"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["resume_entrypoint"],
+        "await_user_input"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["source"],
+        "agent_hooks"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["pending_action"]["action_ref"],
+        "package_manager.install"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["pending_action"]["args_keys"],
+        serde_json::json!(["action", "package", "token"])
+    );
+    assert!(!payload["task_checkpoint"]["pending_action"]
+        .to_string()
+        .contains("redacted-by-caller"));
+}
+
+#[test]
+fn no_progress_checkpoint_payload_records_repair_budget_state() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 3;
+    loop_state.consecutive_no_progress = 2;
+    loop_state.last_stop_signal = Some("no_progress".to_string());
+
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "agent_loop_no_progress_limit",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    assert_eq!(
+        payload["task_lifecycle"]["resume_reason"],
+        "agent_loop_no_progress_limit"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_class"],
+        "checkpoint_resume_repair"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["next_recovery_kind"],
+        "wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
+        3
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["max_attempts"],
+        4
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["no_progress_count"],
+        2
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["budget_exhausted"],
+        true
     );
 }
 

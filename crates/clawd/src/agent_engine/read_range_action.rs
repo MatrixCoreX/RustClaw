@@ -787,6 +787,12 @@ pub(super) fn rewrite_config_change_preview_to_config_edit_plan(
     let Some(route) = route_result else {
         return actions;
     };
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ConfigMutation | crate::OutputSemanticKind::ConfigRiskAssessment
+    ) {
+        return actions;
+    }
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || actions.iter().any(|action| {

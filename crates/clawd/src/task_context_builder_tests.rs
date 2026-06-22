@@ -682,6 +682,23 @@ fn recent_observed_judgments_keep_recent_execution_history() {
 }
 
 #[test]
+fn concrete_content_excerpt_path_uses_light_execution_without_recent_history() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/README.md".to_string();
+
+    assert!(!route_needs_recent_execution_history(&route));
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
 fn unanchored_light_routes_keep_execution_anchor_context() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
@@ -1068,6 +1085,45 @@ fn light_execution_budget_detects_scalar_path_only_pwd_route() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_bounded_observation_summaries() {
+    for semantic_kind in [
+        crate::OutputSemanticKind::CommandOutputSummary,
+        crate::OutputSemanticKind::ServiceStatus,
+        crate::OutputSemanticKind::PackageManagerDetection,
+        crate::OutputSemanticKind::DockerPs,
+        crate::OutputSemanticKind::DockerImages,
+    ] {
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent = "observe local runtime state and summarize current evidence".into();
+        route.output_contract.semantic_kind = semantic_kind;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+        assert!(
+            uses_light_execution_context_budget(&route, &route.resolved_intent),
+            "{semantic_kind:?} should use light execution budget"
+        );
+    }
+}
+
+#[test]
+fn light_execution_budget_keeps_high_risk_observation_summaries_full() {
+    let mut route = base_route_result();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert!(!uses_light_execution_context_budget(
         &route,
         &route.resolved_intent
     ));

@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
 
 ### Request And Agent Loop Flow
 
@@ -56,7 +56,8 @@ flowchart TD
     U --> V
     S --> V
     V --> W[Evidence coverage + answer-shape check]
-    W -->|repair / missing evidence| J
+    W -->|repair / missing evidence| WR[RepairEnvelope<br/>issue codes + attempt ledger]
+    WR --> J
     W -->|complete| X[Observed-output finalizer]
     R --> Y[User-visible message assembly]
     K --> Y
@@ -77,6 +78,7 @@ flowchart TD
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
+- `RepairEnvelope`: repair is bounded loop recovery. Runtime supplies machine fields such as `repair_source`, `issue_codes`, `missing_evidence`, `permission_decision`, `provider_status`, `attempt_fingerprint`, `side_effect_fingerprint`, `checkpoint_id`, and `next_recovery_kind`; planner/finalizer can use those fields to replan, clarify, wait in background, or fail structurally without parsing localized prose.
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
@@ -120,7 +122,8 @@ flowchart TD
     Q -->|respond| ZB[Terminal response]
     ZA --> ZC[Evidence coverage]
     Z --> ZC
-    ZC -->|repair needed| G
+    ZC -->|repair needed| ZR[RepairEnvelope<br/>bounded recovery signal]
+    ZR --> G
     ZC -->|complete| ZD[Observed-output finalizer]
     ZB --> ZE[Output-contract guard]
     ZD --> ZE
@@ -136,6 +139,7 @@ flowchart TD
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
+- `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
 - `Compatibility finalization`: remains for non-eligible, high-risk, schedule, delivery, and rollback cases, but it is not the ordinary semantic decision path.
 
 ### Permission Plane And Command Policy
@@ -324,7 +328,7 @@ flowchart TD
     ZA -->|terminal success/failure| ZB[Persist result_json/status]
     J --> ZC[Heartbeat + process ask/run_skill]
     ZC --> ZD{agent loop outcome}
-    ZD -->|soft budget/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint]
+    ZD -->|soft budget/provider wait/async job| ZE[task_lifecycle<br/>waiting/background + task_checkpoint + repair_signal]
     ZE --> D
     ZD -->|needs user| S
     ZD -->|complete| ZB
@@ -348,7 +352,7 @@ Important lifecycle details:
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
-- Seeded resume restores checkpoint budget counters, observations, artifact refs, and completed side-effect fingerprints before re-entering the agent loop.
+- Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 
 ## Main Components

@@ -536,6 +536,54 @@ fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence(
 }
 
 #[test]
+fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_command() {
+    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
+    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.requires_content_evidence = true;
+    let loop_state = LoopState::new(1);
+    let request = "Run the explicit shell command `pwd`, then inspect local listening ports or processes related to clawd; answer with the working directory and whether a clawd-related process or port is visible.";
+
+    assert_eq!(
+        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
+        Some("pwd")
+    );
+    assert_eq!(
+        super::super::explicit_command_single_step_segment(&state.policy.command_intent, request)
+            .as_deref(),
+        Some("pwd")
+    );
+    let plan = explicit_command_deterministic_plan_result(
+        &state,
+        "run pwd and summarize related process or port evidence",
+        Some(&route),
+        &loop_state,
+        request,
+        None,
+    )
+    .expect("embedded code span command should use deterministic run_cmd plan");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(
+        plan.steps[0].args.get("command").and_then(Value::as_str),
+        Some("pwd")
+    );
+    assert_eq!(
+        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
+        Some(&json!(true))
+    );
+    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
+    assert_eq!(plan.steps[2].action_type, "respond");
+}
+
+#[test]
 fn command_output_summary_prefixed_unknown_second_command_gets_multi_step_plan() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];

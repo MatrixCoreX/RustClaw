@@ -167,10 +167,12 @@ fn startup_recovery_preserves_paused_checkpoints_before_or_after_next_check() {
         "checkpoint-future",
     );
     let due_result = paused_checkpoint_result("background", 1, "checkpoint-due");
+    let needs_user_result = paused_checkpoint_result("needs_user", 1, "checkpoint-needs-user");
     for (task_id, result_json) in [
         ("running-old", None),
         ("waiting-future", Some(future_result)),
         ("background-due", Some(due_result)),
+        ("needs-user", Some(needs_user_result)),
     ] {
         db.execute(
             "INSERT INTO tasks (task_id, status, result_json, error_text, created_at, updated_at)
@@ -184,18 +186,23 @@ fn startup_recovery_preserves_paused_checkpoints_before_or_after_next_check() {
         super::recover_stale_running_tasks_on_startup(&db, 60).expect("recover stale running");
 
     assert_eq!(recovered, vec!["running-old".to_string()]);
-    let statuses = ["running-old", "waiting-future", "background-due"]
-        .into_iter()
-        .map(|task_id| {
-            db.query_row(
-                "SELECT status FROM tasks WHERE task_id = ?1",
-                rusqlite::params![task_id],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("query task status")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(statuses, vec!["timeout", "running", "running"]);
+    let statuses = [
+        "running-old",
+        "waiting-future",
+        "background-due",
+        "needs-user",
+    ]
+    .into_iter()
+    .map(|task_id| {
+        db.query_row(
+            "SELECT status FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("query task status")
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(statuses, vec!["timeout", "running", "running", "running"]);
 }
 
 #[tokio::test]

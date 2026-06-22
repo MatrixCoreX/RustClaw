@@ -71,11 +71,13 @@ pub(super) fn split_sequential_run_cmd_actions(
                 if skill.trim().eq_ignore_ascii_case("run_cmd") =>
             {
                 let parts = run_cmd_command_from_args(&args).and_then(|command| {
-                    if should_preserve_user_supplied_shell_command(
-                        command,
-                        user_text,
-                        original_user_text,
-                    ) {
+                    if run_cmd_args_async_start(&args)
+                        || should_preserve_user_supplied_shell_command(
+                            command,
+                            user_text,
+                            original_user_text,
+                        )
+                    {
                         None
                     } else if let Some(first_attempt) =
                         planner_failure_fallback_first_command(command, split_conditionals)
@@ -104,11 +106,13 @@ pub(super) fn split_sequential_run_cmd_actions(
             }
             AgentAction::CallTool { tool, args } if tool.trim().eq_ignore_ascii_case("run_cmd") => {
                 let parts = run_cmd_command_from_args(&args).and_then(|command| {
-                    if should_preserve_user_supplied_shell_command(
-                        command,
-                        user_text,
-                        original_user_text,
-                    ) {
+                    if run_cmd_args_async_start(&args)
+                        || should_preserve_user_supplied_shell_command(
+                            command,
+                            user_text,
+                            original_user_text,
+                        )
+                    {
                         None
                     } else if let Some(first_attempt) =
                         planner_failure_fallback_first_command(command, split_conditionals)
@@ -142,6 +146,10 @@ pub(super) fn split_sequential_run_cmd_actions(
         info!("plan_split_sequential_run_cmd_actions");
     }
     rewritten
+}
+
+fn run_cmd_args_async_start(args: &Value) -> bool {
+    args.get("async_start").and_then(Value::as_bool) == Some(true)
 }
 
 pub(super) fn run_cmd_command_from_args(args: &Value) -> Option<&str> {

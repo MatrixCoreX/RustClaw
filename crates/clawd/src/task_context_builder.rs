@@ -543,6 +543,29 @@ fn route_uses_structured_content_read(
         && has_concrete_locator
 }
 
+fn route_uses_bounded_observation_summary_light_budget(route_result: &RouteResult) -> bool {
+    if route_result.risk_ceiling != crate::RiskCeiling::Low
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+    {
+        return false;
+    }
+    if !matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+    ) {
+        return false;
+    }
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::ServiceStatus
+            | crate::OutputSemanticKind::PackageManagerDetection
+            | crate::OutputSemanticKind::DockerPs
+            | crate::OutputSemanticKind::DockerImages
+    )
+}
+
 pub(crate) fn uses_light_execution_context_budget(
     route_result: &RouteResult,
     _resolved_prompt: &str,
@@ -556,6 +579,9 @@ pub(crate) fn uses_light_execution_context_budget(
     let intent = route_result.resolved_intent.trim();
     let intent_surface = crate::intent::surface_signals::analyze_prompt_surface(intent);
     if route_uses_structured_chat_wrapped_light_budget(route_result, &intent_surface) {
+        return true;
+    }
+    if route_uses_bounded_observation_summary_light_budget(route_result) {
         return true;
     }
     if !route_result.ask_mode.is_plain_act() {
@@ -635,6 +661,18 @@ fn should_suppress_execution_anchor_context(
 }
 
 fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
+    if route_has_concrete_locator_hint(route_result)
+        && matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+                | crate::OutputSemanticKind::ContentPresenceCheck
+                | crate::OutputSemanticKind::ExcerptKindJudgment
+                | crate::OutputSemanticKind::FileBasename
+        )
+    {
+        return false;
+    }
     matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::QuantityComparison
@@ -645,6 +683,15 @@ fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
             | crate::OutputSemanticKind::RecentArtifactsJudgment
             | crate::OutputSemanticKind::FileBasename
     )
+}
+
+fn route_has_concrete_locator_hint(route_result: &RouteResult) -> bool {
+    matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Url
+    ) && !route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 pub(crate) fn build_route_task_context_bundle(

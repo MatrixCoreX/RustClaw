@@ -93,10 +93,23 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
     if let Some(resolved) = resolve_registry_capability_action(state, &normalized, args.clone()) {
         return (Some(resolved.action), resolved.record);
     }
-    if let Some(resolved) = resolve_static_capability_action_for_state(state, &normalized, args) {
-        return (Some(resolved.action), resolved.record);
+    if !registry_capability_surface_available(state) {
+        if let Some(resolved) = resolve_static_capability_action_for_state(state, &normalized, args)
+        {
+            return (Some(resolved.action), resolved.record);
+        }
     }
     (None, CapabilityResolutionRecord::unresolved(normalized))
+}
+
+fn registry_capability_surface_available(state: &AppState) -> bool {
+    let Some(registry) = state.get_skills_registry() else {
+        return false;
+    };
+    registry.enabled_names().into_iter().any(|skill| {
+        skill_is_globally_resolvable(state, &skill)
+            && !registry.planner_capabilities(&skill).is_empty()
+    })
 }
 
 #[derive(Debug)]
@@ -205,8 +218,8 @@ fn resolve_static_capability_action_for_state(
     let action = action_for_skill(planner_kind, skill.to_string(), args);
     Some(ResolvedCapabilityAction {
         record: CapabilityResolutionRecord::resolved(
-            "capability_resolver_static_mapping_resolved",
-            "static",
+            "capability_resolver_static_compat_resolved",
+            "static_compat",
             normalized.to_string(),
             &action,
             planner_kind,

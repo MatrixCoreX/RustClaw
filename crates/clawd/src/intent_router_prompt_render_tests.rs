@@ -1,6 +1,11 @@
 // Prompt rendering and compaction tests for intent_router.
 
 #[test]
+fn normalizer_compact_prompt_is_default_for_agent_loop_convergence() {
+    assert!(super::prompt_render::intent_normalizer_compact_prompt_default_enabled());
+}
+
+#[test]
 fn compact_normalizer_prompt_pins_output_contract_schema() {
     let route_view = crate::task_context_builder::RouteContextView {
         request_surface_hints: "locator_target_pair: Cargo.toml | Cargo.lock".to_string(),
@@ -39,8 +44,13 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(prompt.contains("\"source\":\"recent_count_inventory\""));
     assert!(prompt.contains("\"selection\":\"max\"|\"min\""));
     assert!(prompt.contains("semantic_kind=\"execution_failed_step\""));
-    assert!(prompt.contains("preserve the whole ordered action sequence"));
-    assert!(prompt.contains("do not downgrade failed-action or success/failure-step reporting"));
+    assert!(prompt.contains("Preserve the whole ordered action sequence"));
+    assert!(prompt.contains("Only use execution_failed_step when the requested final answer"));
+    assert!(prompt.contains("Ordinary ordered observations whose final answer combines"));
+    assert!(prompt
+        .contains("ordinary ordered observations that combine successful command/tool results"));
+    assert!(prompt.contains("explicit command result plus status/process/port observation"));
+    assert!(prompt.contains("service_status is for status-only tasks"));
     assert!(prompt.contains("RECENT_OBSERVED_JUDGMENT"));
     assert!(prompt.contains("do not turn them into fresh file_names/path lookup"));
     assert!(prompt.contains("Text drafting/composition is not file delivery by default"));

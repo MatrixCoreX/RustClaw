@@ -35,6 +35,81 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
 }
 
 #[test]
+fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts() {
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    let path = observed_answer_fallback_prompt_logical_path(
+        Some(&agent_run_context),
+        "status=ok\nprocess=clawd\nport=8787",
+    );
+
+    assert_eq!(path, "prompts/observed_answer_fallback_compact_prompt.md");
+}
+
+#[test]
+fn observed_answer_language_compatibility_rejects_clear_request_language_mismatch() {
+    assert!(!observed_answer_language_compatible(
+        "当前工作目录是 /home/guagua/rustclaw；进程 clawd 正在监听 8787。",
+        "en",
+    ));
+    assert!(observed_answer_language_compatible(
+        "The working directory is /home/guagua/rustclaw; process clawd is listening on 8787.",
+        "en",
+    ));
+    assert!(observed_answer_language_compatible(
+        "/home/guagua/rustclaw",
+        "en",
+    ));
+}
+
+#[test]
+fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts() {
+    let mut content_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    content_route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    content_route.output_contract.requires_content_evidence = true;
+    let content_context = AgentRunContext {
+        route_result: Some(content_route),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(Some(&content_context), "excerpt=..."),
+        "prompts/observed_answer_fallback_prompt.md"
+    );
+
+    let mut delivery_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    delivery_route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    delivery_route.output_contract.delivery_required = true;
+    let delivery_context = AgentRunContext {
+        route_result: Some(delivery_route),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(Some(&delivery_context), "status=ok"),
+        "prompts/observed_answer_fallback_prompt.md"
+    );
+
+    let mut terminal_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    terminal_route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let terminal_context = AgentRunContext {
+        route_result: Some(terminal_route),
+        ..AgentRunContext::default()
+    };
+    let large_observed = "x".repeat(12_001);
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(Some(&terminal_context), &large_observed),
+        "prompts/observed_answer_fallback_prompt.md"
+    );
+}
+
+#[test]
 fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

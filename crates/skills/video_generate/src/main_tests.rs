@@ -83,6 +83,191 @@ fn custom_provider_can_dry_run_with_explicit_adapter_kind() {
 }
 
 #[test]
+fn pending_video_task_response_exposes_skill_poll_adapter() {
+    let (_, extra) = video_pending_task_response(
+        "provider-task-1",
+        "minimax",
+        "MiniMax-Hailuo-2.3",
+        VideoAdapterKind::MiniMaxNative,
+        5,
+        600,
+        true,
+        "video/download/out.mp4",
+    );
+
+    assert_eq!(
+        extra["pending_async_job"]["job_id"],
+        "provider:video_generate:minimax:provider-task-1"
+    );
+    assert_eq!(extra["pending_async_job"]["status"], "accepted");
+    assert_eq!(
+        extra["pending_async_job"]["poll_adapter"]["kind"],
+        "skill_poll"
+    );
+    assert_eq!(
+        extra["pending_async_job"]["poll_adapter"]["skill_name"],
+        "video_generate"
+    );
+    assert_eq!(
+        extra["pending_async_job"]["poll_adapter"]["args"]["action"],
+        "poll"
+    );
+    assert!(extra["pending_async_job"]["poll_adapter"]
+        .get("text")
+        .is_none());
+    assert!(extra["pending_async_job"]["poll_adapter"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn poll_dry_run_running_returns_adapter_reschedule_result() {
+    let root = unique_temp_root("video-poll-running");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-running",
+            "job_id": "provider:video_generate:minimax:provider-task-running",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "Processing",
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "running");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["job_id"],
+        "provider:video_generate:minimax:provider-task-running"
+    );
+    assert!(extra["async_poll_adapter_result"].get("text").is_none());
+    assert!(extra["async_poll_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn poll_dry_run_queueing_returns_adapter_accepted_result() {
+    let root = unique_temp_root("video-poll-accepted");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-accepted",
+            "job_id": "provider:video_generate:minimax:provider-task-accepted",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "Queueing",
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "accepted");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["message_key"],
+        "clawd.task.async_job_pending"
+    );
+}
+
+#[test]
+fn poll_dry_run_success_returns_adapter_final_result() {
+    let root = unique_temp_root("video-poll-success");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-success",
+            "job_id": "provider:video_generate:minimax:provider-task-success",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "Success",
+            "mock_file_id": "file-1",
+            "download": false,
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "succeeded");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["final_result_json"]["source"],
+        "video_generate_poll_adapter"
+    );
+    assert_eq!(
+        extra["async_poll_adapter_result"]["final_result_json"]["file_id"],
+        "file-1"
+    );
+    assert!(extra["async_poll_adapter_result"].get("text").is_none());
+    assert!(extra["async_poll_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn poll_dry_run_failed_returns_adapter_failure_result() {
+    let root = unique_temp_root("video-poll-failed");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-failed",
+            "job_id": "provider:video_generate:minimax:provider-task-failed",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "Fail",
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "failed");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["error_code"],
+        "provider_video_job_failed"
+    );
+    assert_eq!(
+        extra["async_poll_adapter_result"]["failure_result_json"]["source"],
+        "video_generate_poll_adapter"
+    );
+}
+
+#[test]
+fn poll_dry_run_expired_returns_adapter_expired_result() {
+    let root = unique_temp_root("video-poll-expired");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-expired",
+            "job_id": "provider:video_generate:minimax:provider-task-expired",
+            "vendor": "minimax",
+            "dry_run": true,
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 - 1
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "expired");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["error_code"],
+        "async_poll_expired"
+    );
+}
+
+#[test]
 fn local_image_path_converts_to_data_url() {
     let root = unique_temp_root("video-image-source");
     let image = root.join("image.png");

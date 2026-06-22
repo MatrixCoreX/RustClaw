@@ -239,8 +239,11 @@ fn answer_verifier_output_contract_exposes_evidence_profile() {
     let block = output_contract_prompt_block(&route);
 
     assert!(block.contains("\"contract_matrix\""));
+    assert!(block.contains("\"compact_line\""));
     assert!(block.contains("\"evidence_profile\""));
     assert!(block.contains("\"workspace_user_docs_first\""));
+    assert!(!block.contains("\"observation_extractors\""));
+    assert!(!block.contains("\"observation_sources\""));
 }
 
 #[test]

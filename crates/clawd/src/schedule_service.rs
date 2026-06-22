@@ -684,8 +684,9 @@ fn sanitize_schedule_ask_payload_text(payload: &mut Value, fallback_prompt: &str
 }
 
 /// Key-value pairs to inject into task payload when schedule triggers execution.
-/// Skills can read `invocation_source`, `schedule_job_id`, `scheduled` to know they were invoked by schedule.
+/// Skills can read these machine tokens to know they were invoked by schedule.
 pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)> {
+    let resume_trigger = crate::task_lifecycle::ResumeTrigger::ScheduledWakeup.status_code();
     vec![
         ("schedule_triggered".to_string(), Value::Bool(true)),
         (
@@ -693,8 +694,33 @@ pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)>
             Value::String(job_id.to_string()),
         ),
         (
+            "automation_ref".to_string(),
+            Value::String(job_id.to_string()),
+        ),
+        (
+            "automation_kind".to_string(),
+            Value::String("scheduled_job".to_string()),
+        ),
+        (
             "invocation_source".to_string(),
             Value::String("schedule".to_string()),
+        ),
+        (
+            "resume_trigger".to_string(),
+            Value::String(resume_trigger.to_string()),
+        ),
+        (
+            "resume_directive".to_string(),
+            Value::String("run_scheduled_task".to_string()),
+        ),
+        ("thread_resume".to_string(), Value::Bool(true)),
+        (
+            "thread_resume_source".to_string(),
+            Value::String("scheduled_wakeup".to_string()),
+        ),
+        (
+            "automation_checkpoint_required".to_string(),
+            Value::Bool(true),
         ),
         ("scheduled".to_string(), Value::Bool(true)),
     ]

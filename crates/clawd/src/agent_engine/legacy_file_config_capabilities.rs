@@ -330,6 +330,13 @@ pub(super) fn rewrite_readonly_runtime_status_run_cmd_to_system_basic(
             if state.resolve_canonical_skill_name(skill) != "run_cmd" {
                 return action;
             }
+            if args
+                .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return action;
+            }
             let Some(kind) = args
                 .get("command")
                 .and_then(Value::as_str)

@@ -799,7 +799,29 @@ fn planning_prompt_class_uses_lightweight_execution_for_content_evidence_reads()
 }
 
 #[test]
-fn planning_prompt_class_keeps_open_planning_for_chat_wrapped_execution_or_later_rounds() {
+fn planning_prompt_class_uses_lightweight_for_concrete_path_content_excerpt() {
+    let mut route = base_route_result();
+    route.route_reason = "llm_contract:content_excerpt_summary_path_read".to_string();
+    route.resolved_intent =
+        "读取 /home/guagua/rustclaw/README.md 前 20 行并回答结构化摘要".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/README.md".to_string();
+    let mut round2 = LoopState::default();
+    round2.round_no = 2;
+    round2.has_tool_or_skill_output = true;
+
+    assert_eq!(
+        classify_planning_prompt_class(Some(&route), &route.resolved_intent, &round2).as_str(),
+        "lightweight_execution"
+    );
+}
+
+#[test]
+fn planning_prompt_class_keeps_open_for_unbounded_chat_wrapped_but_light_for_later_rounds() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
     route.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
@@ -820,7 +842,28 @@ fn planning_prompt_class_keeps_open_planning_for_chat_wrapped_execution_or_later
     round2.round_no = 2;
     assert_eq!(
         classify_planning_prompt_class(Some(&scalar), &scalar.resolved_intent, &round2).as_str(),
-        "open_planning"
+        "lightweight_execution"
+    );
+}
+
+#[test]
+fn planning_prompt_class_uses_lightweight_for_bounded_observation_summary_later_round() {
+    let mut route = base_route_result();
+    route.resolved_intent =
+        "Run pwd, inspect clawd process and listening ports, then summarize observed results."
+            .to_string();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut round2 = LoopState::default();
+    round2.round_no = 2;
+    round2.has_tool_or_skill_output = true;
+
+    assert_eq!(
+        classify_planning_prompt_class(Some(&route), &route.resolved_intent, &round2).as_str(),
+        "lightweight_execution"
     );
 }
 
@@ -859,6 +902,73 @@ fn round1_prompt_spec_switches_to_lightweight_prompt_for_light_class() {
             "prompts/lightweight_execution_prompt.md",
         )
     );
+}
+
+#[test]
+fn incremental_prompt_spec_switches_to_lightweight_prompt_for_light_class() {
+    assert_eq!(
+        incremental_prompt_spec_for_class(PlanningPromptClass::OpenPlanning),
+        (
+            "loop_incremental_plan_prompt",
+            "prompts/loop_incremental_plan_prompt.md",
+        )
+    );
+    assert_eq!(
+        incremental_prompt_spec_for_class(PlanningPromptClass::LightweightExecution),
+        (
+            "lightweight_incremental_plan_prompt",
+            "prompts/lightweight_incremental_plan_prompt.md",
+        )
+    );
+}
+
+#[test]
+fn lightweight_incremental_goal_context_omits_background_memory_sections() {
+    let goal = "\
+### MEMORY_USE_POLICY
+profile: planner_scoped
+reason: test
+
+### PLANNER_MEMORY_CONTEXT (BACKGROUND ONLY)
+#### STABLE_FACTS
+- stale artifact /tmp/old-output.txt
+
+### CURRENT_REQUEST
+Run `pwd`, then inspect process status.
+
+### RECENT_EXECUTION_CONTEXT
+old step output that should not override this task
+
+### RUNTIME_CONTEXT
+current_process_cwd: /home/guagua/rustclaw
+workspace_root: /home/guagua/rustclaw";
+
+    let compact = compact_lightweight_incremental_goal_context(goal);
+
+    assert!(compact.contains("LIGHTWEIGHT_INCREMENTAL_CONTEXT_BUDGET"));
+    assert!(compact.contains(
+        "omitted_sections=memory_use_policy,planner_memory_context,recent_execution_context"
+    ));
+    assert!(!compact.contains("stale artifact /tmp/old-output.txt"));
+    assert!(!compact.contains("old step output that should not override this task"));
+    assert!(compact.contains("### CURRENT_REQUEST"));
+    assert!(compact.contains("Run `pwd`, then inspect process status."));
+    assert!(compact.contains("current_process_cwd: /home/guagua/rustclaw"));
+}
+
+#[test]
+fn lightweight_incremental_goal_context_truncates_middle_and_preserves_tail() {
+    let goal = format!(
+        "### CURRENT_REQUEST\n{}\n\n### RUNTIME_CONTEXT\ncurrent_process_cwd: /repo\nworkspace_root: /repo",
+        "large_context_line\n".repeat(1400)
+    );
+
+    let compact = compact_lightweight_incremental_goal_context(&goal);
+
+    assert!(compact.contains("truncated_middle=true"));
+    assert!(compact.len() < goal.len());
+    assert!(compact.contains("### CURRENT_REQUEST"));
+    assert!(compact.contains("workspace_root: /repo"));
 }
 
 #[test]

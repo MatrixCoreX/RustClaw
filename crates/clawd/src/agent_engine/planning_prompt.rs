@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use std::fs;
 
 use super::{
-    LoopState, LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
+    LoopState, LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH,
+    LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+    SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
 };
 use crate::{AppState, ClaimedTask, RouteResult};
 
@@ -47,6 +49,102 @@ pub(super) fn build_incremental_plan_prompt(
             ("__WORKSPACE_ROOT__", workspace_root),
         ],
     )
+}
+
+const LIGHTWEIGHT_INCREMENTAL_GOAL_MAX_CHARS: usize = 12_000;
+
+pub(super) fn compact_lightweight_incremental_goal_context(goal: &str) -> String {
+    let mut kept = String::new();
+    let mut omitted_sections = BTreeSet::new();
+    let mut skip_section = false;
+
+    for line in goal.lines() {
+        let trimmed = line.trim_start();
+        if let Some(section) = lightweight_incremental_omitted_goal_section(trimmed) {
+            omitted_sections.insert(section);
+            skip_section = true;
+            continue;
+        }
+        if skip_section {
+            if lightweight_incremental_goal_heading(trimmed) {
+                skip_section = false;
+            } else {
+                continue;
+            }
+        }
+        if !kept.is_empty() {
+            kept.push('\n');
+        }
+        kept.push_str(line);
+    }
+
+    let kept = kept.trim();
+    let mut compact = String::new();
+    if !omitted_sections.is_empty() {
+        compact.push_str("### LIGHTWEIGHT_INCREMENTAL_CONTEXT_BUDGET\n");
+        compact.push_str("omitted_sections=");
+        compact.push_str(
+            &omitted_sections
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        compact.push_str("\nreason=covered_by_turn_analysis_loop_history_attempt_ledger\n\n");
+    }
+    if kept.is_empty() {
+        compact.push_str("<none>");
+    } else {
+        compact.push_str(kept);
+    }
+    truncate_lightweight_incremental_goal_context(&compact)
+}
+
+fn lightweight_incremental_omitted_goal_section(line: &str) -> Option<&'static str> {
+    if line.starts_with("### MEMORY_USE_POLICY") {
+        Some("memory_use_policy")
+    } else if line.starts_with("### PLANNER_MEMORY_CONTEXT") {
+        Some("planner_memory_context")
+    } else if line.starts_with("### MEMORY_CONTEXT") {
+        Some("memory_context")
+    } else if line.starts_with("### RECENT_EXECUTION_CONTEXT") {
+        Some("recent_execution_context")
+    } else {
+        None
+    }
+}
+
+fn lightweight_incremental_goal_heading(line: &str) -> bool {
+    line.starts_with("### ")
+}
+
+fn truncate_lightweight_incremental_goal_context(text: &str) -> String {
+    let char_count = text.chars().count();
+    if char_count <= LIGHTWEIGHT_INCREMENTAL_GOAL_MAX_CHARS {
+        return text.to_string();
+    }
+
+    let marker = format!(
+        "\n\n### LIGHTWEIGHT_INCREMENTAL_CONTEXT_BUDGET\ntruncated_middle=true original_chars={} max_chars={}\n\n",
+        char_count, LIGHTWEIGHT_INCREMENTAL_GOAL_MAX_CHARS
+    );
+    let marker_chars = marker.chars().count();
+    let remaining = LIGHTWEIGHT_INCREMENTAL_GOAL_MAX_CHARS.saturating_sub(marker_chars);
+    let head_chars = remaining.saturating_mul(3) / 4;
+    let tail_chars = remaining.saturating_sub(head_chars);
+    let head = take_first_chars(text, head_chars);
+    let tail = take_last_chars(text, tail_chars);
+    format!("{head}{marker}{tail}")
+}
+
+fn take_first_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+fn take_last_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars().rev().take(max_chars).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
 }
 
 pub(super) fn ensure_required_contract_block_present(
@@ -108,13 +206,11 @@ impl PlanningPromptClass {
 pub(super) fn classify_planning_prompt_class(
     route_result: Option<&RouteResult>,
     user_text: &str,
-    loop_state: &LoopState,
+    _loop_state: &LoopState,
 ) -> PlanningPromptClass {
-    if loop_state.round_no <= 1
-        && route_result.is_some_and(|route| {
-            crate::task_context_builder::uses_light_execution_context_budget(route, user_text)
-        })
-    {
+    if route_result.is_some_and(|route| {
+        crate::task_context_builder::uses_light_execution_context_budget(route, user_text)
+    }) {
         PlanningPromptClass::LightweightExecution
     } else {
         PlanningPromptClass::OpenPlanning
@@ -418,6 +514,21 @@ pub(super) fn round1_prompt_spec_for_class(
     }
 }
 
+pub(super) fn incremental_prompt_spec_for_class(
+    planning_class: PlanningPromptClass,
+) -> (&'static str, &'static str) {
+    match planning_class {
+        PlanningPromptClass::OpenPlanning => (
+            "loop_incremental_plan_prompt",
+            LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+        ),
+        PlanningPromptClass::LightweightExecution => (
+            "lightweight_incremental_plan_prompt",
+            LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+        ),
+    }
+}
+
 pub(super) fn contract_scoped_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
@@ -437,4 +548,45 @@ pub(super) fn contract_scoped_planner_skill_scope(
     } else {
         Some(skills)
     }
+}
+
+pub(super) fn contract_scoped_lightweight_planner_skill_scope(
+    route_result: Option<&RouteResult>,
+) -> Option<BTreeSet<String>> {
+    let route = route_result?;
+    if route.needs_clarify || route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    {
+        return None;
+    }
+    if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
+        return Some(scope);
+    }
+    let skills = skills_from_action_refs_capped(
+        crate::contract_matrix::preferred_action_refs_for_output_contract(&route.output_contract),
+        8,
+    );
+    if skills.is_empty() {
+        None
+    } else {
+        Some(skills)
+    }
+}
+
+fn skills_from_action_refs_capped(
+    action_refs: Vec<crate::contract_matrix::ActionRef>,
+    max_skills: usize,
+) -> BTreeSet<String> {
+    let mut ordered = Vec::new();
+    let mut seen = BTreeSet::new();
+    for action in action_refs {
+        let skill = action.skill.trim();
+        if skill.is_empty() || !seen.insert(skill.to_string()) {
+            continue;
+        }
+        ordered.push(skill.to_string());
+        if ordered.len() >= max_skills {
+            break;
+        }
+    }
+    ordered.into_iter().collect()
 }

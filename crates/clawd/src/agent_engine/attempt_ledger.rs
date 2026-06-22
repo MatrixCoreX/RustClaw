@@ -151,6 +151,8 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
             let error_kind = structured_error_kind(error_text);
             let contract_policy = contract_policy_from_structured_error(error_text)
                 .or_else(|| contract_policy_from_structured_error(output_text));
+            let provider_status = provider_status_from_structured_error(error_text)
+                .or_else(|| provider_status_from_structured_error(output_text));
             let retryable = retryable_from_status(step.status, error_kind.as_deref());
             let error_code = structured_error_code(error_text)
                 .or_else(|| structured_error_code(output_text))
@@ -191,6 +193,8 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                     retryable,
                     &missing_evidence,
                     &forbidden_repeat,
+                    contract_policy.as_ref(),
+                    provider_status.as_ref(),
                     &why_not_satisfied,
                     output_text,
                 ),
@@ -230,6 +234,10 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
             entry.retryable,
             &entry.missing_evidence,
             &entry.forbidden_repeat_signature,
+            entry.contract_policy.as_ref(),
+            provider_status_from_structured_error(&entry.why_not_satisfied)
+                .or_else(|| provider_status_from_structured_error(&entry.observed_output))
+                .as_ref(),
             &entry.why_not_satisfied,
             &entry.observed_output,
         ),
@@ -261,6 +269,8 @@ fn executor_repair_signal_json(
     retryable: bool,
     missing_evidence: &[String],
     forbidden_repeat_signature: &str,
+    contract_policy: Option<&Value>,
+    provider_status: Option<&Value>,
     why_not_satisfied: &str,
     observed_output: &str,
 ) -> Option<Value> {
@@ -298,16 +308,32 @@ fn executor_repair_signal_json(
         message_key,
         reason_code: Some("executor_step_failed".to_string()),
         failure_attribution: failure_attribution.to_string(),
+        repair_attempt: None,
+        round_no: None,
         retryable: Some(retryable),
+        no_progress_count: None,
         missing_fields: missing_evidence.to_vec(),
         rejected_action: None,
         suggested_contract_action: None,
         forbidden_repeat_fingerprint: (!forbidden_repeat_signature.trim().is_empty())
             .then(|| forbidden_repeat_signature.trim().to_string()),
+        side_effect_fingerprint: None,
+        max_attempts: None,
+        budget_exhausted: None,
+        permission_decision: None,
+        contract_failure_policy: None,
+        provider_status: None,
+        checkpoint_id: None,
+        resume_entrypoint: None,
         detail: (!why_not_satisfied.trim().is_empty())
             .then(|| crate::truncate_for_agent_trace(why_not_satisfied.trim())),
     };
-    Some(signal.to_json())
+    Some(
+        signal
+            .with_contract_failure_policy(contract_policy.cloned())
+            .with_provider_status(provider_status.cloned())
+            .to_json(),
+    )
 }
 
 fn structured_message_key(error_text: &str) -> Option<String> {
@@ -371,13 +397,82 @@ fn contract_policy_from_structured_error(error_text: &str) -> Option<Value> {
         "error_kind": structured.error_kind.as_str(),
         "decision": extra.get("decision").and_then(Value::as_str),
         "action": extra.get("action").and_then(Value::as_str),
+        "original_action_ref": extra.get("original_action_ref").and_then(Value::as_str),
+        "replacement_action_ref": extra.get("replacement_action_ref").and_then(Value::as_str),
+        "contract_repair_source": extra.get("contract_repair_source").and_then(Value::as_str),
+        "preferred_replacement_reason_code": extra
+            .get("preferred_replacement_reason_code")
+            .and_then(Value::as_str),
         "contract_match": extra.get("contract_match").and_then(Value::as_str),
         "preferred_actions": extra.get("preferred_actions").cloned(),
         "missing_target_args": extra.get("missing_target_args").cloned(),
         "expected_target_args": extra.get("expected_target_args").cloned(),
         "required_evidence": extra.get("required_evidence").cloned(),
         "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
+        "policy_mode": extra.get("policy_mode").and_then(Value::as_str),
         "evidence_profile": extra.get("evidence_profile").and_then(Value::as_str),
+        "permission_decision": extra.get("permission_decision").cloned(),
+    }))
+}
+
+fn provider_status_from_structured_error(error_text: &str) -> Option<Value> {
+    let structured = crate::skills::parse_structured_skill_error(error_text)?;
+    let extra = structured.extra.as_ref();
+    let provider_error_class = extra
+        .and_then(|extra| extra.get("provider_error_class"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let error_code = extra
+        .and_then(|extra| extra.get("error_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let status_code = provider_error_class
+        .as_deref()
+        .or(error_code.as_deref())
+        .unwrap_or(structured.error_kind.as_str())
+        .to_string();
+    let external_provider_blocked = extra
+        .and_then(|extra| extra.get("external_provider_blocked"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let provider = extra
+        .and_then(|extra| extra.get("provider"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let retry_after_seconds = extra
+        .and_then(|extra| extra.get("retry_after_seconds"))
+        .and_then(Value::as_i64);
+
+    let is_provider_status = external_provider_blocked
+        || provider.is_some()
+        || provider_error_class.is_some()
+        || retry_after_seconds.is_some()
+        || matches!(
+            status_code.as_str(),
+            "provider_error"
+                | "provider_retryable_response"
+                | "rate_limited"
+                | "quota_exhausted"
+                | "quota_exceeded"
+                | "timeout"
+        );
+    if !is_provider_status {
+        return None;
+    }
+
+    Some(json!({
+        "error_kind": structured.error_kind,
+        "status_code": status_code,
+        "provider": provider,
+        "provider_error_class": provider_error_class,
+        "external_provider_blocked": external_provider_blocked,
+        "retry_after_seconds": retry_after_seconds,
     }))
 }
 

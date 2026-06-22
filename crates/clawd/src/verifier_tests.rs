@@ -1924,3 +1924,6 @@ mod ops_recipe_repair;
 
 #[path = "verifier_tests/media_artifact.rs"]
 mod media_artifact;
+
+#[path = "verifier_tests/registry_confirmation.rs"]
+mod registry_confirmation;

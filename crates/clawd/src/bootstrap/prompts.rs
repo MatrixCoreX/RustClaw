@@ -78,12 +78,20 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "loop_incremental_plan (agent_engine.planning)",
     ),
     (
+        "prompts/lightweight_incremental_plan_prompt.md",
+        "lightweight_incremental_plan_agent_engine_planning",
+    ),
+    (
         "prompts/plan_repair_prompt.md",
         "plan_repair (agent_engine.planning)",
     ),
     (
         "prompts/observed_answer_fallback_prompt.md",
         "observed_answer_fallback (finalize.observed)",
+    ),
+    (
+        "prompts/observed_answer_fallback_compact_prompt.md",
+        "observed_answer_fallback_compact (finalize.observed)",
     ),
     (
         "prompts/user_response_composer_prompt.md",

@@ -92,6 +92,23 @@ fn paused_checkpoint_recovery_status_classifies_machine_checkpoint_states() {
             resume_wait_seconds: 0,
         }
     );
+    assert_eq!(
+        paused_checkpoint_recovery_status(
+            &json!({
+                "task_lifecycle": {
+                    "state": "needs_user",
+                    "checkpoint_id": "ckpt-user"
+                }
+            }),
+            100,
+        ),
+        PausedCheckpointRecoveryStatus::Waiting {
+            state: "needs_user".to_string(),
+            checkpoint_id: "ckpt-user".to_string(),
+            resume_due: true,
+            resume_wait_seconds: 0,
+        }
+    );
 }
 
 fn checkpoint_value(
