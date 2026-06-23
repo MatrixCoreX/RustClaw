@@ -75,6 +75,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "skill_name_phrase",
         ],
         migration_target: "keep_schema_compat_only",
@@ -97,6 +99,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "ordinary_semantic_route",
             "skill_selection_phrase",
         ],
@@ -122,6 +126,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "guessed_path_from_phrase",
         ],
         migration_target: "planner_clarify_or_structured_locator_recovery",
@@ -142,6 +148,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "language_phrase_array",
         ],
         migration_target: "migrate_to_agent_loop_followup_recovery",
@@ -165,6 +173,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "ordinary_semantic_route",
         ],
         migration_target: "defer_selected_agent_loop_routes_to_loop",
@@ -190,6 +200,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "runtime_fixed_reply_template",
         ],
         migration_target: "keep_inside_agent_loop_bounded_recovery",
@@ -217,6 +229,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "retry_reply_sentence",
         ],
         migration_target: "repair_envelope_to_loop_recovery",
@@ -244,6 +258,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "retry_reply_sentence",
         ],
         migration_target: "repair_envelope_to_loop_recovery",
@@ -271,6 +287,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "permission_bypass_action",
             "risk_upgrade_repair",
         ],
@@ -296,6 +314,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "semantic_route_error",
         ],
         migration_target: "wait_background_or_structured_blocker",
@@ -324,6 +344,8 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         forbidden_input_fields: &[
             "user_prompt_phrase",
             "localized_reply_text",
+            "text",
+            "error_text",
             "rerun_completed_side_effect",
         ],
         migration_target: "resume_from_checkpoint_without_replaying_side_effects",

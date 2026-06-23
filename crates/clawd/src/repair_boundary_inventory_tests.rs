@@ -62,6 +62,16 @@ fn repair_inventory_items_are_machine_field_bounded() {
             "{} must explicitly reject localized reply text matching",
             item.reason_code
         );
+        assert!(
+            item.forbidden_input_fields.contains(&"text"),
+            "{} must explicitly reject user-visible text fields as repair input",
+            item.reason_code
+        );
+        assert!(
+            item.forbidden_input_fields.contains(&"error_text"),
+            "{} must explicitly reject user-visible error_text fields as repair input",
+            item.reason_code
+        );
     }
 }
 
