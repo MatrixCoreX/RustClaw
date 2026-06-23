@@ -1322,6 +1322,10 @@ pub(super) fn action_fingerprint_for_policy(
             action_token.as_deref(),
             args,
             route_result,
+        ) || run_command_action_uses_args_fingerprint(
+            &normalized_skill,
+            action_token.as_deref(),
+            args,
         ) {
             return action_fingerprint(state, action);
         }
@@ -1363,6 +1367,10 @@ pub(super) fn registry_idempotency_guard_attribution(
         action_token.as_deref(),
         args,
         route_result,
+    ) || run_command_action_uses_args_fingerprint(
+        &normalized_skill,
+        action_token.as_deref(),
+        args,
     ) {
         return None;
     }
@@ -1428,6 +1436,23 @@ fn literal_execution_failed_step_run_cmd_uses_args_fingerprint(
     route_result.is_some_and(|route| {
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
     })
+}
+
+fn run_command_action_uses_args_fingerprint(
+    normalized_skill: &str,
+    action_token: Option<&str>,
+    args: &Value,
+) -> bool {
+    let is_run_command_action = normalized_skill == "run_cmd"
+        || (normalized_skill == "system_basic" && action_token == Some("run_cmd"));
+    if !is_run_command_action {
+        return false;
+    }
+    args.get("command")
+        .or_else(|| args.get("cmd"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|command| !command.is_empty())
 }
 
 #[cfg(test)]

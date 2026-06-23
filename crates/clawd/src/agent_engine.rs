@@ -9,6 +9,7 @@ mod async_start_checkpoint;
 mod attempt_ledger;
 mod dispatch_support;
 mod execution_loop;
+mod filesystem_lifecycle_contract;
 pub(crate) mod loop_control;
 pub(crate) mod migration_class;
 pub(crate) mod observed_output;
@@ -51,6 +52,14 @@ use self::execution_loop::execute_actions_once;
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 
+pub(crate) use self::filesystem_lifecycle_contract::{
+    effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
+    effective_filesystem_lifecycle_output_contract_for_plan_steps,
+    enrich_scratch_filesystem_cleanup_runtime_args, route_can_upgrade_scratch_filesystem_lifecycle,
+    scratch_filesystem_cleanup_recovery_action_allowed,
+    scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_plan_actions_match,
+    scratch_filesystem_lifecycle_plan_steps_match,
+};
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{

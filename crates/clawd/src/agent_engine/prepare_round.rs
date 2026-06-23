@@ -7,6 +7,7 @@ pub(super) struct PreparedRoundActions {
     pub(super) actions: Vec<AgentAction>,
     pub(super) plan_result: PlanResult,
     pub(super) verify_result: crate::verifier::VerifyResult,
+    pub(super) effective_output_contract: Option<crate::IntentOutputContract>,
 }
 
 fn build_round_verify_summary(
@@ -192,12 +193,36 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.planner_notes),
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
+    let original_route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let effective_output_contract = original_route_result.and_then(|route| {
+        crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+            state,
+            route,
+            &plan_result.steps,
+        )
+        .or_else(|| {
+            crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
+                state,
+                loop_state,
+                route,
+                &plan_result.steps,
+            )
+        })
+    });
+    let effective_route_result = original_route_result.map(|route| {
+        let mut route = route.clone();
+        if let Some(output_contract) = effective_output_contract.as_ref() {
+            route.output_contract = output_contract.clone();
+        }
+        route
+    });
+    let verify_route_result = effective_route_result.as_ref().or(original_route_result);
     let verify_mode = verify_mode_for_state(state);
     let verify_result = crate::verifier::verify_plan(
         state,
         task,
         crate::verifier::VerifyInput {
-            route_result: agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            route_result: verify_route_result,
             request_text: Some(planner_user_text),
             context_bundle_summary: agent_run_context
                 .and_then(|ctx| ctx.context_bundle_summary.as_deref()),
@@ -284,6 +309,7 @@ pub(super) async fn prepare_round_actions(
         actions,
         plan_result,
         verify_result,
+        effective_output_contract,
     })
 }
 

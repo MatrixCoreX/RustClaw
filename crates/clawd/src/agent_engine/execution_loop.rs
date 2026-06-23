@@ -52,21 +52,42 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     loop_state: &LoopState,
     action: &AgentAction,
 ) -> bool {
+    let Some(effect) = action_effect_for_repeat_guard(state, loop_state, action) else {
+        return false;
+    };
+    action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
+}
+
+fn repeated_successful_observe_or_validate_is_allowed(
+    state: &AppState,
+    loop_state: &LoopState,
+    action: &AgentAction,
+) -> bool {
+    let Some(effect) = action_effect_for_repeat_guard(state, loop_state, action) else {
+        return false;
+    };
+    !effect.mutates && (effect.observes || effect.validates)
+}
+
+fn action_effect_for_repeat_guard(
+    state: &AppState,
+    loop_state: &LoopState,
+    action: &AgentAction,
+) -> Option<crate::execution_recipe::ActionEffect> {
     let (skill_name, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
-        AgentAction::CallCapability { .. } => return false,
-        AgentAction::SynthesizeAnswer { .. } => return false,
-        AgentAction::Respond { .. } | AgentAction::Think { .. } => return false,
+        AgentAction::CallCapability { .. } => return None,
+        AgentAction::SynthesizeAnswer { .. } => return None,
+        AgentAction::Respond { .. } | AgentAction::Think { .. } => return None,
     };
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
     let raw_effect =
         crate::execution_recipe::classify_skill_action_effect(state, &normalized_skill, args);
-    let effect = crate::execution_recipe::effective_action_effect_for_recipe(
+    Some(crate::execution_recipe::effective_action_effect_for_recipe(
         loop_state.execution_recipe,
         raw_effect,
-    );
-    action_effect_is_repeatable_for_active_recipe(loop_state.execution_recipe, effect)
+    ))
 }
 
 fn action_effect_is_repeatable_for_active_recipe(
@@ -100,35 +121,6 @@ fn check_repeat_action_guard(
         .entry(fingerprint.to_string())
         .or_insert(0);
     *repeat_count += 1;
-    if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
-        if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action) {
-            return None;
-        }
-        if let Some(attribution) = super::registry_idempotency_guard_attribution(
-            state,
-            policy,
-            action,
-            route_result,
-            fingerprint,
-            "registry_idempotency_repeat_completed_action",
-            Some(*success_count),
-            None,
-        ) {
-            loop_state.rollout_attribution.push(attribution);
-        }
-        info!(
-            "executor_result_error task_id={} round={} step={} type=guard error={}",
-            task.task_id,
-            loop_state.round_no,
-            step_in_round,
-            format!(
-                "skip repeated successful action: count={} action={}",
-                success_count,
-                crate::truncate_for_log(fingerprint)
-            )
-        );
-        return Some("repeat_completed_action".to_string());
-    }
     if *repeat_count > policy.repeat_action_limit {
         if let Some(attribution) = super::registry_idempotency_guard_attribution(
             state,
@@ -155,6 +147,37 @@ fn check_repeat_action_guard(
             )
         );
         return Some("repeat_action_limit".to_string());
+    }
+    if let Some(success_count) = loop_state.successful_action_fingerprints.get(fingerprint) {
+        if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action)
+            || repeated_successful_observe_or_validate_is_allowed(state, loop_state, action)
+        {
+            return None;
+        }
+        if let Some(attribution) = super::registry_idempotency_guard_attribution(
+            state,
+            policy,
+            action,
+            route_result,
+            fingerprint,
+            "registry_idempotency_repeat_completed_action",
+            Some(*success_count),
+            None,
+        ) {
+            loop_state.rollout_attribution.push(attribution);
+        }
+        info!(
+            "executor_result_error task_id={} round={} step={} type=guard error={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            format!(
+                "skip repeated successful action: count={} action={}",
+                success_count,
+                crate::truncate_for_log(fingerprint)
+            )
+        );
+        return Some("repeat_completed_action".to_string());
     }
     None
 }

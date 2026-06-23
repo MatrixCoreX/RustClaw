@@ -1600,6 +1600,13 @@ pub(crate) fn verify_plan(
         .map(|step| step.step_id.clone())
         .collect();
     let confirmation_already_granted = route_has_confirmation_resume(input.route_result);
+    let scratch_filesystem_lifecycle_plan = input.route_result.is_some_and(|route| {
+        crate::agent_engine::route_can_upgrade_scratch_filesystem_lifecycle(route)
+            && crate::agent_engine::scratch_filesystem_lifecycle_plan_steps_match(
+                state,
+                &effective_plan_result.steps,
+            )
+    });
     let mut needs_confirmation = false;
     if route_requires_clarify_before_tools {
         issues.push(VerifyIssue {
@@ -1658,6 +1665,12 @@ pub(crate) fn verify_plan(
             ) {
                 if !policy.is_allowed()
                     && !crate::agent_engine::action_has_user_named_output_path_marker(&step.args)
+                    && !(scratch_filesystem_lifecycle_plan
+                        && crate::agent_engine::scratch_filesystem_lifecycle_action_allowed(
+                            state,
+                            &normalized_skill,
+                            &step.args,
+                        ))
                     && !registry_action_can_extend_summary_contract(
                         state,
                         &normalized_skill,

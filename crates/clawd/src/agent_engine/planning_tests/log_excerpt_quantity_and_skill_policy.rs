@@ -354,10 +354,272 @@ fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observatio
         "normalized actions: {normalized:?}"
     );
     assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "process_basic", "ps")),
+        normalized.iter().any(|action| {
+            planned_call_is(action, "process_basic", "ps")
+                || planned_call_is(action, "git_basic", "status")
+        }),
         "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
+fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
+    let loop_state = LoopState::new(1);
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action": "make_dir", "path": "tmp/nl_basic_skill_coverage_case"}),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+                "content": "alpha\n",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "append_text",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+                "content": "beta\n",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+                "mode": "head",
+                "n": 20,
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "remove_path",
+                "path": "tmp/nl_basic_skill_coverage_case",
+                "target_kind": "directory",
+                "recursive": true,
+            }),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "scratch filesystem lifecycle",
+        None,
+        actions,
+    );
+
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "make_dir")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "write_text")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "append_text")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "read_text_range")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    assert!(!normalized
+        .iter()
+        .any(|action| planned_call_is(action, "process_basic", "ps")));
+}
+
+#[test]
+fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
+    let steps = vec![
+        crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({"action": "make_dir", "path": "tmp/nl_basic_skill_coverage_case"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_2".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+                "content": "alpha\n",
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_3".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_4".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "remove_path",
+                "path": "tmp/nl_basic_skill_coverage_case",
+                "target_kind": "directory",
+                "recursive": true,
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+    ];
+
+    let effective =
+        crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+            &state, &route, &steps,
+        )
+        .expect("scratch lifecycle should upgrade effective contract");
+
+    assert_eq!(
+        effective.semantic_kind,
+        OutputSemanticKind::FilesystemMutationResult
+    );
+}
+
+#[test]
+fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
+    let mut loop_state = LoopState::new(3);
+    loop_state.executed_step_results.push(crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            r#"{"extra":{"action":"make_dir","path":"tmp/nl_basic_skill_coverage_case","resolved_path":"/home/guagua/rustclaw/tmp/nl_basic_skill_coverage_case"},"text":"created"}"#
+                .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    loop_state.executed_step_results.push(crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            r#"{"extra":{"action":"write_text","path":"tmp/nl_basic_skill_coverage_case/note.txt","resolved_path":"/home/guagua/rustclaw/tmp/nl_basic_skill_coverage_case/note.txt","content_bytes":6},"text":"written"}"#
+                .to_string(),
+        ),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "remove_path",
+            "path": "tmp/nl_basic_skill_coverage_case",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "scratch filesystem lifecycle cleanup",
+        None,
+        actions,
+    );
+
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    assert!(!normalized
+        .iter()
+        .any(|action| planned_call_is(action, "git_basic", "status")));
+    let steps = vec![crate::PlanStep {
+        step_id: "step_3".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: json!({
+            "action": "remove_path",
+            "path": "tmp/nl_basic_skill_coverage_case",
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }];
+    let effective =
+        crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
+            &state,
+            &loop_state,
+            &route,
+            &steps,
+        )
+        .expect("scratch cleanup recovery should upgrade effective contract");
+    assert_eq!(
+        effective.semantic_kind,
+        OutputSemanticKind::FilesystemMutationResult
+    );
+
+    let mut runtime_args = json!({
+        "path": "tmp/nl_basic_skill_coverage_case",
+    });
+    assert!(
+        crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
+            &state,
+            &loop_state,
+            "fs_basic",
+            &json!({
+                "action": "remove_path",
+                "path": "tmp/nl_basic_skill_coverage_case",
+            }),
+            "remove_file",
+            &mut runtime_args,
+        )
+    );
+    assert_eq!(
+        runtime_args.get("target_kind").and_then(Value::as_str),
+        Some("directory")
+    );
+    assert_eq!(
+        runtime_args.get("recursive").and_then(Value::as_bool),
+        Some(true)
     );
 }
 

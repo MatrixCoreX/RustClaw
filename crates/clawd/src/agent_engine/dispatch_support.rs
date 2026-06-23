@@ -1042,6 +1042,8 @@ pub(super) async fn handle_call_tool_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
+    let requested_virtual_skill = normalized_skill.clone();
+    let requested_virtual_args = resolved_args.clone();
     if let Some(rewrite) =
         crate::virtual_tools::rewrite_virtual_tool_call(&normalized_skill, resolved_args.clone())?
     {
@@ -1056,6 +1058,23 @@ pub(super) async fn handle_call_tool_action(
         );
         normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         resolved_args = rewrite.runtime_args;
+        if crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
+            state,
+            loop_state,
+            &requested_virtual_skill,
+            &requested_virtual_args,
+            &normalized_skill,
+            &mut resolved_args,
+        ) {
+            info!(
+                "executor_args_rewrite task_id={} round={} step={} type=scratch_cleanup_directory skill={} args={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_log(&resolved_args.to_string())
+            );
+        }
         if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
             info!(
                 "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",
@@ -1178,6 +1197,8 @@ pub(super) async fn handle_call_skill_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
+    let requested_virtual_skill = normalized_skill.clone();
+    let requested_virtual_args = resolved_args.clone();
     if let Some(rewrite) =
         crate::virtual_tools::rewrite_virtual_tool_call(&normalized_skill, resolved_args.clone())?
     {
@@ -1192,6 +1213,23 @@ pub(super) async fn handle_call_skill_action(
         );
         normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         resolved_args = rewrite.runtime_args;
+        if crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
+            state,
+            loop_state,
+            &requested_virtual_skill,
+            &requested_virtual_args,
+            &normalized_skill,
+            &mut resolved_args,
+        ) {
+            info!(
+                "executor_args_rewrite task_id={} round={} step={} type=scratch_cleanup_directory skill={} args={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_log(&resolved_args.to_string())
+            );
+        }
         if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
             info!(
                 "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",

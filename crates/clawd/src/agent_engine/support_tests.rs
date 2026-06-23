@@ -144,6 +144,17 @@ planner_capabilities = [
 ]
 
 [[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+risk_level = "high"
+side_effect = true
+requires_confirmation = true
+planner_capabilities = [
+  { name = "system.run_command", effect = "external", required = ["command"], once_per_task = true, idempotent = false, dedup_scope = "action" },
+]
+
+[[skills]]
 name = "system_basic"
 enabled = true
 kind = "runner"
@@ -563,7 +574,42 @@ fn registry_idempotency_guard_keeps_validate_capability_args_fingerprint() {
 }
 
 #[test]
-fn registry_idempotency_guard_switches_external_capability_to_action_fingerprint() {
+fn registry_idempotency_guard_keeps_direct_run_cmd_command_args_fingerprint() {
+    let state = state_with_registry(registry_governance_fixture(), &["run_cmd"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let left = crate::AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({"command": "true"}),
+    };
+    let right = crate::AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({"command": "false"}),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint(&state, &left)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &right, None)
+    );
+    assert!(super::registry_idempotency_guard_attribution(
+        &state,
+        &policy,
+        &left,
+        None,
+        &action_fingerprint_for_policy(&state, &policy, &left, None),
+        "registry_idempotency_repeat_completed_action",
+        Some(1),
+        None,
+    )
+    .is_none());
+}
+
+#[test]
+fn registry_idempotency_guard_keeps_system_run_cmd_command_args_fingerprint() {
     let state = state_with_registry(registry_governance_fixture(), &["system_basic"]);
     let mut policy = base_policy();
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
@@ -578,11 +624,27 @@ fn registry_idempotency_guard_switches_external_capability_to_action_fingerprint
 
     assert_eq!(
         action_fingerprint_for_policy(&state, &policy, &left, None),
-        "skill:system_basic:action:run_cmd"
+        action_fingerprint(&state, &left)
     );
-    assert_eq!(
+    assert_ne!(
         action_fingerprint_for_policy(&state, &policy, &left, None),
         action_fingerprint_for_policy(&state, &policy, &right, None)
+    );
+}
+
+#[test]
+fn registry_idempotency_guard_keeps_action_fingerprint_without_command_args() {
+    let state = state_with_registry(registry_governance_fixture(), &["system_basic"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let action = crate::AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({"action": "run_cmd"}),
+    };
+
+    assert_eq!(
+        action_fingerprint_for_policy(&state, &policy, &action, None),
+        "skill:system_basic:action:run_cmd"
     );
 }
 
@@ -636,7 +698,11 @@ fn registry_idempotency_guard_keeps_literal_execution_failed_step_run_cmd_args_f
         route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::None);
     assert_eq!(
         action_fingerprint_for_policy(&state, &policy, &left, Some(&non_failed_step_route)),
-        "skill:system_basic:action:run_cmd"
+        action_fingerprint(&state, &left)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &left, Some(&non_failed_step_route)),
+        action_fingerprint_for_policy(&state, &policy, &right, Some(&non_failed_step_route))
     );
 }
 

@@ -2,6 +2,7 @@ use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
 };
+use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
 };
@@ -231,6 +232,64 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
             None,
             &fingerprint,
             2,
+        )
+        .as_deref(),
+        Some("repeat_action_limit")
+    );
+}
+
+#[test]
+fn repeat_guard_allows_successful_observe_repeat_until_limit() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-repeat-observe");
+    let mut loop_state = super::LoopState::new(2);
+    let action = crate::AgentAction::CallSkill {
+        skill: "git_basic".to_string(),
+        args: serde_json::json!({"action": "status"}),
+    };
+    let mut policy = test_policy(false);
+    policy.repeat_action_limit = 2;
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action, None);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            None,
+            &fingerprint,
+            1,
+        ),
+        None
+    );
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            None,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            None,
+            &fingerprint,
+            3,
         )
         .as_deref(),
         Some("repeat_action_limit")

@@ -431,6 +431,11 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             == 2;
     let prefer_registry_repair_for_ad_hoc_command =
         actions_use_ad_hoc_command_without_route_preferred_skill(state, route, &actions);
+    let scratch_filesystem_lifecycle_plan =
+        crate::agent_engine::route_can_upgrade_scratch_filesystem_lifecycle(route)
+            && crate::agent_engine::scratch_filesystem_lifecycle_plan_actions_match(
+                state, &actions,
+            );
 
     actions
         .into_iter()
@@ -450,6 +455,33 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 return action;
             }
             let normalized_skill = state.resolve_canonical_skill_name(skill);
+            if scratch_filesystem_lifecycle_plan
+                && crate::agent_engine::scratch_filesystem_lifecycle_action_allowed(
+                    state,
+                    &normalized_skill,
+                    args,
+                )
+            {
+                info!(
+                    "plan_keep_scratch_filesystem_lifecycle_action idx={} contract={} action={}",
+                    idx, policy.contract_match, policy.action_key
+                );
+                return action;
+            }
+            if crate::agent_engine::route_can_upgrade_scratch_filesystem_lifecycle(route)
+                && crate::agent_engine::scratch_filesystem_cleanup_recovery_action_allowed(
+                    state,
+                    loop_state,
+                    &normalized_skill,
+                    args,
+                )
+            {
+                info!(
+                    "plan_keep_scratch_filesystem_cleanup_recovery_action idx={} contract={} action={}",
+                    idx, policy.contract_match, policy.action_key
+                );
+                return action;
+            }
             if active_ops_recipe_allows_mutation_despite_summary_contract(
                 state,
                 loop_state,
