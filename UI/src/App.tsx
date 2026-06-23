@@ -88,6 +88,7 @@ import {
   useNniRuntime,
 } from "./hooks/useNniRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
+import { useLogsRuntime } from "./hooks/useLogsRuntime";
 
 import type {
   ApiResponse,
@@ -120,7 +121,6 @@ import type {
   TelegramConfigResponse,
   ModelConfigItem,
   ModelConfigResponse,
-  LogLatestResponse,
   WhatsappWebLoginStatus,
   WechatLoginStatus,
   WechatQrStartResponse,
@@ -408,13 +408,6 @@ export default function App() {
   const [factoryResetError, setFactoryResetError] = useState<string | null>(null);
   const [factoryResetResult, setFactoryResetResult] = useState<FactoryResetResponse | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
-  const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
-  const [logTailLines, setLogTailLines] = useState(200);
-  const [logLoading, setLogLoading] = useState(false);
-  const [logError, setLogError] = useState<string | null>(null);
-  const [logText, setLogText] = useState("");
-  const [logLastUpdated, setLogLastUpdated] = useState<number | null>(null);
-  const [logFollowTail, setLogFollowTail] = useState(true);
   const [currentPage, setCurrentPage] = useState<ConsolePage>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
     return saved && CONSOLE_PAGES.includes(saved as ConsolePage) ? (saved as ConsolePage) : "dashboard";
@@ -621,6 +614,27 @@ export default function App() {
     clearMemoryScope,
     updateMemoryLongTermEnabled,
   } = useMemoryRuntime({ apiFetch, t });
+  const {
+    selectedLogFile,
+    setSelectedLogFile,
+    logTailLines,
+    setLogTailLines,
+    logLoading,
+    logError,
+    logText,
+    logLastUpdated,
+    logFollowTail,
+    setLogFollowTail,
+    fetchLatestLog,
+  } = useLogsRuntime({
+    apiFetch,
+    t,
+    apiBase,
+    currentPage,
+    pollingSeconds,
+    uiAuthReady,
+    logContainerRef,
+  });
   const activeUserKey = authMode === "key" && uiKey.trim() ? uiKey.trim() : "";
   const activeIdentityIds =
     activeUserKey || interactionUserId == null || interactionChatId == null
@@ -2290,29 +2304,6 @@ export default function App() {
     }
   };
 
-  const fetchLatestLog = async () => {
-    setLogLoading(true);
-    setLogError(null);
-    try {
-      const params = new URLSearchParams({
-        file: selectedLogFile,
-        lines: String(logTailLines),
-      });
-      const res = await apiFetch(`/v1/logs/latest?${params.toString()}`);
-      const body = (await res.json()) as ApiResponse<LogLatestResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `日志读取失败 (${res.status})`);
-      }
-      setLogText(body.data.text || "");
-      setLogLastUpdated(Date.now());
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setLogError(message);
-    } finally {
-      setLogLoading(false);
-    }
-  };
-
   const fetchTaskById = async (id: string): Promise<TaskQueryResponse> => {
     const res = await apiFetch(`/v1/tasks/${id.trim()}`);
     const body = (await res.json()) as ApiResponse<TaskQueryResponse>;
@@ -2944,24 +2935,6 @@ export default function App() {
     void fetchMemoryData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady]);
-
-  useEffect(() => {
-    if (!uiAuthReady) return;
-    if (currentPage !== "logs") return;
-    void fetchLatestLog();
-    const timer = window.setInterval(() => {
-      void fetchLatestLog();
-    }, Math.max(2, pollingSeconds) * 1000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, selectedLogFile, logTailLines, pollingSeconds, uiAuthReady]);
-
-  useEffect(() => {
-    if (!logFollowTail) return;
-    const el = logContainerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [logText, logFollowTail]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
