@@ -945,6 +945,23 @@ fn verify_permission_decision_json(
     })
 }
 
+fn audit_permission_decision(state: &AppState, task: &ClaimedTask, permission_decision: &Value) {
+    let detail = json!({
+        "task_id": task.task_id,
+        "permission_decision": permission_decision,
+    })
+    .to_string();
+    if let Err(err) = crate::repo::insert_audit_log(
+        state,
+        Some(task.user_id),
+        "plan_verifier.permission_decision",
+        Some(&detail),
+        None,
+    ) {
+        tracing::warn!(error = %err, "plan_verifier_permission_decision_audit_failed");
+    }
+}
+
 fn risk_exceeds_ceiling(risk: SkillRiskLevel, risk_ceiling: crate::RiskCeiling) -> bool {
     let risk_rank = match risk {
         SkillRiskLevel::Unknown => 0,
@@ -1764,6 +1781,7 @@ pub(crate) fn verify_plan(
         shadow_blocked_reason.as_deref(),
         &issues,
     );
+    audit_permission_decision(state, task, &permission_decision);
     let rewritten_steps = if issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg))
