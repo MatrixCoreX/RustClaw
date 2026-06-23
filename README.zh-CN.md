@@ -487,6 +487,7 @@ rustclaw -key disable rk-xxxx
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/cancel`
+- `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`：按当前 `X-RustClaw-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
@@ -523,6 +524,7 @@ UI 相关说明：
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
 - `install-rustclaw-cmd.sh` 默认也会执行 UI/nginx 部署，除非传 `--no-deploy-ui`
 - 浏览器 UI 里有独立的 `NNI` 导航分类，对应后端 `/v1/nni/device/*`；没有签名芯片的设备会返回 `signature_chip_present=false`，并在 UI 上显示明确的缺失签名芯片状态
+- 服务控制提示基于后端机器码（`error_code` / `message_key`）渲染，不解析后端英文错误字符串
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
 
 ## 技能体系
