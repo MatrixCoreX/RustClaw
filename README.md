@@ -49,8 +49,9 @@ flowchart TD
     P --> Q{Verified step}
     Q -->|respond| R[Terminal response]
     Q -->|synthesize_answer| S[Grounded synthesis]
-    Q -->|call_tool| T[Tool execution]
-    Q -->|call_skill| U[Shared skill dispatch]
+    Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
+    QP -->|call_tool| T[Tool execution]
+    QP -->|call_skill| U[Shared skill dispatch]
     RS --> U
     T --> V[Observed result]
     U --> V
@@ -105,10 +106,10 @@ flowchart TD
     M --> P[PlanVerifier<br/>schema + permission_decision + effect]
     P --> Q{Step}
     Q -->|call_capability| R[Resolved tool or skill]
-    Q -->|call_tool| S[Tool executor]
-    Q -->|call_skill| T[Skill dispatcher]
-    R --> S
-    R --> T
+    Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
+    R --> QA
+    QA -->|call_tool| S[Tool executor]
+    QA -->|call_skill| T[Skill dispatcher]
     T --> U{Skill kind}
     U -->|builtin| V[In-process builtin]
     U -->|external| W[External adapter]
@@ -136,6 +137,7 @@ flowchart TD
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
+- `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
@@ -150,6 +152,7 @@ The permission plane is a structured execution boundary, not a second semantic r
 - `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
 - `run_cmd` decisions include a nested `command_policy` for machine fields such as `policy_authority`, `literal_command_token`, `command_arg_present`, `unresolved_runtime_template_present`, and command effect flags.
 - Explicit user command preservation is represented by `_clawd_literal_command`; otherwise `run_cmd` is treated as planner-structured command args and remains subject to contract and media-artifact blockers.
+- Recovery paths such as non-interactive sudo retry are still adapter calls: they must reuse the same contract, hook, policy, and audit machinery as the original planner step.
 
 ## Natural Language Contract Boundary
 
@@ -354,7 +357,7 @@ Important lifecycle details:
 - `clawcli get` and `clawcli watch` render lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
 - `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
-- `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl`.
+- `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` reads the flattened `/v1/capabilities` machine endpoint. Add `--json` when another script should consume the response.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
