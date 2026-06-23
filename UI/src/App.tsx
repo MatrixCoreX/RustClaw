@@ -27,8 +27,7 @@ import { MemoryPage } from "./components/MemoryPage";
 import { ModelConfigPage } from "./components/ModelConfigPage";
 import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
-import { SkillImportPanel } from "./components/SkillImportPanel";
-import { SkillSwitchPanel } from "./components/SkillSwitchPanel";
+import { SkillsPage } from "./components/SkillsPage";
 import { TasksPage } from "./components/TasksPage";
 import {
   countCompletedDashboardSteps,
@@ -4638,60 +4637,54 @@ export default function App() {
           ) : null}
 
           {currentPage === "skills" ? (
-            <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-              <SkillImportPanel
-                t={t}
-                skillImportSource={skillImportSource}
-                skillImportLoading={skillImportLoading}
-                skillImportError={skillImportError}
-                skillImportMessage={skillImportMessage}
-                systemRestartMessage={systemRestartMessage}
-                skillImportPreview={skillImportPreview}
-                localImportPickerOpen={localImportPickerOpen}
-                folderImportInputRef={folderImportInputRef}
-                fileImportInputRef={fileImportInputRef}
-                onSkillImportSourceChange={setSkillImportSource}
-                onImportExternalSkill={importExternalSkill}
-                onLocalImportPickerOpenChange={setLocalImportPickerOpen}
-                onUploadImportedSkillFiles={uploadImportedSkillFiles}
-                onDismissSkillImportPreview={() => setSkillImportPreview(null)}
-              />
-
-              <SkillSwitchPanel
-                lang={lang}
-                t={t}
-                tSlash={tSlash}
-                skillsConfigData={skillsConfigData}
-                skillsConfigLoading={skillsConfigLoading}
-                skillsConfigError={skillsConfigError}
-                skillSwitchSaving={skillSwitchSaving}
-                skillSwitchSaveMessage={skillSwitchSaveMessage}
-                hasUnsavedSkillSwitchChanges={hasUnsavedSkillSwitchChanges}
-                managedSkills={managedSkills}
-                filteredManagedSkills={filteredManagedSkills}
-                filteredSkillsTool={filteredSkillsTool}
-                filteredSkillsBase={filteredSkillsBase}
-                filteredSkillsImage={filteredSkillsImage}
-                filteredSkillsAudio={filteredSkillsAudio}
-                filteredSkillsOther={filteredSkillsOther}
-                normalizedSkillsSearchQuery={normalizedSkillsSearchQuery}
-                skillsSearchQuery={skillsSearchQuery}
-                skillItemsByName={skillItemsByName}
-                configuredEnabledSkills={configuredEnabledSkills}
-                skillSwitchDraft={skillSwitchDraft}
-                recentImportedSkillName={recentImportedSkillName}
-                externalSkillNamesSet={externalSkillNamesSet}
-                lockedSkillNamesSet={lockedSkillNamesSet}
-                toolSkillNamesSet={toolSkillNamesSet}
-                baseSkillNamesSet={baseSkillNamesSet}
-                skillUninstallingName={skillUninstallingName}
-                onFetchSkillsConfig={fetchSkillsConfig}
-                onSaveSkillSwitches={saveSkillSwitches}
-                onSkillsSearchQueryChange={setSkillsSearchQuery}
-                onToggleSkillEnabled={toggleSkillEnabled}
-                onUninstallExternalSkill={uninstallExternalSkill}
-              />
-            </section>
+            <SkillsPage
+              lang={lang}
+              t={t}
+              tSlash={tSlash}
+              skillImportSource={skillImportSource}
+              skillImportLoading={skillImportLoading}
+              skillImportError={skillImportError}
+              skillImportMessage={skillImportMessage}
+              systemRestartMessage={systemRestartMessage}
+              skillImportPreview={skillImportPreview}
+              localImportPickerOpen={localImportPickerOpen}
+              folderImportInputRef={folderImportInputRef}
+              fileImportInputRef={fileImportInputRef}
+              onSkillImportSourceChange={setSkillImportSource}
+              onImportExternalSkill={importExternalSkill}
+              onLocalImportPickerOpenChange={setLocalImportPickerOpen}
+              onUploadImportedSkillFiles={uploadImportedSkillFiles}
+              onDismissSkillImportPreview={() => setSkillImportPreview(null)}
+              skillsConfigData={skillsConfigData}
+              skillsConfigLoading={skillsConfigLoading}
+              skillsConfigError={skillsConfigError}
+              skillSwitchSaving={skillSwitchSaving}
+              skillSwitchSaveMessage={skillSwitchSaveMessage}
+              hasUnsavedSkillSwitchChanges={hasUnsavedSkillSwitchChanges}
+              managedSkills={managedSkills}
+              filteredManagedSkills={filteredManagedSkills}
+              filteredSkillsTool={filteredSkillsTool}
+              filteredSkillsBase={filteredSkillsBase}
+              filteredSkillsImage={filteredSkillsImage}
+              filteredSkillsAudio={filteredSkillsAudio}
+              filteredSkillsOther={filteredSkillsOther}
+              normalizedSkillsSearchQuery={normalizedSkillsSearchQuery}
+              skillsSearchQuery={skillsSearchQuery}
+              skillItemsByName={skillItemsByName}
+              configuredEnabledSkills={configuredEnabledSkills}
+              skillSwitchDraft={skillSwitchDraft}
+              recentImportedSkillName={recentImportedSkillName}
+              externalSkillNamesSet={externalSkillNamesSet}
+              lockedSkillNamesSet={lockedSkillNamesSet}
+              toolSkillNamesSet={toolSkillNamesSet}
+              baseSkillNamesSet={baseSkillNamesSet}
+              skillUninstallingName={skillUninstallingName}
+              onFetchSkillsConfig={fetchSkillsConfig}
+              onSaveSkillSwitches={saveSkillSwitches}
+              onSkillsSearchQueryChange={setSkillsSearchQuery}
+              onToggleSkillEnabled={toggleSkillEnabled}
+              onUninstallExternalSkill={uninstallExternalSkill}
+            />
           ) : null}
 
           {currentPage === "memory" ? (
