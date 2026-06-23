@@ -132,6 +132,17 @@ def normalize(value: Any) -> Any:
     return value
 
 
+def normalize_field_for_compare(key: str, value: Any) -> Any:
+    normalized = normalize(value)
+    if key == "capabilities" and isinstance(normalized, list):
+        return [
+            item
+            for item in normalized
+            if not (isinstance(item, str) and item.startswith("secrets."))
+        ]
+    return normalized
+
+
 def compact(value: Any, max_len: int = 180) -> str:
     text = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     if len(text) <= max_len:
@@ -159,8 +170,8 @@ def diff_registries(
             docker_has = key in docker_entry
             if not main_has and not docker_has:
                 continue
-            main_value = normalize(main_entry.get(key))
-            docker_value = normalize(docker_entry.get(key))
+            main_value = normalize_field_for_compare(key, main_entry.get(key))
+            docker_value = normalize_field_for_compare(key, docker_entry.get(key))
             if main_value != docker_value:
                 diffs.append(
                     {
