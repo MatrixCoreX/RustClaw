@@ -31,7 +31,10 @@ impl PolicyDecision {
     }
 
     pub(crate) fn blocks_execution(self) -> bool {
-        matches!(self, Self::Deny | Self::RequireConfirmation)
+        matches!(
+            self,
+            Self::Deny | Self::RequireConfirmation | Self::BackgroundWait
+        )
     }
 
     pub(crate) fn requires_confirmation(self) -> bool {
@@ -115,6 +118,7 @@ mod tests {
         assert!(!PolicyDecision::Allow.blocks_execution());
         assert!(PolicyDecision::Deny.blocks_execution());
         assert!(PolicyDecision::RequireConfirmation.blocks_execution());
+        assert!(PolicyDecision::BackgroundWait.blocks_execution());
         assert!(PolicyDecision::RequireConfirmation.requires_confirmation());
         assert_eq!(
             PolicyDecision::BackgroundWait.pre_tool_use_reason_code(),
