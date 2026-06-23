@@ -46,12 +46,36 @@ impl CapabilityResolutionRecord {
             planner_kind: None,
         }
     }
+
+    fn blocked(
+        reason_code: &'static str,
+        capability_ref: impl Into<String>,
+        skill: &str,
+        planner_kind: PlannerCapabilityKind,
+    ) -> Self {
+        Self {
+            owner_layer: "capability_resolver",
+            reason_code,
+            outcome: "blocked",
+            source: "registry",
+            capability_ref: capability_ref.into(),
+            resolved_ref: Some(resolved_ref_for_skill(planner_kind, skill)),
+            planner_kind: Some(planner_kind.as_token()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 struct ResolvedCapabilityAction {
     action: AgentAction,
     record: CapabilityResolutionRecord,
+}
+
+#[derive(Debug, Clone)]
+enum RegistryCapabilityResolution {
+    Resolved(ResolvedCapabilityAction),
+    Blocked(CapabilityResolutionRecord),
+    None,
 }
 
 pub(crate) fn resolve_agent_actions_for_state(
@@ -90,8 +114,14 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
     args: Value,
 ) -> (Option<AgentAction>, CapabilityResolutionRecord) {
     let normalized = normalize_capability_name(capability);
-    if let Some(resolved) = resolve_registry_capability_action(state, &normalized, args.clone()) {
-        return (Some(resolved.action), resolved.record);
+    match resolve_registry_capability_action(state, &normalized, args.clone()) {
+        RegistryCapabilityResolution::Resolved(resolved) => {
+            return (Some(resolved.action), resolved.record);
+        }
+        RegistryCapabilityResolution::Blocked(record) => {
+            return (None, record);
+        }
+        RegistryCapabilityResolution::None => {}
     }
     if !registry_capability_surface_available(state) {
         if let Some(resolved) = resolve_static_capability_action_for_state(state, &normalized, args)
@@ -107,8 +137,7 @@ fn registry_capability_surface_available(state: &AppState) -> bool {
         return false;
     };
     registry.enabled_names().into_iter().any(|skill| {
-        skill_is_globally_resolvable(state, &skill)
-            && !registry.planner_capabilities(&skill).is_empty()
+        registry.is_planner_visible(&skill) && !registry.planner_capabilities(&skill).is_empty()
     })
 }
 
@@ -232,26 +261,36 @@ fn resolve_registry_capability_action(
     state: &AppState,
     normalized_capability: &str,
     args: Value,
-) -> Option<ResolvedCapabilityAction> {
-    let registry = state.get_skills_registry()?;
+) -> RegistryCapabilityResolution {
+    let Some(registry) = state.get_skills_registry() else {
+        return RegistryCapabilityResolution::None;
+    };
     let mut candidates = Vec::new();
+    let mut blocked = Vec::new();
     for skill in registry.enabled_names() {
-        if !skill_is_globally_resolvable(state, &skill) {
-            continue;
-        }
         let Some(mapping) =
             registry_mapping_for_capability(&registry, &skill, normalized_capability, &args)
         else {
             continue;
         };
         let manifest = registry.manifest(&skill);
+        let planner_kind = manifest
+            .as_ref()
+            .map(|manifest| manifest.planner_kind)
+            .unwrap_or(PlannerCapabilityKind::Skill);
+        if let Some(reason_code) = skill_resolution_block_reason(state, &registry, &skill) {
+            blocked.push(CapabilityResolutionRecord::blocked(
+                reason_code,
+                normalized_capability.to_string(),
+                &skill,
+                planner_kind,
+            ));
+            continue;
+        }
         candidates.push(ResolverCandidate {
             skill,
             action: mapping.action.clone(),
-            planner_kind: manifest
-                .as_ref()
-                .map(|manifest| manifest.planner_kind)
-                .unwrap_or(PlannerCapabilityKind::Skill),
+            planner_kind,
             preferred: mapping.preferred
                 || manifest
                     .as_ref()
@@ -263,10 +302,10 @@ fn resolve_registry_capability_action(
         });
     }
     candidates.sort_by_key(resolver_candidate_rank);
-    candidates.into_iter().next().map(|candidate| {
+    if let Some(candidate) = candidates.into_iter().next() {
         let planner_kind = candidate.planner_kind;
         let action = resolve_candidate_action(candidate, args);
-        ResolvedCapabilityAction {
+        return RegistryCapabilityResolution::Resolved(ResolvedCapabilityAction {
             record: CapabilityResolutionRecord::resolved(
                 "capability_resolver_registry_mapping_resolved",
                 "registry",
@@ -275,8 +314,32 @@ fn resolve_registry_capability_action(
                 planner_kind,
             ),
             action,
+        });
+    }
+    if let Some(record) = blocked.into_iter().next() {
+        return RegistryCapabilityResolution::Blocked(record);
+    }
+    RegistryCapabilityResolution::None
+}
+
+fn skill_resolution_block_reason(
+    state: &AppState,
+    registry: &SkillsRegistry,
+    skill: &str,
+) -> Option<&'static str> {
+    let enabled_skills = state.get_skills_list();
+    if !enabled_skills.is_empty() && !enabled_skills.contains(skill) {
+        return Some("capability_disabled");
+    }
+    if !registry.is_planner_visible(skill) {
+        return Some("capability_unavailable");
+    }
+    if let Some(manifest) = registry.manifest(skill) {
+        if !crate::skill_availability::evaluate_manifest_availability(&manifest).is_available() {
+            return Some("capability_unavailable");
         }
-    })
+    }
+    None
 }
 
 fn registry_mapping_for_capability<'a>(
@@ -382,6 +445,13 @@ fn resolved_action_ref(action: &AgentAction) -> Option<String> {
         AgentAction::SynthesizeAnswer { .. } => Some("synthesize_answer".to_string()),
         AgentAction::Respond { .. } => Some("respond".to_string()),
         AgentAction::Think { .. } => Some("think".to_string()),
+    }
+}
+
+fn resolved_ref_for_skill(planner_kind: PlannerCapabilityKind, skill: &str) -> String {
+    match planner_kind {
+        PlannerCapabilityKind::Tool => format!("tool:{skill}"),
+        PlannerCapabilityKind::Skill | PlannerCapabilityKind::Workflow => format!("skill:{skill}"),
     }
 }
 

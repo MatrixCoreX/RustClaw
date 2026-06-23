@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use tracing::{debug, info};
 
@@ -59,6 +59,27 @@ pub(super) fn apply_respond_action_outcome(
         return ActionLoopDecision::StopRound(outcome.stop_signal.unwrap_or_default());
     }
     ActionLoopDecision::NextAction
+}
+
+fn unresolved_capability_error(state: &AppState, capability: &str, args: &Value) -> String {
+    let (_resolved, record) =
+        crate::capability_resolver::resolve_capability_action_with_record_for_state(
+            state,
+            capability,
+            args.clone(),
+        );
+    json!({
+        "error_kind": record.reason_code,
+        "reason_code": record.reason_code,
+        "message_key": record.reason_code,
+        "owner_layer": record.owner_layer,
+        "outcome": record.outcome,
+        "source": record.source,
+        "capability_ref": record.capability_ref,
+        "resolved_ref": record.resolved_ref,
+        "planner_kind": record.planner_kind,
+    })
+    .to_string()
 }
 
 fn is_discussion_only_action(action: &AgentAction) -> bool {
@@ -1593,9 +1614,9 @@ pub(super) async fn dispatch_round_action(
             )
             .await
         }
-        AgentAction::CallCapability { capability, .. } => Err(format!(
-            "unsupported capability `{capability}` was not resolved before execution"
-        )),
+        AgentAction::CallCapability { capability, args } => {
+            Err(unresolved_capability_error(state, &capability, &args))
+        }
         AgentAction::SynthesizeAnswer { evidence_refs } => {
             if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {
                 record_active_recipe_terminal_discussion_replan(
