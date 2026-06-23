@@ -21,11 +21,12 @@ fn pre_tool_use_hook_blocks_exact_machine_action_ref() {
     };
     let outcome = evaluate_pre_tool_use(&policy, "filesystem.remove_path");
 
-    assert_eq!(outcome.decision, "block");
+    assert_eq!(outcome.decision, "deny");
     assert_eq!(outcome.reason_code, "pre_tool_use_blocked");
     let error = structured_hook_error(&outcome);
     let parsed: serde_json::Value = serde_json::from_str(&error).expect("structured hook error");
     assert_eq!(parsed["owner_layer"], json!("agent_hooks"));
+    assert_eq!(parsed["decision"], json!("deny"));
     assert_eq!(parsed["action_ref"], json!("filesystem.remove_path"));
     assert_eq!(
         parsed["message_key"],
@@ -53,7 +54,7 @@ fn pre_tool_use_hook_blocks_whole_tool_by_machine_token() {
     };
     let outcome = evaluate_pre_tool_use(&policy, "run_cmd");
 
-    assert_eq!(outcome.decision, "block");
+    assert_eq!(outcome.decision, "deny");
 }
 
 #[test]

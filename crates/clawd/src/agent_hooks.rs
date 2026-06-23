@@ -1,23 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::AppState;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HookDecision {
-    Allow,
-    Block,
-    RequireConfirmation,
-}
-
-impl HookDecision {
-    fn as_token(self) -> &'static str {
-        match self {
-            Self::Allow => "allow",
-            Self::Block => "block",
-            Self::RequireConfirmation => "require_confirmation",
-        }
-    }
-}
+use crate::{policy_decision::PolicyDecision, AppState};
 
 #[derive(Debug, Clone, Default)]
 struct HookPolicy {
@@ -72,7 +55,7 @@ pub(crate) fn post_tool_use_outcome(
     };
     HookOutcome {
         stage: "post_tool_use",
-        decision: HookDecision::Allow.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
         reason_code,
         action_ref,
     }
@@ -88,7 +71,7 @@ pub(crate) fn stop_outcome(final_status: &str) -> HookOutcome {
     };
     HookOutcome {
         stage: "stop",
-        decision: HookDecision::Allow.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
         reason_code,
         action_ref: "agent_loop.stop".to_string(),
     }
@@ -97,7 +80,7 @@ pub(crate) fn stop_outcome(final_status: &str) -> HookOutcome {
 pub(crate) fn session_start_outcome() -> HookOutcome {
     HookOutcome {
         stage: "session_start",
-        decision: HookDecision::Allow.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
         reason_code: "session_start",
         action_ref: "agent_loop.session_start".to_string(),
     }
@@ -113,7 +96,7 @@ pub(crate) fn session_end_outcome(final_status: &str) -> HookOutcome {
     };
     HookOutcome {
         stage: "session_end",
-        decision: HookDecision::Allow.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
         reason_code,
         action_ref: "agent_loop.session_end".to_string(),
     }
@@ -122,14 +105,14 @@ pub(crate) fn session_end_outcome(final_status: &str) -> HookOutcome {
 pub(crate) fn user_prompt_submit_outcome() -> HookOutcome {
     HookOutcome {
         stage: "user_prompt_submit",
-        decision: HookDecision::Allow.as_token(),
+        decision: PolicyDecision::Allow.as_token(),
         reason_code: "user_prompt_submitted",
         action_ref: "agent_loop.user_prompt_submit".to_string(),
     }
 }
 
 pub(crate) fn structured_error_for_outcome(outcome: &HookOutcome) -> Option<String> {
-    matches!(outcome.decision, "block" | "require_confirmation")
+    matches!(outcome.decision, "deny" | "require_confirmation")
         .then(|| structured_hook_error(outcome))
 }
 
@@ -142,16 +125,17 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
     let decision = if token_list_contains(&policy.blocked_action_refs, &action_ref)
         || token_list_contains(&policy.blocked_tools, tool_ref)
     {
-        HookDecision::Block
+        PolicyDecision::Deny
     } else if token_list_contains(&policy.require_confirmation_action_refs, &action_ref) {
-        HookDecision::RequireConfirmation
+        PolicyDecision::RequireConfirmation
     } else {
-        HookDecision::Allow
+        PolicyDecision::Allow
     };
     let reason_code = match decision {
-        HookDecision::Allow => "pre_tool_use_allowed",
-        HookDecision::Block => "pre_tool_use_blocked",
-        HookDecision::RequireConfirmation => "pre_tool_use_requires_confirmation",
+        PolicyDecision::Allow => "pre_tool_use_allowed",
+        PolicyDecision::Deny => "pre_tool_use_blocked",
+        PolicyDecision::RequireConfirmation => "pre_tool_use_requires_confirmation",
+        PolicyDecision::BackgroundWait => "pre_tool_use_background_wait",
     };
     HookOutcome {
         stage: "pre_tool_use",
