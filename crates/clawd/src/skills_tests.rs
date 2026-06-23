@@ -260,6 +260,33 @@ fn test_task(payload: serde_json::Value) -> ClaimedTask {
 }
 
 #[tokio::test]
+async fn disabled_skill_preflight_returns_policy_decision_payload() {
+    let state = test_state("zh-CN");
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let err = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": "tmp/out.txt", "content": "alpha\n"}),
+    )
+    .await
+    .expect_err("disabled skill should fail before execution");
+    let parsed = parse_policy_block_error(&err).expect("policy block error");
+    let normalized: serde_json::Value =
+        serde_json::from_str(&normalize_skill_error_for_user("write_file", &err)).unwrap();
+
+    assert_eq!(parsed.reason_code, "skill_disabled");
+    assert_eq!(parsed.decision, "deny");
+    assert_eq!(
+        normalized
+            .pointer("/permission_decision/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+}
+
+#[tokio::test]
 async fn builtin_write_file_outcome_exposes_structured_extra() {
     let root = TempDirGuard::new("builtin_write_file_structured_extra");
     let mut state = test_state("zh-CN");
