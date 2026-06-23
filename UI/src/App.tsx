@@ -55,12 +55,7 @@ import {
   buildMultimodalMetaView,
   type MultimodalKey,
 } from "./lib/model-config";
-import {
-  formatServiceActionError,
-  serviceActionErrorCode,
-  serviceActionSuccessMessage,
-  serviceDisplayName,
-} from "./lib/service-actions";
+import { serviceDisplayName } from "./lib/service-actions";
 import { extractTaskText } from "./lib/task-result";
 import {
   buildWorkspaceUpdateView,
@@ -81,6 +76,7 @@ import { useSkillsRuntime } from "./hooks/useSkillsRuntime";
 import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
 import { useChannelBindingRuntime } from "./hooks/useChannelBindingRuntime";
+import { useServiceActionsRuntime } from "./hooks/useServiceActionsRuntime";
 
 import type {
   ApiResponse,
@@ -106,7 +102,6 @@ import type {
   ChannelPreset,
   ServiceStatusRow,
   DashboardCommunicationRow,
-  ServiceActionNotice,
   ChannelName,
   ConsolePage,
 } from "./types/api";
@@ -262,8 +257,6 @@ export default function App() {
   const [chatAgentMode, setChatAgentMode] = useState(true);
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [serviceActionLoading, setServiceActionLoading] = useState<Record<string, boolean>>({});
-  const [serviceActionMessage, setServiceActionMessage] = useState<ServiceActionNotice | null>(null);
   const [waLoginDialogOpen, setWaLoginDialogOpen] = useState(false);
   const [waLoginLoading, setWaLoginLoading] = useState(false);
   const [waLoginError, setWaLoginError] = useState<string | null>(null);
@@ -912,42 +905,18 @@ export default function App() {
       await fetchHealth();
     },
   });
-
-  const controlService = async (
-    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
-    action: "start" | "stop" | "restart",
-  ) => {
-    setServiceActionMessage(null);
-    setServiceActionLoading((prev) => ({ ...prev, [serviceName]: true }));
-    try {
-      const res = await apiFetch(`/v1/services/${serviceName}/${action}`, {
-        method: "POST",
-      });
-      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
-      if (!res.ok || !body.ok) {
-        setServiceActionMessage({
-          tone: "error",
-          text: formatServiceActionError(serviceName, action, serviceActionErrorCode(body), t),
-        });
-        return;
-      }
-      setServiceActionMessage(
-        {
-          tone: "success",
-          text: serviceActionSuccessMessage(serviceName, action, t),
-        },
-      );
-      await sleep(800);
+  const {
+    serviceActionLoading,
+    serviceActionMessage,
+    setServiceActionMessage,
+    controlService,
+  } = useServiceActionsRuntime({
+    apiFetch,
+    t,
+    onHealthRefresh: async () => {
       await fetchHealth();
-    } catch {
-      setServiceActionMessage({
-        tone: "error",
-        text: formatServiceActionError(serviceName, action, "service_action_request_failed", t),
-      });
-    } finally {
-      setServiceActionLoading((prev) => ({ ...prev, [serviceName]: false }));
-    }
-  };
+    },
+  });
 
   const fetchWhatsappWebLoginStatus = async (silent = false) => {
     if (!silent) {
