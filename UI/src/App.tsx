@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import QRCode from "qrcode";
+import { MultimodalConfigSection } from "./components/MultimodalConfigSection";
 import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
@@ -6984,192 +6985,72 @@ export default function App() {
                         </p>
                       ) : null}
 
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("图像模块", "Image Modules")}</h4>
-                        <p className="mb-4 text-xs text-white/50">
-                          {t("图像编辑、文生图、图像理解可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/image.toml）。", "Configure vendor, model, base URL and API key per image module. Saved to configs/image.toml.")}
-                        </p>
-                        <div className="space-y-4">
-                          {[
-                            { key: "image_edit" as const, label: t("图像编辑", "Image Edit") },
-                            { key: "image_generation" as const, label: t("文生图", "Image Generate") },
-                            { key: "image_vision" as const, label: t("图像理解", "Image Vision") },
-                          ].map(({ key, label }) => (
-                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                                <input
-                                  className="theme-input w-28 shrink-0 text-xs"
-                                  placeholder={t("厂商", "Vendor")}
-                                  value={multimodalDraft[key]?.vendor ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[140px] flex-1 text-xs"
-                                  placeholder={t("模型", "Model")}
-                                  value={multimodalDraft[key]?.model ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                                />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                                <input
-                                  className="theme-input min-w-[200px] flex-1 text-xs"
-                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                                  value={multimodalDraft[key]?.base_url ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[160px] flex-1 text-xs"
-                                  type="password"
-                                  placeholder={t("API Key", "API Key")}
-                                  value={multimodalDraft[key]?.api_key ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                                />
-                              </div>
-                              {renderMultimodalModelMeta(key)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <MultimodalConfigSection
+                        title={t("图像模块", "Image Modules")}
+                        description={t("图像编辑、文生图、图像理解可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/image.toml）。", "Configure vendor, model, base URL and API key per image module. Saved to configs/image.toml.")}
+                        entries={[
+                          { key: "image_edit", label: t("图像编辑", "Image Edit") },
+                          { key: "image_generation", label: t("文生图", "Image Generate") },
+                          { key: "image_vision", label: t("图像理解", "Image Vision") },
+                        ]}
+                        draft={multimodalDraft}
+                        labels={{
+                          vendor: t("厂商", "Vendor"),
+                          model: t("模型", "Model"),
+                          apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
+                          apiKey: "API Key",
+                        }}
+                        onDraftChange={setMultimodalDraftKey}
+                        renderMeta={renderMultimodalModelMeta}
+                      />
 
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("声音模块", "Audio Modules")}</h4>
-                        <p className="mb-4 text-xs text-white/50">
-                          {t("语音合成、语音转写可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/audio.toml）。", "Configure vendor, model, base URL and API key per audio module. Saved to configs/audio.toml.")}
-                        </p>
-                        <div className="space-y-4">
-                          {[
-                            { key: "audio_synthesize" as const, label: t("语音合成", "Audio TTS") },
-                            { key: "audio_transcribe" as const, label: t("语音转写", "Audio STT") },
-                          ].map(({ key, label }) => (
-                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                                <input
-                                  className="theme-input w-28 shrink-0 text-xs"
-                                  placeholder={t("厂商", "Vendor")}
-                                  value={multimodalDraft[key]?.vendor ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[140px] flex-1 text-xs"
-                                  placeholder={t("模型", "Model")}
-                                  value={multimodalDraft[key]?.model ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                                />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                                <input
-                                  className="theme-input min-w-[200px] flex-1 text-xs"
-                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                                  value={multimodalDraft[key]?.base_url ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[160px] flex-1 text-xs"
-                                  type="password"
-                                  placeholder={t("API Key", "API Key")}
-                                  value={multimodalDraft[key]?.api_key ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                                />
-                              </div>
-                              {renderMultimodalModelMeta(key)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <MultimodalConfigSection
+                        title={t("声音模块", "Audio Modules")}
+                        description={t("语音合成、语音转写可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/audio.toml）。", "Configure vendor, model, base URL and API key per audio module. Saved to configs/audio.toml.")}
+                        entries={[
+                          { key: "audio_synthesize", label: t("语音合成", "Audio TTS") },
+                          { key: "audio_transcribe", label: t("语音转写", "Audio STT") },
+                        ]}
+                        draft={multimodalDraft}
+                        labels={{
+                          vendor: t("厂商", "Vendor"),
+                          model: t("模型", "Model"),
+                          apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
+                          apiKey: "API Key",
+                        }}
+                        onDraftChange={setMultimodalDraftKey}
+                        renderMeta={renderMultimodalModelMeta}
+                      />
 
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("视频模块", "Video Modules")}</h4>
-                        <p className="mb-4 text-xs text-white/50">
-                          {t("视频生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/video.toml）。", "Configure vendor, model, base URL and API key for video generation. Saved to configs/video.toml.")}
-                        </p>
-                        <div className="space-y-4">
-                          {[
-                            { key: "video_generation" as const, label: t("视频生成", "Video Generate") },
-                          ].map(({ key, label }) => (
-                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                                <input
-                                  className="theme-input w-28 shrink-0 text-xs"
-                                  placeholder={t("厂商", "Vendor")}
-                                  value={multimodalDraft[key]?.vendor ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[140px] flex-1 text-xs"
-                                  placeholder={t("模型", "Model")}
-                                  value={multimodalDraft[key]?.model ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                                />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                                <input
-                                  className="theme-input min-w-[200px] flex-1 text-xs"
-                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                                  value={multimodalDraft[key]?.base_url ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[160px] flex-1 text-xs"
-                                  type="password"
-                                  placeholder={t("API Key", "API Key")}
-                                  value={multimodalDraft[key]?.api_key ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                                />
-                              </div>
-                              {renderMultimodalModelMeta(key)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <MultimodalConfigSection
+                        title={t("视频模块", "Video Modules")}
+                        description={t("视频生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/video.toml）。", "Configure vendor, model, base URL and API key for video generation. Saved to configs/video.toml.")}
+                        entries={[{ key: "video_generation", label: t("视频生成", "Video Generate") }]}
+                        draft={multimodalDraft}
+                        labels={{
+                          vendor: t("厂商", "Vendor"),
+                          model: t("模型", "Model"),
+                          apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
+                          apiKey: "API Key",
+                        }}
+                        onDraftChange={setMultimodalDraftKey}
+                        renderMeta={renderMultimodalModelMeta}
+                      />
 
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("音乐模块", "Music Modules")}</h4>
-                        <p className="mb-4 text-xs text-white/50">
-                          {t("音乐生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/music.toml）。", "Configure vendor, model, base URL and API key for music generation. Saved to configs/music.toml.")}
-                        </p>
-                        <div className="space-y-4">
-                          {[
-                            { key: "music_generation" as const, label: t("音乐生成", "Music Generate") },
-                          ].map(({ key, label }) => (
-                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                              <div className="flex flex-wrap items-center gap-3">
-                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                                <input
-                                  className="theme-input w-28 shrink-0 text-xs"
-                                  placeholder={t("厂商", "Vendor")}
-                                  value={multimodalDraft[key]?.vendor ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[140px] flex-1 text-xs"
-                                  placeholder={t("模型", "Model")}
-                                  value={multimodalDraft[key]?.model ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                                />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                                <input
-                                  className="theme-input min-w-[200px] flex-1 text-xs"
-                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                                  value={multimodalDraft[key]?.base_url ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                                />
-                                <input
-                                  className="theme-input min-w-[160px] flex-1 text-xs"
-                                  type="password"
-                                  placeholder={t("API Key", "API Key")}
-                                  value={multimodalDraft[key]?.api_key ?? ""}
-                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                                />
-                              </div>
-                              {renderMultimodalModelMeta(key)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <MultimodalConfigSection
+                        title={t("音乐模块", "Music Modules")}
+                        description={t("音乐生成可配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/music.toml）。", "Configure vendor, model, base URL and API key for music generation. Saved to configs/music.toml.")}
+                        entries={[{ key: "music_generation", label: t("音乐生成", "Music Generate") }]}
+                        draft={multimodalDraft}
+                        labels={{
+                          vendor: t("厂商", "Vendor"),
+                          model: t("模型", "Model"),
+                          apiUrl: t("API 地址 (base_url)", "API URL (base_url)"),
+                          apiKey: "API Key",
+                        }}
+                        onDraftChange={setMultimodalDraftKey}
+                        renderMeta={renderMultimodalModelMeta}
+                      />
                     </div>
                   ) : null}
                 </div>
