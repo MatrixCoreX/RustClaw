@@ -70,8 +70,10 @@ import {
 } from "./lib/model-config";
 import {
   NNI_RUNTIME_TILES,
-  findNniJoinErrorCode,
+  nniActionLabel as formatNniActionLabel,
+  nniJoinErrorMessage,
   nniPayloadHexField,
+  parseNniRemoteNodeUrls,
   shortenHex,
   shortNniValue,
 } from "./lib/nni-display";
@@ -1863,24 +1865,6 @@ export default function App() {
     }
   };
 
-  const nniJoinErrorMessage = (error: string | undefined, data: unknown, fallback: string) => {
-    const remoteCode = findNniJoinErrorCode(data);
-    const code = remoteCode || error;
-    if (code === "nni_pubkey_not_allowlisted" || code === "public_key_not_allowlisted") {
-      return t(
-        "本机公钥必须是白名单合规公钥。请读取并复制本机公钥，确认远程 NNI 服务端白名单已允许该公钥后再重试。",
-        "The local public key must be compliant with the whitelist. Read and copy this device public key, confirm the remote NNI server allows it, then retry.",
-      );
-    }
-    if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
-      return t(
-        "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请确定你是合法设备以后再重试。",
-        "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; confirm this is an authorized device, then retry.",
-      );
-    }
-    return error || fallback;
-  };
-
   const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
     const nodeUrls = nniRemoteNodeUrls();
     if (nodeUrls.length === 0) {
@@ -1893,7 +1877,7 @@ export default function App() {
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join request failed (${res.status})`));
+      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join request failed (${res.status})`, lang));
     }
     return body.data;
   };
@@ -1906,16 +1890,12 @@ export default function App() {
     });
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join verify failed (${res.status})`));
+      throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join verify failed (${res.status})`, lang));
     }
     return body.data;
   };
 
-  const nniRemoteNodeUrls = () =>
-    nniRemoteNodes
-      .split(/[\n,]+/)
-      .map((value) => value.trim())
-      .filter(Boolean);
+  const nniRemoteNodeUrls = () => parseNniRemoteNodeUrls(nniRemoteNodes);
 
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
@@ -4200,18 +4180,7 @@ export default function App() {
       return next;
     });
   };
-  const nniActionLabel = (action: string) => {
-    const labels: Record<string, string> = {
-      pubkey: t("读取 slot 0 公钥", "Read Slot 0 public key"),
-      sign_timestamp: t("生成时间戳签名", "Sign current timestamp"),
-      sign_challenge: t("生成挑战签名", "Sign challenge"),
-      tng_device_pubkey: t("读取 TNG 设备公钥", "Read TNG device public key"),
-      tng_device_cert: t("读取设备证书", "Read device certificate"),
-      tng_signer_cert: t("读取 signer 证书", "Read signer certificate"),
-      tng_root_cert: t("读取根证书", "Read root certificate"),
-    };
-    return labels[action] || action;
-  };
+  const nniActionLabel = (action: string) => formatNniActionLabel(action, lang);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.signature_chip_present === false;
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);

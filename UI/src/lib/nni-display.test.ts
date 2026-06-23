@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import {
   NNI_RUNTIME_TILES,
   findNniJoinErrorCode,
+  nniActionLabel,
+  nniJoinErrorMessage,
   nniPayloadHexField,
+  parseNniRemoteNodeUrls,
   shortenHex,
   shortNniValue,
 } from "./nni-display.ts";
@@ -45,6 +48,28 @@ test("finds nested NNI join error codes", () => {
     }),
     "public_key_whitelist_empty",
   );
+});
+
+test("formats NNI join errors from structured codes", () => {
+  assert.match(
+    nniJoinErrorMessage(undefined, { status: "public_key_not_allowlisted" }, "fallback", "en"),
+    /whitelist/,
+  );
+  assert.match(
+    nniJoinErrorMessage("nni_public_key_whitelist_empty", null, "fallback", "zh"),
+    /白名单/,
+  );
+  assert.equal(nniJoinErrorMessage(undefined, null, "fallback", "en"), "fallback");
+});
+
+test("parses remote NNI node urls", () => {
+  assert.deepEqual(parseNniRemoteNodeUrls("https://a\n https://b,https://c "), ["https://a", "https://b", "https://c"]);
+});
+
+test("formats NNI action labels", () => {
+  assert.equal(nniActionLabel("pubkey", "en"), "Read Slot 0 public key");
+  assert.equal(nniActionLabel("sign_timestamp", "zh"), "生成时间戳签名");
+  assert.equal(nniActionLabel("custom_action", "en"), "custom_action");
 });
 
 test("builds deterministic runtime tiles", () => {
