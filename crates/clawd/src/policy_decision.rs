@@ -24,7 +24,7 @@ impl PolicyDecision {
     ) -> Self {
         if background_wait {
             Self::BackgroundWait
-        } else if needs_confirmation {
+        } else if approved && needs_confirmation {
             Self::RequireConfirmation
         } else if denied_by_policy || !approved {
             Self::Deny
@@ -50,6 +50,10 @@ mod tests {
         );
         assert_eq!(
             PolicyDecision::from_permission_flags(false, false, true, false).as_token(),
+            "deny"
+        );
+        assert_eq!(
+            PolicyDecision::from_permission_flags(false, true, true, false).as_token(),
             "deny"
         );
         assert_eq!(
