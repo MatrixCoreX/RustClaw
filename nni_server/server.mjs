@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const JOIN_REQUEST_INTERVAL_SECONDS = 60;
@@ -10,6 +10,8 @@ const JOIN_TASK_TTL_SECONDS = 600;
 const HOST = process.env.NNI_SERVER_HOST || "0.0.0.0";
 const PORT = Number.parseInt(process.env.NNI_SERVER_PORT || "8797", 10);
 const STATE_PATH = process.env.NNI_SERVER_STATE_PATH || "data/nni-server-state.json";
+const LOG_PATH = process.env.NNI_SERVER_LOG_PATH || "logs/nni-server.log";
+const LOG_TO_STDOUT = /^(1|true|yes)$/i.test(process.env.NNI_SERVER_LOG_STDOUT || "");
 const PUBLIC_KEY_WHITELIST_ENV = "NNI_SERVER_PUBLIC_KEY_WHITELIST";
 
 function nowTs() {
@@ -23,6 +25,22 @@ function emptyState() {
     requests: [],
     public_key_whitelist: configuredPublicKeyWhitelist(),
   };
+}
+
+async function appendNniServerLog(eventKind, payload = {}) {
+  const parent = path.dirname(path.resolve(LOG_PATH));
+  await mkdir(parent, { recursive: true });
+  const line = `${JSON.stringify({
+    ts: nowTs(),
+    event_kind: eventKind,
+    payload,
+  })}\n`;
+  await appendFile(LOG_PATH, line, "utf8");
+  if (LOG_TO_STDOUT) process.stdout.write(line);
+}
+
+function logNniServerEvent(eventKind, payload = {}) {
+  void appendNniServerLog(eventKind, payload).catch(() => {});
 }
 
 async function loadState() {
@@ -54,6 +72,14 @@ function sendJson(res, status, payload) {
     "content-length": String(body.length),
   });
   res.end(body);
+  if (res.nniRequestMeta) {
+    logNniServerEvent("http_response", {
+      method: res.nniRequestMeta.method,
+      path: res.nniRequestMeta.path,
+      status,
+      error_code: payload && typeof payload === "object" ? payload.error || null : null,
+    });
+  }
 }
 
 function ok(data) {
@@ -651,6 +677,10 @@ function recordRequest(state, task, signature, ts, compliant, status, errorCode,
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    res.nniRequestMeta = {
+      method: req.method || "",
+      path: url.pathname,
+    };
     if (req.method === "GET" && url.pathname === "/v1/health") {
       sendJson(res, 200, ok({ service: "nni-server", status: "ok" }));
       return;
@@ -683,5 +713,10 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[nni-server] listening on ${HOST}:${PORT}, state=${STATE_PATH}`);
+  logNniServerEvent("server_listening", {
+    host: HOST,
+    port: PORT,
+    state_path: STATE_PATH,
+    log_path: LOG_PATH,
+  });
 });

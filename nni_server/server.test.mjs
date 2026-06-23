@@ -61,6 +61,7 @@ async function startServer({ publicKeyWhitelist = "", initialState = null } = {}
     await writeFile(statePath, `${JSON.stringify(initialState, null, 2)}\n`, "utf8");
   }
   const port = await freePort();
+  const logPath = path.join(dir, "nni-server.log");
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL(".", import.meta.url),
     env: {
@@ -68,6 +69,7 @@ async function startServer({ publicKeyWhitelist = "", initialState = null } = {}
       NNI_SERVER_HOST: "127.0.0.1",
       NNI_SERVER_PORT: String(port),
       NNI_SERVER_STATE_PATH: statePath,
+      NNI_SERVER_LOG_PATH: logPath,
       NNI_SERVER_PUBLIC_KEY_WHITELIST: publicKeyWhitelist,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -95,6 +97,7 @@ async function startServer({ publicKeyWhitelist = "", initialState = null } = {}
         return {
           baseUrl,
           statePath,
+          logPath,
           async stop() {
             if (child.exitCode != null) return;
             child.kill("SIGTERM");
@@ -135,6 +138,15 @@ async function getJson(baseUrl, pathName) {
   };
 }
 
+async function readLogLines(logPath) {
+  const raw = await readFile(logPath, "utf8");
+  return raw
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 test("join request rejects public keys when the whitelist is empty", async (t) => {
   const server = await startServer();
   t.after(() => server.stop());
@@ -149,6 +161,44 @@ test("join request rejects public keys when the whitelist is empty", async (t) =
   assert.equal(res.body.error, "nni_public_key_whitelist_empty");
   assert.equal(res.body.data.status, "public_key_whitelist_empty");
   assert.equal(res.body.data.device_pubkey, VALID_PUBKEY);
+});
+
+test("server writes nni events to configured log file", async (t) => {
+  const server = await startServer();
+  t.after(() => server.stop());
+
+  await getJson(server.baseUrl, "/v1/health");
+
+  let lines = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      lines = await readLogLines(server.logPath);
+    } catch {
+      lines = [];
+    }
+    if (
+      lines.some((line) => line.event_kind === "server_listening") &&
+      lines.some(
+        (line) =>
+          line.event_kind === "http_response" &&
+          line.payload?.path === "/v1/health" &&
+          line.payload?.status === 200,
+      )
+    ) {
+      break;
+    }
+    await delay(50);
+  }
+
+  assert(lines.some((line) => line.event_kind === "server_listening"));
+  assert(
+    lines.some(
+      (line) =>
+        line.event_kind === "http_response" &&
+        line.payload?.path === "/v1/health" &&
+        line.payload?.status === 200,
+    ),
+  );
 });
 
 test("join request accepts public keys injected through the whitelist env", async (t) => {
