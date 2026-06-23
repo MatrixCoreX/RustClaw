@@ -203,11 +203,6 @@ fn output_value_has_missing_file_search_evidence(value: &serde_json::Value) -> b
     value
         .get("extra")
         .is_some_and(output_value_has_missing_file_search_evidence)
-        || value
-            .get("text")
-            .and_then(|text| text.as_str())
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-            .is_some_and(|inner| output_value_has_missing_file_search_evidence(&inner))
 }
 
 fn answer_has_file_delivery_token(answer: &str) -> bool {
@@ -1359,21 +1354,12 @@ pub(super) fn parse_http_health_finding(output: &str) -> Option<HttpHealthFindin
         return None;
     }
     let status_code = extra.get("status_code").and_then(Value::as_u64);
-    let body = extra
-        .get("body_json")
-        .cloned()
-        .or_else(|| {
-            extra
-                .get("body_preview")
-                .and_then(Value::as_str)
-                .and_then(|text| serde_json::from_str::<Value>(text).ok())
-        })
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .and_then(http_text_body_json)
-        })?;
+    let body = extra.get("body_json").cloned().or_else(|| {
+        extra
+            .get("body_preview")
+            .and_then(Value::as_str)
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    })?;
     let data = body.get("data")?;
     Some(HttpHealthFinding {
         status_code,
@@ -1388,13 +1374,6 @@ pub(super) fn parse_http_health_finding(output: &str) -> Option<HttpHealthFindin
         telegram_bot_healthy: data.get("telegram_bot_healthy").and_then(Value::as_bool),
         gateway_instances: health_gateway_instances(data),
     })
-}
-
-pub(super) fn http_text_body_json(text: &str) -> Option<Value> {
-    text.lines()
-        .map(str::trim)
-        .find(|line| line.starts_with('{'))
-        .and_then(|line| serde_json::from_str::<Value>(line).ok())
 }
 
 pub(super) fn health_gateway_instances(data: &Value) -> Vec<HealthGatewayInstance> {
@@ -1549,18 +1528,7 @@ pub(super) fn collect_structured_read_scalar_values_from_output(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
         return;
     };
-    let mut outputs = vec![value];
-    let mut index = 0usize;
-    while index < outputs.len() {
-        let value = &outputs[index];
-        collect_structured_read_scalar_values_from_json_output(value, values);
-        if let Some(text_value) = value.get("text").and_then(|text| text.as_str()) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text_value.trim()) {
-                outputs.push(parsed);
-            }
-        }
-        index += 1;
-    }
+    collect_structured_read_scalar_values_from_json_output(&value, values);
 }
 
 pub(super) fn collect_structured_read_scalar_values_from_json_output(
