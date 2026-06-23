@@ -322,6 +322,7 @@ fn execute(
                 "request": payload,
                 "output_path": output,
                 "outputs": [],
+                "planned_outputs": [{"type":"audio_file","path": output}],
             }),
         ));
     }

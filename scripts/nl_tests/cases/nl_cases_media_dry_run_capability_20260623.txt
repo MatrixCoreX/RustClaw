@@ -1,0 +1,18 @@
+# Media dry-run capability NL coverage.
+# Created: 2026-06-23
+#
+# Purpose:
+# - Cover planner-facing media generation abilities without spending provider quota.
+# - Exercise image, speech audio, video, and music capability selection with dry_run=true.
+# - Keep live image/audio/video/music generation in separate optional provider suites.
+#
+# Format:
+#   suite|name|tags|prompt|expect=<substring>
+
+media_dry_run_capability|image_generate_dry_run_zh|covers:image_generate,image.generate,dry_run,media,image;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry_run，不要真实生成图片：用 image.generate 能力规划一张 512x512 的 RustClaw 状态卡图片，输出路径 document/media_dry_run/image_status_card.png，返回 dry_run=true、provider/model、planned_outputs 和这个输出路径。|expect=document/media_dry_run/image_status_card.png
+
+media_dry_run_capability|audio_synthesize_dry_run_en|covers:audio_synthesize,audio.synthesize,dry_run,media,audio,voice;requires_tool_call=true;dry_run,no_external_side_effect|Dry run only: use the audio.synthesize capability to plan speech audio for the text "RustClaw dry run audio check", format mp3, output_path document/media_dry_run/audio_check.mp3. Do not call a provider or write the file; return dry_run=true, provider/model, planned_outputs, and the output path.|expect=document/media_dry_run/audio_check.mp3
+
+media_dry_run_capability|video_generate_dry_run_zh|covers:video_generate,video.generate,dry_run,media,video;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry run，不要真实生成视频：用 video.generate 能力规划一个 6 秒的产品状态面板短视频，分辨率 768P，输出路径 document/media_dry_run/status_panel.mp4，返回 dry_run=true、provider/model、planned_outputs 和这个输出路径。|expect=document/media_dry_run/status_panel.mp4
+
+media_dry_run_capability|music_generate_dry_run_en|covers:music_generate,music.generate,dry_run,media,music,audio;requires_tool_call=true;dry_run,no_external_side_effect|Dry run only: use the music.generate capability to plan a short instrumental ambient loop, format mp3, output_path document/media_dry_run/ambient_loop.mp3. Do not call a provider or write the file; return dry_run=true, provider/model, planned_outputs, and the output path.|expect=document/media_dry_run/ambient_loop.mp3

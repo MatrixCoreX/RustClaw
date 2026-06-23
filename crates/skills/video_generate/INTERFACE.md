@@ -57,6 +57,7 @@
 - `file_id`: provider file id when available.
 - `output_path`: saved video path when downloaded.
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"video_file\",\"path\":\"...\"}]` when downloaded.
+- `planned_outputs`: planned file outputs for dry-run validation responses.
 - `dry_run`: present and true only for dry runs.
 - `pending_async_job`: present when `generate.wait_for_completion=false`; contains `job_id`, `status`, `poll_after_seconds`, `expires_at`, `cancel_ref`, `message_key`, and `poll_adapter`.
 - `async_poll_adapter_result`: present for `poll`; contains `job_id`, `status=accepted|running|succeeded|failed|expired`, `poll_after_seconds`, `expires_at`, and `final_result_json` or `failure_result_json` when terminal.

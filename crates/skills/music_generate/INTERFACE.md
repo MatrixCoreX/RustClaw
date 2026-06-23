@@ -40,6 +40,7 @@
 - `model_kind`: adapter/runtime mode, such as `minimax_native` or `unsupported` in dry-run metadata.
 - `output_path`: saved audio path.
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"audio_file\",\"path\":\"...\"}]`.
+- `planned_outputs`: planned file outputs for dry-run validation responses.
 - `audio_format`: normalized output format.
 - `trace_id` and `extra_info`: provider metadata when returned.
 - `dry_run`: present and true only for dry runs.

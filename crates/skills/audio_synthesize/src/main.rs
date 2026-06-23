@@ -221,6 +221,10 @@ fn execute(
             input.chars().count()
         ));
     }
+    let dry_run = obj
+        .get("dry_run")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let requested_voice = obj
         .get("voice")
@@ -264,9 +268,27 @@ fn execute(
         obj.get("output_path").and_then(|v| v.as_str()),
         &actual_format,
     )?;
+    let requested_model = obj.get("model").and_then(|v| v.as_str());
+    if dry_run {
+        let model = requested_model
+            .or(first_model_candidate(
+                cfg.audio_synthesize.default_model.as_deref(),
+                vendor_models(&cfg.audio_synthesize, vendor),
+                cfg.audio_synthesize.models.as_ref(),
+            ))
+            .unwrap_or("default");
+        return Ok(build_dry_run_response(
+            vendor_name(vendor),
+            model,
+            &voice,
+            &actual_format,
+            input,
+            &output_path,
+        ));
+    }
+
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &provider_cfg.api_key)?;
-    let requested_model = obj.get("model").and_then(|v| v.as_str());
     let model = requested_model
         .or(first_model_candidate(
             cfg.audio_synthesize.default_model.as_deref(),
@@ -309,6 +331,35 @@ fn execute(
         "latency_ms": 0
     });
     Ok((format!("VOICE_FILE:{saved_path}"), extra))
+}
+
+fn build_dry_run_response(
+    provider: &str,
+    model: &str,
+    voice: &str,
+    response_format: &str,
+    input: &str,
+    output_path: &Path,
+) -> (String, Value) {
+    let saved_path = output_path.to_string_lossy().to_string();
+    (
+        "AUDIO_SYNTHESIZE_DRY_RUN".to_string(),
+        json!({
+            "dry_run": true,
+            "provider": provider,
+            "model": model,
+            "model_kind": "dry_run",
+            "voice": voice,
+            "response_format": response_format,
+            "output_path": saved_path,
+            "outputs": [],
+            "planned_outputs": [{"type":"audio_file","path": saved_path}],
+            "request": {
+                "input_chars": input.chars().count()
+            },
+            "latency_ms": 0
+        }),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1005,6 +1056,20 @@ fn select_vendor(
         .or_else(|| section_default.and_then(parse_vendor))
         .or_else(|| selected_vendor.and_then(parse_vendor))
         .unwrap_or(VendorKind::OpenAI)
+}
+
+fn vendor_name(v: VendorKind) -> &'static str {
+    match v {
+        VendorKind::OpenAI => "openai",
+        VendorKind::Google => "google",
+        VendorKind::Anthropic => "anthropic",
+        VendorKind::Grok => "grok",
+        VendorKind::DeepSeek => "deepseek",
+        VendorKind::Qwen => "qwen",
+        VendorKind::MiniMax => "minimax",
+        VendorKind::Mimo => "mimo",
+        VendorKind::Custom => "custom",
+    }
 }
 
 fn resolve_vendor_config<'a>(
