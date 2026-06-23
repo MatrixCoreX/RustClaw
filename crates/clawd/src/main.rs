@@ -443,8 +443,8 @@ async fn main() -> anyhow::Result<()> {
     );
     for p in &llm_providers {
         info!(
-            "Active provider: name={}, type={}, model={}",
-            p.config.name, p.config.provider_type, p.config.model
+            "Active provider: name={}, type={}, model={}, timeout_seconds={}",
+            p.config.name, p.config.provider_type, p.config.model, p.config.timeout_seconds
         );
     }
     info!(

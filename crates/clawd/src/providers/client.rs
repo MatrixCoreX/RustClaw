@@ -486,15 +486,36 @@ async fn call_provider(
     let provider_type = provider.config.provider_type.as_str();
     for impl_ref in PROVIDER_IMPLS {
         if impl_ref.name() == provider_type {
-            return impl_ref
-                .call(provider.clone(), prompt.to_string(), hints.clone())
-                .await;
+            let timeout_seconds = provider.config.timeout_seconds.max(1);
+            return await_provider_call_with_timeout(
+                provider_type,
+                timeout_seconds,
+                impl_ref.call(provider.clone(), prompt.to_string(), hints.clone()),
+            )
+            .await;
         }
     }
     Err(ProviderError::non_retryable(
         format!("unsupported provider type: {provider_type}"),
         Value::Null,
     ))
+}
+
+async fn await_provider_call_with_timeout(
+    provider_type: &str,
+    timeout_seconds: u64,
+    call: ProviderCallFuture,
+) -> Result<LlmProviderResponse, ProviderError> {
+    match tokio::time::timeout(Duration::from_secs(timeout_seconds.max(1)), call).await {
+        Ok(result) => result,
+        Err(_) => Err(ProviderError::retryable(
+            format!(
+                "provider_call_timeout provider_type={provider_type} timeout_seconds={}",
+                timeout_seconds.max(1)
+            ),
+            Value::Null,
+        )),
+    }
 }
 
 #[cfg(test)]
