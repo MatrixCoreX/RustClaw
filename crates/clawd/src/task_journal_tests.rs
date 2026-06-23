@@ -620,6 +620,18 @@ fn agent_decides_first_action_attribution_is_machine_readable() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
+            .and_then(Value::as_str),
+        Some("act")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_act_first_action")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/decision_envelope/reason_code")
             .and_then(Value::as_str),
         Some("agent_loop_first_action_call_capability")
@@ -693,6 +705,18 @@ fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
     );
     assert_eq!(
         summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
+            .and_then(Value::as_str),
+        Some("recover")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_recover_invalid_clarify")
+    );
+    assert_eq!(
+        summary
             .pointer("/rollout_attribution/0/decision_envelope/reason_code")
             .and_then(Value::as_str),
         Some("agent_loop_first_action_clarify")
@@ -762,6 +786,14 @@ fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
         Some("clarify")
     );
     assert_eq!(
+        envelope.get("control_intent").and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        envelope.get("control_reason_code").and_then(Value::as_str),
+        Some("agent_loop_control_clarify_terminal_intent")
+    );
+    assert_eq!(
         envelope.get("reason_code").and_then(Value::as_str),
         Some("agent_loop_respond_terminal_intent_clarify")
     );
@@ -800,6 +832,86 @@ fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
 }
 
 #[test]
+fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
+    let route = route_for_semantic(crate::OutputSemanticKind::None);
+    let wait_plan = crate::PlanResult {
+        goal: "require confirmation".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: true,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "",
+                "terminal_intent": "needs_confirmation",
+                "message_key": "clawd.msg.confirmation.required"
+            }),
+            depends_on: Vec::new(),
+            why: "structured wait".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let wait_envelope =
+        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &wait_plan);
+
+    assert_eq!(
+        wait_envelope.get("terminal_intent").and_then(Value::as_str),
+        Some("needs_confirmation")
+    );
+    assert_eq!(
+        wait_envelope.get("control_intent").and_then(Value::as_str),
+        Some("wait")
+    );
+    assert_eq!(
+        wait_envelope
+            .get("control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_wait_terminal_intent")
+    );
+
+    let stop_plan = crate::PlanResult {
+        goal: "cannot continue".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "",
+                "terminal_intent": "cannot_proceed",
+                "message_key": "clawd.msg.cannot_proceed"
+            }),
+            depends_on: Vec::new(),
+            why: "structured stop".to_string(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let stop_envelope =
+        super::decision_envelope::agent_loop_round_plan_decision_envelope_json(&route, &stop_plan);
+
+    assert_eq!(
+        stop_envelope.get("terminal_intent").and_then(Value::as_str),
+        Some("cannot_proceed")
+    );
+    assert_eq!(
+        stop_envelope.get("control_intent").and_then(Value::as_str),
+        Some("stop")
+    );
+    assert_eq!(
+        stop_envelope
+            .get("control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_stop_terminal_intent")
+    );
+}
+
+#[test]
 fn agent_loop_decision_envelope_flags_respond_without_required_evidence() {
     let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
     route.output_contract.requires_content_evidence = true;
@@ -833,6 +945,18 @@ fn agent_loop_decision_envelope_flags_respond_without_required_evidence() {
             .and_then(Value::as_str),
         Some("respond_requires_evidence_observation")
     );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
+            .and_then(Value::as_str),
+        Some("recover")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_recover_missing_evidence")
+    );
 }
 
 #[test]
@@ -862,6 +986,8 @@ fn agent_loop_decision_envelope_schema_drift() {
         "fallback_gate_policy",
         "decision",
         "terminal_intent",
+        "control_intent",
+        "control_reason_code",
         "reason_code",
         "clarify_reason_code",
         "validation_status",
@@ -916,6 +1042,19 @@ fn agent_loop_decision_envelope_schema_drift() {
                 .iter()
                 .any(|value| value.as_str() == Some(token)),
             "terminal_intent enum missing `{token}`"
+        );
+    }
+    let control_intents = properties
+        .get("control_intent")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("control_intent enum");
+    for token in ["answer", "clarify", "act", "recover", "wait", "stop"] {
+        assert!(
+            control_intents
+                .iter()
+                .any(|value| value.as_str() == Some(token)),
+            "control_intent enum missing `{token}`"
         );
     }
     let rendering_policies = properties

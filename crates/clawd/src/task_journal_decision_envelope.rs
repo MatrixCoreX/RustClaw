@@ -107,7 +107,8 @@ fn apply_structured_respond_terminal_intent(
     let Some(obj) = envelope.as_object_mut() else {
         return;
     };
-    if intent.terminal_intent == "clarify" {
+    let terminal_intent = intent.terminal_intent.as_str();
+    if terminal_intent == "clarify" {
         obj.insert("decision".to_string(), json!("clarify"));
         obj.insert(
             "reason_code".to_string(),
@@ -140,6 +141,26 @@ fn apply_structured_respond_terminal_intent(
             json!("finalizer_llm_i18n"),
         );
     }
+    let control_intent = if terminal_intent == "clarify"
+        && obj
+            .get("validation_status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status == "shadow_invalid")
+    {
+        "recover"
+    } else {
+        structured_terminal_control_intent(terminal_intent)
+    };
+    let control_reason_code = if control_intent == "recover" && terminal_intent == "clarify" {
+        "agent_loop_control_recover_invalid_clarify"
+    } else {
+        structured_terminal_control_reason_code(terminal_intent)
+    };
+    obj.insert("control_intent".to_string(), json!(control_intent));
+    obj.insert(
+        "control_reason_code".to_string(),
+        json!(control_reason_code),
+    );
     obj.insert("terminal_intent".to_string(), json!(intent.terminal_intent));
     if let Some(message_key) = intent.message_key {
         obj.insert("message_key".to_string(), json!(message_key));
@@ -149,6 +170,28 @@ fn apply_structured_respond_terminal_intent(
     }
     if let Some(locator_kind) = intent.locator_kind {
         obj.insert("locator_kind".to_string(), json!(locator_kind));
+    }
+}
+
+fn structured_terminal_control_intent(terminal_intent: &str) -> &'static str {
+    match terminal_intent {
+        "answer" => "answer",
+        "clarify" => "clarify",
+        "cannot_proceed" => "stop",
+        "needs_confirmation" => "wait",
+        "continue" => "recover",
+        _ => "recover",
+    }
+}
+
+fn structured_terminal_control_reason_code(terminal_intent: &str) -> &'static str {
+    match terminal_intent {
+        "answer" => "agent_loop_control_answer_terminal_intent",
+        "clarify" => "agent_loop_control_clarify_terminal_intent",
+        "cannot_proceed" => "agent_loop_control_stop_terminal_intent",
+        "needs_confirmation" => "agent_loop_control_wait_terminal_intent",
+        "continue" => "agent_loop_control_recover_terminal_intent",
+        _ => "agent_loop_control_recover_unknown_terminal_intent",
     }
 }
 
@@ -164,6 +207,20 @@ pub(super) fn agent_loop_decision_envelope_json(
     let (validation_status, validation_reason_code) =
         agent_loop_decision_validation(route, actions, decision, &contract);
     let terminal_intent = agent_loop_terminal_intent(decision);
+    let control_intent = agent_loop_control_intent(
+        decision,
+        terminal_intent,
+        validation_status,
+        validation_reason_code,
+        actions,
+    );
+    let control_reason_code = agent_loop_control_reason_code(
+        control_intent,
+        terminal_intent,
+        validation_status,
+        validation_reason_code,
+        actions,
+    );
     let missing_slot = contract.missing_parameters.first().map(String::as_str);
     let answer_shape = agent_loop_answer_shape(route);
     json!({
@@ -175,6 +232,8 @@ pub(super) fn agent_loop_decision_envelope_json(
         "fallback_gate_policy": "fallback_safety_check_only",
         "decision": decision,
         "terminal_intent": terminal_intent,
+        "control_intent": control_intent,
+        "control_reason_code": control_reason_code,
         "reason_code": agent_loop_decision_reason_code(decision, actions),
         "clarify_reason_code": agent_loop_clarify_reason_code(
             decision,
@@ -307,6 +366,60 @@ fn agent_loop_terminal_intent(decision: &str) -> &'static str {
         "clarify" => "clarify",
         "respond" | "synthesize_answer" => "answer",
         _ => "cannot_proceed",
+    }
+}
+
+fn agent_loop_control_intent(
+    decision: &str,
+    terminal_intent: &str,
+    validation_status: &'static str,
+    _validation_reason_code: &'static str,
+    actions: &[crate::AgentAction],
+) -> &'static str {
+    if validation_status == "shadow_invalid" {
+        return "recover";
+    }
+    if first_non_think_action_decision(actions) == "no_action" {
+        return "stop";
+    }
+    match terminal_intent {
+        "answer" => "answer",
+        "clarify" => "clarify",
+        "needs_confirmation" => "wait",
+        "cannot_proceed" => "stop",
+        "continue" if decision == "call_capability" => "act",
+        "continue" => "recover",
+        _ => "recover",
+    }
+}
+
+fn agent_loop_control_reason_code(
+    control_intent: &str,
+    terminal_intent: &str,
+    validation_status: &'static str,
+    validation_reason_code: &'static str,
+    actions: &[crate::AgentAction],
+) -> &'static str {
+    if validation_status == "shadow_invalid" {
+        return match validation_reason_code {
+            "respond_requires_evidence_observation" => {
+                "agent_loop_control_recover_missing_evidence"
+            }
+            "clarify_missing_structured_slots" => "agent_loop_control_recover_invalid_clarify",
+            _ => "agent_loop_control_recover_shadow_invalid",
+        };
+    }
+    if first_non_think_action_decision(actions) == "no_action" {
+        return "agent_loop_control_stop_no_action";
+    }
+    match (control_intent, terminal_intent) {
+        ("act", "continue") => "agent_loop_control_act_first_action",
+        ("answer", "answer") => "agent_loop_control_answer_terminal_intent",
+        ("clarify", "clarify") => "agent_loop_control_clarify_terminal_intent",
+        ("wait", "needs_confirmation") => "agent_loop_control_wait_terminal_intent",
+        ("stop", "cannot_proceed") => "agent_loop_control_stop_terminal_intent",
+        ("recover", "continue") => "agent_loop_control_recover_terminal_intent",
+        _ => "agent_loop_control_unknown",
     }
 }
 

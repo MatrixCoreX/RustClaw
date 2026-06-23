@@ -93,6 +93,18 @@ fn trace_json_includes_round_decision_envelope() {
     );
     assert_eq!(
         trace
+            .pointer("/rounds/0/decision_envelope/control_intent")
+            .and_then(Value::as_str),
+        Some("act")
+    );
+    assert_eq!(
+        trace
+            .pointer("/rounds/0/decision_envelope/control_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_control_act_first_action")
+    );
+    assert_eq!(
+        trace
             .pointer("/rounds/0/decision_envelope/capability_ref")
             .and_then(Value::as_str),
         Some("fs.read_text_range")
