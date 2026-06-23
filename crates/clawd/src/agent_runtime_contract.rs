@@ -1,3 +1,5 @@
+use crate::policy_decision::PolicyDecision;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubagentRole {
     Observe,
@@ -73,8 +75,9 @@ pub(crate) fn runtime_protocol_hint_line() -> String {
         .map(|stage| stage.as_token())
         .collect::<Vec<_>>()
         .join("|");
+    let policy_decisions = PolicyDecision::all_tokens().join("|");
     format!(
-        "agent_runtime_protocols=subagent_roles:{roles};subagent_write_enabled:false;subagent_external_publish_enabled:false;hook_stages:{hooks};hook_decisions:allow|block|require_confirmation"
+        "agent_runtime_protocols=subagent_roles:{roles};subagent_write_enabled:false;subagent_external_publish_enabled:false;hook_stages:{hooks};hook_decisions:{policy_decisions}"
     )
 }
 
@@ -91,6 +94,8 @@ mod tests {
         assert!(hint.contains(
             "hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit"
         ));
-        assert!(hint.contains("hook_decisions:allow|block|require_confirmation"));
+        let expected_hook_decisions =
+            format!("hook_decisions:{}", PolicyDecision::all_tokens().join("|"));
+        assert!(hint.contains(&expected_hook_decisions));
     }
 }

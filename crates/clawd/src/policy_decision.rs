@@ -7,6 +7,10 @@ pub(crate) enum PolicyDecision {
 }
 
 impl PolicyDecision {
+    pub(crate) fn all_tokens() -> &'static [&'static str] {
+        &["allow", "deny", "require_confirmation", "background_wait"]
+    }
+
     pub(crate) fn as_token(self) -> &'static str {
         match self {
             Self::Allow => "allow",
@@ -59,6 +63,14 @@ mod tests {
         assert_eq!(
             PolicyDecision::from_permission_flags(true, false, false, true).as_token(),
             "background_wait"
+        );
+    }
+
+    #[test]
+    fn all_tokens_exposes_protocol_vocabulary() {
+        assert_eq!(
+            PolicyDecision::all_tokens(),
+            &["allow", "deny", "require_confirmation", "background_wait"]
         );
     }
 }
