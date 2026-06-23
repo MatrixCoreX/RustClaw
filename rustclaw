@@ -298,7 +298,7 @@ cmd_logs() {
   local do_follow=0
   for arg in "$@"; do
     case "$arg" in
-      all|clawd|telegramd|whatsappd|whatsapp_webd|feishud)
+      all|clawd|nni|telegramd|whatsappd|whatsapp_webd|feishud)
         service="$arg"
         ;;
       --follow)
@@ -323,7 +323,10 @@ cmd_logs() {
   local files=()
   case "$service" in
     all)
-      files=("$log_dir/clawd.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log" "$log_dir/feishud.log")
+      files=("$log_dir/clawd.log" "$log_dir/nni.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log" "$log_dir/feishud.log")
+      ;;
+    nni)
+      files=("$log_dir/nni.log")
       ;;
     clawd|telegramd|whatsappd|whatsapp_webd|feishud)
       files=("$log_dir/$service.log")

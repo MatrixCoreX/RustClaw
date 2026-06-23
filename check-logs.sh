@@ -13,7 +13,7 @@ Usage: # zh: 用法
 
 Options: # zh: 参数
   -n NUM   Show latest NUM lines per log file (default 120) # zh: 每个日志文件展示最近 NUM 行（默认 120）
-  -f       Follow clawd/telegramd logs continuously # zh: 持续跟踪 clawd/telegramd 日志
+  -f       Follow service logs continuously # zh: 持续跟踪服务日志
   -h       Show help # zh: 显示帮助
 EOF
 }
@@ -79,11 +79,12 @@ echo "Log directory: ${LOG_DIR}" # zh: 日志目录: ${LOG_DIR}
 echo "Check time: $(date '+%F %T')" # zh: 检查时间: $(date '+%F %T')
 
 print_file_report "${LOG_DIR}/clawd.log"
+print_file_report "${LOG_DIR}/nni.log"
 print_file_report "${LOG_DIR}/telegramd.log"
 print_file_report "${LOG_DIR}/feishud.log"
 
 if [[ "${FOLLOW}" == "1" ]]; then
   echo
   echo "Start following logs (Ctrl+C to exit)..." # zh: 开始持续跟踪日志（Ctrl+C 退出）...
-  tail -F "${LOG_DIR}/clawd.log" "${LOG_DIR}/telegramd.log" "${LOG_DIR}/feishud.log"
+  tail -F "${LOG_DIR}/clawd.log" "${LOG_DIR}/nni.log" "${LOG_DIR}/telegramd.log" "${LOG_DIR}/feishud.log"
 fi
