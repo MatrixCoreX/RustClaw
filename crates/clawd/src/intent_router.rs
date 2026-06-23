@@ -278,6 +278,8 @@ use current_turn_anchor::{
 
 #[path = "intent_router_current_turn_structural_repair.rs"]
 mod current_turn_structural_repair;
+#[cfg(test)]
+use current_turn_structural_repair::apply_media_generation_path_report_machine_contract_repair;
 use current_turn_structural_repair::{
     apply_current_turn_structural_contract_repair,
     apply_fs_basic_lifecycle_machine_contract_repair,

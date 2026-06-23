@@ -139,9 +139,13 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         return true;
     }
     match normalized_skill {
+        "audio_synthesize" => normalize_audio_synthesize_arg_aliases(args),
         "fs_search" => normalize_fs_search_arg_aliases(args),
+        "image_generate" => normalize_image_generate_arg_aliases(args),
         "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
+        "music_generate" => normalize_music_generate_arg_aliases(args),
+        "video_generate" => normalize_video_generate_arg_aliases(args),
         _ => false,
     }
 }
@@ -192,6 +196,86 @@ fn normalize_image_edit_arg_aliases(args: &mut Value) -> bool {
         return false;
     };
     move_string_alias_if_missing(obj, "instruction", &["prompt", "query", "text"])
+}
+
+fn normalize_image_generate_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    changed |= move_string_alias_if_missing(
+        obj,
+        "prompt",
+        &["subject", "description", "instruction", "text", "query"],
+    );
+    changed |= move_string_alias_if_missing(obj, "size", &["resolution", "dimensions"]);
+    changed |= move_size_from_width_height_if_missing(obj);
+    changed
+}
+
+fn normalize_audio_synthesize_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_string_alias_if_missing(obj, "text", &["input", "prompt", "content"])
+}
+
+fn normalize_video_generate_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_string_alias_if_missing(
+        obj,
+        "prompt",
+        &["subject", "description", "instruction", "text", "query"],
+    )
+}
+
+fn normalize_music_generate_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_string_alias_if_missing(obj, "prompt", &["description", "subject", "theme", "text"])
+}
+
+fn move_size_from_width_height_if_missing(obj: &mut serde_json::Map<String, Value>) -> bool {
+    if obj
+        .get("size")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return false;
+    }
+    let Some(width) = dimension_value_to_string(obj.get("width")) else {
+        return false;
+    };
+    let Some(height) = dimension_value_to_string(obj.get("height")) else {
+        return false;
+    };
+    obj.insert(
+        "size".to_string(),
+        Value::String(format!("{width}x{height}")),
+    );
+    true
+}
+
+fn dimension_value_to_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::Number(number) => number
+            .as_u64()
+            .filter(|value| *value > 0)
+            .map(|value| value.to_string()),
+        Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.chars().all(|ch| ch.is_ascii_digit()) && trimmed != "0" {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {

@@ -655,6 +655,139 @@ pub(super) fn direct_generated_file_path_report_from_written_path(
     Some((path, matrix_observed_shape_summary(loop_state)))
 }
 
+fn route_allows_generated_file_path_report_payload(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            !route.output_contract.delivery_required
+                && route.output_contract.semantic_kind
+                    == crate::OutputSemanticKind::GeneratedFilePathReport
+        })
+}
+
+fn compact_machine_json(value: &serde_json::Value) -> Option<String> {
+    serde_json::to_string(value)
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn clean_machine_field_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.contains('\n'))
+        .map(ToOwned::to_owned)
+}
+
+fn machine_bool_true(value: Option<&serde_json::Value>) -> bool {
+    value.and_then(|value| value.as_bool()) == Some(true)
+}
+
+fn projected_planned_outputs(value: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
+    let Some(items) = value.and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let path = item
+                .get("path")
+                .and_then(clean_machine_field_value)
+                .and_then(|path| clean_machine_path_payload(&path))?;
+            let mut projected = serde_json::Map::new();
+            projected.insert("path".to_string(), serde_json::Value::String(path));
+            if let Some(kind) = item.get("type").and_then(clean_machine_field_value) {
+                projected.insert("type".to_string(), serde_json::Value::String(kind));
+            }
+            Some(serde_json::Value::Object(projected))
+        })
+        .collect()
+}
+
+fn first_projected_output_path(projected: &[serde_json::Value]) -> Option<String> {
+    projected.iter().find_map(|item| {
+        item.get("path")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> Option<String> {
+    let extra = value.get("extra").unwrap_or(value);
+    if !machine_bool_true(extra.get("dry_run")) {
+        return None;
+    }
+    let mut planned_outputs = projected_planned_outputs(extra.get("planned_outputs"));
+    let output_path = extra
+        .get("output_path")
+        .and_then(clean_machine_field_value)
+        .and_then(|path| clean_machine_path_payload(&path))
+        .or_else(|| first_projected_output_path(&planned_outputs))?;
+    if planned_outputs.is_empty() {
+        let mut projected = serde_json::Map::new();
+        projected.insert(
+            "path".to_string(),
+            serde_json::Value::String(output_path.clone()),
+        );
+        planned_outputs.push(serde_json::Value::Object(projected));
+    }
+
+    let mut fields = vec!["dry_run=true".to_string()];
+    if let Some(provider) = extra.get("provider").and_then(clean_machine_field_value) {
+        fields.push(format!("provider={provider}"));
+    }
+    if let Some(model) = extra.get("model").and_then(clean_machine_field_value) {
+        fields.push(format!("model={model}"));
+    }
+    if let Some(model_kind) = extra.get("model_kind").and_then(clean_machine_field_value) {
+        fields.push(format!("model_kind={model_kind}"));
+    }
+    fields.push(format!("output_path={output_path}"));
+    if let Some(planned_outputs_json) =
+        compact_machine_json(&serde_json::Value::Array(planned_outputs))
+    {
+        fields.push(format!("planned_outputs={planned_outputs_json}"));
+    }
+    Some(fields.join("\n"))
+}
+
+pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_allows_generated_file_path_report_payload(agent_run_context) {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        if let Some(answer) = generated_file_path_report_from_dry_run_value(&value) {
+            return Some((answer, matrix_observed_shape_summary(loop_state)));
+        }
+    }
+    None
+}
+
 pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
