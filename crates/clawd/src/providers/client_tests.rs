@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use super::{is_quota_exhausted_429, BreakerImpact, ProviderError, PROVIDER_IMPLS};
 use serde_json::Value;
+use std::future::pending;
 
 #[test]
 fn provider_impls_names_are_unique_and_cover_known_protocols() {
@@ -158,4 +159,22 @@ fn provider_retry_metadata_is_attached_to_results() {
         ProviderError::retryable("timeout".to_string(), Value::Null).with_retry_metadata(4, 4);
     assert_eq!(error.attempts, 4);
     assert_eq!(error.retryable_error_count, 4);
+}
+
+#[tokio::test]
+async fn provider_call_future_is_bounded_by_dispatch_timeout() {
+    let err = super::await_provider_call_with_timeout(
+        "fixture_replay",
+        1,
+        Box::pin(async {
+            pending::<Result<super::LlmProviderResponse, super::ProviderError>>().await
+        }),
+    )
+    .await
+    .expect_err("pending provider call should time out");
+
+    assert!(err.retryable);
+    assert_eq!(err.observability_kind(), "timeout");
+    assert!(err.message.contains("provider_call_timeout"));
+    assert!(err.message.contains("timeout_seconds=1"));
 }
