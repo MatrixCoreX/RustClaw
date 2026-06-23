@@ -340,6 +340,8 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         description: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("capability".to_string()),
+        adapter_category: Some("external_api_adapter".to_string()),
+        background_job_capable: Some(true),
         group: Some("media".to_string()),
         risk_level: Some("high".to_string()),
         auto_invocable: Some(false),
@@ -369,6 +371,8 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         item.skill_name == "video_generate"
             && item.capability == "video.generate"
             && item.capability_kind == "planner_capability"
+            && item.adapter_category.as_deref() == Some("external_api_adapter")
+            && item.background_job_capable == Some(true)
             && item.enabled == Some(true)
             && item.risk_level.as_deref() == Some("high")
             && item.runtime_available == Some(true)
@@ -388,6 +392,8 @@ fn capability_items_include_disabled_machine_reason() {
         description: None,
         kind: Some("builtin".to_string()),
         planner_kind: Some("tool".to_string()),
+        adapter_category: Some("local_tool_adapter".to_string()),
+        background_job_capable: None,
         group: Some("filesystem".to_string()),
         risk_level: Some("high".to_string()),
         auto_invocable: Some(false),
@@ -417,6 +423,10 @@ fn capability_items_include_disabled_machine_reason() {
     assert_eq!(items[0].capability, "filesystem.list_entries");
     assert_eq!(items[0].enabled, Some(false));
     assert_eq!(items[0].runtime_available, Some(false));
+    assert_eq!(
+        items[0].adapter_category.as_deref(),
+        Some("local_tool_adapter")
+    );
     assert_eq!(
         items[0].unavailable_reason.as_deref(),
         Some("skill_disabled")

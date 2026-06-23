@@ -134,6 +134,8 @@ export interface SkillListItem {
   description?: string | null;
   kind?: string | null;
   planner_kind?: string | null;
+  adapter_category?: string | null;
+  background_job_capable?: boolean | null;
   group?: string | null;
   risk_level?: string | null;
   auto_invocable?: boolean | null;
