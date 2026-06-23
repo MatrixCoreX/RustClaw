@@ -93,6 +93,12 @@ import {
   taskTraceEvents,
   traceEventMeta,
 } from "./lib/task-result";
+import {
+  buildWorkspaceUpdateView,
+  formatWorkspaceUpdateStatus,
+  formatWorkspaceUpdateStep,
+  formatWorkspaceUpdateTime,
+} from "./lib/workspace-update";
 
 import type {
   ApiResponse,
@@ -4408,191 +4414,19 @@ export default function App() {
       }),
     [health?.memory_rss_bytes, health?.uptime_seconds, isOnline],
   );
-  const workspaceUpdateRestarting = workspaceUpdateStatus?.status === "restarting";
-  const workspaceUpdateRunning = workspaceUpdateStatus?.status === "running" || workspaceUpdateRestarting;
-  const workspaceUpdateHasRemoteDiff =
-    Boolean(workspaceUpdateStatus?.old_commit) &&
-    Boolean(workspaceUpdateStatus?.remote_commit) &&
-    workspaceUpdateStatus?.old_commit !== workspaceUpdateStatus?.remote_commit;
-  const workspaceUpdateKnownUpToDate =
-    Boolean(workspaceUpdateStatus?.old_commit) &&
-    Boolean(workspaceUpdateStatus?.remote_commit) &&
-    workspaceUpdateStatus?.old_commit === workspaceUpdateStatus?.remote_commit &&
-    (workspaceUpdateStatus?.status === "idle" || workspaceUpdateStatus?.status === "up_to_date");
-  const workspaceUpdateDisplayStatus = workspaceUpdateKnownUpToDate
-    ? "up_to_date"
-    : workspaceUpdateStatus?.status;
-  const workspaceUpdateStepLabel = (step?: string) => {
-    const labels: Record<string, string> = {
-      idle: t("空闲", "Idle"),
-      starting: t("准备更新", "Preparing update"),
-      checking_current_version: t("检查当前版本", "Checking current version"),
-      checking_remote_version: t("检查远端版本", "Checking remote version"),
-      already_latest: t("已经是最新版本", "Already latest"),
-      pulling_latest_code: t("拉取远端版本", "Pulling remote version"),
-      resolving_conflicting_files: t("只覆盖冲突文件", "Overwriting conflicts only"),
-      skipping_pull_latest_code: t("远端无新版本，继续编译", "No remote changes, building"),
-      checking_new_version: t("确认新版本", "Checking new version"),
-      building_workspace: t("正在完整编译", "Running full build"),
-      building_ui: t("正在编译 UI", "Building UI"),
-      ui_build_succeeded: t("UI 编译完成", "UI build completed"),
-      building_clawd: t("正在编译 clawd", "Building clawd"),
-      downloading_release: t("正在下载 Release 包", "Downloading Release package"),
-      deploying_release: t("正在部署 Release 包", "Deploying Release package"),
-      cancel_requested: t("正在停止编译", "Stopping build"),
-      canceled: t("已停止", "Stopped"),
-      restarting_clawd: t("正在安排重启", "Scheduling restart"),
-      restart_scheduled: t("已安排重启", "Restart scheduled"),
-      clawd_restart_scheduled: t("clawd 已安排重启", "clawd restart scheduled"),
-      release_restart_scheduled: t("Release 已部署，正在重启", "Release deployed, restarting"),
-    };
-    return labels[step || ""] || step || "--";
-  };
-  const workspaceUpdateStatusLabel = (status?: string) => {
-    if (status === "running") {
-      return workspaceUpdateStatus?.mode === "ui_only" || workspaceUpdateStatus?.mode === "clawd_only"
-        ? t("编译中", "Building")
-        : workspaceUpdateStatus?.mode === "release_deploy"
-          ? t("部署中", "Deploying")
-        : t("更新中", "Updating");
-    }
-    if (status === "restarting") return t("重启中", "Restarting");
-    if (status === "up_to_date") return t("已是最新", "Up to date");
-    if (status === "succeeded") return t("已完成", "Completed");
-    if (status === "failed") return t("失败", "Failed");
-    if (status === "canceled") return t("已停止", "Stopped");
-    return t("未运行", "Idle");
-  };
-  const workspaceUpdateProgressPercent = (() => {
-    if (!workspaceUpdateStatus) return 0;
-    if (workspaceUpdateStatus.status === "up_to_date") return 100;
-    if (workspaceUpdateStatus.status === "succeeded") return 100;
-    if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.status === "canceled") return 100;
-    if (workspaceUpdateStatus.status === "restarting" || workspaceUpdateStatus.step === "restart_scheduled") return 100;
-    const stepProgress: Record<string, number> = {
-      idle: 0,
-      starting: 5,
-      checking_current_version: 12,
-      checking_remote_version: 22,
-      pulling_latest_code: 38,
-      resolving_conflicting_files: 48,
-      skipping_pull_latest_code: 52,
-      checking_new_version: 58,
-      building_workspace: 82,
-      building_ui: 82,
-      building_clawd: 82,
-      downloading_release: 35,
-      deploying_release: 78,
-      cancel_requested: 92,
-      restarting_clawd: 96,
-    };
-    return stepProgress[workspaceUpdateStatus.step] ?? (workspaceUpdateRunning ? 50 : 0);
-  })();
-  const workspaceUpdateProgressActive =
-    workspaceUpdateRunning && workspaceUpdateProgressPercent > 0 && workspaceUpdateProgressPercent < 100;
-  const workspaceUpdateProgressLabel = (() => {
-    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_workspace") {
-      return t("编译中，实际耗时取决于设备性能。", "Building; duration depends on device performance.");
-    }
-    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_ui") {
-      return t("UI 编译中，完成后会部署到 nginx。", "Building the UI; it will deploy to nginx when finished.");
-    }
-    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "building_clawd") {
-      return t("clawd 编译中，完成后会安排 clawd 重启。", "Building clawd; clawd will restart when finished.");
-    }
-    if (workspaceUpdateRunning && workspaceUpdateStatus?.step === "downloading_release") {
-      return t("正在下载当前机器对应的 GitHub Release 包。", "Downloading the GitHub Release package for this machine.");
-    }
-    if (workspaceUpdateRunning && workspaceUpdateStatus?.mode === "release_deploy") {
-      return t("Release 包部署中，完成后会保留配置并重启 clawd。", "Deploying the Release package; configs will be preserved and clawd will restart.");
-    }
-    return workspaceUpdateStepLabel(workspaceUpdateStatus?.step);
-  })();
-  const workspaceUpdateTimeLabel = (ts?: number | null) => {
-    if (!ts) return "--";
-    return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
-      hour12: false,
-    });
-  };
-  const workspaceUpdateStdoutPreview = workspaceUpdateStatus?.stdout_tail?.trim() || "";
-  const workspaceUpdateStderrPreview = workspaceUpdateStatus?.stderr_tail?.trim() || "";
-  const workspaceUpdateLogPreview = [
-    workspaceUpdateStdoutPreview ? `${t("构建输出", "Build output")}\n${workspaceUpdateStdoutPreview}` : "",
-    workspaceUpdateStderrPreview
-      ? `${t("构建日志（stderr，不一定是错误）", "Build log (stderr, not necessarily errors)")}\n${workspaceUpdateStderrPreview}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-  const workspaceUpdateNotice = (() => {
-    if (!workspaceUpdateStatus) return null;
-    if (workspaceUpdateStatus.status === "canceled") {
-      return {
-        tone: "info" as const,
-        title: t("编译已停止。", "Build stopped."),
-        detail: t(
-          "当前编译进程已结束；如果需要继续，请修复问题后重新点击完整编译。",
-          "The current build process has ended. Fix any issues and run Build All again when ready.",
-        ),
-      };
-    }
-    if (workspaceUpdateStatus.status === "failed" || workspaceUpdateStatus.error) {
-      return {
-        tone: "error" as const,
-        title: workspaceUpdateStatus.error || t("更新失败", "Update failed"),
-        detail: t(
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
-            : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
-            : "Check the log summary below, then fix Git, network, or build issues and retry.",
-        ),
-      };
-    }
-    if (workspaceUpdateRestarting) {
-      return {
-        tone: "success" as const,
-        title: t(
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "Release 包已部署，RustClaw 正在重启。"
-            : "构建已完成，RustClaw 正在重启。",
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "Release package deployed and RustClaw is restarting."
-            : "Build completed and RustClaw is restarting.",
-        ),
-        detail: t(
-          "请等待 10-20 秒；如果页面没有自动恢复，可以稍后点击“检查远端版本”。",
-          "Wait 10-20 seconds. If the page does not recover automatically, click Check remote shortly.",
-        ),
-      };
-    }
-    if (workspaceUpdateStatus.status === "running") {
-      return {
-        tone: "info" as const,
-        title: workspaceUpdateStepLabel(workspaceUpdateStatus.step),
-        detail: t(
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "Release 部署正在进行，日志会在下方持续刷新。"
-            : "更新流程正在进行，编译日志会在下方持续刷新。",
-          workspaceUpdateStatus.mode === "release_deploy"
-            ? "Release deployment is running. Logs will keep refreshing below."
-            : "The update is running. Build logs will keep refreshing below.",
-        ),
-      };
-    }
-    if (workspaceUpdateDisplayStatus === "up_to_date") {
-      return {
-        tone: "success" as const,
-        title: t("远端已经是最新版本。", "The remote version is up to date."),
-        detail: t(
-          "如需重新应用当前本地环境，仍可点击完整编译。",
-          "Use Build All if you need to re-apply the current local environment.",
-        ),
-      };
-    }
-    return null;
-  })();
+  const workspaceUpdateView = useMemo(() => buildWorkspaceUpdateView(workspaceUpdateStatus, lang), [workspaceUpdateStatus, lang]);
+  const workspaceUpdateRestarting = workspaceUpdateView.restarting;
+  const workspaceUpdateRunning = workspaceUpdateView.running;
+  const workspaceUpdateHasRemoteDiff = workspaceUpdateView.hasRemoteDiff;
+  const workspaceUpdateDisplayStatus = workspaceUpdateView.displayStatus;
+  const workspaceUpdateProgressPercent = workspaceUpdateView.progressPercent;
+  const workspaceUpdateProgressActive = workspaceUpdateView.progressActive;
+  const workspaceUpdateProgressLabel = workspaceUpdateView.progressLabel;
+  const workspaceUpdateLogPreview = workspaceUpdateView.logPreview;
+  const workspaceUpdateNotice = workspaceUpdateView.notice;
+  const workspaceUpdateStepLabel = (step?: string) => formatWorkspaceUpdateStep(step, lang);
+  const workspaceUpdateStatusLabel = (status?: string) => formatWorkspaceUpdateStatus(status, workspaceUpdateStatus?.mode, lang);
+  const workspaceUpdateTimeLabel = (ts?: number | null) => formatWorkspaceUpdateTime(ts, lang);
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
