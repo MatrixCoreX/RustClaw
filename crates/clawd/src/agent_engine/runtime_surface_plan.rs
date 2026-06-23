@@ -95,14 +95,17 @@ pub(super) fn hook_permission_surface_deterministic_plan_result(
 }
 
 fn hook_permission_machine_projection(evidence_refs: impl IntoIterator<Item = String>) -> Value {
+    let allow = crate::policy_decision::PolicyDecision::Allow.as_token();
+    let require_confirmation =
+        crate::policy_decision::PolicyDecision::RequireConfirmation.as_token();
     serde_json::json!({
         "output_format": "machine_json",
         "owner_layer": "agent_hooks",
         "stage": "pre_tool_use",
         "field_value": {
-            "allow": "default_allow",
+            allow: "default_allow",
             "block": ["blocked_action_refs", "blocked_tools"],
-            "require_confirmation": ["require_confirmation_action_refs"]
+            require_confirmation: ["require_confirmation_action_refs"]
         },
         "config_path": "configs/agent_guard.toml",
         "evidence_refs": evidence_refs.into_iter().collect::<Vec<_>>()

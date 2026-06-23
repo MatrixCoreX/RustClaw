@@ -797,6 +797,7 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
     args: &Value,
 ) -> Value {
     let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
+    let policy_decision = crate::policy_decision::PolicyDecision::RequireConfirmation.as_token();
     let pending_action = json!({
         "schema_version": 1,
         "kind": "agent_hook_pre_tool_use",
@@ -812,7 +813,7 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
             "schema_version": 1,
             "source": "agent_hooks",
             "stage": "pre_tool_use",
-            "decision": "require_confirmation",
+            "decision": policy_decision,
             "task_id": task.task_id,
             "resume_reason": resume_reason,
             "tool_or_skill": tool_or_skill,
@@ -863,7 +864,7 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
             "last_heartbeat_ts": now_ts,
             "message_key": "clawd.agent_hook.confirmation_required",
             "stage": "pre_tool_use",
-            "decision": "require_confirmation",
+            "decision": policy_decision,
             "tool_or_skill": tool_or_skill,
             "action_ref": action_ref,
         },
