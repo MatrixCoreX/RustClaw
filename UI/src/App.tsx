@@ -35,7 +35,8 @@ import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
 } from "./lib/dashboard-home";
-import { copyAuthKeyValue, writeTextToClipboard } from "./lib/auth-keys";
+import { copyAuthKeyValue, maskStoredKey, writeTextToClipboard } from "./lib/auth-keys";
+import { fileToDataUrl, formatVisionResultText } from "./lib/chat-attachments";
 import { formatBytes, formatDuration, sleep, toLocalTime } from "./lib/display-format";
 import { formatDateOnlyHuman } from "./lib/date-format";
 import {
@@ -265,54 +266,6 @@ function buildDefaultTelegramBot(): TelegramBotConfigItem {
     allowed_telegram_usernames: [],
     is_primary: true,
   };
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("读取图片失败"));
-    };
-    reader.onerror = () => reject(new Error("读取图片失败"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function formatVisionResultText(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("{")) return raw;
-  try {
-    const parsed = JSON.parse(trimmed) as {
-      summary?: unknown;
-      objects?: unknown;
-      visible_text?: unknown;
-      uncertainties?: unknown;
-    };
-    const lines: string[] = [];
-    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
-      lines.push(parsed.summary.trim());
-    }
-    if (Array.isArray(parsed.objects) && parsed.objects.length > 0) {
-      lines.push(`Objects: ${parsed.objects.join(", ")}`);
-    }
-    if (Array.isArray(parsed.visible_text) && parsed.visible_text.length > 0) {
-      lines.push(`Visible text: ${parsed.visible_text.join(" ; ")}`);
-    }
-    if (Array.isArray(parsed.uncertainties) && parsed.uncertainties.length > 0) {
-      lines.push(`Uncertainties: ${parsed.uncertainties.join(" ; ")}`);
-    }
-    return lines.length > 0 ? lines.join("\n\n") : raw;
-  } catch {
-    return raw;
-  }
-}
-
-function maskStoredKey(value: string, keep = 6): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  const visible = trimmed.slice(0, Math.max(1, keep));
-  return `${visible}${"*".repeat(Math.max(4, trimmed.length - visible.length))}`;
 }
 
 const NNI_HEARTBEAT_RECORDS_PAGE_SIZE = 10;
