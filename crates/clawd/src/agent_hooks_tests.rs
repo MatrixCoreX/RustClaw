@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::{evaluate_pre_tool_use, structured_hook_error, HookPolicy};
+use crate::policy_decision::PolicyDecision;
 
 #[test]
 fn pre_tool_use_hook_allows_without_policy_match() {
@@ -43,6 +44,12 @@ fn pre_tool_use_hook_requires_confirmation_from_machine_action_ref() {
     let outcome = evaluate_pre_tool_use(&policy, "package.install");
 
     assert_eq!(outcome.decision, "require_confirmation");
+    assert_eq!(
+        outcome.decision_kind(),
+        Some(PolicyDecision::RequireConfirmation)
+    );
+    assert!(outcome.requires_confirmation());
+    assert!(super::structured_error_for_outcome(&outcome).is_some());
     assert_eq!(outcome.reason_code, "pre_tool_use_requires_confirmation");
 }
 

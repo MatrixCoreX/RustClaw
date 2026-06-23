@@ -20,6 +20,33 @@ impl PolicyDecision {
         }
     }
 
+    pub(crate) fn parse_token(value: &str) -> Option<Self> {
+        match value.trim() {
+            "allow" => Some(Self::Allow),
+            "deny" => Some(Self::Deny),
+            "require_confirmation" => Some(Self::RequireConfirmation),
+            "background_wait" => Some(Self::BackgroundWait),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn blocks_execution(self) -> bool {
+        matches!(self, Self::Deny | Self::RequireConfirmation)
+    }
+
+    pub(crate) fn requires_confirmation(self) -> bool {
+        self == Self::RequireConfirmation
+    }
+
+    pub(crate) fn pre_tool_use_reason_code(self) -> &'static str {
+        match self {
+            Self::Allow => "pre_tool_use_allowed",
+            Self::Deny => "pre_tool_use_blocked",
+            Self::RequireConfirmation => "pre_tool_use_requires_confirmation",
+            Self::BackgroundWait => "pre_tool_use_background_wait",
+        }
+    }
+
     pub(crate) fn from_permission_flags(
         approved: bool,
         needs_confirmation: bool,
@@ -71,6 +98,27 @@ mod tests {
         assert_eq!(
             PolicyDecision::all_tokens(),
             &["allow", "deny", "require_confirmation", "background_wait"]
+        );
+    }
+
+    #[test]
+    fn token_parse_and_execution_flags_are_closed() {
+        assert_eq!(
+            PolicyDecision::parse_token("allow"),
+            Some(PolicyDecision::Allow)
+        );
+        assert_eq!(
+            PolicyDecision::parse_token("require_confirmation"),
+            Some(PolicyDecision::RequireConfirmation)
+        );
+        assert_eq!(PolicyDecision::parse_token("unknown"), None);
+        assert!(!PolicyDecision::Allow.blocks_execution());
+        assert!(PolicyDecision::Deny.blocks_execution());
+        assert!(PolicyDecision::RequireConfirmation.blocks_execution());
+        assert!(PolicyDecision::RequireConfirmation.requires_confirmation());
+        assert_eq!(
+            PolicyDecision::BackgroundWait.pre_tool_use_reason_code(),
+            "pre_tool_use_background_wait"
         );
     }
 }

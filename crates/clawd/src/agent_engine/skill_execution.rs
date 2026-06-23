@@ -655,7 +655,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
         step_in_round,
         &pre_tool_use_outcome,
     );
-    if pre_tool_use_outcome.decision == "require_confirmation" {
+    if pre_tool_use_outcome.requires_confirmation() {
         super::publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
@@ -1486,7 +1486,7 @@ pub(super) async fn execute_prepared_skill_action(
         step_in_round,
         &pre_tool_use_outcome,
     );
-    if pre_tool_use_outcome.decision == "require_confirmation" {
+    if pre_tool_use_outcome.requires_confirmation() {
         super::publish_agent_loop_user_input_checkpoint_progress(
             state,
             task,
