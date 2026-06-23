@@ -488,7 +488,7 @@ fn build_auto_sudo_retry_args(
     }))
 }
 
-fn auto_sudo_retry_failed_delivery(
+async fn auto_sudo_retry_failed_delivery(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
@@ -496,15 +496,30 @@ fn auto_sudo_retry_failed_delivery(
 ) -> String {
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let detail = crate::truncate_for_agent_trace(err.trim());
-    if language_hint.to_ascii_lowercase().starts_with("en") {
-        format!(
-            "The first attempt was denied by the operating system, so this admin-authorized task retried with `sudo -n`, but the retry still failed: {detail}. Confirm that the `clawd` process user has passwordless sudo or run the service with the required OS permission."
-        )
-    } else {
-        format!(
-            "首次执行被操作系统拒绝后，当前 admin 授权任务已自动用 `sudo -n` 重试，但重试仍失败：{detail}。请确认 `clawd` 进程用户具备免密 sudo，或用具备目标系统权限的服务用户运行。"
-        )
-    }
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        "auto_sudo_retry_failed",
+        user_text,
+        "auto_sudo_retry",
+        vec![
+            "failure_stage: auto_sudo_retry".to_string(),
+            "retry_mode: sudo_non_interactive".to_string(),
+            format!("error_excerpt: {detail}"),
+            "message_key: clawd.agent_loop.auto_sudo_retry_failed".to_string(),
+        ],
+        vec![
+            "boundary:do_not_claim_retry_succeeded".to_string(),
+            "boundary:observed_facts_only_one_recovery_step".to_string(),
+        ],
+        "brief_failure_with_next_step",
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+    )
+    .await
 }
 
 fn compact_progress_error(err: &str) -> String {
@@ -600,6 +615,72 @@ async fn try_auto_sudo_retry_after_permission_denied(
     else {
         return Ok(None);
     };
+    let retry_trace_kind = "auto_sudo_retry";
+    if let Some(err) =
+        contract_matrix_action_policy_error(state, loop_state, "run_cmd", &retry_args)
+    {
+        let outcome = handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            "run_cmd",
+            &retry_args,
+            &err,
+            retry_trace_kind,
+        );
+        return Ok(Some(outcome.stop_signal));
+    }
+    if let Some(err) = contract_matrix_arg_policy_error(loop_state, "run_cmd", &retry_args) {
+        let outcome = handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            "run_cmd",
+            &retry_args,
+            &err,
+            retry_trace_kind,
+        );
+        return Ok(Some(outcome.stop_signal));
+    }
+    let pre_tool_use_outcome =
+        crate::agent_hooks::pre_tool_use_outcome_for_state(state, "run_cmd", &retry_args);
+    record_hook_outcome_observation(
+        loop_state,
+        "run_cmd",
+        global_step,
+        step_in_round,
+        &pre_tool_use_outcome,
+    );
+    if pre_tool_use_outcome.decision == "require_confirmation" {
+        super::publish_agent_loop_user_input_checkpoint_progress(
+            state,
+            task,
+            loop_state,
+            "hook_confirmation_required",
+            "run_cmd",
+            &pre_tool_use_outcome.action_ref,
+            &retry_args,
+        );
+        return Ok(Some(Some("hook_confirmation_required".to_string())));
+    }
+    if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
+        let outcome = handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            "run_cmd",
+            &retry_args,
+            &err,
+            retry_trace_kind,
+        );
+        return Ok(Some(outcome.stop_signal));
+    }
     let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
     publish_failure_recovery_progress(
         state,
@@ -632,6 +713,14 @@ async fn try_auto_sudo_retry_after_permission_denied(
         },
     )
     .await;
+    record_post_tool_use_observation(
+        loop_state,
+        "run_cmd",
+        &retry_args,
+        global_step,
+        step_in_round,
+        retry_step.status,
+    );
 
     match retry_step.output.as_deref() {
         Some(out) => {
@@ -661,7 +750,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 global_step,
                 step_in_round,
                 "run_cmd",
-                "call_skill(auto_sudo_retry)",
+                retry_trace_kind,
                 &args_summary,
                 &retry_args,
                 out,
@@ -718,7 +807,8 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 return Ok(Some(Some("policy_block_user_visible".to_string())));
             }
             let message =
-                auto_sudo_retry_failed_delivery(state, task, user_text, &user_visible_retry_err);
+                auto_sudo_retry_failed_delivery(state, task, user_text, &user_visible_retry_err)
+                    .await;
             super::append_delivery_message(
                 &task.task_id,
                 &mut loop_state.delivery_messages,
