@@ -18,6 +18,15 @@ pub(crate) struct HookOutcome {
 }
 
 impl HookOutcome {
+    pub(crate) fn decision_kind(&self) -> Option<PolicyDecision> {
+        PolicyDecision::parse_token(self.decision)
+    }
+
+    pub(crate) fn requires_confirmation(&self) -> bool {
+        self.decision_kind()
+            .is_some_and(PolicyDecision::requires_confirmation)
+    }
+
     pub(crate) fn to_machine_json(&self, tool_or_skill: &str) -> Value {
         json!({
             "schema_version": 1,
@@ -112,7 +121,9 @@ pub(crate) fn user_prompt_submit_outcome() -> HookOutcome {
 }
 
 pub(crate) fn structured_error_for_outcome(outcome: &HookOutcome) -> Option<String> {
-    matches!(outcome.decision, "deny" | "require_confirmation")
+    outcome
+        .decision_kind()
+        .is_some_and(PolicyDecision::blocks_execution)
         .then(|| structured_hook_error(outcome))
 }
 
@@ -131,12 +142,7 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
     } else {
         PolicyDecision::Allow
     };
-    let reason_code = match decision {
-        PolicyDecision::Allow => "pre_tool_use_allowed",
-        PolicyDecision::Deny => "pre_tool_use_blocked",
-        PolicyDecision::RequireConfirmation => "pre_tool_use_requires_confirmation",
-        PolicyDecision::BackgroundWait => "pre_tool_use_background_wait",
-    };
+    let reason_code = decision.pre_tool_use_reason_code();
     HookOutcome {
         stage: "pre_tool_use",
         decision: decision.as_token(),
