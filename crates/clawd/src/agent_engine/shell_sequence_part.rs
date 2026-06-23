@@ -263,6 +263,19 @@ pub(super) fn absolutize_readonly_file_path_from_run_cmd_args(path: &str, args: 
 }
 
 pub(super) fn append_text_from_shell_command(command: &str) -> Option<(String, String)> {
+    echo_text_redirect_from_shell_command(command).and_then(|redirect| {
+        (redirect.action == "append_text").then_some((redirect.content, redirect.path))
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EchoTextRedirect {
+    action: &'static str,
+    content: String,
+    path: String,
+}
+
+fn echo_text_redirect_from_shell_command(command: &str) -> Option<EchoTextRedirect> {
     if command.contains('\n') || command.contains('\r') || command.contains('\0') {
         return None;
     }
@@ -271,10 +284,15 @@ pub(super) fn append_text_from_shell_command(command: &str) -> Option<(String, S
     if !executable.eq_ignore_ascii_case("echo") {
         return None;
     }
-    let redirect_idx = words.iter().position(|word| word == ">>")?;
+    let redirect_idx = words.iter().position(|word| word == ">" || word == ">>")?;
     if redirect_idx < 2 || redirect_idx + 2 != words.len() {
         return None;
     }
+    let action = if words[redirect_idx] == ">>" {
+        "append_text"
+    } else {
+        "write_text"
+    };
     let mut content_start = 1usize;
     let mut trailing_newline = true;
     if words.get(1).is_some_and(|word| word == "-n") {
@@ -292,7 +310,224 @@ pub(super) fn append_text_from_shell_command(command: &str) -> Option<(String, S
     if !shell_file_path_token_is_safe(path) {
         return None;
     }
-    Some((content, path.to_string()))
+    Some(EchoTextRedirect {
+        action,
+        content,
+        path: path.to_string(),
+    })
+}
+
+fn mkdir_path_from_shell_command(command: &str) -> Option<String> {
+    if command_has_shell_control_or_expansion(command) {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let executable = words.first().map(|word| command_basename(word))?;
+    if !executable.eq_ignore_ascii_case("mkdir") {
+        return None;
+    }
+    let mut paths = Vec::new();
+    for word in words.iter().skip(1) {
+        let word = word.trim();
+        if word.is_empty() || matches!(word, "-p" | "--parents") {
+            continue;
+        }
+        if word.starts_with('-') {
+            return None;
+        }
+        paths.push(word.to_string());
+    }
+    if paths.len() != 1 || !shell_file_path_token_is_safe(&paths[0]) {
+        return None;
+    }
+    Some(paths.remove(0))
+}
+
+fn cat_path_from_shell_command(command: &str) -> Option<String> {
+    if command_has_shell_control_or_expansion(command) {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let executable = words.first().map(|word| command_basename(word))?;
+    if !executable.eq_ignore_ascii_case("cat") {
+        return None;
+    }
+    let mut words = words
+        .into_iter()
+        .skip(1)
+        .filter(|word| !word.trim().is_empty());
+    let path = words.next()?;
+    if words.next().is_some() || !shell_file_path_token_is_safe(&path) {
+        return None;
+    }
+    Some(path)
+}
+
+fn rm_path_from_shell_command(command: &str) -> Option<(String, bool)> {
+    if command_has_shell_control_or_expansion(command) {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let executable = words.first().map(|word| command_basename(word))?;
+    if !executable.eq_ignore_ascii_case("rm") {
+        return None;
+    }
+    let mut recursive = false;
+    let mut paths = Vec::new();
+    for word in words.iter().skip(1) {
+        let word = word.trim();
+        if word.is_empty() {
+            continue;
+        }
+        if word == "--" {
+            return None;
+        }
+        if word == "-r" || word == "-R" || word == "--recursive" {
+            recursive = true;
+            continue;
+        }
+        if word == "-f" || word == "--force" {
+            continue;
+        }
+        if word.starts_with('-') {
+            let flags = word.trim_start_matches('-');
+            if flags.is_empty() || !flags.chars().all(|ch| matches!(ch, 'r' | 'R' | 'f')) {
+                return None;
+            }
+            if flags.chars().any(|ch| matches!(ch, 'r' | 'R')) {
+                recursive = true;
+            }
+            continue;
+        }
+        paths.push(word.to_string());
+    }
+    if paths.len() != 1 || !shell_file_path_token_is_safe(&paths[0]) {
+        return None;
+    }
+    Some((paths.remove(0), recursive))
+}
+
+fn simple_filesystem_action_from_shell_command(command: &str, args: &Value) -> Option<AgentAction> {
+    if let Some(path) = mkdir_path_from_shell_command(command) {
+        return Some(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "make_dir",
+                "path": absolutize_readonly_file_path_from_run_cmd_args(&path, args),
+            }),
+        });
+    }
+    if let Some(redirect) = echo_text_redirect_from_shell_command(command) {
+        return Some(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": redirect.action,
+                "path": absolutize_readonly_file_path_from_run_cmd_args(&redirect.path, args),
+                "content": redirect.content,
+            }),
+        });
+    }
+    if let Some(path) = cat_path_from_shell_command(command) {
+        return Some(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": absolutize_readonly_file_path_from_run_cmd_args(&path, args),
+                "mode": "head",
+                "n": 500,
+            }),
+        });
+    }
+    if let Some((path, recursive)) = rm_path_from_shell_command(command) {
+        let mut action_args = serde_json::json!({
+            "action": "remove_path",
+            "path": absolutize_readonly_file_path_from_run_cmd_args(&path, args),
+        });
+        if recursive {
+            if let Some(obj) = action_args.as_object_mut() {
+                obj.insert(
+                    "target_kind".to_string(),
+                    Value::String("directory".to_string()),
+                );
+                obj.insert("recursive".to_string(), Value::Bool(true));
+            }
+        }
+        return Some(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: action_args,
+        });
+    }
+    None
+}
+
+pub(super) fn rewrite_simple_filesystem_run_cmd_to_fs_basic(
+    state: &AppState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !fs_basic_read_available_for_plan(state) {
+        return actions;
+    }
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if skill.trim().eq_ignore_ascii_case("run_cmd") =>
+            {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallSkill { skill, args };
+                }
+                let Some(next_action) = simple_filesystem_action_from_shell_command(command, &args)
+                else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                changed = true;
+                next_action
+            }
+            AgentAction::CallTool { tool, args } if tool.trim().eq_ignore_ascii_case("run_cmd") => {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallTool { tool, args };
+                }
+                let Some(next_action) = simple_filesystem_action_from_shell_command(command, &args)
+                else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                changed = true;
+                next_action
+            }
+            other => other,
+        })
+        .collect();
+    if changed {
+        info!("plan_rewrite_simple_filesystem_run_cmd_to_fs_basic");
+    }
+    rewritten
 }
 
 pub(super) fn rewrite_append_run_cmd_to_fs_basic(

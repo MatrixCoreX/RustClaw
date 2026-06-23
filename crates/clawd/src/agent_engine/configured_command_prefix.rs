@@ -1275,6 +1275,12 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     );
     let actions =
         rewrite_process_ps_run_cmd_to_process_basic(state, user_text, original_user_text, actions);
+    let actions = rewrite_simple_filesystem_run_cmd_to_fs_basic(
+        state,
+        user_text,
+        original_user_text,
+        actions,
+    );
     let actions = rewrite_append_run_cmd_to_fs_basic(state, user_text, original_user_text, actions);
     let actions = rewrite_readonly_file_read_run_cmd_to_fs_basic(
         state,
