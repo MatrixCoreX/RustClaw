@@ -28,6 +28,10 @@ struct ModelConfigItem {
     dry_run_supported: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_provider: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unsupported_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +86,8 @@ fn default_model_item() -> ModelConfigItem {
         risk_level: None,
         dry_run_supported: None,
         external_provider: None,
+        provider_supported: None,
+        unsupported_reason: None,
     }
 }
 
@@ -135,6 +141,8 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         risk_level: None,
         dry_run_supported: None,
         external_provider: None,
+        provider_supported: None,
+        unsupported_reason: None,
     };
     model_item_with_capability_metadata(item, section)
 }
@@ -197,7 +205,28 @@ fn model_item_with_capability_metadata(
     item.risk_level = Some(risk_level.to_string());
     item.dry_run_supported = Some(dry_run_supported);
     item.external_provider = Some(external_provider);
+    let (provider_supported, unsupported_reason) = provider_support_status(&item);
+    item.provider_supported = provider_supported;
+    item.unsupported_reason = unsupported_reason;
     item
+}
+
+fn provider_support_status(item: &ModelConfigItem) -> (Option<bool>, Option<String>) {
+    if item.vendor.trim().is_empty() {
+        return (Some(false), Some("provider_not_configured".to_string()));
+    }
+    if item.model.trim().is_empty() {
+        return (Some(false), Some("model_not_configured".to_string()));
+    }
+    if !item.available_models.is_empty()
+        && !item
+            .available_models
+            .iter()
+            .any(|model| model.trim() == item.model.trim())
+    {
+        return (Some(false), Some("model_not_in_available_models".to_string()));
+    }
+    (Some(true), None)
 }
 
 fn upsert_model_section(
@@ -318,6 +347,8 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                     risk_level: None,
                     dry_run_supported: None,
                     external_provider: None,
+                    provider_supported: None,
+                    unsupported_reason: None,
                 },
                 "llm",
             )

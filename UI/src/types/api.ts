@@ -530,6 +530,8 @@ export interface ModelConfigItem {
   risk_level?: string | null;
   dry_run_supported?: boolean | null;
   external_provider?: boolean | null;
+  provider_supported?: boolean | null;
+  unsupported_reason?: string | null;
 }
 
 export interface ModelConfigResponse {
