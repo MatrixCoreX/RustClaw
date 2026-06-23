@@ -80,6 +80,7 @@ import { useModelConfigRuntime } from "./hooks/useModelConfigRuntime";
 import { useSkillsRuntime } from "./hooks/useSkillsRuntime";
 import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
+import { useChannelBindingRuntime } from "./hooks/useChannelBindingRuntime";
 
 import type {
   ApiResponse,
@@ -93,7 +94,6 @@ import type {
   PiAppStatusResponse,
   LocalInteractionContextResponse,
   AuthIdentityResponse,
-  ResolveChannelBindingResponse,
   NniDeviceMeta,
   AgentConfigItem,
   WhatsappWebLoginStatus,
@@ -281,15 +281,6 @@ export default function App() {
   const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
   const [feishuBindQrDataUrl, setFeishuBindQrDataUrl] = useState<string | null>(null);
   const [feishuResetLoading, setFeishuResetLoading] = useState(false);
-  const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
-  const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
-  const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
-  const [channelResolveLoading, setChannelResolveLoading] = useState(false);
-  const [channelResolveError, setChannelResolveError] = useState<string | null>(null);
-  const [channelResolveResult, setChannelResolveResult] = useState<ResolveChannelBindingResponse | null>(null);
-  const [channelBindLoading, setChannelBindLoading] = useState(false);
-  const [channelBindError, setChannelBindError] = useState<string | null>(null);
-  const [channelBindMessage, setChannelBindMessage] = useState<string | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState<ConsolePage>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
@@ -896,6 +887,32 @@ export default function App() {
     }
   };
 
+  const {
+    channelBindingChannel,
+    setChannelBindingChannel,
+    channelBindingExternalUserId,
+    setChannelBindingExternalUserId,
+    channelBindingExternalChatId,
+    setChannelBindingExternalChatId,
+    channelResolveLoading,
+    channelResolveError,
+    channelResolveResult,
+    channelBindLoading,
+    channelBindError,
+    channelBindMessage,
+    resolveChannelBinding,
+    bindChannelToCurrentKey,
+  } = useChannelBindingRuntime({
+    apiFetch,
+    t,
+    activeUserKey,
+    channelLabel,
+    onIdentityApplied: applyIdentity,
+    onHealthRefresh: async () => {
+      await fetchHealth();
+    },
+  });
+
   const controlService = async (
     serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
     action: "start" | "stop" | "restart",
@@ -1131,87 +1148,6 @@ export default function App() {
       setLocalContextError(message);
     } finally {
       setLocalContextLoading(false);
-    }
-  };
-
-  const resolveChannelBinding = async () => {
-    setChannelResolveLoading(true);
-    setChannelResolveError(null);
-    setChannelBindMessage(null);
-    try {
-      const body: Record<string, unknown> = {
-        channel: channelBindingChannel,
-      };
-      const externalUserId = channelBindingExternalUserId.trim();
-      const externalChatId = channelBindingExternalChatId.trim();
-      if (externalUserId) {
-        body.external_user_id = externalUserId;
-      }
-      if (externalChatId) {
-        body.external_chat_id = externalChatId;
-      }
-      const res = await apiFetch(`/v1/auth/channel/resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const resp = (await res.json()) as ApiResponse<ResolveChannelBindingResponse>;
-      if (!res.ok || !resp.ok || !resp.data) {
-        throw new Error(resp.error || `渠道绑定查询失败 (${res.status})`);
-      }
-      setChannelResolveResult(resp.data);
-      return resp.data;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setChannelResolveError(message);
-      return null;
-    } finally {
-      setChannelResolveLoading(false);
-    }
-  };
-
-  const bindChannelToCurrentKey = async () => {
-    setChannelBindLoading(true);
-    setChannelBindError(null);
-    setChannelBindMessage(null);
-    try {
-      const body: Record<string, unknown> = {
-        channel: channelBindingChannel,
-        ...(activeUserKey ? { user_key: activeUserKey } : {}),
-      };
-      const externalUserId = channelBindingExternalUserId.trim();
-      const externalChatId = channelBindingExternalChatId.trim();
-      if (externalUserId) {
-        body.external_user_id = externalUserId;
-      }
-      if (externalChatId) {
-        body.external_chat_id = externalChatId;
-      }
-      const res = await apiFetch(`/v1/auth/channel/bind`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const resp = (await res.json()) as ApiResponse<AuthIdentityResponse>;
-      if (!res.ok || !resp.ok || !resp.data) {
-        throw new Error(resp.error || `渠道绑定失败 (${res.status})`);
-      }
-      setChannelResolveResult({ bound: true, identity: resp.data });
-      setChannelBindMessage(
-        t(
-          `绑定成功：${channelLabel(channelBindingChannel)} 已绑定到当前 key`,
-          `${channelLabel(channelBindingChannel)} has been bound to the current key`,
-        ),
-      );
-      applyIdentity(resp.data);
-      await fetchHealth();
-      return resp.data;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setChannelBindError(message);
-      return null;
-    } finally {
-      setChannelBindLoading(false);
     }
   };
 
