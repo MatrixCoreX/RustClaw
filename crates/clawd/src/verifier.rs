@@ -829,6 +829,7 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
             "step_id": step.step_id,
             "action_type": step.action_type,
             "executable": false,
+            "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
         });
     }
 
@@ -865,11 +866,17 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
                     })
             })
     });
+    let decision = if requires_confirmation {
+        crate::policy_decision::PolicyDecision::RequireConfirmation
+    } else {
+        crate::policy_decision::PolicyDecision::Allow
+    };
 
     json!({
         "step_id": step.step_id,
         "action_type": step.action_type,
         "executable": true,
+        "decision": decision.as_token(),
         "skill": normalized_skill,
         "action": action,
         "action_effect": {
@@ -894,14 +901,24 @@ fn verify_permission_decision_json(
     issues: &[VerifyIssue],
 ) -> Value {
     let first_issue = first_blocking_issue(issues);
+    let denied_by_policy = issues
+        .iter()
+        .any(|issue| issue_is_policy_denial(issue.kind));
+    let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
+        approved,
+        needs_confirmation,
+        denied_by_policy,
+        false,
+    );
     json!({
         "schema_version": 1,
         "owner_layer": "plan_verifier",
         "mode": mode.as_str(),
+        "decision": decision.as_token(),
         "allowed": approved && !needs_confirmation,
         "approved": approved,
         "needs_confirmation": needs_confirmation,
-        "denied_by_policy": issues.iter().any(|issue| issue_is_policy_denial(issue.kind)),
+        "denied_by_policy": denied_by_policy,
         "dry_run_required": false,
         "external_provider_blocked": false,
         "reason_code": first_issue
