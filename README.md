@@ -612,7 +612,7 @@ Focused long-tail closed-loop entries:
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
-- `RUSTCLAW_CLI_SMOKE_KEY=... bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch; optional env vars enable active/cancel/pause/resume/run-skill coverage.
+- `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `RUSTCLAW_CLI_SMOKE_KEY` / `RUSTCLAW_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable.
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
 
