@@ -3280,6 +3280,19 @@ export default function App() {
       .filter(Boolean)
       .join(" / ");
 
+  const providerUnsupportedLabel = (reason?: string | null) => {
+    switch (reason) {
+      case "provider_not_configured":
+        return t("未选择服务商", "Provider not configured");
+      case "model_not_configured":
+        return t("未选择模型", "Model not configured");
+      case "model_not_in_available_models":
+        return t("当前模型不在可选列表", "Model is not in the available list");
+      default:
+        return t("服务商暂不可用", "Provider unavailable");
+    }
+  };
+
   const renderMultimodalModelMeta = (key: (typeof MULTIMODAL_KEYS)[number]) => {
     const item = multimodalConfigData?.[key];
     if (!item) return null;
@@ -3297,6 +3310,9 @@ export default function App() {
           ? t("额度/阻断由外部厂商管理", "Quota/blockers managed by provider")
           : t("本地或内置能力", "Local or built-in capability"),
       );
+    }
+    if (item.provider_supported === false) {
+      metaBadges.push(providerUnsupportedLabel(item.unsupported_reason));
     }
     if (item.api_key_configured) {
       metaBadges.push(item.api_key_masked ? `${t("密钥", "Key")}: ${item.api_key_masked}` : t("密钥已配置", "Key configured"));

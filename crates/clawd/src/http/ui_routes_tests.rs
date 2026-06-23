@@ -308,6 +308,29 @@ api_key = "video-secret"
     assert_eq!(item.risk_level.as_deref(), Some("high"));
     assert_eq!(item.dry_run_supported, Some(true));
     assert_eq!(item.external_provider, Some(true));
+    assert_eq!(item.provider_supported, Some(true));
+    assert_eq!(item.unsupported_reason, None);
+}
+
+#[test]
+fn model_sections_mark_cached_model_mismatch_with_machine_reason() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[video_generation]
+default_vendor = "minimax"
+default_model = "video-missing"
+models = ["video-01", "video-02"]
+        "#,
+    )
+    .expect("parse");
+
+    let item = read_model_section(&parsed, "video_generation");
+
+    assert_eq!(item.provider_supported, Some(false));
+    assert_eq!(
+        item.unsupported_reason.as_deref(),
+        Some("model_not_in_available_models")
+    );
 }
 
 #[test]
