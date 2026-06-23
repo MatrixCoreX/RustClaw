@@ -85,20 +85,30 @@ pub(crate) fn print_active_task_table(body: &serde_json::Value) {
 pub(crate) fn print_skill_table(body: &serde_json::Value) {
     let items = skill_items(body);
     println!(
-        "{:<30} {:<10} {:<12} {:<8} {:<8} {:<22} description",
-        "skill", "kind", "planner", "risk", "available", "reason"
+        "{:<30} {:<10} {:<12} {:<22} {:<5} {:<8} {:<8} {:<22} description",
+        "skill", "kind", "planner", "adapter", "bg", "risk", "available", "reason"
     );
     for item in items {
         let name = value_token(item.get("name"));
         let kind = value_token(item.get("kind"));
         let planner_kind = value_token(item.get("planner_kind"));
+        let adapter = value_token(item.get("adapter_category"));
+        let background_job = value_token(item.get("background_job_capable"));
         let risk = value_token(item.get("risk_level"));
         let available = value_token(item.get("runtime_available"));
         let unavailable_reason = value_token(item.get("unavailable_reason"));
         let description = truncate_display_token(&value_token(item.get("description")), 80);
         println!(
-            "{:<30} {:<10} {:<12} {:<8} {:<8} {:<22} {}",
-            name, kind, planner_kind, risk, available, unavailable_reason, description
+            "{:<30} {:<10} {:<12} {:<22} {:<5} {:<8} {:<8} {:<22} {}",
+            name,
+            kind,
+            planner_kind,
+            adapter,
+            background_job,
+            risk,
+            available,
+            unavailable_reason,
+            description
         );
     }
 }

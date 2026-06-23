@@ -1090,6 +1090,10 @@ struct SkillListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     planner_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    adapter_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_job_capable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     group: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     risk_level: Option<String>,

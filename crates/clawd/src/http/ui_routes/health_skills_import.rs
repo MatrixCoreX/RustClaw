@@ -413,6 +413,13 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| ui_skill_description(state, skill_name));
+    let adapter_category = registry_entry
+        .as_ref()
+        .map(|entry| skill_adapter_category(entry, planner_kind).to_string());
+    let background_job_capable = registry_entry
+        .as_ref()
+        .map(skill_background_job_capable)
+        .filter(|value| *value);
     SkillListItem {
         name: skill_name.to_string(),
         description,
@@ -420,6 +427,8 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
             .as_ref()
             .map(|entry| skill_kind_token(entry.kind).to_string()),
         planner_kind: planner_kind.map(|kind| kind.as_token().to_string()),
+        adapter_category,
+        background_job_capable,
         group: registry_entry.as_ref().and_then(|entry| {
             entry
                 .group
@@ -521,6 +530,67 @@ fn skill_unavailable_reason(
     None
 }
 
+fn skill_adapter_category(
+    entry: &claw_core::skill_registry::SkillRegistryEntry,
+    planner_kind: Option<PlannerCapabilityKind>,
+) -> &'static str {
+    if planner_kind == Some(PlannerCapabilityKind::Workflow) {
+        return "workflow";
+    }
+    if skill_uses_external_api(entry) {
+        return "external_api_adapter";
+    }
+    if planner_kind == Some(PlannerCapabilityKind::Tool)
+        || entry.kind == SkillKind::Builtin
+        || entry.runtime_skill.is_some()
+        || entry.runtime_action.is_some()
+    {
+        return "local_tool_adapter";
+    }
+    "pure_skill"
+}
+
+fn skill_uses_external_api(entry: &claw_core::skill_registry::SkillRegistryEntry) -> bool {
+    entry.resolved_capabilities.iter().any(|capability| {
+        matches!(
+            capability,
+            claw_core::skill_registry::Capability::Llm
+                | claw_core::skill_registry::Capability::Net
+                | claw_core::skill_registry::Capability::Secrets(_)
+        )
+    }) || entry
+        .external_endpoint
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn skill_background_job_capable(entry: &claw_core::skill_registry::SkillRegistryEntry) -> bool {
+    entry.planner_capabilities.iter().any(|capability| {
+        let name = capability.name.trim();
+        let action = capability
+            .action
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        action == "poll"
+            || name.ends_with(".poll")
+            || capability
+                .optional
+                .iter()
+                .chain(capability.required.iter())
+                .any(|field| {
+                    matches!(
+                        field.trim(),
+                        "async_start"
+                            | "wait_for_completion"
+                            | "poll_after_seconds"
+                            | "expires_at"
+                            | "expires_in_seconds"
+                    )
+                })
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CapabilityListItem {
     skill_name: String,
@@ -528,6 +598,10 @@ struct CapabilityListItem {
     capability_kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     planner_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adapter_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_job_capable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     risk_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -573,6 +647,8 @@ fn capability_list_item(
         capability: capability.to_string(),
         capability_kind: capability_kind.to_string(),
         planner_kind: skill.planner_kind.clone(),
+        adapter_category: skill.adapter_category.clone(),
+        background_job_capable: skill.background_job_capable,
         risk_level: skill.risk_level.clone(),
         enabled: skill.enabled,
         runtime_available: skill.runtime_available,
