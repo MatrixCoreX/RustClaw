@@ -28,6 +28,35 @@ fn state_with_workspace_registry_excluding(disabled: &[&str]) -> crate::AppState
     state
 }
 
+fn state_with_registry_toml(toml: &str) -> crate::AppState {
+    let path = std::env::temp_dir().join(format!(
+        "rustclaw-capability-resolver-{}-{}.toml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos()
+    ));
+    std::fs::write(&path, toml).expect("write registry fixture");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&path)
+        .expect("load registry fixture");
+    let _ = std::fs::remove_file(path);
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let state = crate::AppState::test_default_with_fixture_provider();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    state
+}
+
 fn state_without_registry_with_skills(skills: &[&str]) -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
     let enabled = skills
@@ -316,6 +345,56 @@ fn registry_resolves_doc_parse_bare_capability() {
     );
     assert_eq!(record.source, "registry");
     assert_eq!(record.capability_ref, "doc_parse");
+}
+
+#[test]
+fn registry_metadata_adds_ordinary_skill_without_static_branch() {
+    let state = state_with_registry_toml(
+        r#"
+[[skills]]
+name = "custom_translate"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+aliases = ["translate"]
+capabilities = ["llm"]
+planner_capabilities = [
+  { name = "text.translate", action = "translate", effect = "external", required = ["text"], optional = ["target_locale"], risk_level = "medium", preferred = true }
+]
+"#,
+    );
+
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "text.translate",
+        json!({"text": "hello", "target_locale": "fr"}),
+    );
+    let action = action.expect("registry-only ordinary skill should resolve");
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "custom_translate");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("translate")
+            );
+            assert_eq!(
+                args.get("target_locale").and_then(Value::as_str),
+                Some("fr")
+            );
+        }
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "text.translate");
+    assert_eq!(
+        record.resolved_ref.as_deref(),
+        Some("skill:custom_translate")
+    );
+    assert_eq!(record.planner_kind, Some("skill"));
 }
 
 #[test]
