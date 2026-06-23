@@ -89,6 +89,7 @@ import {
 } from "./hooks/useNniRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
+import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
 
 import type {
   ApiResponse,
@@ -107,7 +108,6 @@ import type {
   SkillListItem,
   SkillsResponse,
   SkillsConfigResponse,
-  FactoryResetResponse,
   ImportedSkillResponse,
   LlmVendorOption,
   LlmRuntimeInfo,
@@ -198,9 +198,6 @@ function buildDefaultTelegramBot(): TelegramBotConfigItem {
     is_primary: true,
   };
 }
-
-const FACTORY_RESET_CONFIRM_WORD = "RESET";
-const FACTORY_RESET_COUNTDOWN_SECONDS = 10;
 
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
@@ -401,12 +398,6 @@ export default function App() {
   const [webdLoginEditorKeyId, setWebdLoginEditorKeyId] = useState<number | null>(null);
   const [webdLoginUsernameDraft, setWebdLoginUsernameDraft] = useState("");
   const [webdLoginPasswordDraft, setWebdLoginPasswordDraft] = useState("");
-  const [factoryResetDialogOpen, setFactoryResetDialogOpen] = useState(false);
-  const [factoryResetCountdown, setFactoryResetCountdown] = useState(FACTORY_RESET_COUNTDOWN_SECONDS);
-  const [factoryResetConfirmText, setFactoryResetConfirmText] = useState("");
-  const [factoryResetLoading, setFactoryResetLoading] = useState(false);
-  const [factoryResetError, setFactoryResetError] = useState<string | null>(null);
-  const [factoryResetResult, setFactoryResetResult] = useState<FactoryResetResponse | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState<ConsolePage>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
@@ -414,14 +405,6 @@ export default function App() {
   });
   const logContainerRef = useRef<HTMLPreElement | null>(null);
   const chatImageInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!factoryResetDialogOpen || factoryResetResult || factoryResetCountdown <= 0) return;
-    const timer = window.setTimeout(() => {
-      setFactoryResetCountdown((value) => Math.max(0, value - 1));
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [factoryResetCountdown, factoryResetDialogOpen, factoryResetResult]);
 
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
@@ -635,19 +618,47 @@ export default function App() {
     uiAuthReady,
     logContainerRef,
   });
+  const {
+    confirmWord: factoryResetConfirmWord,
+    dialogOpen: factoryResetDialogOpen,
+    countdown: factoryResetCountdown,
+    confirmText: factoryResetConfirmText,
+    setConfirmText: setFactoryResetConfirmText,
+    loading: factoryResetLoading,
+    error: factoryResetError,
+    result: factoryResetResult,
+    canConfirm: factoryResetCanConfirm,
+    openDialog: openFactoryResetDialog,
+    closeDialog: closeFactoryResetDialog,
+    runFactoryReset,
+  } = useFactoryResetRuntime({
+    apiFetch,
+    t,
+    onResetComplete: (result) => {
+      authFlowEpochRef.current += 1;
+      window.localStorage.removeItem(STORAGE_KEYS.userKey);
+      window.localStorage.removeItem(STORAGE_KEYS.authMode);
+      setAuthMode(null);
+      setUiKey("");
+      setUiKeyDraft(result.admin_user_key);
+      setUiAuthReady(false);
+      setUiAuthLoading(false);
+      setAuthIdentity(null);
+      setAuthMeError(null);
+      setInteractionUserId(null);
+      setInteractionChatId(null);
+      setInteractionRole("-");
+      setLoginTab("webd");
+      setWebdUsername(result.webd_username || "rustclaw");
+      setWebdPassword("");
+      setAuthKeysList([]);
+    },
+  });
   const activeUserKey = authMode === "key" && uiKey.trim() ? uiKey.trim() : "";
   const activeIdentityIds =
     activeUserKey || interactionUserId == null || interactionChatId == null
       ? {}
       : { user_id: interactionUserId, chat_id: interactionChatId };
-
-  const readApiBody = async <T,>(res: Response, label: string): Promise<T> => {
-    const body = (await res.json()) as ApiResponse<T>;
-    if (!res.ok || !body.ok || body.data === undefined) {
-      throw new Error(body.error || `${label} 请求失败 (${res.status})`);
-    }
-    return body.data;
-  };
 
   const applyIdentity = (identity: AuthIdentityResponse) => {
     setAuthIdentity(identity);
@@ -1401,66 +1412,6 @@ export default function App() {
       setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
     } finally {
       setAuthKeyActionLoading(null);
-    }
-  };
-
-  const openFactoryResetDialog = () => {
-    setFactoryResetDialogOpen(true);
-    setFactoryResetCountdown(FACTORY_RESET_COUNTDOWN_SECONDS);
-    setFactoryResetConfirmText("");
-    setFactoryResetError(null);
-    setFactoryResetResult(null);
-  };
-
-  const clearLocalAuthAfterFactoryReset = (result: FactoryResetResponse) => {
-    authFlowEpochRef.current += 1;
-    window.localStorage.removeItem(STORAGE_KEYS.userKey);
-    window.localStorage.removeItem(STORAGE_KEYS.authMode);
-    setAuthMode(null);
-    setUiKey("");
-    setUiKeyDraft(result.admin_user_key);
-    setUiAuthReady(false);
-    setUiAuthLoading(false);
-    setAuthIdentity(null);
-    setAuthMeError(null);
-    setInteractionUserId(null);
-    setInteractionChatId(null);
-    setInteractionRole("-");
-    setLoginTab("webd");
-    setWebdUsername(result.webd_username || "rustclaw");
-    setWebdPassword("");
-    setAuthKeysList([]);
-  };
-
-  const closeFactoryResetDialog = () => {
-    if (factoryResetLoading) return;
-    setFactoryResetDialogOpen(false);
-    setFactoryResetConfirmText("");
-    setFactoryResetError(null);
-    setFactoryResetCountdown(FACTORY_RESET_COUNTDOWN_SECONDS);
-  };
-
-  const runFactoryReset = async () => {
-    if (factoryResetCountdown > 0 || factoryResetConfirmText.trim() !== FACTORY_RESET_CONFIRM_WORD) {
-      setFactoryResetError(
-        t(
-          `请等待倒计时结束，并输入 ${FACTORY_RESET_CONFIRM_WORD} 后再继续。`,
-          `Wait for the countdown to finish and type ${FACTORY_RESET_CONFIRM_WORD} before continuing.`,
-        ),
-      );
-      return;
-    }
-    setFactoryResetLoading(true);
-    setFactoryResetError(null);
-    try {
-      const res = await apiFetch("/v1/admin/factory-reset", { method: "POST" });
-      const data = await readApiBody<FactoryResetResponse>(res, "factory reset");
-      setFactoryResetResult(data);
-      clearLocalAuthAfterFactoryReset(data);
-    } catch (err) {
-      setFactoryResetError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
-    } finally {
-      setFactoryResetLoading(false);
     }
   };
 
@@ -3701,15 +3652,10 @@ export default function App() {
   const workspaceUpdateStepLabel = (step?: string) => formatWorkspaceUpdateStep(step, lang);
   const workspaceUpdateStatusLabel = (status?: string) => formatWorkspaceUpdateStatus(status, workspaceUpdateStatus?.mode, lang);
   const workspaceUpdateTimeLabel = (ts?: number | null) => formatWorkspaceUpdateTime(ts, lang);
-  const factoryResetCanConfirm =
-    factoryResetCountdown <= 0 &&
-    factoryResetConfirmText.trim() === FACTORY_RESET_CONFIRM_WORD &&
-    !factoryResetLoading &&
-    !factoryResetResult;
   const factoryResetModal = factoryResetDialogOpen ? (
     <FactoryResetModal
       t={t}
-      confirmWord={FACTORY_RESET_CONFIRM_WORD}
+      confirmWord={factoryResetConfirmWord}
       countdown={factoryResetCountdown}
       confirmText={factoryResetConfirmText}
       loading={factoryResetLoading}
