@@ -62,6 +62,20 @@ import {
   serviceActionSuccessMessage,
   serviceDisplayName,
 } from "./lib/service-actions";
+import {
+  baseSkillNamesWithFallback,
+  filterSkillNamesBySearch,
+  groupSkillNames,
+  isUiHiddenSkill,
+  isVisibleSkillName,
+  normalizeSkillSearchQuery,
+  skillCapabilityLabel,
+  skillDescription,
+  skillPlannerCapabilityLabel,
+  skillRiskLabel,
+  skillRuntimeIssue,
+  visibleSkillNames,
+} from "./lib/skill-display";
 import { buildTaskLifecycleView } from "./lib/task-lifecycle";
 import {
   buildTaskOutcome,
@@ -140,73 +154,6 @@ import type {
 const llmVendorSupportsApiFormat = (vendor?: string | null) => vendor === "minimax" || vendor === "mimo";
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "memory", "logs", "tasks"];
-
-const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
-/** 基本技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
-const FALLBACK_BASE_SKILL_NAMES = [
-  "run_cmd",
-  "fs_basic",
-  "config_basic",
-  "read_file",
-  "write_file",
-  "list_dir",
-  "make_dir",
-  "remove_file",
-  "system_basic",
-  "process_basic",
-  "config_guard",
-  "fs_search",
-  "git_basic",
-  "service_control",
-  "archive_basic",
-];
-const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
-  archive_basic: { zh: "压缩、解压和整理归档文件。", en: "Compress, extract, and organize archives." },
-  audio_synthesize: { zh: "把文字转成语音。", en: "Turn text into speech." },
-  audio_transcribe: { zh: "把语音转成文字。", en: "Turn speech into text." },
-  browser_web: { zh: "打开网页并提取页面内容。", en: "Open webpages and extract page content." },
-  config_guard: { zh: "检查配置是否缺项或明显不合理。", en: "Check configs for missing or risky values." },
-  config_basic: { zh: "读取并校验结构化配置字段。", en: "Read and validate structured config fields." },
-  crypto: { zh: "查看币价、账户、订单和交易相关能力。", en: "Handle crypto quotes, balances, orders, and trading tasks." },
-  db_basic: { zh: "查看和处理数据库里的基础数据。", en: "Inspect and work with basic database data." },
-  doc_parse: { zh: "解析文档内容，提取可读文本。", en: "Parse documents and extract readable text." },
-  docker_basic: { zh: "查看和操作 Docker 容器、镜像与服务。", en: "Inspect and control Docker containers, images, and services." },
-  extension_manager: { zh: "管理外部扩展技能的接入。", en: "Manage external skill extensions." },
-  fs_search: { zh: "在文件里搜索关键词或定位内容。", en: "Search files and locate content." },
-  fs_basic: { zh: "处理文件、目录、路径事实和文本搜索。", en: "Handle files, directories, path facts, and text search." },
-  git_basic: { zh: "查看提交、分支和常见 Git 操作。", en: "Inspect commits, branches, and common Git actions." },
-  health_check: { zh: "快速检查系统和服务是否正常。", en: "Run quick health checks for the system and services." },
-  http_basic: { zh: "发起 HTTP 请求并查看返回结果。", en: "Send HTTP requests and inspect responses." },
-  image_edit: { zh: "修改、扩图或局部编辑图片。", en: "Edit, extend, or patch images." },
-  image_generate: { zh: "根据描述生成图片。", en: "Generate images from prompts." },
-  image_vision: { zh: "识别和理解图片内容。", en: "Analyze and understand image content." },
-  install_module: { zh: "安装或补齐项目依赖模块。", en: "Install or restore project dependencies." },
-  invest_copy: { zh: "整理调研材料并生成投资文案。", en: "Turn research material into investment copy." },
-  kb: { zh: "查询和维护本地知识库内容。", en: "Query and maintain local knowledge base content." },
-  list_dir: { zh: "查看目录结构和文件列表。", en: "List directories and files." },
-  log_analyze: { zh: "分析日志，定位错误和异常。", en: "Analyze logs and find issues." },
-  make_dir: { zh: "创建新目录。", en: "Create directories." },
-  map_merchant: { zh: "按位置推荐商家或地点。", en: "Recommend nearby merchants or places." },
-  music_generate: { zh: "根据描述和歌词生成音乐。", en: "Generate music from prompts and lyrics." },
-  package_manager: { zh: "处理包管理、安装与版本问题。", en: "Manage packages, installs, and versions." },
-  photo_organize: { zh: "整理照片文件并生成分类建议。", en: "Organize photos and suggest categories." },
-  process_basic: { zh: "查看和管理进程。", en: "Inspect and manage processes." },
-  read_file: { zh: "读取文件内容。", en: "Read file contents." },
-  remove_file: { zh: "删除文件。", en: "Remove files." },
-  rss_fetch: { zh: "抓取和整理 RSS 资讯。", en: "Fetch and summarize RSS feeds." },
-  run_cmd: { zh: "运行命令行命令。", en: "Run shell commands." },
-  schedule: { zh: "创建、查询或管理定时任务。", en: "Create, inspect, or manage scheduled tasks." },
-  service_control: { zh: "启动、停止或重启服务。", en: "Start, stop, or restart services." },
-  stock: { zh: "股票市场技能。", en: "Stock market skill." },
-  task_control: { zh: "查看、取消当前会话未完成任务。", en: "List and cancel unfinished tasks in the current chat." },
-  system_basic: { zh: "查看系统信息和基础环境。", en: "Inspect system information and environment basics." },
-  transform: { zh: "转换文本、数据或文件格式。", en: "Transform text, data, or file formats." },
-  video_generate: { zh: "根据描述或图片生成视频。", en: "Generate videos from prompts or images." },
-  weather: { zh: "查询天气和基础预报信息。", en: "Check weather and basic forecasts." },
-  web_search_extract: { zh: "搜索网页并提取关键内容。", en: "Search the web and extract key content." },
-  write_file: { zh: "写入或修改文件内容。", en: "Write or update file contents." },
-  x: { zh: "xurl调用技能。", en: "xurl invocation skill." },
-};
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -4032,32 +3979,30 @@ export default function App() {
     const set = new Set<string>(skillsConfigData?.managed_skills ?? []);
     Object.keys(skillSwitchDraft).forEach((k) => set.add(k));
     return Array.from(set)
-      .filter((name) => !UI_HIDDEN_SKILLS.has(name))
+      .filter(isVisibleSkillName)
       .sort((a, b) => a.localeCompare(b));
   }, [skillsConfigData, skillSwitchDraft]);
   const baseSkillNamesSet = useMemo(() => {
-    const list = skillsConfigData?.base_skill_names;
-    const useList = list && list.length > 0 ? list : FALLBACK_BASE_SKILL_NAMES;
-    return new Set<string>(useList);
+    return new Set<string>(baseSkillNamesWithFallback(skillsConfigData?.base_skill_names));
   }, [skillsConfigData?.base_skill_names]);
   const toolSkillNamesSet = useMemo(() => {
-    return new Set<string>((skillsConfigData?.tool_skill_names ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+    return new Set<string>(visibleSkillNames(skillsConfigData?.tool_skill_names));
   }, [skillsConfigData?.tool_skill_names]);
   const lockedSkillNamesSet = useMemo(() => {
     const list = skillsConfigData?.locked_skill_names;
     const useList = list && list.length > 0 ? list : [...Array.from(baseSkillNamesSet), ...Array.from(toolSkillNamesSet)];
-    return new Set<string>(useList);
+    return new Set<string>(visibleSkillNames(useList));
   }, [baseSkillNamesSet, skillsConfigData?.locked_skill_names, toolSkillNamesSet]);
   const externalSkillNamesSet = useMemo(() => {
-    return new Set<string>((skillsConfigData?.external_skill_names ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+    return new Set<string>(visibleSkillNames(skillsConfigData?.external_skill_names));
   }, [skillsConfigData?.external_skill_names]);
   const baseEnabledSkills = useMemo(() => {
-    return new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+    return new Set<string>(visibleSkillNames(skillsConfigData?.skills_list));
   }, [skillsConfigData]);
   const configuredEnabledSkills = useMemo(() => {
-    const set = new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+    const set = new Set<string>(visibleSkillNames(skillsConfigData?.skills_list));
     Object.entries(skillSwitchDraft).forEach(([name, value]) => {
-      if (UI_HIDDEN_SKILLS.has(name)) return;
+      if (isUiHiddenSkill(name)) return;
       if (value) set.add(name);
       else set.delete(name);
     });
@@ -4067,8 +4012,8 @@ export default function App() {
   const hasUnsavedSkillSwitchChanges = useMemo(() => {
     const persisted = skillsConfigData?.skill_switches ?? {};
     const keys = new Set<string>([
-      ...Object.keys(persisted).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
-      ...Object.keys(skillSwitchDraft).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
+      ...Object.keys(persisted).filter(isVisibleSkillName),
+      ...Object.keys(skillSwitchDraft).filter(isVisibleSkillName),
     ]);
     for (const key of keys) {
       if (persisted[key] !== skillSwitchDraft[key]) {
@@ -4294,43 +4239,22 @@ export default function App() {
     }
     return "todo";
   }, [chatMessages, llmStepStatus]);
-  const normalizedSkillsSearchQuery = useMemo(() => skillsSearchQuery.trim().toLowerCase(), [skillsSearchQuery]);
+  const normalizedSkillsSearchQuery = useMemo(() => normalizeSkillSearchQuery(skillsSearchQuery), [skillsSearchQuery]);
   const filteredManagedSkills = useMemo(
-    () => managedSkills.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
+    () => filterSkillNamesBySearch(managedSkills, normalizedSkillsSearchQuery),
     [managedSkills, normalizedSkillsSearchQuery],
   );
 
   /** 能力分组：工具 / 图片 / 语音 / 基础 / 其他 */
-  const skillsTool = useMemo(
-    () => managedSkills.filter((n) => toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
-    [managedSkills, toolSkillNamesSet],
-  );
-  const skillsImage = useMemo(
-    () => managedSkills.filter((n) => n.startsWith("image_") && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
-    [managedSkills, toolSkillNamesSet],
-  );
-  const skillsAudio = useMemo(
-    () => managedSkills.filter((n) => n.startsWith("audio_") && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
-    [managedSkills, toolSkillNamesSet],
-  );
-  const skillsBase = useMemo(
-    () => managedSkills.filter((n) => baseSkillNamesSet.has(n) && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
+  const skillGroups = useMemo(
+    () => groupSkillNames(managedSkills, baseSkillNamesSet, toolSkillNamesSet),
     [managedSkills, baseSkillNamesSet, toolSkillNamesSet],
   );
-  const skillsOther = useMemo(
-    () =>
-      managedSkills
-        .filter((n) => !n.startsWith("image_") && !n.startsWith("audio_") && !baseSkillNamesSet.has(n) && !toolSkillNamesSet.has(n))
-        .sort((a, b) => a.localeCompare(b)),
-    [managedSkills, baseSkillNamesSet, toolSkillNamesSet],
-  );
-  const filterBySearch = (list: string[]) =>
-    list.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery));
-  const filteredSkillsTool = useMemo(() => filterBySearch(skillsTool), [skillsTool, normalizedSkillsSearchQuery]);
-  const filteredSkillsImage = useMemo(() => filterBySearch(skillsImage), [skillsImage, normalizedSkillsSearchQuery]);
-  const filteredSkillsAudio = useMemo(() => filterBySearch(skillsAudio), [skillsAudio, normalizedSkillsSearchQuery]);
-  const filteredSkillsBase = useMemo(() => filterBySearch(skillsBase), [skillsBase, normalizedSkillsSearchQuery]);
-  const filteredSkillsOther = useMemo(() => filterBySearch(skillsOther), [skillsOther, normalizedSkillsSearchQuery]);
+  const filteredSkillsTool = useMemo(() => filterSkillNamesBySearch(skillGroups.tool, normalizedSkillsSearchQuery), [skillGroups.tool, normalizedSkillsSearchQuery]);
+  const filteredSkillsImage = useMemo(() => filterSkillNamesBySearch(skillGroups.image, normalizedSkillsSearchQuery), [skillGroups.image, normalizedSkillsSearchQuery]);
+  const filteredSkillsAudio = useMemo(() => filterSkillNamesBySearch(skillGroups.audio, normalizedSkillsSearchQuery), [skillGroups.audio, normalizedSkillsSearchQuery]);
+  const filteredSkillsBase = useMemo(() => filterSkillNamesBySearch(skillGroups.base, normalizedSkillsSearchQuery), [skillGroups.base, normalizedSkillsSearchQuery]);
+  const filteredSkillsOther = useMemo(() => filterSkillNamesBySearch(skillGroups.other, normalizedSkillsSearchQuery), [skillGroups.other, normalizedSkillsSearchQuery]);
   useEffect(() => {
     if (!skillImportPreview) return;
     if (managedSkills.includes(skillImportPreview.skill_name)) return;
@@ -4340,98 +4264,23 @@ export default function App() {
     }
   }, [managedSkills, recentImportedSkillName, skillImportPreview]);
   const visibleRuntimeSkills = useMemo(
-    () => (skillsData?.skills ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
+    () => visibleSkillNames(skillsData?.skills),
     [skillsData],
   );
   const skillItemsByName = useMemo(() => {
     const map = new Map<string, SkillListItem>();
     (skillsData?.skill_items ?? []).forEach((item) => {
-      if (!item.name || UI_HIDDEN_SKILLS.has(item.name)) return;
+      if (!isVisibleSkillName(item.name)) return;
       map.set(item.name, item);
     });
     (skillsConfigData?.skill_items ?? []).forEach((item) => {
-      if (!item.name || UI_HIDDEN_SKILLS.has(item.name)) return;
+      if (!isVisibleSkillName(item.name)) return;
       map.set(item.name, item);
     });
     return map;
   }, [skillsConfigData?.skill_items, skillsData?.skill_items]);
   const describeSkill = (name: string) => {
-    const itemDescription = skillItemsByName.get(name)?.description?.trim();
-    if (itemDescription) return itemDescription;
-    return SKILL_SUMMARY[name]
-      ? t(SKILL_SUMMARY[name].zh, SKILL_SUMMARY[name].en)
-      : t("该技能无简短说明。", "No short description for this skill.");
-  };
-  const skillRiskLabel = (risk?: string | null) => {
-    switch ((risk || "").toLowerCase()) {
-      case "low":
-        return t("低风险", "Low risk");
-      case "medium":
-        return t("中风险", "Medium risk");
-      case "high":
-        return t("高风险", "High risk");
-      default:
-        return t("风险未声明", "Risk not declared");
-    }
-  };
-  const skillCapabilityLabel = (capability: string) => {
-    switch (capability) {
-      case "llm":
-        return t("会调用模型", "Uses model");
-      case "net":
-        return t("访问网络", "Network");
-      case "fs.read":
-        return t("读取文件", "Reads files");
-      case "fs.write":
-        return t("改写文件", "Changes files");
-      case "exec":
-        return t("运行命令", "Runs commands");
-      case "exec.sudo":
-        return t("可提权执行", "Can use sudo");
-      default:
-        return capability.startsWith("secrets.") ? t("需要密钥", "Needs secret") : capability;
-    }
-  };
-  const formatCapabilityToken = (token: string) =>
-    token
-      .split(".")
-      .map((part) => part.replace(/_/g, " "))
-      .join(" / ");
-  const skillPlannerCapabilityLabel = (capability: string) => {
-    const [domain, ...rest] = capability.split(".");
-    const action = rest.join(".");
-    const readable = formatCapabilityToken(action || capability);
-    switch (domain) {
-      case "filesystem":
-        return t(`文件：${readable}`, `Files: ${readable}`);
-      case "config":
-        return t(`配置：${readable}`, `Config: ${readable}`);
-      case "system":
-        return t(`系统：${readable}`, `System: ${readable}`);
-      case "database":
-        return t(`数据库：${readable}`, `Database: ${readable}`);
-      default:
-        return formatCapabilityToken(capability);
-    }
-  };
-  const skillRuntimeIssue = (item?: SkillListItem) => {
-    if (!item || item.runtime_available !== false) return null;
-    if (item.unavailable_reason === "skill_disabled" || item.enabled === false) {
-      return t("该技能当前未开启", "This skill is currently disabled");
-    }
-    if (item.unsupported_os?.length) {
-      return t(
-        `当前系统 ${item.current_os || "unknown"} 不在支持列表：${item.unsupported_os.join(", ")}`,
-        `Current OS ${item.current_os || "unknown"} is not supported: ${item.unsupported_os.join(", ")}`,
-      );
-    }
-    if (item.missing_required_bins?.length) {
-      return t(
-        `缺少本地工具：${item.missing_required_bins.join(", ")}`,
-        `Missing local tools: ${item.missing_required_bins.join(", ")}`,
-      );
-    }
-    return t("当前设备暂不可用", "Unavailable on this device");
+    return skillDescription(name, lang, skillItemsByName.get(name)?.description);
   };
   const applyLlmVendorDraft = (nextVendor: string) => {
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
@@ -4451,7 +4300,7 @@ export default function App() {
   };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
-    if (UI_HIDDEN_SKILLS.has(name)) return;
+    if (isUiHiddenSkill(name)) return;
     if (lockedSkillNamesSet.has(name)) return;
     setSkillSwitchDraft((prev) => {
       const next = { ...prev };
@@ -7849,7 +7698,7 @@ export default function App() {
                   };
                   const renderSkillRow = (name: string) => {
                     const skillItem = skillItemsByName.get(name);
-                    const runtimeIssue = skillRuntimeIssue(skillItem);
+                    const runtimeIssue = skillRuntimeIssue(skillItem, lang);
                     const visiblePlannerCapabilities = (skillItem?.planner_capabilities ?? []).slice(0, 3);
                     const visibleCapabilities = (skillItem?.capabilities ?? []).slice(0, 3);
                     const configuredEnabled = configuredEnabledSkills.has(name);
@@ -7886,7 +7735,7 @@ export default function App() {
                           ) : null}
                           <span className="mt-1 flex flex-wrap gap-1">
                             <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
-                              {skillRiskLabel(skillItem?.risk_level)}
+                              {skillRiskLabel(skillItem?.risk_level, lang)}
                             </span>
                             {skillItem?.requires_confirmation ? (
                               <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-100">
@@ -7903,12 +7752,12 @@ export default function App() {
                                 key={`planner-${capability}`}
                                 className="rounded border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-100"
                               >
-                                {skillPlannerCapabilityLabel(capability)}
+                                {skillPlannerCapabilityLabel(capability, lang)}
                               </span>
                             ))}
                             {visibleCapabilities.map((capability) => (
                               <span key={`runtime-${capability}`} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
-                                {skillCapabilityLabel(capability)}
+                                {skillCapabilityLabel(capability, lang)}
                               </span>
                             ))}
                           </span>
