@@ -10,6 +10,8 @@ This script validates the required canonical baseline under prompts/layers/gener
 and keeps prompt-layer rules machine-checkable:
 - real prompt markdown files keep the shared Multilingual Reinforcement EOF section;
 - vendor skill patches stay small overlays instead of copied full skill documents.
+- generated skill prompts stay within a bounded line budget so skill growth does
+  not silently crowd planner context.
 Does not touch production code or clawd.
 """
 from __future__ import annotations
@@ -35,6 +37,8 @@ FULL_SKILL_SECTION_HEADINGS = (
     "## Examples",
     "### Action",
 )
+MAX_GENERATED_SKILL_PROMPT_LINES = 320
+MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES = 6000
 
 
 def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
@@ -122,6 +126,39 @@ def check_vendor_skill_patches_are_overlays() -> list[str]:
     return errors
 
 
+def check_generated_skill_prompt_budget() -> list[str]:
+    errors: list[str] = []
+    if not GENERATED_SKILLS.exists():
+        return errors
+    prompt_files = sorted(
+        path
+        for path in GENERATED_SKILLS.glob("*.md")
+        if path.name != "README.md"
+    )
+    total_lines = 0
+    over_limit: list[str] = []
+    for path in prompt_files:
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        total_lines += line_count
+        if line_count > MAX_GENERATED_SKILL_PROMPT_LINES:
+            rel = path.relative_to(REPO_ROOT)
+            over_limit.append(
+                f"{rel} ({line_count} lines; max {MAX_GENERATED_SKILL_PROMPT_LINES})"
+            )
+    if over_limit:
+        errors.append(
+            "Generated skill prompt exceeds per-skill budget:\n"
+            + "\n".join(f"  - {item}" for item in over_limit)
+        )
+    if total_lines > MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES:
+        errors.append(
+            "Generated skill prompts exceed total budget: "
+            f"{total_lines} lines across {len(prompt_files)} files; "
+            f"max {MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES}"
+        )
+    return errors
+
+
 def main() -> int:
     if not REGISTRY_PATH.exists():
         print(f"Registry not found: {REGISTRY_PATH}", file=sys.stderr)
@@ -160,6 +197,7 @@ def main() -> int:
     prompt_errors = (
         check_multilingual_reinforcement_blocks()
         + check_vendor_skill_patches_are_overlays()
+        + check_generated_skill_prompt_budget()
     )
     if prompt_errors:
         for error in prompt_errors:
