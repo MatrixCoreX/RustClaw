@@ -55,6 +55,16 @@ The guard fails on new user-language phrase matching in runtime Rust code. Known
 legacy hits are reported with their owning plan item and should be removed by
 the structured-contract migration instead of expanded with more phrases.
 
+Static compact coverage guard:
+
+- `python3 scripts/nl_tests/check_compact_coverage.py`
+- `python3 scripts/nl_tests/check_compact_coverage.py --report`
+
+This guard does not call `clawd` or a model. It verifies that the source-controlled
+compact tier files cover the required basic skill, route/lifecycle, and media
+dry-run classes, that default compact media rows are dry-run only, and that
+X/Twitter live publish tags are not part of the compact gate.
+
 Client-like continuous regression:
 
 - Run the offline contract-matrix regression suite, including generator checks and attribution fixtures:
@@ -153,6 +163,12 @@ safe aggregate.
   the safe aggregate metadata. It currently selects 285 rows from the 2,096-row
   source aggregate and covers all reported metadata categories in
   `nl_cases_client_like_release_gate_equivalent_coverage.json`.
+
+Before running live compact NL, check the metadata coverage:
+
+```bash
+python3 scripts/nl_tests/check_compact_coverage.py --report
+```
 
 Recommended commands:
 
