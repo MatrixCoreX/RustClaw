@@ -30,17 +30,45 @@ pub(crate) async fn execute_external_skill(
         "local_script" => {
             execute_external_local_script(state, task, canonical_skill_name, args, source).await
         }
-        "prompt_bundle" => Ok(serde_json::json!({
-            "request_id": task.task_id,
-            "status": "error",
-            "text": "",
-            "error_text": format!(
-                "Imported external skill preview is registered, but runtime execution for external_kind={} is not enabled yet.",
-                config.kind
-            )
-        })),
-        other => Err(format!("external_kind not supported: {other}")),
+        "prompt_bundle" => Ok(external_kind_machine_error_response(
+            task,
+            canonical_skill_name,
+            config.kind,
+            "external_kind_not_enabled",
+        )),
+        other => Ok(external_kind_machine_error_response(
+            task,
+            canonical_skill_name,
+            other,
+            "external_kind_unsupported",
+        )),
     }
+}
+
+fn external_kind_machine_error_response(
+    task: &ClaimedTask,
+    canonical_skill_name: &str,
+    external_kind: &str,
+    error_code: &str,
+) -> Value {
+    serde_json::json!({
+        "request_id": task.task_id,
+        "status": "error",
+        "text": "",
+        "error_kind": error_code,
+        "error_text": error_code,
+        "extra": {
+            "schema_version": 1,
+            "owner_layer": "external_skill_adapter",
+            "status_code": error_code,
+            "error_code": error_code,
+            "message_key": format!("clawd.msg.external_skill.{error_code}"),
+            "skill_name": canonical_skill_name,
+            "external_kind": external_kind,
+            "provider_supported": false,
+            "unsupported_reason": error_code,
+        }
+    })
 }
 
 fn external_reserved_arg_key(key: &str) -> bool {

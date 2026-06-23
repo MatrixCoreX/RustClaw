@@ -108,6 +108,18 @@ fn install_real_registry(state: &mut AppState) {
     });
 }
 
+fn install_registry_from_toml(state: &mut AppState, root: &Path, toml: &str, enabled: &[&str]) {
+    let registry_path = root.join("skills_registry.toml");
+    fs::write(&registry_path, toml).expect("write registry fixture");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load registry fixture");
+    let enabled = enabled.iter().map(|skill| (*skill).to_string()).collect();
+    *state.core.skill_views_snapshot.write().unwrap() = Arc::new(SkillViewsSnapshot {
+        registry: Some(Arc::new(registry)),
+        skills_list: Arc::new(enabled),
+    });
+}
+
 fn make_echo_skill_runner(root: &Path) -> PathBuf {
     let path = root.join("echo-skill-runner");
     fs::write(
@@ -283,6 +295,65 @@ async fn disabled_skill_preflight_returns_policy_decision_payload() {
             .pointer("/permission_decision/decision")
             .and_then(serde_json::Value::as_str),
         Some("deny")
+    );
+}
+
+#[tokio::test]
+async fn external_prompt_bundle_error_uses_machine_payload() {
+    let root = TempDirGuard::new("external_prompt_bundle_machine_error");
+    let mut state = test_state("en");
+    install_registry_from_toml(
+        &mut state,
+        root.path(),
+        r#"
+[[skills]]
+name = "external_prompt_fixture"
+enabled = true
+kind = "external"
+external_kind = "prompt_bundle"
+"#,
+        &["external_prompt_fixture"],
+    );
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let err = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "external_prompt_fixture",
+        json!({"action": "preview"}),
+    )
+    .await
+    .expect_err("prompt_bundle runtime preview should be a structured adapter error");
+    let parsed = parse_structured_skill_error(&err).expect("structured external adapter error");
+    let extra = parsed.extra.expect("external adapter extra");
+
+    assert_eq!(parsed.error_kind, "external_kind_not_enabled");
+    assert_eq!(parsed.error_text, "external_kind_not_enabled");
+    assert_eq!(
+        extra.get("owner_layer").and_then(serde_json::Value::as_str),
+        Some("external_skill_adapter")
+    );
+    assert_eq!(
+        extra.get("message_key").and_then(serde_json::Value::as_str),
+        Some("clawd.msg.external_skill.external_kind_not_enabled")
+    );
+    assert_eq!(
+        extra
+            .get("external_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("prompt_bundle")
+    );
+    assert_eq!(
+        extra
+            .get("unsupported_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("external_kind_not_enabled")
+    );
+    assert_eq!(
+        extra
+            .get("provider_supported")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
     );
 }
 
