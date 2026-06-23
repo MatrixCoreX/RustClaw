@@ -37,8 +37,13 @@ import {
 } from "./lib/dashboard-home";
 import { copyAuthKeyValue, maskStoredKey, writeTextToClipboard } from "./lib/auth-keys";
 import { fileToDataUrl, formatVisionResultText } from "./lib/chat-attachments";
+import { boundChannelsLabel as formatBoundChannelsLabel, channelLabel as formatChannelLabel } from "./lib/channel-display";
 import { formatBytes, formatDuration, sleep, toLocalTime } from "./lib/display-format";
-import { formatDateOnlyHuman } from "./lib/date-format";
+import {
+  formatDateOnlyHuman,
+  formatDateTimeHuman as formatDateTimeHumanValue,
+  formatUnixDateTime as formatUnixDateTimeValue,
+} from "./lib/date-format";
 import {
   fetchFeishuBindSession,
   getFeishuBindStatusCopy,
@@ -49,6 +54,11 @@ import {
   type FeishuBindSessionResponse,
 } from "./lib/feishu-bind";
 import { hasUnsavedLlmDraftChanges, llmVendorSupportsApiFormat } from "./lib/llm-config";
+import {
+  memoryFactStatusLabel,
+  memorySafetyLabel,
+  shouldHideMemoryRecentContent,
+} from "./lib/memory-display";
 import {
   MULTIMODAL_KEYS,
   buildMultimodalDraft,
@@ -522,72 +532,16 @@ export default function App() {
     const [zh, en] = mixed.split(" / ");
     return lang === "zh" ? zh : en ?? zh;
   };
-  const channelLabel = (channel: ChannelName) => {
-    const labels: Record<ChannelName, string> = {
-      telegram: "Telegram",
-      whatsapp: "WhatsApp",
-      ui: "UI",
-      wechat: t("微信", "WeChat"),
-      feishu: "Feishu",
-      lark: "Lark",
-    };
-    return labels[channel];
-  };
+  const dateLocale = lang === "zh" ? "zh-CN" : "en-US";
+  const channelLabel = (channel: ChannelName) => formatChannelLabel(channel, lang);
   const boundChannelsLabel = useMemo(() => {
-    const channels = health?.bound_channels ?? [];
-    if (channels.length === 0) return "";
-    return channels
-      .map((channel) => {
-        if (channel === "telegram" || channel === "whatsapp" || channel === "ui" || channel === "wechat" || channel === "feishu" || channel === "lark") {
-          return channelLabel(channel);
-        }
-        return channel;
-      })
-      .join(" / ");
+    return formatBoundChannelsLabel(health?.bound_channels, lang);
   }, [health?.bound_channels, lang]);
   const formatDateTimeHuman = (raw: string | null | undefined) => {
-    if (!raw) return "--";
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(date);
+    return formatDateTimeHumanValue(raw, dateLocale);
   };
   const formatUnixDateTime = (ts: number | null | undefined) => {
-    if (!ts || ts <= 0) return "--";
-    const date = new Date(ts * 1000);
-    if (Number.isNaN(date.getTime())) return "--";
-    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(date);
-  };
-  const memoryFactStatusLabel = (status: string) => {
-    const normalized = status.toLowerCase();
-    if (normalized === "active") return t("有效", "Active");
-    if (normalized === "expired") return t("已过期", "Expired");
-    if (normalized === "superseded") return t("已替换", "Superseded");
-    if (normalized === "deleted") return t("已删除", "Deleted");
-    return status || "--";
-  };
-  const memorySafetyLabel = (flag: string) => {
-    const normalized = flag.toLowerCase();
-    if (!normalized || normalized === "safe" || normalized === "normal") return t("普通", "Normal");
-    return t("已标记", "Flagged");
-  };
-  const shouldHideMemoryRecentContent = (flag: string) => {
-    const normalized = flag.toLowerCase();
-    return Boolean(normalized && normalized !== "safe" && normalized !== "normal");
+    return formatUnixDateTimeValue(ts, dateLocale);
   };
   const channelPresets = useMemo<Record<ChannelName, ChannelPreset>>(
     () => ({
@@ -7837,7 +7791,7 @@ export default function App() {
                                     : "rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/55"
                                 }
                               >
-                                {memoryFactStatusLabel(item.status)}
+                                {memoryFactStatusLabel(item.status, lang)}
                               </span>
                               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">
                                 {item.namespace || "default"}
@@ -7911,7 +7865,7 @@ export default function App() {
                               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/55">{item.role}</span>
                               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">{item.memory_type}</span>
                               <span className={hidden ? "rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100" : "rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45"}>
-                                {memorySafetyLabel(item.safety_flag)}
+                                {memorySafetyLabel(item.safety_flag, lang)}
                               </span>
                               <span className="text-[10px] text-white/35">{formatUnixDateTime(item.created_at_ts)}</span>
                             </div>
