@@ -290,9 +290,10 @@ async fn start_service_if_needed(state: &AppState, service: &str) -> anyhow::Res
         .ok()
         .filter(|v| matches!(v.as_str(), "debug" | "release"))
         .unwrap_or_else(|| runtime_profile_default().to_string());
-    let script_name = service_start_script(service)
-        .ok_or_else(|| anyhow::anyhow!("unsupported service: {service}"))?;
-    validate_service_start_readiness(state, service).map_err(|err| anyhow::anyhow!(err))?;
+    let script_name =
+        service_start_script(service).ok_or_else(|| anyhow::anyhow!("unsupported_service"))?;
+    validate_service_start_readiness(state, service)
+        .map_err(|err| anyhow::anyhow!(err.error_code))?;
     let workspace = state.skill_rt.workspace_root.to_string_lossy();
     let log_file = format!("logs/{}.log", service);
     let cmd = format!(

@@ -43,6 +43,33 @@ fn write_workspace_and_mounted_file_writes_channel_copy_to_mounted_channels_dir(
 }
 
 #[test]
+fn service_control_error_response_uses_machine_fields() {
+    let (status, Json(body)) = service_control_error_response(
+        StatusCode::BAD_REQUEST,
+        "feishud",
+        "start",
+        ServiceControlFailure::new("service_disabled"),
+    );
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.ok);
+    assert_eq!(body.error.as_deref(), Some("service_disabled"));
+    let data = body.data.expect("service control error data");
+    assert_eq!(
+        data.get("owner_layer").and_then(serde_json::Value::as_str),
+        Some("ui_service_control")
+    );
+    assert_eq!(
+        data.get("error_code").and_then(serde_json::Value::as_str),
+        Some("service_disabled")
+    );
+    assert_eq!(
+        data.get("message_key").and_then(serde_json::Value::as_str),
+        Some("clawd.ui.service_control.service_disabled")
+    );
+}
+
+#[test]
 fn update_feishu_config_raw_preserves_template_comments_and_updates_only_keys() {
     let output = update_feishu_config_raw_preserving_format(
         FEISHU_CONFIG_TEMPLATE,

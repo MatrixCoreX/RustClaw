@@ -11,6 +11,61 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
     }
 }
 
+fn service_action_token(action: ServiceAction) -> &'static str {
+    match action {
+        ServiceAction::Start => "start",
+        ServiceAction::Stop => "stop",
+        ServiceAction::Restart => "restart",
+    }
+}
+
+struct ServiceControlFailure {
+    error_code: &'static str,
+    data: Value,
+}
+
+impl ServiceControlFailure {
+    fn new(error_code: &'static str) -> Self {
+        Self {
+            error_code,
+            data: json!({}),
+        }
+    }
+
+    fn with_data(error_code: &'static str, data: Value) -> Self {
+        Self { error_code, data }
+    }
+}
+
+fn service_control_error_response(
+    status: StatusCode,
+    service: &str,
+    action: &str,
+    failure: ServiceControlFailure,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let mut data = json!({
+        "owner_layer": "ui_service_control",
+        "error_code": failure.error_code,
+        "status_code": failure.error_code,
+        "message_key": format!("clawd.ui.service_control.{}", failure.error_code),
+        "service": service,
+        "action": action,
+    });
+    if let (Some(dst), Some(src)) = (data.as_object_mut(), failure.data.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
+    (
+        status,
+        Json(ApiResponse {
+            ok: false,
+            data: Some(data),
+            error: Some(failure.error_code.to_string()),
+        }),
+    )
+}
+
 fn service_start_script(service: &str) -> Option<&'static str> {
     match service {
         "channel-gateway" | "channel_gateway" => Some("component_start/start-channel-gateway.sh"),
@@ -132,24 +187,32 @@ fn spawn_background_shell(cmd: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn validate_service_start_readiness(state: &AppState, service: &str) -> Result<(), String> {
+fn validate_service_start_readiness(
+    state: &AppState,
+    service: &str,
+) -> Result<(), ServiceControlFailure> {
     match service {
         "feishud" => {
             let config = load_feishu_config_response(state, None)
-                .map_err(|err| format!("read feishu config failed: {err}"))?;
+                .map_err(|err| {
+                    ServiceControlFailure::with_data(
+                        "feishu_config_read_failed",
+                        json!({"detail": err.to_string()}),
+                    )
+                })?;
             if !config.enabled {
-                return Err("service disabled".to_string());
+                return Err(ServiceControlFailure::new("service_disabled"));
             }
             if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
-                return Err("feishu app_id/app_secret are required".to_string());
+                return Err(ServiceControlFailure::new("feishu_credentials_missing"));
             }
             if config.mode.eq_ignore_ascii_case("webhook")
                 && !config.verification_token_configured
                 && !config.encrypt_key_configured
             {
-                return Err(
-                    "feishu webhook mode requires verification_token or encrypt_key".to_string(),
-                );
+                return Err(ServiceControlFailure::new(
+                    "feishu_webhook_credentials_missing",
+                ));
             }
             Ok(())
         }
@@ -168,38 +231,33 @@ async fn control_service(
     let action = match parse_service_action(action.trim()) {
         Some(v) => v,
         None => {
-            return (
+            return service_control_error_response(
                 StatusCode::BAD_REQUEST,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("action must be start, stop, or restart".to_string()),
-                }),
+                service.as_str(),
+                action.trim(),
+                ServiceControlFailure::new("invalid_service_action"),
             );
         }
     };
+    let action_token = service_action_token(action);
 
     if service_start_script(service.as_str()).is_none() {
-        return (
+        return service_control_error_response(
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("unsupported service".to_string()),
-            }),
+            service.as_str(),
+            action_token,
+            ServiceControlFailure::new("unsupported_service"),
         );
     }
 
     match action {
         ServiceAction::Start => {
             if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(err),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    err,
                 );
             }
             if service_is_running(service.as_str()) {
@@ -221,13 +279,11 @@ async fn control_service(
                 .filter(|v| matches!(v.as_str(), "debug" | "release"))
                 .unwrap_or_else(|| runtime_profile_default().to_string());
             let Some(script_name) = service_start_script(service.as_str()) else {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("unsupported service".to_string()),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
                 );
             };
             let workspace = state.skill_rt.workspace_root.to_string_lossy();
@@ -240,28 +296,27 @@ async fn control_service(
                 shell_escape_arg(log_file.as_str())
             );
             if let Err(err) = spawn_background_shell(&cmd) {
-                return (
+                return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("failed to start service process: {err}")),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_spawn_failed",
+                        json!({"detail": err.to_string()}),
+                    ),
                 );
             }
-            // The start command may return success even if script preflight exits quickly
-            // (for example, service disabled or missing required config). Verify process is up.
+            // Startup scripts are asynchronous; verify the target process after launch.
             tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
             if !service_is_running(service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "service did not enter running state: {service}. check logs/{service}.log and channel config"
-                        )),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_start_not_running",
+                        json!({"log_file": format!("logs/{service}.log")}),
+                    ),
                 );
             }
             (
@@ -280,25 +335,22 @@ async fn control_service(
         }
         ServiceAction::Stop => {
             if service_is_gateway_managed(service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "{service} is currently managed by channel-gateway and cannot be stopped from the per-service button"
-                        )),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_gateway_managed",
+                        json!({"managed_by": "channel-gateway"}),
+                    ),
                 );
             }
             let Some(process_name) = service_process_name(service.as_str()) else {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("unsupported service".to_string()),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
                 );
             };
             let mut killed = 0usize;
@@ -333,13 +385,11 @@ async fn control_service(
                 );
             }
             let Some(pid_file) = service_pid_file(service.as_str()) else {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("unsupported service".to_string()),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
                 );
             };
             let workspace = state.skill_rt.workspace_root.to_string_lossy();
@@ -351,13 +401,14 @@ async fn control_service(
             let output = match Command::new("bash").arg("-lc").arg(cmd).output().await {
                 Ok(v) => v,
                 Err(err) => {
-                    return (
+                    return service_control_error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some(format!("failed to stop service process: {err}")),
-                        }),
+                        service.as_str(),
+                        action_token,
+                        ServiceControlFailure::with_data(
+                            "service_stop_spawn_failed",
+                            json!({"detail": err.to_string()}),
+                        ),
                     );
                 }
             };
@@ -365,13 +416,14 @@ async fn control_service(
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 let detail = if !stderr.is_empty() { stderr } else { stdout };
-                return (
+                return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("service stop command failed: {detail}")),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_stop_command_failed",
+                        json!({"detail": detail}),
+                    ),
                 );
             }
             (
@@ -389,35 +441,30 @@ async fn control_service(
         }
         ServiceAction::Restart => {
             if service_is_gateway_managed(service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "{service} is currently managed by channel-gateway and cannot be restarted from the per-service button"
-                        )),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_gateway_managed",
+                        json!({"managed_by": "channel-gateway"}),
+                    ),
                 );
             }
             if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(err),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    err,
                 );
             }
             let Some(process_name) = service_process_name(service.as_str()) else {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("unsupported service".to_string()),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
                 );
             };
             if let Some(pids) = daemon_process_pids_by_name(process_name) {
@@ -449,13 +496,11 @@ async fn control_service(
                 .filter(|v| matches!(v.as_str(), "debug" | "release"))
                 .unwrap_or_else(|| runtime_profile_default().to_string());
             let Some(script_name) = service_start_script(service.as_str()) else {
-                return (
+                return service_control_error_response(
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("unsupported service".to_string()),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
                 );
             };
             let workspace = state.skill_rt.workspace_root.to_string_lossy();
@@ -468,26 +513,26 @@ async fn control_service(
                 shell_escape_arg(log_file.as_str())
             );
             if let Err(err) = spawn_background_shell(&cmd) {
-                return (
+                return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("failed to start service process: {err}")),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_spawn_failed",
+                        json!({"detail": err.to_string()}),
+                    ),
                 );
             }
             tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
             if !service_is_running(service.as_str()) {
-                return (
+                return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "service did not enter running state after restart: {service}. check logs/{service}.log"
-                        )),
-                    }),
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_restart_not_running",
+                        json!({"log_file": format!("logs/{service}.log")}),
+                    ),
                 );
             }
             (
