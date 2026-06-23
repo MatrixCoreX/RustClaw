@@ -32,3 +32,11 @@ codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hook
 codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 RUSTCLAW_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
 
 codex_parity_runtime_smoke|resume_context_cli_surface_zh|covers:resume,clawcli,needs_user,checkpoint;requires_tool_call=true;local_readonly|检查 clawcli 是否提供 resume 子命令，并说明 resume 请求应提交哪些结构化字段；不要实际恢复任何任务；最后必须包含机器字段 resume_task_id。|expect=resume_task_id
+
+codex_parity_runtime_smoke|agent_loop_control_trace_act_read_zh|covers:agent_loop,act,control_trace,fs_basic,verifier;requires_tool_call=true;local_readonly|用只读能力读取 README.md 的标题行，并在最终回答中保留 decision_envelope 的 control_intent=act 或对应机器 trace；不要用 shell cat 兜底。|expect=control_intent
+
+codex_parity_runtime_smoke|agent_loop_control_trace_clarify_missing_target_en|covers:agent_loop,clarify,control_trace,missing_slot,no_write;requires_tool_call=false;local_readonly|Read the first line of that file and answer only the line. If the target is missing, ask for the missing locator through structured clarification fields rather than guessing a file.|expect=missing
+
+codex_parity_runtime_smoke|agent_loop_control_trace_direct_answer_zh|covers:agent_loop,direct_answer,control_trace,status_query,no_write;requires_tool_call=false;local_readonly|不要调用工具，只根据运行时结构化状态回答：当前是否有等待用户确认的任务？最终回答需要保留 approval_wait 或等价机器字段。|expect=approval_wait
+
+codex_parity_runtime_smoke|agent_loop_repair_envelope_dry_run_en|covers:agent_loop,recover,repair_envelope,control_trace,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|Dry run only: explain which machine fields a verifier missing-evidence recovery should pass through RepairEnvelope, and explicitly do not use skill text or error_text as protocol input.|expect=RepairEnvelope
