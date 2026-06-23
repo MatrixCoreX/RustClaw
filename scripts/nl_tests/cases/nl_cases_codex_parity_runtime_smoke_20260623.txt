@@ -27,7 +27,7 @@ codex_parity_runtime_smoke|task_lifecycle_readonly_zh|covers:task_control,task_l
 
 codex_parity_runtime_smoke|subagent_review_boundary_zh|covers:subagent,review,boundary,no_write;requires_tool_call=true;local_readonly|让只读 review 子代理检查 AGENTS.md 和当前计划文件的执行边界是否一致；子代理不能写文件、不能发布外部内容，最后只返回机器化边界摘要。|expect=boundary
 
-codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;dry_run,no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、block、require_confirmation 三种机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
+codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;dry_run,no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、deny、require_confirmation、background_wait 机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
 
 codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 RUSTCLAW_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
 
