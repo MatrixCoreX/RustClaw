@@ -130,6 +130,7 @@ const STRUCTURED_SKILL_ERROR_PREFIX: &str = "__RC_SKILL_ERROR__:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyBlockError {
+    pub(crate) decision: String,
     pub(crate) reason_code: String,
     pub(crate) observed_facts: Vec<String>,
     pub(crate) policy_boundary: Vec<String>,
@@ -310,8 +311,16 @@ pub(crate) fn policy_block_error(
     observed_facts: Vec<String>,
     policy_boundary: Vec<String>,
 ) -> String {
+    let decision = crate::policy_decision::PolicyDecision::Deny.as_token();
     let payload = json!({
+        "decision": decision,
         "reason_code": reason_code.trim(),
+        "permission_decision": {
+            "decision": decision,
+            "denied_by_policy": true,
+            "needs_confirmation": false,
+            "background_wait": false,
+        },
         "observed_facts": observed_facts,
         "policy_boundary": policy_boundary,
     });
@@ -328,6 +337,19 @@ pub(crate) fn parse_policy_block_error(err: &str) -> Option<PolicyBlockError> {
         .map(str::trim)
         .filter(|v| !v.is_empty())?
         .to_string();
+    let decision = value
+        .get("decision")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            value
+                .get("permission_decision")
+                .and_then(|v| v.get("decision"))
+                .and_then(|v| v.as_str())
+        })
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(crate::policy_decision::PolicyDecision::Deny.as_token())
+        .to_string();
     let strings_from_array = |key: &str| -> Vec<String> {
         value
             .get(key)
@@ -343,6 +365,7 @@ pub(crate) fn parse_policy_block_error(err: &str) -> Option<PolicyBlockError> {
             .unwrap_or_default()
     };
     Some(PolicyBlockError {
+        decision,
         reason_code,
         observed_facts: strings_from_array("observed_facts"),
         policy_boundary: strings_from_array("policy_boundary"),
@@ -396,7 +419,14 @@ fn policy_observed_facts_value(facts: &[String]) -> Value {
 fn policy_block_machine_payload(block: &PolicyBlockError) -> String {
     json!({
         "message_key": policy_block_message_key(&block.reason_code),
+        "decision": &block.decision,
         "reason_code": block.reason_code,
+        "permission_decision": {
+            "decision": &block.decision,
+            "denied_by_policy": true,
+            "needs_confirmation": false,
+            "background_wait": false,
+        },
         "observed_facts": policy_observed_facts_value(&block.observed_facts),
         "policy_boundary_count": block.policy_boundary.len(),
     })
