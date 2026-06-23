@@ -20,6 +20,12 @@ struct ModelConfigItem {
     api_key_masked: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capability_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    input_modalities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    output_modalities: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     available_models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,6 +88,9 @@ fn default_model_item() -> ModelConfigItem {
         api_key_configured: None,
         api_key_masked: None,
         capabilities: Vec::new(),
+        capability_family: None,
+        input_modalities: Vec::new(),
+        output_modalities: Vec::new(),
         available_models: Vec::new(),
         risk_level: None,
         dry_run_supported: None,
@@ -137,6 +146,9 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         api_key_configured: Some(api_key.is_some()),
         api_key_masked: api_key.map(mask_secret),
         capabilities: Vec::new(),
+        capability_family: None,
+        input_modalities: Vec::new(),
+        output_modalities: Vec::new(),
         available_models: read_section_model_cache(table),
         risk_level: None,
         dry_run_supported: None,
@@ -187,28 +199,125 @@ fn model_item_with_capability_metadata(
     mut item: ModelConfigItem,
     section: &str,
 ) -> ModelConfigItem {
-    let (capability, risk_level, dry_run_supported, external_provider) =
-        match section.trim() {
-            "llm" => ("text.chat", "medium", false, true),
-            "image_edit" => ("image.edit", "high", true, true),
-            "image_generation" => ("image.generate", "high", true, true),
-            "image_vision" => ("image.understand", "medium", false, true),
-            "audio_transcribe" => ("audio.transcribe", "medium", false, true),
-            "audio_synthesize" => ("audio.synthesize", "high", true, true),
-            "video_generation" => ("video.generate", "high", true, true),
-            "music_generation" => ("music.generate", "high", true, true),
-            _ => ("unknown", "unknown", false, false),
-        };
-    if capability != "unknown" {
+    let metadata = model_capability_metadata(section);
+    if let Some(capability) = metadata.capability {
         item.capabilities = vec![capability.to_string()];
     }
-    item.risk_level = Some(risk_level.to_string());
-    item.dry_run_supported = Some(dry_run_supported);
-    item.external_provider = Some(external_provider);
+    item.capability_family = Some(metadata.family.to_string());
+    item.input_modalities = metadata
+        .input_modalities
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+    item.output_modalities = metadata
+        .output_modalities
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+    item.risk_level = Some(metadata.risk_level.to_string());
+    item.dry_run_supported = Some(metadata.dry_run_supported);
+    item.external_provider = Some(metadata.external_provider);
     let (provider_supported, unsupported_reason) = provider_support_status(&item);
     item.provider_supported = provider_supported;
     item.unsupported_reason = unsupported_reason;
     item
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ModelCapabilityMetadata {
+    capability: Option<&'static str>,
+    family: &'static str,
+    input_modalities: &'static [&'static str],
+    output_modalities: &'static [&'static str],
+    risk_level: &'static str,
+    dry_run_supported: bool,
+    external_provider: bool,
+}
+
+fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
+    match section.trim() {
+        "llm" => ModelCapabilityMetadata {
+            capability: Some("text.chat"),
+            family: "text",
+            input_modalities: &["text"],
+            output_modalities: &["text"],
+            risk_level: "medium",
+            dry_run_supported: false,
+            external_provider: true,
+        },
+        "image_edit" => ModelCapabilityMetadata {
+            capability: Some("image.edit"),
+            family: "image",
+            input_modalities: &["text", "image"],
+            output_modalities: &["image"],
+            risk_level: "high",
+            dry_run_supported: true,
+            external_provider: true,
+        },
+        "image_generation" => ModelCapabilityMetadata {
+            capability: Some("image.generate"),
+            family: "image",
+            input_modalities: &["text"],
+            output_modalities: &["image"],
+            risk_level: "high",
+            dry_run_supported: true,
+            external_provider: true,
+        },
+        "image_vision" => ModelCapabilityMetadata {
+            capability: Some("image.understand"),
+            family: "image",
+            input_modalities: &["image", "text"],
+            output_modalities: &["text"],
+            risk_level: "medium",
+            dry_run_supported: false,
+            external_provider: true,
+        },
+        "audio_transcribe" => ModelCapabilityMetadata {
+            capability: Some("audio.transcribe"),
+            family: "audio",
+            input_modalities: &["audio"],
+            output_modalities: &["text"],
+            risk_level: "medium",
+            dry_run_supported: false,
+            external_provider: true,
+        },
+        "audio_synthesize" => ModelCapabilityMetadata {
+            capability: Some("audio.synthesize"),
+            family: "audio",
+            input_modalities: &["text"],
+            output_modalities: &["audio"],
+            risk_level: "high",
+            dry_run_supported: true,
+            external_provider: true,
+        },
+        "video_generation" => ModelCapabilityMetadata {
+            capability: Some("video.generate"),
+            family: "video",
+            input_modalities: &["text", "image", "video"],
+            output_modalities: &["video"],
+            risk_level: "high",
+            dry_run_supported: true,
+            external_provider: true,
+        },
+        "music_generation" => ModelCapabilityMetadata {
+            capability: Some("music.generate"),
+            family: "music",
+            input_modalities: &["text", "audio"],
+            output_modalities: &["audio", "music"],
+            risk_level: "high",
+            dry_run_supported: true,
+            external_provider: true,
+        },
+        _ => ModelCapabilityMetadata {
+            capability: None,
+            family: "unknown",
+            input_modalities: &[],
+            output_modalities: &[],
+            risk_level: "unknown",
+            dry_run_supported: false,
+            external_provider: false,
+        },
+    }
 }
 
 fn provider_support_status(item: &ModelConfigItem) -> (Option<bool>, Option<String>) {
@@ -344,6 +453,9 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                     api_key_configured: None,
                     api_key_masked: None,
                     capabilities: Vec::new(),
+                    capability_family: None,
+                    input_modalities: Vec::new(),
+                    output_modalities: Vec::new(),
                     risk_level: None,
                     dry_run_supported: None,
                     external_provider: None,
