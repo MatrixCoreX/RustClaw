@@ -32,6 +32,10 @@ mod filesystem_mutation_lifecycle;
 mod synthesize_failure_replan;
 
 fn test_state_with_registry() -> AppState {
+    test_state_with_registry_excluding(&[])
+}
+
+fn test_state_with_registry_excluding(disabled: &[&str]) -> AppState {
     let agents_by_id = HashMap::from([(
         DEFAULT_AGENT_ID.to_string(),
         AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
@@ -39,12 +43,17 @@ fn test_state_with_registry() -> AppState {
     let registry_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .filter(|skill| !disabled.iter().any(|disabled| skill.as_str() == *disabled))
+        .collect::<HashSet<_>>();
     AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
                 registry: Some(Arc::new(registry)),
-                skills_list: Arc::new(HashSet::new()),
+                skills_list: Arc::new(enabled),
             }))),
             ..crate::CoreServices::test_default()
         },
@@ -62,6 +71,27 @@ fn test_state_with_registry() -> AppState {
         reload_ctx: crate::ReloadContext::default(),
         ask_states: crate::AskStateRegistry::default(),
     }
+}
+
+#[test]
+fn unresolved_disabled_capability_error_is_machine_payload() {
+    let state = test_state_with_registry_excluding(&["fs_basic"]);
+    let error = super::unresolved_capability_error(
+        &state,
+        "filesystem.list_entries",
+        &serde_json::json!({"path": "."}),
+    );
+    let payload: serde_json::Value =
+        serde_json::from_str(&error).expect("unresolved capability error json");
+
+    assert_eq!(payload["error_kind"], "capability_disabled");
+    assert_eq!(payload["message_key"], "capability_disabled");
+    assert_eq!(payload["owner_layer"], "capability_resolver");
+    assert_eq!(payload["outcome"], "blocked");
+    assert_eq!(payload["source"], "registry");
+    assert_eq!(payload["capability_ref"], "filesystem.list_entries");
+    assert_eq!(payload["resolved_ref"], "tool:fs_basic");
+    assert_eq!(payload["planner_kind"], "tool");
 }
 
 #[test]

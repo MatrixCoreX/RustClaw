@@ -3,6 +3,10 @@ use serde_json::json;
 use super::*;
 
 fn state_with_workspace_registry() -> crate::AppState {
+    state_with_workspace_registry_excluding(&[])
+}
+
+fn state_with_workspace_registry_excluding(disabled: &[&str]) -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
     let registry_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
@@ -11,6 +15,7 @@ fn state_with_workspace_registry() -> crate::AppState {
     let enabled = registry
         .enabled_names()
         .into_iter()
+        .filter(|skill| !disabled.iter().any(|disabled| skill.as_str() == *disabled))
         .collect::<std::collections::HashSet<_>>();
     *state
         .core
@@ -490,4 +495,26 @@ fn capability_resolution_record_covers_unresolved_mapping() {
     assert_eq!(record.capability_ref, "unknown.example");
     assert!(record.resolved_ref.is_none());
     assert!(record.planner_kind.is_none());
+}
+
+#[test]
+fn disabled_registry_capability_returns_machine_disabled_record_without_static_fallback() {
+    let state = state_with_workspace_registry_excluding(&["fs_basic"]);
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.list_entries",
+        json!({"path": "."}),
+    );
+
+    assert!(
+        action.is_none(),
+        "disabled registry capability must not fall back to static compat"
+    );
+    assert_eq!(record.owner_layer, "capability_resolver");
+    assert_eq!(record.reason_code, "capability_disabled");
+    assert_eq!(record.outcome, "blocked");
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "filesystem.list_entries");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:fs_basic"));
+    assert_eq!(record.planner_kind, Some("tool"));
 }
