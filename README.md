@@ -108,6 +108,7 @@ flowchart TD
     Q -->|call_capability| R[Resolved tool or skill]
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
+    QA -->|subagent tool| SS[Bounded read-only subagent batch<br/>role/config + aggregation]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
     T --> U{Skill kind}
@@ -115,6 +116,7 @@ flowchart TD
     U -->|external| W[External adapter]
     U -->|runner| X[skill-runner subprocess]
     X --> Y[Concrete skill binary<br/>single-line JSON protocol]
+    SS --> Z
     S --> Z[Observation]
     V --> Z
     W --> Z
@@ -138,6 +140,7 @@ flowchart TD
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
+- `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`). It does not grant write or external-publish permission.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.

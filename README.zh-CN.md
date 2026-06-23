@@ -108,6 +108,7 @@ flowchart TD
     Q -->|call_capability| R[解析后的 tool 或 skill]
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
+    QA -->|subagent tool| SS[有界只读子代理 batch<br/>role/config + aggregation]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
     T --> U{Skill kind}
@@ -115,6 +116,7 @@ flowchart TD
     U -->|external| W[External adapter]
     U -->|runner| X[skill-runner 子进程]
     X --> Y[具体技能二进制<br/>单行 JSON 协议]
+    SS --> Z
     S --> Z[Observation]
     V --> Z
     W --> Z
@@ -138,6 +140,7 @@ flowchart TD
 - `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
+- `subagent tool`：planner 授权的子代理必须显式、只读。单个 child run 或有界 `children` batch 都通过 role/config 校验、timeout/cancellation policy 字段、optional/required failure 隔离，以及只包含机器字段的聚合（`child_results`、`finding_refs`、`evidence_refs`）记录；不会授予写入或外部发布权限。
 - `Skill dispatcher`：直接 `run_skill` 和 planner skill call 复用同一调度层。直接 `run_skill` 不让 normalizer / planner 选择技能，只派发显式的 `payload.skill_name`。Builtin 在进程内运行，external 走 adapter，runner 才启动 `skill-runner` 和具体二进制。
 - `Skill process protocol`：runner 技能通过 stdin/stdout 交换单行 JSON；运行时需要判断时，技能应在 `extra` 返回稳定机器字段。
 - `synthesize_answer`：在循环内需要自然语言合成时调度，不是每个任务固定最后再调用一次 LLM。
