@@ -8,8 +8,9 @@ use super::{
     contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
     preflight_failure_metadata, skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
+    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
+    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
@@ -131,6 +132,18 @@ fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
         registry: Some(registry),
         skills_list: Arc::new(set),
     });
+}
+
+fn install_agent_guard_workspace(name: &str, raw: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-skill-exec-agent-guard-{}-{name}",
+        std::process::id()
+    ));
+    let config_dir = root.join("configs");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&config_dir).expect("create config dir");
+    fs::write(config_dir.join("agent_guard.toml"), raw).expect("write agent guard");
+    root
 }
 
 fn admin_task() -> ClaimedTask {
@@ -907,6 +920,80 @@ fn auto_sudo_retry_does_not_trigger_for_non_admin_or_existing_sudo() {
         err,
     )
     .is_none());
+}
+
+#[tokio::test]
+async fn auto_sudo_retry_obeys_pre_tool_hook_policy() {
+    let mut state = test_state();
+    state.policy.allow_sudo = true;
+    state.skill_rt.workspace_root = install_agent_guard_workspace(
+        "blocked-run-cmd",
+        r#"
+[agent.hooks]
+blocked_tools = ["run_cmd"]
+"#,
+    );
+    enable_test_skills(&state, &["run_cmd", "system_basic"]);
+    insert_auth_key(&state, "rk-admin", "admin");
+    let task = admin_task();
+    let restricted_path = state
+        .skill_rt
+        .workspace_root
+        .join("restricted.log")
+        .to_string_lossy()
+        .to_string();
+    let err = crate::skills::structured_skill_error_from_parts(
+        "system_basic",
+        "permission_denied",
+        "read_range failed for restricted.log",
+        Some("linux"),
+        Some(serde_json::json!({
+            "operation": "metadata",
+            "path": restricted_path.clone()
+        })),
+    );
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+
+    let stop = try_auto_sudo_retry_after_permission_denied(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        "inspect restricted log",
+        "inspect restricted log",
+        "system_basic",
+        Some(&serde_json::json!({
+            "action": "read_range",
+            "path": restricted_path,
+            "n": 1
+        })),
+        &err,
+    )
+    .await
+    .expect("auto sudo retry preflight should not error");
+
+    assert_eq!(
+        stop.as_ref().and_then(|value| value.as_deref()),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(loop_state.task_observations.iter().any(|observation| {
+        observation.get("stage").and_then(serde_json::Value::as_str) == Some("pre_tool_use")
+            && observation
+                .get("decision")
+                .and_then(serde_json::Value::as_str)
+                == Some("deny")
+            && observation
+                .get("action_ref")
+                .and_then(serde_json::Value::as_str)
+                == Some("run_cmd")
+    }));
+    assert!(loop_state
+        .executed_step_results
+        .iter()
+        .all(|step| step.output.is_none()));
+    let _ = fs::remove_dir_all(&state.skill_rt.workspace_root);
 }
 
 fn ok_step(step_id: &str, skill: &str, output: &str) -> crate::executor::StepExecutionResult {
