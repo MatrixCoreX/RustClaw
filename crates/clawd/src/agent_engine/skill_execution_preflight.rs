@@ -470,6 +470,14 @@ fn preflight_permission_decision(
             .or_else(|| manifest.as_ref().and_then(|value| value.risk_level))
     };
     let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
+    let needs_confirmation =
+        state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
+    let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
+        false,
+        needs_confirmation,
+        true,
+        false,
+    );
     let registry = state.get_skills_registry();
     let registry_policy = registry.as_ref().map(|registry| {
         json!({
@@ -483,9 +491,9 @@ fn preflight_permission_decision(
     });
     json!({
         "schema_version": 1,
+        "decision": decision.as_token(),
         "allowed": false,
-        "needs_confirmation": state
-            .skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args)),
+        "needs_confirmation": needs_confirmation,
         "denied_by_policy": true,
         "dry_run_required": false,
         "external_provider_blocked": false,

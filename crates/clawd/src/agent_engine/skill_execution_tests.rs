@@ -235,6 +235,7 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
         .and_then(|extra| extra.get("permission_decision"))
         .expect("permission_decision");
     assert_eq!(permission["allowed"], false);
+    assert_eq!(permission["decision"], serde_json::json!("deny"));
     assert_eq!(permission["denied_by_policy"], true);
     assert_eq!(permission["needs_confirmation"], false);
     assert_eq!(permission["dry_run_required"], false);
@@ -344,6 +345,7 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
         .and_then(|extra| extra.get("permission_decision"))
         .expect("permission_decision");
     assert_eq!(permission["allowed"], false);
+    assert_eq!(permission["decision"], serde_json::json!("deny"));
     assert_eq!(permission["denied_by_policy"], true);
     assert_eq!(
         permission["owner_layer"],
@@ -432,6 +434,7 @@ planner_capabilities = [
         .expect("permission_decision");
 
     assert_eq!(permission["risk_level"], serde_json::json!("high"));
+    assert_eq!(permission["decision"], serde_json::json!("deny"));
     assert_eq!(permission["needs_confirmation"], true);
     assert_eq!(permission["action_effect"], serde_json::json!("observe"));
     assert_eq!(permission["canonical_skill"], serde_json::json!("run_cmd"));
@@ -515,6 +518,7 @@ planner_capabilities = [
         .expect("permission_decision");
 
     assert_eq!(permission["risk_level"], serde_json::json!("low"));
+    assert_eq!(permission["decision"], serde_json::json!("deny"));
     assert_eq!(permission["needs_confirmation"], false);
     assert_eq!(permission["action_effect"], serde_json::json!("observe"));
     assert_eq!(
