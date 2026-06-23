@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copyAuthKeyValue, writeTextToClipboard } from "./auth-keys.ts";
+import { copyAuthKeyValue, maskStoredKey, writeTextToClipboard } from "./auth-keys.ts";
 
 test("copies plaintext key directly when it is already available", async () => {
   const writes: string[] = [];
@@ -104,4 +104,9 @@ test("falls back to execCommand copy when clipboard api is unavailable", async (
 
   assert.equal(textarea.value, "rk-fallback");
   assert.deepEqual(operations, ["set:readonly=", "append", "focus", "select", "exec:copy", "remove"]);
+});
+
+test("masks stored auth keys for display", () => {
+  assert.equal(maskStoredKey("abcdef123456", 4), "abcd********");
+  assert.equal(maskStoredKey("  "), "");
 });

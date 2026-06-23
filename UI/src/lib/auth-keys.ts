@@ -23,6 +23,13 @@ export async function copyAuthKeyValue(options: {
   return fullKey;
 }
 
+export function maskStoredKey(value: string, keep = 6): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const visible = trimmed.slice(0, Math.max(1, keep));
+  return `${visible}${"*".repeat(Math.max(4, trimmed.length - visible.length))}`;
+}
+
 type ClipboardDocument = {
   body?: {
     appendChild: (node: unknown) => void;
