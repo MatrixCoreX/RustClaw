@@ -23,6 +23,8 @@ pub struct AppConfig {
     pub whatsapp_web: WhatsappWebConfig,
     #[serde(default)]
     pub adapters: HashMap<String, AdapterPlaceholderConfig>,
+    #[serde(default)]
+    pub mcp: McpConfig,
     pub database: DatabaseConfig,
     pub worker: WorkerConfig,
     #[serde(default)]
@@ -517,6 +519,91 @@ impl Default for AdapterPlaceholderConfig {
             note: String::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTransportConfig {
+    #[default]
+    Stdio,
+    Sse,
+    StreamableHttp,
+}
+
+impl McpTransportConfig {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+            Self::Sse => "sse",
+            Self::StreamableHttp => "streamable_http",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct McpConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub servers: HashMap<String, McpServerConfig>,
+}
+
+impl McpConfig {
+    pub fn enabled_server_names(&self) -> Vec<String> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        let mut names: Vec<String> = self
+            .servers
+            .iter()
+            .filter(|(_, server)| server.enabled)
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpServerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub transport: McpTransportConfig,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_mcp_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default)]
+    pub capability_prefix: Option<String>,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+}
+
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            transport: McpTransportConfig::default(),
+            command: None,
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            timeout_seconds: default_mcp_timeout_seconds(),
+            capability_prefix: None,
+            allowed_tools: Vec::new(),
+        }
+    }
+}
+
+fn default_mcp_timeout_seconds() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Deserialize)]
