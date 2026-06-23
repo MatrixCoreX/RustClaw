@@ -57,6 +57,36 @@ fn provider_failures_do_not_use_local_fallback_by_default() {
 }
 
 #[test]
+fn dry_run_returns_machine_payload_without_writing_file() {
+    let root = unique_temp_root("image-generate-dry-run");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "prompt": "minimal smoke card",
+            "output_path": "document/out.png",
+            "dry_run": true,
+            "vendor": "minimax",
+            "model": "image-01"
+        }),
+    )
+    .expect("dry-run should not require provider credentials");
+
+    let out = root.join("document/out.png");
+    assert_eq!(text, "IMAGE_GENERATE_DRY_RUN");
+    assert!(!out.exists());
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "image-01");
+    assert_eq!(extra["model_kind"], "dry_run");
+    assert_eq!(
+        extra["planned_outputs"][0]["path"].as_str(),
+        Some(out.to_string_lossy().as_ref())
+    );
+    assert!(extra["outputs"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
 fn explicit_local_fallback_writes_image_file() {
     let root = unique_temp_root("image-generate-local-fallback");
     let mut cfg = RootConfig::default();

@@ -220,6 +220,10 @@ fn execute(
         .and_then(|v| v.as_u64())
         .unwrap_or(1)
         .clamp(1, 4);
+    let dry_run = obj
+        .get("dry_run")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -247,6 +251,29 @@ fn execute(
     )?;
     let output_lang = resolve_output_language(cfg, obj);
     let i18n = TextCatalog::for_lang(workspace_root, &cfg.image_generation, &output_lang);
+
+    if dry_run {
+        let vendor = *providers
+            .first()
+            .ok_or_else(|| "no vendor configured".to_string())?;
+        let model = requested_model
+            .or(first_model_candidate(
+                cfg.image_generation.default_model.as_deref(),
+                vendor_models(&cfg.image_generation, vendor),
+                cfg.image_generation.models.as_ref(),
+            ))
+            .unwrap_or("default");
+        return Ok(build_dry_run_response(
+            &output_path,
+            vendor_name(vendor),
+            model,
+            prompt,
+            size,
+            style,
+            quality,
+            n,
+        ));
+    }
 
     let mut provider_errors: Vec<String> = Vec::new();
     for vendor in providers {
@@ -329,6 +356,45 @@ fn build_success_response(
         extra["fallback"] = fallback;
     }
     (text, extra)
+}
+
+fn build_dry_run_response(
+    output_path: &Path,
+    provider: &str,
+    model: &str,
+    prompt: &str,
+    size: &str,
+    style: Option<&str>,
+    quality: Option<&str>,
+    n: u64,
+) -> (String, Value) {
+    let saved_path = output_path.to_string_lossy().to_string();
+    let mut request = json!({
+        "prompt_chars": prompt.chars().count(),
+        "size": size,
+        "n": n,
+        "output_path": saved_path,
+    });
+    if let Some(style) = style {
+        request["style"] = json!(style);
+    }
+    if let Some(quality) = quality {
+        request["quality"] = json!(quality);
+    }
+    (
+        "IMAGE_GENERATE_DRY_RUN".to_string(),
+        json!({
+            "dry_run": true,
+            "provider": provider,
+            "model": model,
+            "model_kind": "dry_run",
+            "latency_ms": 0,
+            "output_path": saved_path,
+            "outputs": [],
+            "planned_outputs": [{"type":"image_file","path": saved_path}],
+            "request": request
+        }),
+    )
 }
 
 fn first_model_candidate<'a>(

@@ -337,6 +337,7 @@ fn execute_generate(
                 "request": payload,
                 "output_path": output,
                 "outputs": [],
+                "planned_outputs": [{"type":"video_file","path": output}],
             }),
         ));
     }

@@ -8,6 +8,7 @@
 - It saves the generated audio file to disk and returns a file marker in `text`.
 - It supports voice/format/output path tuning plus optional vendor/model routing.
 - It supports Mimo native TTS through `mimo-v2.5-tts` using the chat-completions audio response contract.
+- It supports `dry_run=true` for capability validation without calling a provider or writing an audio file.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `voice`, `response_format`, `output_path`, and `outputs`.
 
 ## Planner Selection Notes
@@ -34,6 +35,7 @@
 | synthesize | `output_path` | no | string(path) | auto | Output audio file path. |
 | synthesize | `vendor` | no | string | impl default | Backend vendor selector. |
 | synthesize | `model` | no | string | impl default | Backend model selector. |
+| synthesize | `dry_run` | no | boolean | `false` | Validate and return planned machine output without provider calls or file writes. |
 
 Provider notes:
 - `minimax` is the current repo default for ordinary TTS requests; use the runtime default unless the user explicitly asks for another provider.
@@ -49,6 +51,8 @@ Provider notes:
 - `response_format`: normalized output audio format
 - `output_path`: saved audio file path
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"audio_file\",\"path\":\"...\"}]`
+- `dry_run`: present and `true` for dry-run validation responses.
+- `planned_outputs`: planned file outputs for dry-run validation responses.
 - `latency_ms`: reserved latency field
 
 ## Error Contract
@@ -65,4 +69,14 @@ Request:
 Response:
 ```json
 {"request_id":"demo-1","status":"ok","text":"VOICE_FILE:tmp/hello.mp3","extra":{"provider":"minimax","model":"speech-2.8-turbo","model_kind":"native","voice":"male-qn-qingse","response_format":"mp3","output_path":"tmp/hello.mp3","outputs":[{"type":"audio_file","path":"tmp/hello.mp3"}],"latency_ms":0},"error_text":null}
+```
+
+### Example 2
+Request:
+```json
+{"request_id":"demo-2","args":{"text":"Hello from RustClaw","format":"mp3","output_path":"tmp/hello.mp3","dry_run":true}}
+```
+Response:
+```json
+{"request_id":"demo-2","status":"ok","text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","voice":"male-qn-qingse","response_format":"mp3","output_path":"tmp/hello.mp3","outputs":[],"planned_outputs":[{"type":"audio_file","path":"tmp/hello.mp3"}],"latency_ms":0},"error_text":null}
 ```

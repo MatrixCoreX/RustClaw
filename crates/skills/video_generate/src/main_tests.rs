@@ -26,6 +26,14 @@ fn dry_run_returns_request_payload_without_key() {
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["dry_run"], true);
     assert_eq!(extra["request"]["model"], DEFAULT_MODEL);
+    assert_eq!(extra["planned_outputs"][0]["type"], "video_file");
+    assert!(
+        extra["planned_outputs"][0]["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(".mp4")),
+        "{extra}"
+    );
+    assert!(extra["outputs"].as_array().unwrap().is_empty());
 }
 
 #[test]

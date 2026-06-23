@@ -23,6 +23,14 @@ fn dry_run_can_generate_with_prompt_only_by_enabling_lyrics_optimizer() {
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["dry_run"], true);
     assert_eq!(extra["request"]["lyrics_optimizer"], true);
+    assert_eq!(extra["planned_outputs"][0]["type"], "audio_file");
+    assert!(
+        extra["planned_outputs"][0]["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(".mp3")),
+        "{extra}"
+    );
+    assert!(extra["outputs"].as_array().unwrap().is_empty());
 }
 
 #[test]

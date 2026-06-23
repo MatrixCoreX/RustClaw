@@ -11,6 +11,7 @@
 - `image_generate` creates images from a prompt and optional style/render controls.
 - It writes generated assets to an output path and returns file markers in `text`.
 - It also supports optional vendor/model routing and response language selection for the human-readable success text.
+- It supports `dry_run=true` for capability validation without calling a provider or writing an image file.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, and `outputs`.
 
 ## Planner Selection Notes (from interface)
@@ -41,6 +42,7 @@
 | generate | `vendor` | no | string | impl default | Backend vendor selector. |
 | generate | `model` | no | string | impl default | Backend model selector. |
 | generate | `timeout_seconds` | no | integer | impl/config default | Per-request timeout, clamped by implementation. |
+| generate | `dry_run` | no | boolean | `false` | Validate and return planned machine output without provider calls or file writes. |
 
 ## Error Contract (from interface)
 - Missing or empty `prompt`.
@@ -56,6 +58,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-1","status":"ok","text":"Generated successfully and saved: image/out-1.png\nFILE:image/out-1.png\nEPHEMERAL:IMAGE_SAVED","extra":{"provider":"openai","model":"gpt-image-1","model_kind":"native","latency_ms":0,"outputs":[{"type":"image_file","path":"image/out-1.png"}]},"error_text":null}
+```
+
+### Example 2
+Request:
+```json
+{"request_id":"demo-2","args":{"prompt":"Minimal black app icon with claw mark","output_path":"tmp/icon.png","dry_run":true}}
+```
+Response:
+```json
+{"request_id":"demo-2","status":"ok","text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"tmp/icon.png","outputs":[],"planned_outputs":[{"type":"image_file","path":"tmp/icon.png"}]},"error_text":null}
 ```
 
 ## Output Contract

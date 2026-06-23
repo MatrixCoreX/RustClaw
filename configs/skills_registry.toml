@@ -681,9 +681,9 @@ capabilities = [
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
 planner_capabilities = [
-  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["size", "style", "quality", "n", "output_path", "response_language", "language", "vendor", "model", "timeout_seconds", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
-input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -747,9 +747,9 @@ output_kind = "text"
 capabilities = ["llm", "net", "fs.write"]
 side_effect = true
 planner_capabilities = [
-  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
+  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action" },
 ]
-input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" } } }
+input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, dry_run = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
