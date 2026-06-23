@@ -77,6 +77,7 @@ import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 import { useAuthKeysRuntime } from "./hooks/useAuthKeysRuntime";
 import { useChannelBindingRuntime } from "./hooks/useChannelBindingRuntime";
 import { useServiceActionsRuntime } from "./hooks/useServiceActionsRuntime";
+import { useWhatsappWebRuntime } from "./hooks/useWhatsappWebRuntime";
 
 import type {
   ApiResponse,
@@ -92,7 +93,6 @@ import type {
   AuthIdentityResponse,
   NniDeviceMeta,
   AgentConfigItem,
-  WhatsappWebLoginStatus,
   WechatLoginStatus,
   WechatQrStartResponse,
   WechatQrWaitResponse,
@@ -257,12 +257,6 @@ export default function App() {
   const [chatAgentMode, setChatAgentMode] = useState(true);
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [waLoginDialogOpen, setWaLoginDialogOpen] = useState(false);
-  const [waLoginLoading, setWaLoginLoading] = useState(false);
-  const [waLoginError, setWaLoginError] = useState<string | null>(null);
-  const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
-  const [waWebBridgeReachable, setWaWebBridgeReachable] = useState(false);
-  const [waLogoutLoading, setWaLogoutLoading] = useState(false);
   const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
   const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
   const [wechatLoginStatus, setWechatLoginStatus] = useState<WechatLoginStatus | null>(null);
@@ -917,60 +911,24 @@ export default function App() {
       await fetchHealth();
     },
   });
-
-  const fetchWhatsappWebLoginStatus = async (silent = false) => {
-    if (!silent) {
-      setWaLoginLoading(true);
-      setWaLoginError(null);
-    }
-    try {
-      const res = await apiFetch(`/v1/whatsapp-web/login-status`);
-      const body = (await res.json()) as ApiResponse<WhatsappWebLoginStatus>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `获取 WhatsApp 登录状态失败 (${res.status})`);
-      }
-      setWaLoginStatus(body.data);
-      setWaWebBridgeReachable(true);
-      if (!silent) {
-        setWaLoginError(null);
-      }
-    } catch (err) {
-      setWaWebBridgeReachable(false);
-      const message = err instanceof Error ? err.message : "未知错误";
-      if (!silent) {
-        setWaLoginError(message);
-      }
-    } finally {
-      if (!silent) {
-        setWaLoginLoading(false);
-      }
-    }
-  };
-
-  const logoutWhatsappWeb = async () => {
-    setWaLogoutLoading(true);
-    setWaLoginError(null);
-    try {
-      const res = await apiFetch(`/v1/whatsapp-web/logout`, {
-        method: "POST",
-      });
-      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
-      if (!res.ok || !body.ok) {
-        throw new Error(body.error || `退出登录失败 (${res.status})`);
-      }
-      await sleep(1200);
-      await fetchWhatsappWebLoginStatus();
-      setServiceActionMessage({
-        tone: "success",
-        text: t("已发起 WhatsApp Web 退出登录。", "WhatsApp Web logout requested."),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setWaLoginError(message);
-    } finally {
-      setWaLogoutLoading(false);
-    }
-  };
+  const {
+    waLoginDialogOpen,
+    setWaLoginDialogOpen,
+    waLoginLoading,
+    waLoginError,
+    waLoginStatus,
+    waWebBridgeReachable,
+    waLogoutLoading,
+    fetchWhatsappWebLoginStatus,
+    logoutWhatsappWeb,
+  } = useWhatsappWebRuntime({
+    apiFetch,
+    t,
+    apiBase,
+    uiAuthReady,
+    whatsappWebHealthy: health?.whatsapp_web_healthy === true,
+    setServiceActionMessage,
+  });
 
   const fetchWechatLoginStatus = async (silent = false) => {
     if (!silent) {
@@ -2072,37 +2030,6 @@ export default function App() {
     void fetchMemoryData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady]);
-
-  useEffect(() => {
-    if (!uiAuthReady) return;
-    if (!waLoginDialogOpen) return;
-    if (health?.whatsapp_web_healthy !== true) {
-      setWaWebBridgeReachable(false);
-      setWaLoginError(null);
-      return;
-    }
-    void fetchWhatsappWebLoginStatus();
-    const timer = window.setInterval(() => {
-      void fetchWhatsappWebLoginStatus(true);
-    }, 2000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waLoginDialogOpen, apiBase, uiAuthReady, health?.whatsapp_web_healthy]);
-
-  useEffect(() => {
-    if (!uiAuthReady) return;
-    if (health?.whatsapp_web_healthy !== true) {
-      setWaWebBridgeReachable(false);
-      return;
-    }
-    // Keep whatsapp web login status fresh for row actions.
-    void fetchWhatsappWebLoginStatus(true);
-    const timer = window.setInterval(() => {
-      void fetchWhatsappWebLoginStatus(true);
-    }, 5000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, health?.whatsapp_web_healthy]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
