@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::{client, output, task};
+use crate::{client, events::EventFilters, output, task};
 
 pub(crate) fn run_health(base_url: &str, key: Option<&str>) -> Result<()> {
     let url = format!("{}/health", client::base_v1(base_url));
@@ -41,7 +41,7 @@ pub(crate) fn run_submit(
         if json_output {
             output::print_json_pretty(&task.raw_data);
         } else {
-            output::print_task_status(&task, false, &[]);
+            output::print_task_status(&task, false, &EventFilters::default());
         }
     } else if json_output {
         output::print_json_pretty(&json!({
@@ -71,7 +71,7 @@ pub(crate) fn run_skill(
         if json_output {
             output::print_json_pretty(&task.raw_data);
         } else {
-            output::print_task_status(&task, false, &[]);
+            output::print_task_status(&task, false, &EventFilters::default());
         }
     } else if json_output {
         output::print_json_pretty(&json!({
@@ -131,20 +131,22 @@ pub(crate) fn run_get(
     task_id: &str,
     events: bool,
     event_types: &[String],
+    checkpoint_id: Option<&str>,
+    policy_decision: Option<&str>,
+    subagent_id: Option<&str>,
+    async_job_id: Option<&str>,
     events_output: Option<&PathBuf>,
 ) -> Result<()> {
     let task = task::get_task_status(base_url, key, task_id)?;
-    let requested_event_types = event_types
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    output::print_task_status(
-        &task,
-        events || !requested_event_types.is_empty(),
-        &requested_event_types,
+    let event_filters = EventFilters::from_parts(
+        event_types,
+        checkpoint_id,
+        policy_decision,
+        subagent_id,
+        async_job_id,
     );
-    let filtered_events = output::filtered_event_lines(&task, &requested_event_types);
+    output::print_task_status(&task, events || !event_filters.is_empty(), &event_filters);
+    let filtered_events = output::filtered_event_lines(&task, &event_filters);
     if let Some(path) = events_output {
         let mut content = filtered_events.join("\n");
         if !content.is_empty() {
@@ -178,16 +180,22 @@ pub(crate) fn run_watch(
     task_id: &str,
     events: bool,
     event_types: &[String],
+    checkpoint_id: Option<&str>,
+    policy_decision: Option<&str>,
+    subagent_id: Option<&str>,
+    async_job_id: Option<&str>,
     until_terminal: bool,
     interval_ms: u64,
     json_output: bool,
     jsonl_output: bool,
 ) -> Result<()> {
-    let requested_event_types = event_types
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
+    let event_filters = EventFilters::from_parts(
+        event_types,
+        checkpoint_id,
+        policy_decision,
+        subagent_id,
+        async_job_id,
+    );
     let mut last_snapshot = String::new();
     let mut seen_events = HashSet::new();
     let interval = Duration::from_millis(interval_ms.max(100));
@@ -215,13 +223,13 @@ pub(crate) fn run_watch(
                 task.lifecycle_summary_tokens().join(" ")
             );
             if snapshot != last_snapshot {
-                output::print_task_status(&task, false, &requested_event_types);
+                output::print_task_status(&task, false, &event_filters);
                 last_snapshot = snapshot;
             }
         }
 
-        if events || !requested_event_types.is_empty() {
-            for line in output::filtered_event_lines(&task, &requested_event_types) {
+        if events || !event_filters.is_empty() {
+            for line in output::filtered_event_lines(&task, &event_filters) {
                 if seen_events.insert(line.clone()) {
                     println!("{line}");
                 }
@@ -241,15 +249,21 @@ pub(crate) fn run_events(
     key: &str,
     task_id: &str,
     event_types: &[String],
+    checkpoint_id: Option<&str>,
+    policy_decision: Option<&str>,
+    subagent_id: Option<&str>,
+    async_job_id: Option<&str>,
     jsonl_output: bool,
 ) -> Result<()> {
     let task = task::get_task_status(base_url, key, task_id)?;
-    let requested_event_types = event_types
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    let events = output::filtered_events(&task, &requested_event_types);
+    let event_filters = EventFilters::from_parts(
+        event_types,
+        checkpoint_id,
+        policy_decision,
+        subagent_id,
+        async_job_id,
+    );
+    let events = output::filtered_events(&task, &event_filters);
     for event in events {
         if jsonl_output {
             println!(
@@ -258,6 +272,7 @@ pub(crate) fn run_events(
                     "task_id": &task.task_id,
                     "event_type": &event.event_type,
                     "line": &event.line,
+                    "fields": &event.fields,
                 }))?
             );
         } else {
