@@ -85,8 +85,8 @@ pub(crate) fn print_active_task_table(body: &serde_json::Value) {
 pub(crate) fn print_skill_table(body: &serde_json::Value) {
     let items = skill_items(body);
     println!(
-        "{:<30} {:<10} {:<12} {:<8} {:<8} description",
-        "skill", "kind", "planner", "risk", "available"
+        "{:<30} {:<10} {:<12} {:<8} {:<8} {:<22} description",
+        "skill", "kind", "planner", "risk", "available", "reason"
     );
     for item in items {
         let name = value_token(item.get("name"));
@@ -94,10 +94,11 @@ pub(crate) fn print_skill_table(body: &serde_json::Value) {
         let planner_kind = value_token(item.get("planner_kind"));
         let risk = value_token(item.get("risk_level"));
         let available = value_token(item.get("runtime_available"));
+        let unavailable_reason = value_token(item.get("unavailable_reason"));
         let description = truncate_display_token(&value_token(item.get("description")), 80);
         println!(
-            "{:<30} {:<10} {:<12} {:<8} {:<8} {}",
-            name, kind, planner_kind, risk, available, description
+            "{:<30} {:<10} {:<12} {:<8} {:<8} {:<22} {}",
+            name, kind, planner_kind, risk, available, unavailable_reason, description
         );
     }
 }
@@ -105,8 +106,8 @@ pub(crate) fn print_skill_table(body: &serde_json::Value) {
 pub(crate) fn print_capability_table(body: &serde_json::Value) {
     let items = skill_items(body);
     println!(
-        "{:<30} {:<40} {:<30} {:<8} available",
-        "skill", "planner_capabilities", "capabilities", "risk"
+        "{:<30} {:<40} {:<30} {:<8} {:<8} reason",
+        "skill", "planner_capabilities", "capabilities", "risk", "available"
     );
     for item in items {
         let planner_capabilities = join_string_array(item.get("planner_capabilities"));
@@ -117,13 +118,15 @@ pub(crate) fn print_capability_table(body: &serde_json::Value) {
         let name = value_token(item.get("name"));
         let risk = value_token(item.get("risk_level"));
         let available = value_token(item.get("runtime_available"));
+        let unavailable_reason = value_token(item.get("unavailable_reason"));
         println!(
-            "{:<30} {:<40} {:<30} {:<8} {}",
+            "{:<30} {:<40} {:<30} {:<8} {:<8} {}",
             name,
             truncate_display_token(&planner_capabilities, 40),
             truncate_display_token(&capabilities, 30),
             risk,
-            available
+            available,
+            unavailable_reason
         );
     }
 }

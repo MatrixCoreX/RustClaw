@@ -141,7 +141,9 @@ export interface SkillListItem {
   side_effect?: boolean | null;
   retryable?: boolean | null;
   output_kind?: string | null;
+  enabled?: boolean | null;
   runtime_available?: boolean | null;
+  unavailable_reason?: string | null;
   current_os?: string | null;
   unsupported_os?: string[] | null;
   missing_required_bins?: string[] | null;

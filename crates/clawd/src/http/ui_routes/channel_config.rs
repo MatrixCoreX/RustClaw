@@ -1104,7 +1104,11 @@ struct SkillListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     output_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     runtime_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unavailable_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     current_os: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
