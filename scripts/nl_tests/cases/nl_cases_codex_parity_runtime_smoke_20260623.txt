@@ -27,6 +27,12 @@ codex_parity_runtime_smoke|task_lifecycle_readonly_zh|covers:task_control,task_l
 
 codex_parity_runtime_smoke|subagent_review_boundary_zh|covers:subagent,review,boundary,no_write;requires_tool_call=true;local_readonly|让只读 review 子代理检查 AGENTS.md 和当前计划文件的执行边界是否一致；子代理不能写文件、不能发布外部内容，最后只返回机器化边界摘要。|expect=boundary
 
+codex_parity_runtime_smoke|subagent_bounded_batch_aggregation_en|covers:subagent,bounded_parallel,aggregation,no_write;requires_tool_call=true;local_readonly|Ask the subagent tool to run a bounded read-only batch with explorer and verifier child roles over AGENTS.md and the active plan, then return only the structured aggregation fields including execution_mode and finding_refs; do not write files or publish externally.|expect=bounded_parallel_readonly_child_runs
+
+codex_parity_runtime_smoke|subagent_optional_child_failure_en|covers:subagent,bounded_parallel,optional_child_failure,failure_isolated,no_write;requires_tool_call=true;local_readonly|Dry-run a subagent batch where one optional child is invalid or over the read-only parallel budget; the parent task should continue and expose optional_failed_count without claiming external work happened.|expect=optional_failed_count
+
+codex_parity_runtime_smoke|subagent_required_child_failure_zh|covers:subagent,bounded_parallel,required_child_failure,failure,no_write;requires_tool_call=true;local_readonly|只做结构化 dry-run：模拟一个 required=true 的只读子代理失败，父任务必须给出 subagent_required_child_failed 或 failed_required_child 机器状态，不能写文件、不能发布。|expect=subagent_required_child_failed
+
 codex_parity_runtime_smoke|hook_permission_boundary_dry_run_zh|covers:agent_hooks,pre_tool_use,permission_boundary;requires_tool_call=true;dry_run,no_external_side_effect|只检查当前 hook/permission 配置能否表达 PreToolUse 的 allow、deny、require_confirmation、background_wait 机器决策；不要修改配置文件；最后包含机器字段 stage=pre_tool_use。|expect=pre_tool_use
 
 codex_parity_runtime_smoke|background_async_cmd_contract_zh|covers:async_start,checkpoint,run_cmd,poll_async_job;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：先 sleep 2 再输出 RUSTCLAW_ASYNC_SMOKE；如果任务进入 waiting/background，就返回 checkpoint_id、poll_ref 和 next_check_after；不要重复启动同一个副作用。|expect=checkpoint_id
