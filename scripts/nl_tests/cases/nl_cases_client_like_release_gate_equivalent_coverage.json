@@ -2,8 +2,8 @@
   "input_rows": 2096,
   "target_cases": 240,
   "selected_rows": 285,
-  "coverage_categories": 317,
-  "covered_categories": 317,
+  "coverage_categories": 318,
+  "covered_categories": 318,
   "missing_categories": [],
   "selected_suite_counts": {
     "act": 37,
@@ -91,6 +91,7 @@
     "exec": 2,
     "execution_failed_step": 1,
     "expect_exact_scalar": 5,
+    "expect_max_lines:3": 1,
     "extension": 2,
     "failure": 1,
     "feedback": 2,
