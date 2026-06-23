@@ -184,6 +184,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/health", get(health))
         .route("/skills", get(list_skills))
+        .route("/capabilities", get(list_capabilities))
         .route(
             "/skills/config",
             get(get_skills_config).post(update_skills_config),

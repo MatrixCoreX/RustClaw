@@ -396,7 +396,7 @@ pub(crate) fn run_skills(base_url: &str, key: &str, config: bool, json_output: b
 }
 
 pub(crate) fn run_capabilities(base_url: &str, key: &str, json_output: bool) -> Result<()> {
-    let body = get_v1_json(base_url, key, "/skills/config", "capabilities")?;
+    let body = get_v1_json(base_url, key, "/capabilities", "capabilities")?;
     if json_output {
         output::print_json_pretty(&body);
     } else {

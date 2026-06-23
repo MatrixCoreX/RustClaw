@@ -309,3 +309,48 @@ api_key = "video-secret"
     assert_eq!(item.dry_run_supported, Some(true));
     assert_eq!(item.external_provider, Some(true));
 }
+
+#[test]
+fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
+    let skill = SkillListItem {
+        name: "video_generate".to_string(),
+        description: None,
+        kind: Some("builtin".to_string()),
+        planner_kind: Some("capability".to_string()),
+        group: Some("media".to_string()),
+        risk_level: Some("high".to_string()),
+        auto_invocable: Some(false),
+        requires_confirmation: Some(true),
+        side_effect: Some(true),
+        retryable: Some(true),
+        output_kind: Some("mixed".to_string()),
+        runtime_available: Some(true),
+        current_os: Some("linux".to_string()),
+        unsupported_os: None,
+        missing_required_bins: None,
+        missing_optional_bins: None,
+        supported_os: None,
+        required_bins: None,
+        optional_bins: None,
+        platform_notes: None,
+        planner_capabilities: Some(vec!["video.generate".to_string()]),
+        capabilities: Some(vec!["media.video".to_string()]),
+    };
+
+    let items = capability_items_from_skill_items(&[skill]);
+
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().any(|item| {
+        item.skill_name == "video_generate"
+            && item.capability == "video.generate"
+            && item.capability_kind == "planner_capability"
+            && item.risk_level.as_deref() == Some("high")
+            && item.runtime_available == Some(true)
+    }));
+    assert!(items.iter().any(|item| {
+        item.skill_name == "video_generate"
+            && item.capability == "media.video"
+            && item.capability_kind == "runtime_capability"
+            && item.output_kind.as_deref() == Some("mixed")
+    }));
+}
