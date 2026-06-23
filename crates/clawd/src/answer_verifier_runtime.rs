@@ -772,21 +772,7 @@ pub(super) fn structured_read_output_contains_scalar_answer(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
         return false;
     };
-    let mut outputs = vec![value];
-    let mut index = 0usize;
-    while index < outputs.len() {
-        let value = &outputs[index];
-        if structured_read_json_contains_scalar_answer(value, candidate_answer) {
-            return true;
-        }
-        if let Some(text_value) = value.get("text").and_then(|text| text.as_str()) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text_value.trim()) {
-                outputs.push(parsed);
-            }
-        }
-        index += 1;
-    }
-    false
+    structured_read_json_contains_scalar_answer(&value, candidate_answer)
 }
 
 pub(super) fn structured_read_json_contains_scalar_answer(
@@ -1122,13 +1108,6 @@ pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde
     let mut values = vec![value.clone()];
     if let Some(extra) = value.get("extra") {
         values.push(extra.clone());
-    }
-    if let Some(inner) = value
-        .get("text")
-        .and_then(|text| text.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-    {
-        values.push(inner);
     }
     values
 }

@@ -106,17 +106,15 @@ fn observed_local_health_finding(reply: &AskReply) -> Option<LocalHealthFinding>
 fn collect_local_health_fields_from_output(output: &str, finding: &mut LocalHealthFinding) {
     if let Ok(value) = serde_json::from_str::<Value>(output) {
         collect_local_health_fields_from_json(&value, finding);
+        return;
     }
-    collect_local_health_fields_from_text(output, finding);
+    collect_local_health_fields_from_command_output(output, finding);
 }
 
 fn collect_local_health_fields_from_json(value: &Value, finding: &mut LocalHealthFinding) {
     let payload = value.get("extra").unwrap_or(value);
     collect_health_check_payload_fields(payload, finding);
     collect_process_basic_payload_fields(payload, finding);
-    if let Some(text) = value.get("text").and_then(Value::as_str) {
-        collect_local_health_fields_from_text(text, finding);
-    }
 }
 
 fn collect_health_check_payload_fields(payload: &Value, finding: &mut LocalHealthFinding) {
@@ -237,8 +235,15 @@ fn collect_log_fields(prefix: &str, value: &Value, finding: &mut LocalHealthFind
     }
 }
 
-fn collect_local_health_fields_from_text(text: &str, finding: &mut LocalHealthFinding) {
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+fn collect_local_health_fields_from_command_output(
+    command_output: &str,
+    finding: &mut LocalHealthFinding,
+) {
+    for line in command_output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         collect_df_root_fields(line, finding);
         collect_free_fields(line, finding);
         collect_uptime_load_fields(line, finding);
