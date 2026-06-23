@@ -22,12 +22,14 @@ Equivalent environment variables:
 NNI_SERVER_HOST=0.0.0.0 \
 NNI_SERVER_PORT=8797 \
 NNI_SERVER_STATE_PATH=data/nni-server-state.json \
+NNI_SERVER_LOG_PATH=logs/nni-server.log \
 NNI_SERVER_PUBLIC_KEY_WHITELIST=<128-hex-pubkey>[,<128-hex-pubkey>...] \
 node nni_server/server.mjs
 ```
 
 The server stores its tasks, joined devices, compliance records, and public-key whitelist in the JSON state file configured by `NNI_SERVER_STATE_PATH`.
 Request records stay in this server-side state file for administrator audit and troubleshooting. The service does not expose a public request-record query API.
+Runtime events are written as JSONL to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) so NNI logs stay separate from `claw.log`. Set `NNI_SERVER_LOG_STDOUT=1` only when a supervisor intentionally captures NNI logs elsewhere.
 
 ## Public-Key Whitelist
 
