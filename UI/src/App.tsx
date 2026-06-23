@@ -4874,6 +4874,9 @@ export default function App() {
   };
   const skillRuntimeIssue = (item?: SkillListItem) => {
     if (!item || item.runtime_available !== false) return null;
+    if (item.unavailable_reason === "skill_disabled" || item.enabled === false) {
+      return t("该技能当前未开启", "This skill is currently disabled");
+    }
     if (item.unsupported_os?.length) {
       return t(
         `当前系统 ${item.current_os || "unknown"} 不在支持列表：${item.unsupported_os.join(", ")}`,

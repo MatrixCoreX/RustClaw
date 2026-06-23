@@ -324,7 +324,9 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         side_effect: Some(true),
         retryable: Some(true),
         output_kind: Some("mixed".to_string()),
+        enabled: Some(true),
         runtime_available: Some(true),
+        unavailable_reason: None,
         current_os: Some("linux".to_string()),
         unsupported_os: None,
         missing_required_bins: None,
@@ -344,6 +346,7 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         item.skill_name == "video_generate"
             && item.capability == "video.generate"
             && item.capability_kind == "planner_capability"
+            && item.enabled == Some(true)
             && item.risk_level.as_deref() == Some("high")
             && item.runtime_available == Some(true)
     }));
@@ -353,4 +356,46 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
             && item.capability_kind == "runtime_capability"
             && item.output_kind.as_deref() == Some("mixed")
     }));
+}
+
+#[test]
+fn capability_items_include_disabled_machine_reason() {
+    let skill = SkillListItem {
+        name: "fs_basic".to_string(),
+        description: None,
+        kind: Some("builtin".to_string()),
+        planner_kind: Some("tool".to_string()),
+        group: Some("filesystem".to_string()),
+        risk_level: Some("high".to_string()),
+        auto_invocable: Some(false),
+        requires_confirmation: Some(true),
+        side_effect: Some(true),
+        retryable: Some(false),
+        output_kind: Some("text".to_string()),
+        enabled: Some(false),
+        runtime_available: Some(false),
+        unavailable_reason: Some("skill_disabled".to_string()),
+        current_os: Some("linux".to_string()),
+        unsupported_os: None,
+        missing_required_bins: None,
+        missing_optional_bins: None,
+        supported_os: None,
+        required_bins: None,
+        optional_bins: None,
+        platform_notes: None,
+        planner_capabilities: Some(vec!["filesystem.list_entries".to_string()]),
+        capabilities: None,
+    };
+
+    let items = capability_items_from_skill_items(&[skill]);
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].skill_name, "fs_basic");
+    assert_eq!(items[0].capability, "filesystem.list_entries");
+    assert_eq!(items[0].enabled, Some(false));
+    assert_eq!(items[0].runtime_available, Some(false));
+    assert_eq!(
+        items[0].unavailable_reason.as_deref(),
+        Some("skill_disabled")
+    );
 }

@@ -401,6 +401,12 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     let availability = registry_entry
         .as_ref()
         .map(crate::skill_availability::evaluate_entry_availability);
+    let enabled = skill_enabled_for_state(state, skill_name);
+    let platform_available = availability
+        .as_ref()
+        .map(crate::skill_availability::SkillRuntimeAvailability::is_available);
+    let runtime_available = platform_available.map(|available| available && enabled);
+    let unavailable_reason = skill_unavailable_reason(enabled, availability.as_ref());
     let description = registry_entry
         .as_ref()
         .and_then(|entry| entry.description.as_ref())
@@ -439,7 +445,9 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
         output_kind: registry_entry
             .as_ref()
             .map(|entry| output_kind_token(entry.output_kind).to_string()),
-        runtime_available: availability.as_ref().map(|item| item.is_available()),
+        enabled: Some(enabled),
+        runtime_available,
+        unavailable_reason,
         current_os: availability.as_ref().map(|item| item.current_os.clone()),
         unsupported_os: availability
             .as_ref()
@@ -491,6 +499,28 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     }
 }
 
+fn skill_enabled_for_state(state: &AppState, skill_name: &str) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains(skill_name)
+}
+
+fn skill_unavailable_reason(
+    enabled: bool,
+    availability: Option<&crate::skill_availability::SkillRuntimeAvailability>,
+) -> Option<String> {
+    if !enabled {
+        return Some("skill_disabled".to_string());
+    }
+    let availability = availability?;
+    if availability.unsupported_os.is_some() {
+        return Some("unsupported_os".to_string());
+    }
+    if !availability.missing_required_bins.is_empty() {
+        return Some("missing_required_bins".to_string());
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CapabilityListItem {
     skill_name: String,
@@ -501,7 +531,11 @@ struct CapabilityListItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     risk_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     runtime_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unavailable_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_kind: Option<String>,
 }
@@ -540,7 +574,9 @@ fn capability_list_item(
         capability_kind: capability_kind.to_string(),
         planner_kind: skill.planner_kind.clone(),
         risk_level: skill.risk_level.clone(),
+        enabled: skill.enabled,
         runtime_available: skill.runtime_available,
+        unavailable_reason: skill.unavailable_reason.clone(),
         output_kind: skill.output_kind.clone(),
     }
 }
