@@ -14,6 +14,8 @@
     "fallback_gate_policy",
     "decision",
     "terminal_intent",
+    "control_intent",
+    "control_reason_code",
     "reason_code",
     "clarify_reason_code",
     "validation_status",
@@ -66,6 +68,15 @@
       "type": "string",
       "enum": ["answer", "clarify", "cannot_proceed", "needs_confirmation", "continue"],
       "description": "Stable terminal/continuation intent derived from the planner-loop decision. This is machine state, not a rendered user reply."
+    },
+    "control_intent": {
+      "type": "string",
+      "enum": ["answer", "clarify", "act", "recover", "wait", "stop"],
+      "description": "Stable loop-control token explaining whether this round should answer, clarify, act, recover, wait, or stop."
+    },
+    "control_reason_code": {
+      "type": "string",
+      "description": "Stable machine reason code for the loop-control token."
     },
     "reason_code": {
       "type": "string",
