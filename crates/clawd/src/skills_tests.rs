@@ -900,6 +900,7 @@ fn policy_block_error_roundtrips_structured_payload() {
         vec!["Do not access the denied path.".to_string()],
     );
     let parsed = parse_policy_block_error(&encoded).expect("policy block payload");
+    assert_eq!(parsed.decision, "deny");
     assert_eq!(parsed.reason_code, "path_outside_workspace");
     assert_eq!(parsed.observed_facts, vec!["denied_path: /etc/shadow"]);
     assert_eq!(
@@ -908,6 +909,18 @@ fn policy_block_error_roundtrips_structured_payload() {
     );
     let normalized: serde_json::Value =
         serde_json::from_str(&normalize_skill_error_for_user("read_file", &encoded)).unwrap();
+    assert_eq!(
+        normalized
+            .pointer("/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+    assert_eq!(
+        normalized
+            .pointer("/permission_decision/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
     assert_eq!(
         normalized
             .pointer("/message_key")
@@ -920,6 +933,23 @@ fn policy_block_error_roundtrips_structured_payload() {
             .and_then(serde_json::Value::as_str),
         Some("path_outside_workspace")
     );
+}
+
+#[test]
+fn legacy_policy_block_payload_defaults_to_deny_decision() {
+    let encoded = format!(
+        "__RC_POLICY_BLOCK__:{}",
+        json!({
+            "reason_code": "legacy_policy_block",
+            "observed_facts": ["policy_token: skill:demo"],
+            "policy_boundary": []
+        })
+    );
+
+    let parsed = parse_policy_block_error(&encoded).expect("legacy policy block payload");
+
+    assert_eq!(parsed.decision, "deny");
+    assert_eq!(parsed.reason_code, "legacy_policy_block");
 }
 
 #[test]
@@ -936,6 +966,12 @@ fn policy_block_default_text_returns_machine_payload() {
     let parsed = parse_policy_block_error(&encoded).expect("policy block payload");
     let text = policy_block_default_text(&state, &task, "读取 /etc/shadow 第一行", &parsed);
     let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/permission_decision/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
     assert_eq!(
         payload
             .pointer("/message_key")
