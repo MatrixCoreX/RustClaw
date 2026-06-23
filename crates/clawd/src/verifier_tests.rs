@@ -723,6 +723,13 @@ fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
     assert_eq!(
         result
             .permission_decision
+            .pointer("/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+    assert_eq!(
+        result
+            .permission_decision
             .pointer("/status_code")
             .and_then(serde_json::Value::as_str),
         Some("risk_budget_exceeded")
@@ -1524,9 +1531,23 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
     assert_eq!(
         result
             .permission_decision
+            .pointer("/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
+    );
+    assert_eq!(
+        result
+            .permission_decision
             .pointer("/reason_code")
             .and_then(serde_json::Value::as_str),
         Some("verify_confirmation_required")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
     );
     assert_eq!(
         result
