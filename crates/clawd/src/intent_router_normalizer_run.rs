@@ -858,6 +858,7 @@ pub(crate) async fn run_intent_normalizer(
         if let Some(repair_reason) = restore_declared_publishing_preview_contract(
             declared_semantic_kind,
             active_text_followup_route_repair,
+            structural_contract_repair,
             schedule_kind,
             &mut output_contract,
             &mut needs_clarify,

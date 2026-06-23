@@ -85,6 +85,180 @@ fn fs_basic_lifecycle_machine_tokens_repair_command_summary_contract() {
 }
 
 #[test]
+fn media_generation_machine_tokens_repair_command_summary_contract() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_media_generation_path_report_machine_contract_repair(
+        &mut contract,
+        "capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs",
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "document/media_dry_run/image_status_card.png"
+    );
+}
+
+#[test]
+fn media_generation_machine_tokens_override_publishing_preview_contract() {
+    let request = "capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        semantic_kind: OutputSemanticKind::PublishingPreview,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+}
+
+#[test]
+fn media_generation_path_tokens_force_evidence_for_generic_contract() {
+    let request = "capability=music.generate dry_run=true output_path=document/media_dry_run/ambient_loop.mp3 planned_outputs";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: false,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+}
+
+#[test]
+fn media_generation_machine_tokens_repair_generic_contract() {
+    let request = "capability=audio.synthesize dry_run=true output_path=document/media_dry_run/audio_check.mp3 planned_outputs";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/audio_check.mp3".to_string(),
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "document/media_dry_run/audio_check.mp3"
+    );
+}
+
+#[test]
+fn media_generation_machine_tokens_override_filesystem_mutation_contract() {
+    let request = "capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+}
+
+#[test]
 fn structural_config_field_value_repairs_to_config_mutation_contract() {
     let request = "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);

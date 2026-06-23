@@ -483,6 +483,65 @@ fn generated_file_path_report_replaces_write_status_with_written_path() {
 }
 
 #[test]
+fn generated_file_path_report_projects_media_dry_run_payload() {
+    let state = test_state();
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "document/media_dry_run".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "image_generate",
+        r#"{"text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","planned_outputs":[{"type":"image_file","path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"}],"outputs":[]}}"#,
+    ));
+
+    let (answer, summary) = direct_generated_file_path_report_from_dry_run_payload(
+        &loop_state,
+        Some(&agent_run_context),
+    )
+    .expect("dry_run payload should project generated file path report");
+
+    assert!(answer.contains("dry_run=true"), "answer: {answer}");
+    assert!(answer.contains("provider=minimax"), "answer: {answer}");
+    assert!(answer.contains("model=image-01"), "answer: {answer}");
+    assert!(
+        answer.contains(
+            "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png"
+        ),
+        "answer: {answer}"
+    );
+    assert!(
+        answer.contains(
+            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png","type":"image_file"}]"#
+        ),
+        "answer: {answer}"
+    );
+    assert!(summary.contract_ok);
+
+    let task = claimed_task("task-generated-file-path-report-dry-run-payload");
+    let (matrix_answer, matrix_summary) = super::deterministic_matrix_observed_shape_answer(
+        &state,
+        &task,
+        "media dry run",
+        &loop_state,
+        Some(&agent_run_context),
+    )
+    .expect("matrix path should project dry_run payload");
+    assert_eq!(matrix_answer, answer);
+    assert!(matrix_summary.contract_ok);
+}
+
+#[test]
 fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status() {
     let state = test_state();
     let mut route = free_route_result();

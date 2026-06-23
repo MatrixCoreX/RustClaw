@@ -9,6 +9,7 @@ use super::{
     build_loop_journal, direct_created_archive_path_from_observed_archive_pack,
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
+    direct_generated_file_path_report_from_dry_run_payload,
     direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
     direct_scalar_observed_answer, direct_scalar_path_candidate_list_from_observed_outputs,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
@@ -294,7 +295,13 @@ fn matrix_observed_answer_candidate_for_shape(
         }
         crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
         | crate::contract_matrix::FinalAnswerShapeClass::SinglePath => {
-            direct_generated_file_path_report_from_written_path(loop_state, agent_run_context)
+            direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_generated_file_path_report_from_written_path(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
                 .or_else(|| {
                     direct_created_archive_path_from_observed_archive_pack(
                         loop_state,

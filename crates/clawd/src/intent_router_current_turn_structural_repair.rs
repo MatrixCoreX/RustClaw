@@ -378,6 +378,11 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     {
         reason = Some(repair_reason);
     }
+    if let Some(repair_reason) =
+        apply_media_generation_path_report_machine_contract_repair(output_contract, req)
+    {
+        reason = Some(repair_reason);
+    }
 
     if let Some(locator_hint) = structured_config_keys_contract_from_surface(output_contract, req) {
         output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
@@ -662,6 +667,81 @@ fn command_summary_declares_fs_basic_lifecycle(
         && machine_context.contains("append_text")
         && machine_context.contains("read_text_range")
         && machine_context.contains("remove_path")
+}
+
+pub(super) fn apply_media_generation_path_report_machine_contract_repair(
+    output_contract: &mut IntentOutputContract,
+    machine_context: &str,
+) -> Option<&'static str> {
+    if !generic_contract_declares_media_generation_path_report(output_contract, machine_context) {
+        return None;
+    }
+    output_contract.semantic_kind = OutputSemanticKind::GeneratedFilePathReport;
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    if matches!(
+        output_contract.response_shape,
+        OutputResponseShape::Free | OutputResponseShape::OneSentence
+    ) {
+        output_contract.response_shape = OutputResponseShape::Strict;
+    }
+    if matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && output_contract.locator_hint.trim().is_empty()
+    {
+        output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    }
+    Some("media_generation_path_report_contract_repair")
+}
+
+fn generic_contract_declares_media_generation_path_report(
+    output_contract: &IntentOutputContract,
+    machine_context: &str,
+) -> bool {
+    matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+            | OutputSemanticKind::FilesystemMutationResult
+            | OutputSemanticKind::PublishingPreview
+            | OutputSemanticKind::None
+    ) && media_generation_machine_context_has_capability(machine_context)
+        && media_generation_machine_context_has_path_report(output_contract, machine_context)
+}
+
+fn media_generation_machine_context_has_capability(machine_context: &str) -> bool {
+    const MEDIA_GENERATION_CAPABILITY_TOKENS: &[&str] = &[
+        "image.generate",
+        "image.edit",
+        "audio.synthesize",
+        "video.generate",
+        "music.generate",
+        "image_generate",
+        "image_edit",
+        "audio_synthesize",
+        "video_generate",
+        "music_generate",
+    ];
+    let context = machine_context.to_ascii_lowercase();
+    MEDIA_GENERATION_CAPABILITY_TOKENS
+        .iter()
+        .any(|token| context.contains(token))
+}
+
+fn media_generation_machine_context_has_path_report(
+    output_contract: &IntentOutputContract,
+    machine_context: &str,
+) -> bool {
+    let context = machine_context.to_ascii_lowercase();
+    let declares_path_report =
+        context.contains("output_path") || context.contains("planned_outputs");
+    declares_path_report
+        || context.contains("dry_run") && output_contract.requires_content_evidence
+        || (matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::CurrentWorkspace
+        ) && !output_contract.locator_hint.trim().is_empty())
 }
 
 fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -> bool {

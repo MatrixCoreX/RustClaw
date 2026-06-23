@@ -123,6 +123,7 @@ use file_delivery::{
     direct_file_token_from_observed_auto_locator_filename,
     direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_file_token_from_observed_path_batch_facts,
+    direct_generated_file_path_report_from_dry_run_payload,
     direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
     direct_scalar_path_candidate_list_from_observed_outputs,
     normalize_file_token_delivery_from_auto_locator,
@@ -1474,6 +1475,24 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
     );
+
+    if let Some((answer, summary)) =
+        direct_generated_file_path_report_from_dry_run_payload(&loop_state, agent_run_context)
+    {
+        let current = delivery_deduped.last().map(|message| message.trim());
+        if current != Some(answer.as_str()) {
+            delivery_deduped = vec![answer.clone()];
+            loop_state.last_user_visible_respond = Some(answer);
+            finalizer_summary = Some(summary);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "generated_file_path_report_dry_run_payload",
+                "replaced",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+        }
+    }
 
     if let Some(marker) =
         missing_requested_success_marker(agent_run_context, &loop_state, &delivery_deduped)

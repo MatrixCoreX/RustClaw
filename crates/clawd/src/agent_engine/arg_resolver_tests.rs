@@ -170,6 +170,75 @@ fn image_edit_prompt_alias_normalizes_to_instruction() {
 }
 
 #[test]
+fn image_generate_subject_and_dimensions_aliases_normalize() {
+    let mut args = json!({
+        "subject": "RustClaw status card",
+        "width": 512,
+        "height": "512",
+        "output_path": "document/media_dry_run/image_status_card.png",
+        "dry_run": true
+    });
+
+    assert!(normalize_skill_arg_aliases("image_generate", &mut args));
+    assert_eq!(
+        args.get("prompt").and_then(|value| value.as_str()),
+        Some("RustClaw status card")
+    );
+    assert_eq!(
+        args.get("size").and_then(|value| value.as_str()),
+        Some("512x512")
+    );
+}
+
+#[test]
+fn audio_synthesize_input_alias_normalizes_to_text() {
+    let mut args = json!({
+        "input": "RustClaw dry run audio check",
+        "output_path": "document/media_dry_run/audio_check.mp3",
+        "dry_run": true
+    });
+
+    assert!(normalize_skill_arg_aliases("audio_synthesize", &mut args));
+    assert_eq!(
+        args.get("text").and_then(|value| value.as_str()),
+        Some("RustClaw dry run audio check")
+    );
+}
+
+#[test]
+fn video_generate_description_alias_normalizes_to_prompt() {
+    let mut args = json!({
+        "description": "status panel product video",
+        "duration": 6,
+        "resolution": "768P",
+        "output_path": "document/media_dry_run/status_panel.mp4",
+        "dry_run": true
+    });
+
+    assert!(normalize_skill_arg_aliases("video_generate", &mut args));
+    assert_eq!(
+        args.get("prompt").and_then(|value| value.as_str()),
+        Some("status panel product video")
+    );
+}
+
+#[test]
+fn music_generate_theme_alias_normalizes_to_prompt() {
+    let mut args = json!({
+        "theme": "short instrumental ambient loop",
+        "format": "mp3",
+        "output_path": "document/media_dry_run/ambient_loop.mp3",
+        "dry_run": true
+    });
+
+    assert!(normalize_skill_arg_aliases("music_generate", &mut args));
+    assert_eq!(
+        args.get("prompt").and_then(|value| value.as_str()),
+        Some("short instrumental ambient loop")
+    );
+}
+
+#[test]
 fn kb_ingest_source_alias_normalizes_to_paths_array() {
     let mut args = json!({
         "action": "ingest",
