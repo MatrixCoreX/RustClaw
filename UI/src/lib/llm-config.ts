@@ -16,7 +16,7 @@ export interface LlmDirtyStateInput {
   draftApiFormat: string;
 }
 
-function llmVendorSupportsApiFormat(vendor: string | null | undefined): boolean {
+export function llmVendorSupportsApiFormat(vendor: string | null | undefined): boolean {
   const normalized = (vendor || "").trim();
   return normalized === "minimax" || normalized === "mimo";
 }

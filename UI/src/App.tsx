@@ -48,7 +48,16 @@ import {
   startFeishuBindSession,
   type FeishuBindSessionResponse,
 } from "./lib/feishu-bind";
-import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
+import { hasUnsavedLlmDraftChanges, llmVendorSupportsApiFormat } from "./lib/llm-config";
+import {
+  MULTIMODAL_KEYS,
+  buildMultimodalDraft,
+  buildMultimodalMetaView,
+  buildMultimodalSavePayload,
+  hasUnsavedMultimodalDraftChanges,
+  updateMultimodalDraftField,
+  type MultimodalKey,
+} from "./lib/model-config";
 import {
   NNI_RUNTIME_TILES,
   findNniJoinErrorCode,
@@ -150,8 +159,6 @@ import type {
   ChannelName,
   ConsolePage,
 } from "./types/api";
-
-const llmVendorSupportsApiFormat = (vendor?: string | null) => vendor === "minimax" || vendor === "mimo";
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "memory", "logs", "tasks"];
 
@@ -2662,16 +2669,6 @@ export default function App() {
     }
   };
 
-  const MULTIMODAL_KEYS = [
-    "image_edit",
-    "image_generation",
-    "image_vision",
-    "audio_synthesize",
-    "audio_transcribe",
-    "video_generation",
-    "music_generation",
-  ] as const;
-
   const fetchMultimodalConfig = async () => {
     setMultimodalConfigLoading(true);
     setMultimodalConfigError(null);
@@ -2680,17 +2677,7 @@ export default function App() {
       const body = (await res.json()) as ApiResponse<ModelConfigResponse>;
       if (!res.ok || !body.ok || !body.data) throw new Error(body.error || "fetch failed");
       setMultimodalConfigData(body.data);
-      const draft: Record<string, ModelConfigItem> = {};
-      for (const k of MULTIMODAL_KEYS) {
-        const item = body.data[k];
-        draft[k] = {
-          vendor: item?.vendor ?? "",
-          model: item?.model ?? "",
-          base_url: item?.base_url ?? "",
-          api_key: item?.api_key ?? "",
-        };
-      }
-      setMultimodalDraft(draft);
+      setMultimodalDraft(buildMultimodalDraft(body.data));
     } catch (err) {
       setMultimodalConfigError(err instanceof Error ? err.message : "Unknown");
     } finally {
@@ -2703,17 +2690,7 @@ export default function App() {
     setMultimodalConfigSaveMessage(null);
     setMultimodalConfigError(null);
     try {
-      const payload: Record<string, ModelConfigItem | undefined> = {};
-      for (const k of MULTIMODAL_KEYS) {
-        const d = multimodalDraft[k];
-        if (d)
-          payload[k] = {
-            vendor: d.vendor.trim() || d.vendor,
-            model: d.model.trim() || d.model,
-            base_url: d.base_url?.trim() ?? "",
-            api_key: d.api_key?.trim() ?? "",
-          };
-      }
+      const payload = buildMultimodalSavePayload(multimodalDraft);
       const res = await apiFetch("/v1/admin/model-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2730,81 +2707,31 @@ export default function App() {
     }
   };
 
-  const setMultimodalDraftKey = (key: (typeof MULTIMODAL_KEYS)[number], field: keyof ModelConfigItem, value: string) => {
-    setMultimodalDraft((prev) => ({ ...prev, [key]: { ...(prev[key] ?? { vendor: "", model: "", base_url: "", api_key: "" }), [field]: value } }));
+  const setMultimodalDraftKey = (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => {
+    setMultimodalDraft((prev) => updateMultimodalDraftField(prev, key, field, value));
   };
 
   const hasUnsavedMultimodalChanges = useMemo(() => {
-    if (!multimodalConfigData) return false;
-    for (const k of MULTIMODAL_KEYS) {
-      const a = multimodalConfigData[k];
-      const b = multimodalDraft[k];
-      if (!b) continue;
-      if ((a?.vendor ?? "") !== (b.vendor ?? "") || (a?.model ?? "") !== (b.model ?? "")) return true;
-      if ((a?.base_url ?? "") !== (b.base_url ?? "") || (a?.api_key ?? "") !== (b.api_key ?? "")) return true;
-    }
-    return false;
+    return hasUnsavedMultimodalDraftChanges(multimodalConfigData, multimodalDraft);
   }, [multimodalConfigData, multimodalDraft]);
 
-  const formatMultimodalToken = (token: string) =>
-    token
-      .split(/[._-]+/)
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .join(" / ");
-
-  const providerUnsupportedLabel = (reason?: string | null) => {
-    switch (reason) {
-      case "provider_not_configured":
-        return t("未选择服务商", "Provider not configured");
-      case "model_not_configured":
-        return t("未选择模型", "Model not configured");
-      case "model_not_in_available_models":
-        return t("当前模型不在可选列表", "Model is not in the available list");
-      default:
-        return t("服务商暂不可用", "Provider unavailable");
-    }
-  };
-
-  const renderMultimodalModelMeta = (key: (typeof MULTIMODAL_KEYS)[number]) => {
-    const item = multimodalConfigData?.[key];
-    if (!item) return null;
-    const capabilityBadges = (item.capabilities ?? []).map(formatMultimodalToken);
-    const modelOptions = (item.available_models ?? []).filter(Boolean);
-    const visibleModels = modelOptions.slice(0, 4);
-    const metaBadges: string[] = [];
-    if (item.risk_level) metaBadges.push(`${t("风险", "Risk")}: ${item.risk_level}`);
-    if (item.dry_run_supported !== undefined && item.dry_run_supported !== null) {
-      metaBadges.push(item.dry_run_supported ? t("支持 dry-run", "Dry-run supported") : t("不支持 dry-run", "No dry-run"));
-    }
-    if (item.external_provider !== undefined && item.external_provider !== null) {
-      metaBadges.push(
-        item.external_provider
-          ? t("额度/阻断由外部厂商管理", "Quota/blockers managed by provider")
-          : t("本地或内置能力", "Local or built-in capability"),
-      );
-    }
-    if (item.provider_supported === false) {
-      metaBadges.push(providerUnsupportedLabel(item.unsupported_reason));
-    }
-    if (item.api_key_configured) {
-      metaBadges.push(item.api_key_masked ? `${t("密钥", "Key")}: ${item.api_key_masked}` : t("密钥已配置", "Key configured"));
-    }
-    if (capabilityBadges.length === 0 && modelOptions.length === 0 && metaBadges.length === 0) return null;
+  const renderMultimodalModelMeta = (key: MultimodalKey) => {
+    const metaView = buildMultimodalMetaView(multimodalConfigData?.[key], lang);
+    if (!metaView) return null;
     return (
       <div className="flex flex-wrap items-center gap-1.5 pl-[7.5rem] text-[11px] text-white/55 max-sm:pl-0">
-        {capabilityBadges.map((capability) => (
+        {metaView.capabilityBadges.map((capability) => (
           <span key={`capability-${key}-${capability}`} className="rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-sky-100/85">
             {capability}
           </span>
         ))}
-        {visibleModels.length > 0 ? (
+        {metaView.visibleModels.length > 0 ? (
           <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">
-            {t("可选模型", "Models")}: {visibleModels.join(", ")}
-            {modelOptions.length > visibleModels.length ? ` +${modelOptions.length - visibleModels.length}` : ""}
+            {t("可选模型", "Models")}: {metaView.visibleModels.join(", ")}
+            {metaView.hiddenModelCount > 0 ? ` +${metaView.hiddenModelCount}` : ""}
           </span>
         ) : null}
-        {metaBadges.map((badge) => (
+        {metaView.metaBadges.map((badge) => (
           <span key={`meta-${key}-${badge}`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
             {badge}
           </span>

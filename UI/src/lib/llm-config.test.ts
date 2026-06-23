@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { hasUnsavedLlmDraftChanges } from "./llm-config.ts";
+import { hasUnsavedLlmDraftChanges, llmVendorSupportsApiFormat } from "./llm-config.ts";
+
+test("detects vendors with configurable api format", () => {
+  assert.equal(llmVendorSupportsApiFormat("minimax"), true);
+  assert.equal(llmVendorSupportsApiFormat("mimo"), true);
+  assert.equal(llmVendorSupportsApiFormat("openai"), false);
+});
 
 test("marks api key edits as unsaved for the current vendor", () => {
   assert.equal(
