@@ -5,10 +5,15 @@ use super::{AppState, LoopState};
 use crate::agent_runtime_contract::SubagentRole;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ROLE: &str = "subagent_invalid_role";
+pub(super) const SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED: &str =
+    "subagent_required_child_failed";
 const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;
 const MAX_SUBAGENT_CAPABILITIES: usize = 32;
 const MAX_SUBAGENT_RESULT_CONTRACT_KEYS: usize = 16;
 const DEFAULT_MAX_PARALLEL_READONLY: u64 = 4;
+
+#[path = "subagent_runtime_batch.rs"]
+mod subagent_runtime_batch;
 
 #[derive(Debug, Clone)]
 pub(super) struct SubagentRuntimeConfig {
@@ -290,11 +295,63 @@ pub(super) fn record_subagent_action_from_args_with_config(
     args: &Value,
     config: &SubagentRuntimeConfig,
 ) -> Option<&'static str> {
-    let role = args.get("role").and_then(Value::as_str).unwrap_or_default();
+    if let Some(stop_signal) =
+        subagent_runtime_batch::record_subagent_batch_action_from_args_with_config(
+            loop_state,
+            global_step,
+            step_in_round,
+            args,
+            config,
+        )
+    {
+        return stop_signal;
+    }
+    let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
+    record_subagent_action_with_config(
+        loop_state,
+        global_step,
+        step_in_round,
+        &role,
+        &objective,
+        &context_refs,
+        options,
+        config,
+    )
+}
+
+pub(super) struct SubagentActionOptions {
+    allowed_capabilities: Vec<String>,
+    budget: Option<Value>,
+    parent_task_id: Option<String>,
+    context_slice: Option<Value>,
+    result_contract: Option<Value>,
+}
+
+impl Default for SubagentActionOptions {
+    fn default() -> Self {
+        Self {
+            allowed_capabilities: Vec::new(),
+            budget: None,
+            parent_task_id: None,
+            context_slice: None,
+            result_contract: None,
+        }
+    }
+}
+
+fn subagent_action_parts_from_args(
+    args: &Value,
+) -> (String, String, Vec<String>, SubagentActionOptions) {
+    let role = args
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let objective = args
         .get("objective")
         .and_then(Value::as_str)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string();
     let context_refs = args
         .get("context_refs")
         .and_then(Value::as_array)
@@ -327,36 +384,7 @@ pub(super) fn record_subagent_action_from_args_with_config(
         context_slice: args.get("context_slice").cloned(),
         result_contract: args.get("result_contract").cloned(),
     };
-    record_subagent_action_with_config(
-        loop_state,
-        global_step,
-        step_in_round,
-        role,
-        objective,
-        &context_refs,
-        options,
-        config,
-    )
-}
-
-pub(super) struct SubagentActionOptions {
-    allowed_capabilities: Vec<String>,
-    budget: Option<Value>,
-    parent_task_id: Option<String>,
-    context_slice: Option<Value>,
-    result_contract: Option<Value>,
-}
-
-impl Default for SubagentActionOptions {
-    fn default() -> Self {
-        Self {
-            allowed_capabilities: Vec::new(),
-            budget: None,
-            parent_task_id: None,
-            context_slice: None,
-            result_contract: None,
-        }
-    }
+    (role, objective, context_refs, options)
 }
 
 fn context_refs_from_context_slice(context_slice: Option<&Value>) -> Option<Vec<String>> {
