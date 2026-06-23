@@ -78,6 +78,7 @@ import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
 import { useModelConfigRuntime } from "./hooks/useModelConfigRuntime";
 import { useSkillsRuntime } from "./hooks/useSkillsRuntime";
+import { useChannelConfigRuntime } from "./hooks/useChannelConfigRuntime";
 
 import type {
   ApiResponse,
@@ -94,11 +95,7 @@ import type {
   AuthKeyListItem,
   ResolveChannelBindingResponse,
   NniDeviceMeta,
-  WechatConfigResponse,
-  FeishuConfigResponse,
   AgentConfigItem,
-  TelegramBotConfigItem,
-  TelegramConfigResponse,
   WhatsappWebLoginStatus,
   WechatLoginStatus,
   WechatQrStartResponse,
@@ -162,20 +159,6 @@ function readNumber(key: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function buildDefaultTelegramBot(): TelegramBotConfigItem {
-  return {
-    name: "primary",
-    bot_token: "",
-    bot_token_configured: false,
-    bot_token_masked: null,
-    agent_id: "main",
-    allowlist: [],
-    access_mode: "public",
-    allowed_telegram_usernames: [],
-    is_primary: true,
-  };
-}
-
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
@@ -221,21 +204,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [wechatConfigLoading, setWechatConfigLoading] = useState(false);
-  const [wechatConfigError, setWechatConfigError] = useState<string | null>(null);
-  const [wechatConfigData, setWechatConfigData] = useState<WechatConfigResponse | null>(null);
-  const [wechatConfigDraft, setWechatConfigDraft] = useState<WechatConfigResponse | null>(null);
-  const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
-  const [wechatConfigSaveMessage, setWechatConfigSaveMessage] = useState<string | null>(null);
-  const [feishuConfigLoading, setFeishuConfigLoading] = useState(false);
-  const [feishuConfigError, setFeishuConfigError] = useState<string | null>(null);
-  const [feishuConfigData, setFeishuConfigData] = useState<FeishuConfigResponse | null>(null);
-  const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
-  const [telegramConfigError, setTelegramConfigError] = useState<string | null>(null);
-  const [telegramConfigData, setTelegramConfigData] = useState<TelegramConfigResponse | null>(null);
-  const [telegramConfigDraft, setTelegramConfigDraft] = useState<TelegramConfigResponse | null>(null);
-  const [telegramConfigSaving, setTelegramConfigSaving] = useState(false);
-  const [telegramConfigSaveMessage, setTelegramConfigSaveMessage] = useState<string | null>(null);
   const workspaceUpdateSilentFailuresRef = useRef(0);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
@@ -682,6 +650,27 @@ export default function App() {
     toggleSkillEnabled,
     clearSkillsConfigError,
   } = useSkillsRuntime({ apiFetch, t });
+  const {
+    wechatConfigLoading,
+    wechatConfigError,
+    wechatConfigData,
+    feishuConfigLoading,
+    feishuConfigError,
+    feishuConfigData,
+    telegramConfigLoading,
+    telegramConfigError,
+    telegramConfigData,
+    telegramConfigSaving,
+    telegramConfigSaveMessage,
+    primaryTelegramBot,
+    telegramBotTokenConfigured,
+    hasUnsavedTelegramConfigChanges,
+    fetchWechatConfig,
+    fetchFeishuConfig,
+    fetchTelegramConfig,
+    setTelegramPrimaryBotDraftField,
+    saveTelegramConfig,
+  } = useChannelConfigRuntime({ apiFetch, t });
   const activeUserKey = authMode === "key" && uiKey.trim() ? uiKey.trim() : "";
   const activeIdentityIds =
     activeUserKey || interactionUserId == null || interactionChatId == null
@@ -1328,17 +1317,16 @@ export default function App() {
     );
     if (!confirmed) return;
     setFeishuResetLoading(true);
-    setFeishuConfigError(null);
     setFeishuBindError(null);
     try {
       const res = await apiFetch(`/v1/admin/feishu/reset`, { method: "POST" });
-      const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
+      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!res.ok || !body.ok) {
         throw new Error(body.error || `飞书重置失败 (${res.status})`);
       }
-      setFeishuConfigData(body.data);
       setFeishuBindSession(null);
       setFeishuBindQrDataUrl(null);
+      await fetchFeishuConfig();
       await fetchHealth();
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -1473,165 +1461,6 @@ export default function App() {
       ]);
     } finally {
       setDiagnosticsRefreshing(false);
-    }
-  };
-
-  const fetchWechatConfig = async () => {
-    setWechatConfigLoading(true);
-    setWechatConfigError(null);
-    try {
-      const res = await apiFetch(`/v1/wechat/config`);
-      const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `微信配置获取失败 (${res.status})`);
-      }
-      setWechatConfigData(body.data);
-      setWechatConfigDraft(body.data);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setWechatConfigError(message);
-    } finally {
-      setWechatConfigLoading(false);
-    }
-  };
-
-  const fetchFeishuConfig = async () => {
-    setFeishuConfigLoading(true);
-    setFeishuConfigError(null);
-    try {
-      const res = await apiFetch(`/v1/feishu/config`);
-      const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `飞书配置获取失败 (${res.status})`);
-      }
-      setFeishuConfigData(body.data);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setFeishuConfigError(message);
-    } finally {
-      setFeishuConfigLoading(false);
-    }
-  };
-
-  const fetchTelegramConfig = async () => {
-    setTelegramConfigLoading(true);
-    setTelegramConfigError(null);
-    try {
-      const res = await apiFetch(`/v1/telegram/config`);
-      const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Telegram 配置获取失败 (${res.status})`);
-      }
-      setTelegramConfigData(body.data);
-      setTelegramConfigDraft(body.data);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setTelegramConfigError(message);
-    } finally {
-      setTelegramConfigLoading(false);
-    }
-  };
-
-  const setWechatConfigDraftField = <K extends keyof WechatConfigResponse>(key: K, value: WechatConfigResponse[K]) => {
-    setWechatConfigDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
-  };
-
-  const setTelegramPrimaryBotDraftField = (key: keyof TelegramBotConfigItem, value: TelegramBotConfigItem[keyof TelegramBotConfigItem]) => {
-    setTelegramConfigDraft((prev) => {
-      if (!prev) return prev;
-      const bots = prev.bots.length > 0 ? [...prev.bots] : [buildDefaultTelegramBot()];
-      const primaryIndex = bots.findIndex((bot) => bot.is_primary);
-      const targetIndex = primaryIndex >= 0 ? primaryIndex : 0;
-      bots[targetIndex] = {
-        ...(bots[targetIndex] ?? buildDefaultTelegramBot()),
-        [key]: value,
-        is_primary: true,
-      };
-      return { ...prev, bots };
-    });
-  };
-
-  const saveWechatConfig = async () => {
-    if (!wechatConfigDraft) return;
-    setWechatConfigSaving(true);
-    setWechatConfigSaveMessage(null);
-    setWechatConfigError(null);
-    try {
-      const res = await apiFetch(`/v1/wechat/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: wechatConfigDraft.enabled,
-          listen: wechatConfigDraft.listen,
-          clawd_base_url: wechatConfigDraft.clawd_base_url,
-          api_base_url: wechatConfigDraft.api_base_url,
-          wechat_uin_base64: wechatConfigDraft.wechat_uin_base64,
-          request_timeout_seconds: wechatConfigDraft.request_timeout_seconds,
-          longpoll_timeout_ms: wechatConfigDraft.longpoll_timeout_ms,
-          text_chunk_chars: wechatConfigDraft.text_chunk_chars,
-        }),
-      });
-      const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `微信配置保存失败 (${res.status})`);
-      }
-      setWechatConfigData(body.data);
-      setWechatConfigDraft(body.data);
-      setWechatConfigSaveMessage(
-        t(
-          "微信配置已保存。请到 Services 页重启 wechatd，让新配置生效。",
-          "WeChat config was saved. Restart wechatd from the Services page to apply it.",
-        ),
-      );
-      await fetchWechatLoginStatus(true);
-      await fetchHealth();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setWechatConfigError(message);
-    } finally {
-      setWechatConfigSaving(false);
-    }
-  };
-
-  const saveTelegramConfig = async () => {
-    if (!telegramConfigDraft) return;
-    setTelegramConfigSaving(true);
-    setTelegramConfigSaveMessage(null);
-    setTelegramConfigError(null);
-    try {
-      const bots = telegramConfigDraft.bots.length > 0 ? telegramConfigDraft.bots : [buildDefaultTelegramBot()];
-      const normalizedBots = bots.map((bot, index) => ({
-        ...bot,
-        name: bot.name?.trim() || (index === 0 ? "primary" : `bot-${index + 1}`),
-        bot_token: bot.bot_token?.trim() || "",
-        agent_id: bot.agent_id?.trim() || "main",
-        is_primary: index === 0 ? true : bot.is_primary,
-      }));
-      const res = await apiFetch(`/v1/telegram/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bots: normalizedBots,
-          agents: telegramConfigDraft.agents ?? [],
-        }),
-      });
-      const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Telegram 配置保存失败 (${res.status})`);
-      }
-      setTelegramConfigData(body.data);
-      setTelegramConfigDraft(body.data);
-      setTelegramConfigSaveMessage(
-        t(
-          "Telegram 配置已保存。下一步请启动 telegramd，然后发一条测试消息。",
-          "Telegram config was saved. Next, start telegramd and send a test message.",
-        ),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setTelegramConfigError(message);
-    } finally {
-      setTelegramConfigSaving(false);
     }
   };
 
@@ -2754,44 +2583,10 @@ export default function App() {
     [authKeysList],
   );
   const selectedChannelPreset = useMemo(() => channelPresets[channelBindingChannel], [channelBindingChannel, channelPresets]);
-  const hasUnsavedWechatConfigChanges = useMemo(() => {
-    if (!wechatConfigData || !wechatConfigDraft) return false;
-    return JSON.stringify({
-      enabled: wechatConfigData.enabled,
-      listen: wechatConfigData.listen,
-      clawd_base_url: wechatConfigData.clawd_base_url,
-      api_base_url: wechatConfigData.api_base_url,
-      wechat_uin_base64: wechatConfigData.wechat_uin_base64,
-      request_timeout_seconds: wechatConfigData.request_timeout_seconds,
-      longpoll_timeout_ms: wechatConfigData.longpoll_timeout_ms,
-      text_chunk_chars: wechatConfigData.text_chunk_chars,
-    }) !== JSON.stringify({
-      enabled: wechatConfigDraft.enabled,
-      listen: wechatConfigDraft.listen,
-      clawd_base_url: wechatConfigDraft.clawd_base_url,
-      api_base_url: wechatConfigDraft.api_base_url,
-      wechat_uin_base64: wechatConfigDraft.wechat_uin_base64,
-      request_timeout_seconds: wechatConfigDraft.request_timeout_seconds,
-      longpoll_timeout_ms: wechatConfigDraft.longpoll_timeout_ms,
-      text_chunk_chars: wechatConfigDraft.text_chunk_chars,
-    });
-  }, [wechatConfigData, wechatConfigDraft]);
-  const primaryTelegramBot = useMemo(() => {
-    const bots = telegramConfigDraft?.bots ?? telegramConfigData?.bots ?? [];
-    return bots.find((bot) => bot.is_primary) ?? bots[0] ?? buildDefaultTelegramBot();
-  }, [telegramConfigData, telegramConfigDraft]);
-  const telegramBotTokenConfigured = useMemo(() => {
-    const token = primaryTelegramBot.bot_token?.trim() || "";
-    return (token.length > 0 && token !== "REPLACE_ME") || primaryTelegramBot.bot_token_configured === true;
-  }, [primaryTelegramBot]);
-  const hasUnsavedTelegramConfigChanges = useMemo(() => {
-    if (!telegramConfigData || !telegramConfigDraft) return false;
-    return JSON.stringify(telegramConfigData) !== JSON.stringify(telegramConfigDraft);
-  }, [telegramConfigData, telegramConfigDraft]);
   const healthStatusLoading = health == null && error == null;
-  const wechatStatusLoading = healthStatusLoading || (wechatConfigData == null && wechatConfigError == null);
-  const telegramStatusLoading = healthStatusLoading || (telegramConfigData == null && telegramConfigError == null);
-  const feishuStatusLoading = healthStatusLoading || (feishuConfigData == null && feishuConfigError == null);
+  const wechatStatusLoading = healthStatusLoading || wechatConfigLoading || (wechatConfigData == null && wechatConfigError == null);
+  const telegramStatusLoading = healthStatusLoading || telegramConfigLoading || (telegramConfigData == null && telegramConfigError == null);
+  const feishuStatusLoading = healthStatusLoading || feishuConfigLoading || (feishuConfigData == null && feishuConfigError == null);
   const wechatStepStatus = useMemo<"done" | "attention" | "todo">(() => {
     if (!wechatConfigData?.enabled) return "todo";
     if (health?.wechatd_healthy === true && wechatLoginStatus?.connected) return "done";
@@ -3319,7 +3114,7 @@ export default function App() {
               wechatLoginStatus={wechatLoginStatus}
               wechatQrPreviewRequested={wechatQrPreviewRequested}
               wechatLoginError={wechatLoginError}
-              wechatConfigEnabled={wechatConfigDraft?.enabled === true}
+              wechatConfigEnabled={wechatConfigData?.enabled === true}
               wechatServiceHealthy={health?.wechatd_healthy === true}
               telegramStatusLoading={telegramStatusLoading}
               telegramStepStatus={telegramStepStatus}
