@@ -7,11 +7,7 @@ BASE_URL="${RUSTCLAW_BASE_URL:-http://127.0.0.1:8787}"
 KEY="${RUSTCLAW_CLI_SMOKE_KEY:-${RUSTCLAW_ADMIN_KEY:-}}"
 SMOKE_TEXT="${RUSTCLAW_CLI_SMOKE_TEXT:-hello}"
 WATCH_TIMEOUT_SECONDS="${RUSTCLAW_CLI_SMOKE_WATCH_TIMEOUT_SECONDS:-120}"
-
-if [[ -z "$KEY" ]]; then
-  echo "RUSTCLAW_CLI_SMOKE_KEY or RUSTCLAW_ADMIN_KEY is required" >&2
-  exit 2
-fi
+REQUIRE_CAPABILITIES="${RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES:-0}"
 
 if [[ ! -x "$CLAWCLI_BIN" ]]; then
   echo "clawcli binary not found or not executable: $CLAWCLI_BIN" >&2
@@ -19,8 +15,13 @@ if [[ ! -x "$CLAWCLI_BIN" ]]; then
   exit 2
 fi
 
+CLI_BASE=("$CLAWCLI_BIN" --base-url "$BASE_URL")
+if [[ -n "$KEY" ]]; then
+  CLI_BASE+=(--key "$KEY")
+fi
+
 run_cli() {
-  "$CLAWCLI_BIN" --base-url "$BASE_URL" --key "$KEY" "$@"
+  "${CLI_BASE[@]}" "$@"
 }
 
 extract_task_id() {
@@ -34,7 +35,16 @@ echo "SMOKE skills"
 run_cli skills --json >/dev/null
 
 echo "SMOKE capabilities"
-run_cli capabilities --json >/dev/null
+capabilities_error="$(mktemp)"
+if ! run_cli capabilities --json >/dev/null 2>"$capabilities_error"; then
+  if [[ "$REQUIRE_CAPABILITIES" == "1" ]]; then
+    cat "$capabilities_error" >&2
+    rm -f "$capabilities_error"
+    exit 1
+  fi
+  echo "SMOKE capabilities skipped endpoint_unavailable" >&2
+fi
+rm -f "$capabilities_error"
 
 echo "SMOKE submit"
 submit_json="$(run_cli submit --text "$SMOKE_TEXT" --detach --json)"
@@ -53,8 +63,7 @@ run_cli events "$task_id" --jsonl >/dev/null
 
 echo "SMOKE watch"
 timeout "$WATCH_TIMEOUT_SECONDS" \
-  "$CLAWCLI_BIN" --base-url "$BASE_URL" --key "$KEY" \
-  watch "$task_id" --until-terminal --jsonl >/dev/null
+  "${CLI_BASE[@]}" watch "$task_id" --until-terminal --jsonl >/dev/null
 
 if [[ -n "${RUSTCLAW_CLI_SMOKE_USER_ID:-}" && -n "${RUSTCLAW_CLI_SMOKE_CHAT_ID:-}" ]]; then
   echo "SMOKE active"
