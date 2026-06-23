@@ -1192,7 +1192,7 @@ fn content_presence_accepts_excerpt_evidence_alternative() {
             .and_then(|value| value.get("any_of"))
             .and_then(Value::as_array)
             .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["content_excerpt", "content_match"])
+        Some(vec!["content_excerpt", "content_match", "field_value"])
     );
 }
 
