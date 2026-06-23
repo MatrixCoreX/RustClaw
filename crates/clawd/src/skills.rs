@@ -1,4 +1,4 @@
-use claw_core::skill_registry::SkillKind;
+use claw_core::skill_registry::{SkillKind, SkillRiskLevel};
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
 use tokio::process::Command;
@@ -1257,6 +1257,75 @@ fn ensure_config_mutation_allowed(
     ))
 }
 
+fn skill_action_token(args: &Value) -> Option<String> {
+    args.as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase().replace(['-', ' ', '.'], "_"))
+}
+
+fn skill_risk_level_token(risk: SkillRiskLevel) -> &'static str {
+    match risk {
+        SkillRiskLevel::Unknown => "unknown",
+        SkillRiskLevel::Low => "low",
+        SkillRiskLevel::Medium => "medium",
+        SkillRiskLevel::High => "high",
+    }
+}
+
+fn effective_dispatch_risk_level(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> SkillRiskLevel {
+    let Some(manifest) = state.skill_manifest(skill_name) else {
+        return SkillRiskLevel::Unknown;
+    };
+    let action_risk = skill_action_token(args).and_then(|action| {
+        manifest
+            .planner_capabilities
+            .iter()
+            .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+            .and_then(|mapping| mapping.risk_level)
+    });
+    action_risk
+        .or(manifest.risk_level)
+        .unwrap_or(SkillRiskLevel::Unknown)
+}
+
+fn audit_high_risk_skill_start(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &Value,
+) {
+    let risk_level = effective_dispatch_risk_level(state, skill_name, args);
+    let requires_confirmation =
+        state.skill_invocation_requires_confirmation_policy(skill_name, Some(args));
+    if risk_level != SkillRiskLevel::High && !requires_confirmation {
+        return;
+    }
+    let detail = json!({
+        "task_id": task.task_id,
+        "skill": skill_name,
+        "action": skill_action_token(args),
+        "risk_level": skill_risk_level_token(risk_level),
+        "requires_confirmation": requires_confirmation,
+    })
+    .to_string();
+    if let Err(err) = crate::repo::insert_audit_log(
+        state,
+        Some(task.user_id),
+        "skill_dispatch.high_risk_start",
+        Some(&detail),
+        None,
+    ) {
+        tracing::warn!(error = %err, "skill_dispatch_high_risk_start_audit_failed");
+    }
+}
+
 /// §P4.1 fallback：当 `SkillsRegistry` 还没装载（启动早期 / 某些测试 stub）时
 /// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
 /// `AppState::is_builtin_skill`**——它优先从 registry 拿 kind，failure 才退到这里。
@@ -1365,6 +1434,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
         SkillKind::Runner => "runner",
         SkillKind::External => "external",
     };
+    audit_high_risk_skill_start(state, task, &skill_name, &args);
     tracing::info!(
         "skill_dispatch skill={} kind={} branch={}",
         skill_name,

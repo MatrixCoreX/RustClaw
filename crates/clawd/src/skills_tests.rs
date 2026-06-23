@@ -287,6 +287,44 @@ async fn disabled_skill_preflight_returns_policy_decision_payload() {
 }
 
 #[tokio::test]
+async fn high_risk_skill_dispatch_start_is_audited() {
+    let mut state = test_state("en");
+    install_real_registry(&mut state);
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "run_cmd",
+        json!({
+            "command": "true",
+            "timeout_seconds": 5,
+            "idle_timeout_seconds": 5,
+            "max_output_bytes": 8000
+        }),
+    )
+    .await
+    .expect("safe high-risk command should run");
+
+    let conn = state.core.audit_db.get().expect("audit db");
+    let (action, detail_json, user_id): (String, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT action, detail_json, user_id FROM audit_logs ORDER BY id DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("latest audit row");
+    assert_eq!(action, "skill_dispatch.high_risk_start");
+    assert_eq!(user_id, Some(task.user_id));
+    let detail: serde_json::Value =
+        serde_json::from_str(detail_json.as_deref().expect("audit detail json")).unwrap();
+    assert_eq!(detail["task_id"], task.task_id);
+    assert_eq!(detail["skill"], "run_cmd");
+    assert_eq!(detail["risk_level"], "high");
+    assert_eq!(detail["requires_confirmation"], true);
+}
+
+#[tokio::test]
 async fn builtin_write_file_outcome_exposes_structured_extra() {
     let root = TempDirGuard::new("builtin_write_file_structured_extra");
     let mut state = test_state("zh-CN");
