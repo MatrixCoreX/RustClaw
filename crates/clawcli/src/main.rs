@@ -9,7 +9,7 @@ mod output;
 mod task;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8787";
@@ -81,8 +81,8 @@ enum Command {
         task_id: String,
         #[arg(long)]
         events: bool,
-        #[arg(long = "event-type")]
-        event_types: Vec<String>,
+        #[command(flatten)]
+        event_filters: EventFilterArgs,
         #[arg(long)]
         events_output: Option<PathBuf>,
     },
@@ -92,8 +92,8 @@ enum Command {
         task_id: String,
         #[arg(long)]
         events: bool,
-        #[arg(long = "event-type")]
-        event_types: Vec<String>,
+        #[command(flatten)]
+        event_filters: EventFilterArgs,
         #[arg(long)]
         until_terminal: bool,
         #[arg(long, default_value_t = 1000)]
@@ -107,8 +107,8 @@ enum Command {
     /// Print task event stream from GET /v1/tasks/:task_id.
     Events {
         task_id: String,
-        #[arg(long = "event-type")]
-        event_types: Vec<String>,
+        #[command(flatten)]
+        event_filters: EventFilterArgs,
         #[arg(long)]
         jsonl: bool,
     },
@@ -178,6 +178,20 @@ enum Command {
     ReloadSkills,
 }
 
+#[derive(Args, Debug, Clone, Default)]
+struct EventFilterArgs {
+    #[arg(long = "event-type")]
+    event_types: Vec<String>,
+    #[arg(long = "checkpoint-id")]
+    checkpoint_id: Option<String>,
+    #[arg(long = "policy-decision")]
+    policy_decision: Option<String>,
+    #[arg(long = "subagent-id")]
+    subagent_id: Option<String>,
+    #[arg(long = "async-job-id")]
+    async_job_id: Option<String>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let base_url = std::env::var("RUSTCLAW_BASE_URL")
@@ -232,7 +246,7 @@ fn main() -> Result<()> {
         Command::Get {
             task_id,
             events,
-            event_types,
+            event_filters,
             events_output,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
@@ -241,14 +255,18 @@ fn main() -> Result<()> {
                 k,
                 task_id,
                 *events,
-                event_types,
+                &event_filters.event_types,
+                event_filters.checkpoint_id.as_deref(),
+                event_filters.policy_decision.as_deref(),
+                event_filters.subagent_id.as_deref(),
+                event_filters.async_job_id.as_deref(),
                 events_output.as_ref(),
             )
         }
         Command::Watch {
             task_id,
             events,
-            event_types,
+            event_filters,
             until_terminal,
             interval_ms,
             json,
@@ -260,7 +278,11 @@ fn main() -> Result<()> {
                 k,
                 task_id,
                 *events,
-                event_types,
+                &event_filters.event_types,
+                event_filters.checkpoint_id.as_deref(),
+                event_filters.policy_decision.as_deref(),
+                event_filters.subagent_id.as_deref(),
+                event_filters.async_job_id.as_deref(),
                 *until_terminal,
                 *interval_ms,
                 *json,
@@ -269,11 +291,21 @@ fn main() -> Result<()> {
         }
         Command::Events {
             task_id,
-            event_types,
+            event_filters,
             jsonl,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_events(base_url, k, task_id, event_types, *jsonl)
+            commands::run_events(
+                base_url,
+                k,
+                task_id,
+                &event_filters.event_types,
+                event_filters.checkpoint_id.as_deref(),
+                event_filters.policy_decision.as_deref(),
+                event_filters.subagent_id.as_deref(),
+                event_filters.async_job_id.as_deref(),
+                *jsonl,
+            )
         }
         Command::Active {
             user_id,

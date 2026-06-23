@@ -1,4 +1,7 @@
-use crate::{events::TaskEventLine, task};
+use crate::{
+    events::{EventFilters, TaskEventLine},
+    task,
+};
 
 pub(crate) fn print_json_pretty(body: &serde_json::Value) {
     println!("{}", serde_json::to_string_pretty(body).unwrap_or_default());
@@ -7,7 +10,7 @@ pub(crate) fn print_json_pretty(body: &serde_json::Value) {
 pub(crate) fn print_task_status(
     task: &task::TaskStatusView,
     include_events: bool,
-    requested_event_types: &[String],
+    event_filters: &EventFilters,
 ) {
     println!("task_id: {}", task.task_id);
     println!("status: {}", task.status);
@@ -25,7 +28,7 @@ pub(crate) fn print_task_status(
         eprintln!("error: {error_text}");
     }
     if include_events {
-        for line in filtered_event_lines(task, requested_event_types) {
+        for line in filtered_event_lines(task, event_filters) {
             println!("{line}");
         }
     }
@@ -33,9 +36,9 @@ pub(crate) fn print_task_status(
 
 pub(crate) fn filtered_event_lines(
     task: &task::TaskStatusView,
-    requested_event_types: &[String],
+    event_filters: &EventFilters,
 ) -> Vec<String> {
-    filtered_events(task, requested_event_types)
+    filtered_events(task, event_filters)
         .into_iter()
         .map(|event| format!("event: {}", event.line))
         .collect()
@@ -43,16 +46,11 @@ pub(crate) fn filtered_event_lines(
 
 pub(crate) fn filtered_events<'a>(
     task: &'a task::TaskStatusView,
-    requested_event_types: &[String],
+    event_filters: &EventFilters,
 ) -> Vec<&'a TaskEventLine> {
     task.events
         .iter()
-        .filter(|event| {
-            requested_event_types.is_empty()
-                || requested_event_types
-                    .iter()
-                    .any(|requested| requested == &event.event_type.to_ascii_lowercase())
-        })
+        .filter(|event| event_filters.matches(event))
         .collect()
 }
 
