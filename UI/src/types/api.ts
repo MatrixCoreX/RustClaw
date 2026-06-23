@@ -528,6 +528,9 @@ export interface ModelConfigItem {
   api_key_configured?: boolean;
   api_key_masked?: string | null;
   capabilities?: string[];
+  capability_family?: string | null;
+  input_modalities?: string[];
+  output_modalities?: string[];
   available_models?: string[];
   risk_level?: string | null;
   dry_run_supported?: boolean | null;

@@ -304,6 +304,12 @@ api_key = "video-secret"
     let item = read_model_section(&parsed, "video_generation");
 
     assert_eq!(item.capabilities, vec!["video.generate"]);
+    assert_eq!(item.capability_family.as_deref(), Some("video"));
+    assert_eq!(
+        item.input_modalities,
+        vec!["text".to_string(), "image".to_string(), "video".to_string()]
+    );
+    assert_eq!(item.output_modalities, vec!["video".to_string()]);
     assert_eq!(item.available_models, vec!["video-01", "video-02"]);
     assert_eq!(item.risk_level.as_deref(), Some("high"));
     assert_eq!(item.dry_run_supported, Some(true));
