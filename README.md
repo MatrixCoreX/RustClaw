@@ -579,6 +579,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `POST /v1/tasks/cancel`
 - `POST /v1/tasks/cancel-by-task-id`
 - `POST /v1/tasks/cancel-one`: compatibility endpoint that cancels by active-list index
+- `POST /v1/services/{service}/{action}`: browser-console service start/stop/restart; failures return machine fields such as `error_code`, `status_code`, `message_key`, `service`, and `action`
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
@@ -627,6 +628,7 @@ UI notes:
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
 - the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
+- service-control notices are rendered from backend machine codes (`error_code` / `message_key`) instead of parsing backend English strings
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
 ## Skills
