@@ -62,6 +62,17 @@ blocked_action_refs = []
 blocked_tools = []
 require_confirmation_action_refs = []
 
+[agent.subagents]
+# 用途/Purpose: subagent 角色与只读并发预算；只消费机器 token，不解析用户自然语言。
+# Machine-only subagent role and read-only parallel budget configuration.
+# allowed_roles 缺失或为空时使用代码默认全集。
+allowed_roles = ["observe", "explorer", "worker", "review", "reviewer", "test", "verifier"]
+# 当前 runtime 仍是 inline_readonly_child_run；该值先进入 observation/scheduler 机器字段，
+# 后续 bounded parallel executor 使用同一配置。
+max_parallel_readonly = 4
+# 子 agent 未显式给 budget.timeout_ms 时使用的默认 timeout；0 或缺失表示使用 parent loop 默认。
+default_timeout_ms = 30000
+
 [agent.loop_guard]
 # 用途/Purpose: 单任务最大 agent 步数上限.
 # 建议修改/Recommended change: 可改 / Editable.

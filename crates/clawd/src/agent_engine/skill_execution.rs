@@ -1403,11 +1403,13 @@ pub(super) async fn execute_prepared_skill_action(
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
     if normalized_skill == "subagent" {
-        let stop_signal = super::subagent_runtime::record_subagent_action_from_args(
+        let subagent_config = super::subagent_runtime::load_subagent_runtime_config(state);
+        let stop_signal = super::subagent_runtime::record_subagent_action_from_args_with_config(
             loop_state,
             global_step,
             step_in_round,
             &exec_args,
+            &subagent_config,
         )
         .map(str::to_string);
         return Ok(SkillActionOutcome {

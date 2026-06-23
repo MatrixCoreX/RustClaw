@@ -202,3 +202,76 @@ fn subagent_new_role_tokens_preserve_readonly_policy() {
         "cancelled"
     );
 }
+
+#[test]
+fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
+    let mut loop_state = LoopState::new(2);
+    let config = SubagentRuntimeConfig {
+        allowed_roles: SubagentRole::all_tokens()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        max_parallel_readonly: 3,
+        default_timeout_ms: Some(15_000),
+    };
+
+    let stop_signal = record_subagent_action_with_config(
+        &mut loop_state,
+        2,
+        1,
+        "explorer",
+        "Collect read-only evidence.",
+        &[],
+        SubagentActionOptions::default(),
+        &config,
+    );
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["runtime_config"]["max_parallel_readonly"], 3);
+    assert_eq!(observation["budget"]["default_timeout_ms"], 15_000);
+    assert_eq!(observation["budget"]["effective_timeout_ms"], 15_000);
+    assert_eq!(observation["timeout_policy"]["timeout_ms"], 15_000);
+    assert_eq!(
+        observation["timeout_policy"]["timeout_source"],
+        "agent_guard.subagents.default_timeout_ms"
+    );
+    assert_eq!(observation["scheduler"]["max_parallel_readonly"], 3);
+    assert_eq!(
+        observation["child_request"]["runtime_config"]["default_timeout_ms"],
+        15_000
+    );
+}
+
+#[test]
+fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
+    let mut loop_state = LoopState::new(2);
+    let config = SubagentRuntimeConfig {
+        allowed_roles: vec!["observe".to_string()],
+        max_parallel_readonly: 1,
+        default_timeout_ms: Some(5_000),
+    };
+
+    let stop_signal = record_subagent_action_with_config(
+        &mut loop_state,
+        2,
+        1,
+        "review",
+        "Review evidence.",
+        &[],
+        SubagentActionOptions::default(),
+        &config,
+    );
+
+    assert_eq!(stop_signal, Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE));
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["status"], "rejected");
+    assert_eq!(
+        observation["error_code"],
+        "subagent_role_disabled_by_config"
+    );
+    assert_eq!(observation["allowed_roles"][0], "observe");
+    assert_eq!(observation["runtime_config"]["write_enabled"], false);
+    assert_eq!(observation["write_enabled"], false);
+    assert_eq!(observation["external_publish_enabled"], false);
+}
