@@ -1,5 +1,7 @@
 import type { NniDevicePayload } from "../types/api";
 
+export type UiLanguage = "zh" | "en";
+
 export interface NniPayloadHexField {
   label: string;
   value: string;
@@ -10,6 +12,10 @@ export interface NniRuntimeTile {
   delay: number;
   duration: number;
   idleOpacity: number;
+}
+
+function copy(lang: UiLanguage, zh: string, en: string): string {
+  return lang === "zh" ? zh : en;
 }
 
 export function shortenHex(value?: string | null, head = 16, tail = 16): string {
@@ -56,6 +62,50 @@ export function findNniJoinErrorCode(data?: unknown): string | null {
     }
   }
   return null;
+}
+
+export function parseNniRemoteNodeUrls(value: string): string[] {
+  return value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function nniJoinErrorMessage(
+  error: string | undefined,
+  data: unknown,
+  fallback: string,
+  lang: UiLanguage,
+): string {
+  const code = error || findNniJoinErrorCode(data);
+  if (code === "nni_pubkey_not_allowlisted" || code === "nni_public_key_not_allowlisted" || code === "public_key_not_allowlisted") {
+    return copy(
+      lang,
+      "本机公钥必须是白名单合规公钥。请读取并复制本机公钥，确认远程 NNI 服务端白名单已允许该公钥后再重试。",
+      "The local public key must be compliant with the whitelist. Read and copy this device public key, confirm the remote NNI server allows it, then retry.",
+    );
+  }
+  if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
+    return copy(
+      lang,
+      "本机公钥必须是白名单合规公钥。远程 NNI 服务端还没有配置允许的公钥，请确定你是合法设备以后再重试。",
+      "The local public key must be compliant with the whitelist. The remote NNI server has no allowed public keys configured yet; confirm this is an authorized device, then retry.",
+    );
+  }
+  return error || fallback;
+}
+
+export function nniActionLabel(action: string, lang: UiLanguage): string {
+  const labels: Record<string, string> = {
+    pubkey: copy(lang, "读取 slot 0 公钥", "Read Slot 0 public key"),
+    sign_timestamp: copy(lang, "生成时间戳签名", "Sign current timestamp"),
+    sign_challenge: copy(lang, "生成挑战签名", "Sign challenge"),
+    tng_device_pubkey: copy(lang, "读取 TNG 设备公钥", "Read TNG device public key"),
+    tng_device_cert: copy(lang, "读取设备证书", "Read device certificate"),
+    tng_signer_cert: copy(lang, "读取 signer 证书", "Read signer certificate"),
+    tng_root_cert: copy(lang, "读取根证书", "Read root certificate"),
+  };
+  return labels[action] || action;
 }
 
 export const NNI_RUNTIME_TILES: NniRuntimeTile[] = Array.from({ length: 32 }, (_, index) => {
