@@ -33,7 +33,6 @@ import {
   getDashboardOverviewItems,
 } from "./lib/dashboard-home";
 import { maskStoredKey } from "./lib/auth-keys";
-import { fileToDataUrl, formatVisionResultText } from "./lib/chat-attachments";
 import { boundChannelsLabel as formatBoundChannelsLabel, channelLabel as formatChannelLabel } from "./lib/channel-display";
 import { formatBytes, formatDuration, sleep, toLocalTime } from "./lib/display-format";
 import {
@@ -52,7 +51,6 @@ import {
   type MultimodalKey,
 } from "./lib/model-config";
 import { serviceDisplayName } from "./lib/service-actions";
-import { extractTaskText } from "./lib/task-result";
 import {
   buildWorkspaceUpdateView,
   formatWorkspaceUpdateStatus,
@@ -76,6 +74,7 @@ import { useServiceActionsRuntime } from "./hooks/useServiceActionsRuntime";
 import { useWhatsappWebRuntime } from "./hooks/useWhatsappWebRuntime";
 import { useWechatRuntime } from "./hooks/useWechatRuntime";
 import { useFeishuBindRuntime } from "./hooks/useFeishuBindRuntime";
+import { useChatRuntime } from "./hooks/useChatRuntime";
 
 import type {
   ApiResponse,
@@ -91,8 +90,6 @@ import type {
   AuthIdentityResponse,
   NniDeviceMeta,
   AgentConfigItem,
-  ChatMessage,
-  ChatImageAttachment,
   AdapterHealthRow,
   ChannelPreset,
   ServiceStatusRow,
@@ -239,26 +236,12 @@ export default function App() {
   const [interactionLoading, setInteractionLoading] = useState(false);
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [interactionSubmittedTaskId, setInteractionSubmittedTaskId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "chat-system-welcome",
-      role: "system",
-      text: "会话窗口已连接 clawd。发送消息后会自动提交 ask 任务并轮询结果。",
-      ts: Date.now(),
-    },
-  ]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatImageAttachments, setChatImageAttachments] = useState<ChatImageAttachment[]>([]);
-  const [chatAgentMode, setChatAgentMode] = useState(true);
-  const [chatSending, setChatSending] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState<ConsolePage>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
     return saved && CONSOLE_PAGES.includes(saved as ConsolePage) ? (saved as ConsolePage) : "dashboard";
   });
   const logContainerRef = useRef<HTMLPreElement | null>(null);
-  const chatImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
@@ -1235,6 +1218,44 @@ export default function App() {
     return body.data;
   };
 
+  const {
+    chatMessages,
+    chatInput,
+    chatImageAttachments,
+    chatAgentMode,
+    chatSending,
+    chatError,
+    chatImageInputRef,
+    setChatAgentMode,
+    clearChatMessages,
+    setChatInput,
+    handleChatInputKeyDown,
+    handleChatImageSelection,
+    removeChatImageAttachment,
+    sendChatMessage,
+  } = useChatRuntime({
+    apiFetch,
+    t,
+    lang,
+    interactionAdapter,
+    interactionChannel,
+    activeUserKey,
+    activeIdentityIds,
+    interactionExternalUserId,
+    interactionExternalChatId,
+    fetchTaskById,
+    onTaskSubmitted: (submittedTaskId) => {
+      setTaskId(submittedTaskId);
+      setTrackingTaskId(submittedTaskId);
+    },
+    onTaskResult: (submittedTaskId, finalResult) => {
+      setTaskResult(finalResult);
+      setTrackingTaskId(
+        ["succeeded", "failed", "canceled", "timeout"].includes(finalResult.status) ? null : submittedTaskId,
+      );
+    },
+  });
+
   const fetchActiveTasks = async (silent = false): Promise<ActiveTaskItem[]> => {
     if (interactionUserId == null || interactionChatId == null) {
       if (!silent) {
@@ -1472,133 +1493,6 @@ export default function App() {
       setInteractionError(message);
     } finally {
       setInteractionLoading(false);
-    }
-  };
-
-  const handleChatImageSelection = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    try {
-      const selected = Array.from(fileList).filter((file) => file.type.startsWith("image/"));
-      if (selected.length === 0) {
-        setChatError(t("请选择图片文件。", "Please choose image files."));
-        return;
-      }
-      const nextImages = await Promise.all(
-        selected.map(async (file) => ({
-          name: file.name,
-          dataUrl: await fileToDataUrl(file),
-        })),
-      );
-      setChatImageAttachments((prev) => [...prev, ...nextImages].slice(0, 6));
-      setChatError(null);
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : t("读取图片失败。", "Failed to read images."));
-    }
-  };
-
-  const removeChatImageAttachment = (index: number) => {
-    setChatImageAttachments((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const sendChatMessage = async () => {
-    const text = chatInput.trim();
-    const attachedImages = chatImageAttachments;
-    if ((!text && attachedImages.length === 0) || chatSending) return;
-    const requestText = text || t("请描述这张图片", "Please describe this image");
-    setChatSending(true);
-    setChatError(null);
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      text: text || t("发送了一张图片", "Sent an image"),
-      ts: Date.now(),
-      images: attachedImages,
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
-    setChatImageAttachments([]);
-    if (chatImageInputRef.current) {
-      chatImageInputRef.current.value = "";
-    }
-
-    try {
-      const adapterName = interactionAdapter.trim();
-      const submitBody: Record<string, unknown> = {
-        channel: interactionChannel,
-        kind: "ask",
-        ...(activeUserKey ? { user_key: activeUserKey } : {}),
-        ...activeIdentityIds,
-        ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
-        ...(interactionExternalChatId.trim() ? { external_chat_id: interactionExternalChatId.trim() } : {}),
-        payload: {
-          text: requestText,
-          agent_mode: chatAgentMode,
-          ...(adapterName ? { adapter: adapterName } : {}),
-          ...(attachedImages.length > 0
-            ? {
-                images: attachedImages.map((image) => ({ base64: image.dataUrl })),
-                response_language: lang === "zh" ? "zh-CN" : "en",
-              }
-            : {}),
-        },
-      };
-      const submitRes = await apiFetch(`/v1/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(submitBody),
-      });
-      const submitData = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
-      if (!submitRes.ok || !submitData.ok || !submitData.data?.task_id) {
-        throw new Error(submitData.error || `提交任务失败 (${submitRes.status})`);
-      }
-
-      const submittedTaskId = submitData.data.task_id;
-      setTaskId(submittedTaskId);
-      setTrackingTaskId(submittedTaskId);
-
-      let finalResult: TaskQueryResponse | null = null;
-      for (let i = 0; i < 90; i += 1) {
-        const current = await fetchTaskById(submittedTaskId);
-        if (["succeeded", "failed", "canceled", "timeout"].includes(current.status)) {
-          finalResult = current;
-          break;
-        }
-        await sleep(1200);
-      }
-      if (!finalResult) {
-        throw new Error("轮询超时：任务仍在运行，请稍后在任务查询区查看。");
-      }
-      setTaskResult(finalResult);
-      setTrackingTaskId(
-        ["succeeded", "failed", "canceled", "timeout"].includes(finalResult.status) ? null : submittedTaskId,
-      );
-
-      const assistantMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: "assistant",
-        text: attachedImages.length > 0 ? formatVisionResultText(extractTaskText(finalResult)) : extractTaskText(finalResult),
-        ts: Date.now(),
-      };
-      setChatMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
-      setChatError(message);
-      const systemErrMsg: ChatMessage = {
-        id: `e-${Date.now()}`,
-        role: "system",
-        text: `发送失败：${message}`,
-        ts: Date.now(),
-      };
-      setChatMessages((prev) => [...prev, systemErrMsg]);
-    } finally {
-      setChatSending(false);
-    }
-  };
-
-  const handleChatInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void sendChatMessage();
     }
   };
 
@@ -2437,16 +2331,7 @@ export default function App() {
               chatImageInputRef={chatImageInputRef}
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
-              onClearMessages={() =>
-                setChatMessages([
-                  {
-                    id: `chat-clear-${Date.now()}`,
-                    role: "system",
-                    text: t("聊天记录已清空。", "Chat history cleared."),
-                    ts: Date.now(),
-                  },
-                ])
-              }
+              onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}
               onImageSelection={handleChatImageSelection}
