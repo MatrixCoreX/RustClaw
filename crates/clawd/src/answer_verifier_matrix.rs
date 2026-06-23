@@ -331,6 +331,7 @@ pub(super) fn health_check_diagnostic_expected_tokens(value: &serde_json::Value)
         tokens.push(format!("telegramd_process_count={count}"));
     }
     collect_health_check_log_tokens(value, "clawd_log", &mut tokens);
+    collect_health_check_log_tokens(value, "nni_log", &mut tokens);
     collect_health_check_log_tokens(value, "telegramd_log", &mut tokens);
     collect_health_check_system_tokens(value, &mut tokens);
     tokens

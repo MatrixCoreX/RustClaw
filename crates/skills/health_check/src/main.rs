@@ -98,6 +98,7 @@ fn execute(args: Value) -> Result<Value, String> {
     let system_health = collect_system_health();
 
     let clawd_log = summarize_log_file(&log_dir.join("clawd.log"));
+    let nni_log = summarize_log_file(&log_dir.join("nni.log"));
     let telegramd_log = summarize_log_file(&log_dir.join("telegramd.log"));
 
     Ok(json!({
@@ -108,6 +109,7 @@ fn execute(args: Value) -> Result<Value, String> {
         "telegramd_process_count": telegramd_count,
         "clawd_health_port_open": health_port_open,
         "clawd_log": clawd_log,
+        "nni_log": nni_log,
         "telegramd_log": telegramd_log,
         "system_health": system_health
     }))

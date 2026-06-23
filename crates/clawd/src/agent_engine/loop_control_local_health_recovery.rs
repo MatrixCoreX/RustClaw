@@ -138,6 +138,9 @@ fn collect_health_check_payload_fields(payload: &Value, finding: &mut LocalHealt
     if let Some(log) = payload.get("clawd_log") {
         collect_log_fields("clawd_log", log, finding);
     }
+    if let Some(log) = payload.get("nni_log") {
+        collect_log_fields("nni_log", log, finding);
+    }
     if let Some(log) = payload.get("telegramd_log") {
         collect_log_fields("telegramd_log", log, finding);
     }
