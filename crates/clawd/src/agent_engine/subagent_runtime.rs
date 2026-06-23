@@ -1,13 +1,111 @@
 use serde_json::{json, Value};
+use std::path::Path;
 
-use super::LoopState;
+use super::{AppState, LoopState};
 use crate::agent_runtime_contract::SubagentRole;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ROLE: &str = "subagent_invalid_role";
 const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;
 const MAX_SUBAGENT_CAPABILITIES: usize = 32;
 const MAX_SUBAGENT_RESULT_CONTRACT_KEYS: usize = 16;
+const DEFAULT_MAX_PARALLEL_READONLY: u64 = 4;
 
+#[derive(Debug, Clone)]
+pub(super) struct SubagentRuntimeConfig {
+    allowed_roles: Vec<String>,
+    max_parallel_readonly: u64,
+    default_timeout_ms: Option<u64>,
+}
+
+impl Default for SubagentRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            allowed_roles: SubagentRole::all_tokens()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            max_parallel_readonly: DEFAULT_MAX_PARALLEL_READONLY,
+            default_timeout_ms: None,
+        }
+    }
+}
+
+impl SubagentRuntimeConfig {
+    fn role_allowed(&self, role: SubagentRole) -> bool {
+        self.allowed_roles
+            .iter()
+            .any(|allowed| allowed == role.as_token())
+    }
+
+    fn trace_summary(&self) -> Value {
+        json!({
+            "schema_version": 1,
+            "allowed_roles": self.allowed_roles,
+            "max_parallel_readonly": self.max_parallel_readonly,
+            "default_timeout_ms": self.default_timeout_ms,
+            "write_enabled": false,
+            "external_publish_enabled": false,
+        })
+    }
+}
+
+fn normalize_machine_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+pub(super) fn load_subagent_runtime_config(state: &AppState) -> SubagentRuntimeConfig {
+    let path = state
+        .skill_rt
+        .workspace_root
+        .join("configs/agent_guard.toml");
+    load_subagent_runtime_config_from_path(&path)
+}
+
+fn load_subagent_runtime_config_from_path(path: &Path) -> SubagentRuntimeConfig {
+    let mut config = SubagentRuntimeConfig::default();
+    let Some(root) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok())
+    else {
+        return config;
+    };
+    let Some(subagents) = root
+        .get("agent")
+        .and_then(|agent| agent.get("subagents"))
+        .and_then(toml::Value::as_table)
+    else {
+        return config;
+    };
+    if let Some(roles) = subagents
+        .get("allowed_roles")
+        .and_then(toml::Value::as_array)
+    {
+        let allowed = roles
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(normalize_machine_token)
+            .filter(|token| SubagentRole::parse_token(token).is_some())
+            .collect::<Vec<_>>();
+        if !allowed.is_empty() {
+            config.allowed_roles = allowed;
+        }
+    }
+    if let Some(value) = subagents
+        .get("max_parallel_readonly")
+        .and_then(toml::Value::as_integer)
+        .filter(|value| *value > 0)
+    {
+        config.max_parallel_readonly = (value as u64).clamp(1, 16);
+    }
+    config.default_timeout_ms = subagents
+        .get("default_timeout_ms")
+        .and_then(toml::Value::as_integer)
+        .filter(|value| *value > 0)
+        .map(|value| (value as u64).clamp(1_000, 3_600_000));
+    config
+}
+
+#[cfg(test)]
 pub(super) fn record_subagent_action(
     loop_state: &mut LoopState,
     global_step: usize,
@@ -16,6 +114,28 @@ pub(super) fn record_subagent_action(
     objective: &str,
     context_refs: &[String],
     options: SubagentActionOptions,
+) -> Option<&'static str> {
+    record_subagent_action_with_config(
+        loop_state,
+        global_step,
+        step_in_round,
+        role,
+        objective,
+        context_refs,
+        options,
+        &SubagentRuntimeConfig::default(),
+    )
+}
+
+pub(super) fn record_subagent_action_with_config(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    role: &str,
+    objective: &str,
+    context_refs: &[String],
+    options: SubagentActionOptions,
+    config: &SubagentRuntimeConfig,
 ) -> Option<&'static str> {
     let role_token = role.trim();
     let Some(role) = SubagentRole::parse_token(role_token) else {
@@ -34,6 +154,23 @@ pub(super) fn record_subagent_action(
         }));
         return Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
     };
+    if !config.role_allowed(role) {
+        loop_state.task_observations.push(json!({
+            "schema_version": 1,
+            "owner_layer": "subagent_runtime",
+            "status": "rejected",
+            "error_code": "subagent_role_disabled_by_config",
+            "role": role.as_token(),
+            "allowed_roles": config.allowed_roles,
+            "runtime_config": config.trace_summary(),
+            "write_enabled": false,
+            "external_publish_enabled": false,
+            "global_step": global_step,
+            "step_in_round": step_in_round,
+            "round_no": loop_state.round_no,
+        }));
+        return Some(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
+    }
     let child_run_id = format!(
         "subagent:{}:{}:{}",
         loop_state.round_no,
@@ -44,8 +181,8 @@ pub(super) fn record_subagent_action(
     let allowed_capabilities = safe_machine_token_list(&options.allowed_capabilities);
     let context_ref_count = context_refs.len();
     let allowed_capability_count = allowed_capabilities.len();
-    let role_metadata = role_metadata_summary(role);
-    let budget_summary = subagent_budget_summary(options.budget.as_ref());
+    let role_metadata = role_metadata_summary(role, config);
+    let budget_summary = subagent_budget_summary(options.budget.as_ref(), config);
     let timeout_policy = subagent_timeout_policy(&budget_summary);
     let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
     loop_state.task_observations.push(json!({
@@ -62,6 +199,7 @@ pub(super) fn record_subagent_action(
         "context_ref_count": context_ref_count,
         "allowed_capabilities": &allowed_capabilities,
         "allowed_capability_count": allowed_capability_count,
+        "runtime_config": config.trace_summary(),
         "budget": budget_summary,
         "timeout_policy": timeout_policy,
         "cancellation_policy": cancellation_policy,
@@ -74,12 +212,14 @@ pub(super) fn record_subagent_action(
             context_ref_count,
             allowed_capability_count,
             options.budget.as_ref(),
+            config,
         ),
         "scheduler": {
             "status": "inline_completed",
             "reason_code": "readonly_subagent_inline_execution",
             "lease_required": false,
             "checkpoint_required": false,
+            "max_parallel_readonly": config.max_parallel_readonly,
             "child_request_ref": child_run_id.as_str(),
         },
         "merge_contract": {
@@ -127,11 +267,28 @@ pub(super) fn record_subagent_action(
     None
 }
 
+#[cfg(test)]
 pub(super) fn record_subagent_action_from_args(
     loop_state: &mut LoopState,
     global_step: usize,
     step_in_round: usize,
     args: &Value,
+) -> Option<&'static str> {
+    record_subagent_action_from_args_with_config(
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
+        &SubagentRuntimeConfig::default(),
+    )
+}
+
+pub(super) fn record_subagent_action_from_args_with_config(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
 ) -> Option<&'static str> {
     let role = args.get("role").and_then(Value::as_str).unwrap_or_default();
     let objective = args
@@ -170,7 +327,7 @@ pub(super) fn record_subagent_action_from_args(
         context_slice: args.get("context_slice").cloned(),
         result_contract: args.get("result_contract").cloned(),
     };
-    record_subagent_action(
+    record_subagent_action_with_config(
         loop_state,
         global_step,
         step_in_round,
@@ -178,6 +335,7 @@ pub(super) fn record_subagent_action_from_args(
         objective,
         &context_refs,
         options,
+        config,
     )
 }
 
@@ -246,29 +404,35 @@ fn safe_machine_token_list(values: &[String]) -> Vec<Value> {
         .collect()
 }
 
-fn subagent_budget_summary(budget: Option<&Value>) -> Value {
+fn subagent_budget_summary(budget: Option<&Value>, config: &SubagentRuntimeConfig) -> Value {
     let Some(budget) = budget.and_then(Value::as_object) else {
         return json!({
             "present": false,
+            "default_timeout_ms": config.default_timeout_ms,
+            "effective_timeout_ms": config.default_timeout_ms,
         });
     };
+    let timeout_ms = budget.get("timeout_ms").and_then(Value::as_u64);
     json!({
         "present": true,
         "max_rounds": budget.get("max_rounds").and_then(Value::as_u64),
         "max_tool_calls": budget.get("max_tool_calls").and_then(Value::as_u64),
         "max_context_chars": budget.get("max_context_chars").and_then(Value::as_u64),
-        "timeout_ms": budget.get("timeout_ms").and_then(Value::as_u64),
+        "timeout_ms": timeout_ms,
+        "default_timeout_ms": config.default_timeout_ms,
+        "effective_timeout_ms": timeout_ms.or(config.default_timeout_ms),
     })
 }
 
-fn role_metadata_summary(role: SubagentRole) -> Value {
+fn role_metadata_summary(role: SubagentRole, config: &SubagentRuntimeConfig) -> Value {
     json!({
         "schema_version": 1,
         "role": role.as_token(),
         "role_family": role.family_token(),
         "default_scope": role.default_scope_token(),
         "tool_permission_profile": "read_only",
-        "parallel_eligible": true,
+        "parallel_eligible": config.max_parallel_readonly > 1,
+        "max_parallel_readonly": config.max_parallel_readonly,
         "result_contract_required": role.result_contract_required(),
         "write_enabled": false,
         "external_publish_enabled": false,
@@ -277,6 +441,11 @@ fn role_metadata_summary(role: SubagentRole) -> Value {
 
 fn subagent_timeout_policy(budget_summary: &Value) -> Value {
     let timeout_ms = budget_summary
+        .get("effective_timeout_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| budget_summary.get("timeout_ms").and_then(Value::as_u64))
+        .filter(|value| *value > 0);
+    let budget_timeout_ms = budget_summary
         .get("timeout_ms")
         .and_then(Value::as_u64)
         .filter(|value| *value > 0);
@@ -285,7 +454,13 @@ fn subagent_timeout_policy(budget_summary: &Value) -> Value {
         "policy": "bounded",
         "timeout_ms": timeout_ms,
         "timeout_required": true,
-        "timeout_source": if timeout_ms.is_some() { "budget.timeout_ms" } else { "parent_loop_default" },
+        "timeout_source": if budget_timeout_ms.is_some() {
+            "budget.timeout_ms"
+        } else if timeout_ms.is_some() {
+            "agent_guard.subagents.default_timeout_ms"
+        } else {
+            "parent_loop_default"
+        },
         "terminal_status_on_timeout": "timeout",
     })
 }
@@ -323,14 +498,16 @@ fn child_request_envelope(
     context_ref_count: usize,
     allowed_capability_count: usize,
     budget: Option<&Value>,
+    config: &SubagentRuntimeConfig,
 ) -> Value {
-    let budget_summary = subagent_budget_summary(budget);
+    let budget_summary = subagent_budget_summary(budget, config);
     let timeout_policy = subagent_timeout_policy(&budget_summary);
     json!({
         "schema_version": 1,
         "request_ref": child_run_id,
         "role": role.as_token(),
-        "role_metadata": role_metadata_summary(role),
+        "role_metadata": role_metadata_summary(role, config),
+        "runtime_config": config.trace_summary(),
         "state": "completed",
         "execution_mode": "inline_readonly_child_run",
         "context_ref_count": context_ref_count,
