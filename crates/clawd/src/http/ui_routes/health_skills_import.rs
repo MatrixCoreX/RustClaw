@@ -353,6 +353,44 @@ async fn list_skills(
     )
 }
 
+async fn list_capabilities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let mut names = BTreeSet::new();
+    if let Some(registry) = state.get_skills_registry().as_ref() {
+        for name in registry.all_names() {
+            if !hide_skill_in_ui(&state, &name) {
+                names.insert(name);
+            }
+        }
+    }
+    for name in state.get_skills_list().iter() {
+        if !hide_skill_in_ui(&state, name) {
+            names.insert(name.clone());
+        }
+    }
+    let skill_items = names
+        .iter()
+        .map(|name| build_skill_list_item(&state, name))
+        .collect::<Vec<_>>();
+    let capability_items = capability_items_from_skill_items(&skill_items);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "skill_items": skill_items,
+                "capability_items": capability_items,
+            })),
+            error: None,
+        }),
+    )
+}
+
 fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
     let registry_entry = state
         .get_skills_registry()
@@ -450,6 +488,60 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
                     .collect::<Vec<_>>()
             })
             .filter(|items| !items.is_empty()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CapabilityListItem {
+    skill_name: String,
+    capability: String,
+    capability_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    planner_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_kind: Option<String>,
+}
+
+fn capability_items_from_skill_items(skill_items: &[SkillListItem]) -> Vec<CapabilityListItem> {
+    let mut items = Vec::new();
+    for skill in skill_items {
+        if let Some(capabilities) = skill.planner_capabilities.as_ref() {
+            for capability in capabilities {
+                items.push(capability_list_item(skill, capability, "planner_capability"));
+            }
+        }
+        if let Some(capabilities) = skill.capabilities.as_ref() {
+            for capability in capabilities {
+                items.push(capability_list_item(skill, capability, "runtime_capability"));
+            }
+        }
+    }
+    items.sort_by(|a, b| {
+        a.skill_name
+            .cmp(&b.skill_name)
+            .then_with(|| a.capability_kind.cmp(&b.capability_kind))
+            .then_with(|| a.capability.cmp(&b.capability))
+    });
+    items
+}
+
+fn capability_list_item(
+    skill: &SkillListItem,
+    capability: &str,
+    capability_kind: &str,
+) -> CapabilityListItem {
+    CapabilityListItem {
+        skill_name: skill.name.clone(),
+        capability: capability.to_string(),
+        capability_kind: capability_kind.to_string(),
+        planner_kind: skill.planner_kind.clone(),
+        risk_level: skill.risk_level.clone(),
+        runtime_available: skill.runtime_available,
+        output_kind: skill.output_kind.clone(),
     }
 }
 
