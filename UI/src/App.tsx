@@ -1055,41 +1055,41 @@ export default function App() {
   const formatServiceActionError = (
     serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
     action: "start" | "stop" | "restart",
-    rawMessage: string,
+    errorCode: string,
   ) => {
     const serviceLabel = serviceActionLabel(serviceName);
     const actionLabel =
       action === "start" ? t("启动", "start") : action === "restart" ? t("重启", "restart") : t("停止", "stop");
 
-    if (rawMessage.includes("did not enter running state")) {
+    if (errorCode === "service_start_not_running" || errorCode === "service_restart_not_running") {
       return t(
         `${serviceLabel}服务还没有准备好，${actionLabel}暂时没有完成。请先确认配置已保存，稍等 2 到 3 秒后再试；如果还是失败，再到日志页面查看 ${serviceName}.log。`,
         `${serviceLabel} is not ready yet, so the ${actionLabel} action did not finish. Make sure the configuration is saved, wait 2 to 3 seconds, and try again. If it still fails, check ${serviceName}.log on the Logs page.`,
       );
     }
 
-    if (rawMessage.includes("service disabled")) {
+    if (errorCode === "service_disabled") {
       return t(
         `${serviceLabel}服务当前没有启用，请先完成配置并保存后再试。`,
         `${serviceLabel} is not enabled yet. Finish the configuration and save it before trying again.`,
       );
     }
 
-    if (rawMessage.includes("app_id/app_secret")) {
+    if (errorCode === "feishu_credentials_missing") {
       return t(
         `${serviceLabel}还缺少 App ID 或 App Secret。先把这两项填好并保存，再启动服务。`,
         `${serviceLabel} still needs an App ID or App Secret. Fill them in, save, and then start the service.`,
       );
     }
 
-    if (rawMessage.includes("verification_token or encrypt_key")) {
+    if (errorCode === "feishu_webhook_credentials_missing") {
       return t(
         `${serviceLabel}当前是 webhook 模式，还需要 Verification Token 或 Encrypt Key，补齐后才能启动。`,
         `${serviceLabel} is in webhook mode and still needs a Verification Token or Encrypt Key before it can start.`,
       );
     }
 
-    if (rawMessage.includes("managed by channel-gateway")) {
+    if (errorCode === "service_gateway_managed") {
       return t(
         `${serviceLabel}当前是由 channel-gateway 统一托管的，不能在这个单独按钮里${actionLabel}。请改为重启 channel-gateway，或先切回独立 ${serviceLabel} 进程。`,
         `${serviceLabel} is currently managed by channel-gateway, so it cannot be ${actionLabel}ed from this per-service button. Restart channel-gateway instead, or switch back to a dedicated ${serviceLabel} process first.`,
@@ -1101,6 +1101,11 @@ export default function App() {
       `The ${serviceLabel} action did not complete. Please try again shortly. If needed, check ${serviceName}.log on the Logs page.`,
     );
   };
+  const serviceActionErrorCode = (body: ApiResponse<Record<string, unknown>>) =>
+    stringAt(body.data, ["error_code"]) ||
+    stringAt(body.data, ["status_code"]) ||
+    body.error?.trim() ||
+    "";
   const channelPresets = useMemo<Record<ChannelName, ChannelPreset>>(
     () => ({
       telegram: {
@@ -1582,7 +1587,11 @@ export default function App() {
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `${action} ${serviceName} failed (${res.status})`);
+        setServiceActionMessage({
+          tone: "error",
+          text: formatServiceActionError(serviceName, action, serviceActionErrorCode(body)),
+        });
+        return;
       }
       setServiceActionMessage(
         {
@@ -1597,11 +1606,10 @@ export default function App() {
       );
       await sleep(800);
       await fetchHealth();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
+    } catch {
       setServiceActionMessage({
         tone: "error",
-        text: formatServiceActionError(serviceName, action, message),
+        text: formatServiceActionError(serviceName, action, "service_action_request_failed"),
       });
     } finally {
       setServiceActionLoading((prev) => ({ ...prev, [serviceName]: false }));
