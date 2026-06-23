@@ -415,10 +415,14 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
         .or_else(|| ui_skill_description(state, skill_name));
     let adapter_category = registry_entry
         .as_ref()
-        .map(|entry| skill_adapter_category(entry, planner_kind).to_string());
+        .map(|entry| {
+            claw_core::capability_adapter::CapabilityAdapterKind::for_skill_registry_entry(entry)
+                .as_token()
+                .to_string()
+        });
     let background_job_capable = registry_entry
         .as_ref()
-        .map(skill_background_job_capable)
+        .map(claw_core::capability_adapter::skill_background_job_capable)
         .filter(|value| *value);
     SkillListItem {
         name: skill_name.to_string(),
@@ -528,67 +532,6 @@ fn skill_unavailable_reason(
         return Some("missing_required_bins".to_string());
     }
     None
-}
-
-fn skill_adapter_category(
-    entry: &claw_core::skill_registry::SkillRegistryEntry,
-    planner_kind: Option<PlannerCapabilityKind>,
-) -> &'static str {
-    if planner_kind == Some(PlannerCapabilityKind::Workflow) {
-        return "workflow";
-    }
-    if skill_uses_external_api(entry) {
-        return "external_api_adapter";
-    }
-    if planner_kind == Some(PlannerCapabilityKind::Tool)
-        || entry.kind == SkillKind::Builtin
-        || entry.runtime_skill.is_some()
-        || entry.runtime_action.is_some()
-    {
-        return "local_tool_adapter";
-    }
-    "pure_skill"
-}
-
-fn skill_uses_external_api(entry: &claw_core::skill_registry::SkillRegistryEntry) -> bool {
-    entry.resolved_capabilities.iter().any(|capability| {
-        matches!(
-            capability,
-            claw_core::skill_registry::Capability::Llm
-                | claw_core::skill_registry::Capability::Net
-                | claw_core::skill_registry::Capability::Secrets(_)
-        )
-    }) || entry
-        .external_endpoint
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
-}
-
-fn skill_background_job_capable(entry: &claw_core::skill_registry::SkillRegistryEntry) -> bool {
-    entry.planner_capabilities.iter().any(|capability| {
-        let name = capability.name.trim();
-        let action = capability
-            .action
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or_default();
-        action == "poll"
-            || name.ends_with(".poll")
-            || capability
-                .optional
-                .iter()
-                .chain(capability.required.iter())
-                .any(|field| {
-                    matches!(
-                        field.trim(),
-                        "async_start"
-                            | "wait_for_completion"
-                            | "poll_after_seconds"
-                            | "expires_at"
-                            | "expires_in_seconds"
-                    )
-                })
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
