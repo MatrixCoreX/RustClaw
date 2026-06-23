@@ -1556,6 +1556,32 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
             .and_then(serde_json::Value::as_bool),
         Some(true)
     );
+
+    let conn = state.core.audit_db.get().expect("audit db");
+    let (action, detail_json, user_id): (String, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT action, detail_json, user_id FROM audit_logs ORDER BY id DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("latest audit row");
+    assert_eq!(action, "plan_verifier.permission_decision");
+    assert_eq!(user_id, Some(task.user_id));
+    let detail: serde_json::Value =
+        serde_json::from_str(detail_json.as_deref().expect("audit detail json")).unwrap();
+    assert_eq!(detail["task_id"], task.task_id);
+    assert_eq!(
+        detail
+            .pointer("/permission_decision/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
+    );
+    assert_eq!(
+        detail
+            .pointer("/permission_decision/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
+    );
 }
 
 #[test]
