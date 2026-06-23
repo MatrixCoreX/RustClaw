@@ -3,30 +3,79 @@ use crate::policy_decision::PolicyDecision;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubagentRole {
     Observe,
+    Explorer,
+    Worker,
     Review,
+    Reviewer,
     Test,
+    Verifier,
 }
 
 impl SubagentRole {
-    fn all() -> &'static [Self] {
-        &[Self::Observe, Self::Review, Self::Test]
+    pub(crate) fn all() -> &'static [Self] {
+        &[
+            Self::Observe,
+            Self::Explorer,
+            Self::Worker,
+            Self::Review,
+            Self::Reviewer,
+            Self::Test,
+            Self::Verifier,
+        ]
     }
 
     pub(crate) fn as_token(self) -> &'static str {
         match self {
             Self::Observe => "observe",
+            Self::Explorer => "explorer",
+            Self::Worker => "worker",
             Self::Review => "review",
+            Self::Reviewer => "reviewer",
             Self::Test => "test",
+            Self::Verifier => "verifier",
         }
     }
 
     pub(crate) fn parse_token(value: &str) -> Option<Self> {
         match value.trim() {
             "observe" => Some(Self::Observe),
+            "explorer" => Some(Self::Explorer),
+            "worker" => Some(Self::Worker),
             "review" => Some(Self::Review),
+            "reviewer" => Some(Self::Reviewer),
             "test" => Some(Self::Test),
+            "verifier" => Some(Self::Verifier),
             _ => None,
         }
+    }
+
+    pub(crate) fn all_tokens() -> Vec<&'static str> {
+        Self::all().iter().map(|role| role.as_token()).collect()
+    }
+
+    pub(crate) fn family_token(self) -> &'static str {
+        match self {
+            Self::Observe | Self::Explorer => "explorer",
+            Self::Worker => "worker",
+            Self::Review | Self::Reviewer => "reviewer",
+            Self::Test | Self::Verifier => "verifier",
+        }
+    }
+
+    pub(crate) fn default_scope_token(self) -> &'static str {
+        match self {
+            Self::Observe | Self::Explorer => "read_only_discovery",
+            Self::Worker => "read_only_worker",
+            Self::Review | Self::Reviewer => "read_only_review",
+            Self::Test | Self::Verifier => "read_only_verification",
+        }
+    }
+
+    pub(crate) fn result_contract_required(self) -> bool {
+        matches!(
+            self,
+            Self::Review | Self::Reviewer | Self::Test | Self::Verifier
+        )
     }
 }
 
@@ -65,11 +114,7 @@ impl HookStage {
 }
 
 pub(crate) fn runtime_protocol_hint_line() -> String {
-    let roles = SubagentRole::all()
-        .iter()
-        .map(|role| role.as_token())
-        .collect::<Vec<_>>()
-        .join("|");
+    let roles = SubagentRole::all_tokens().join("|");
     let hooks = HookStage::all()
         .iter()
         .map(|stage| stage.as_token())
@@ -88,7 +133,8 @@ mod tests {
     #[test]
     fn runtime_protocol_hint_exposes_safe_subagent_roles_and_hook_stages() {
         let hint = runtime_protocol_hint_line();
-        assert!(hint.contains("subagent_roles:observe|review|test"));
+        let expected_roles = format!("subagent_roles:{}", SubagentRole::all_tokens().join("|"));
+        assert!(hint.contains(&expected_roles));
         assert!(hint.contains("subagent_write_enabled:false"));
         assert!(hint.contains("subagent_external_publish_enabled:false"));
         assert!(hint.contains(

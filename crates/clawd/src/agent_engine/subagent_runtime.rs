@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::LoopState;
+use crate::agent_runtime_contract::SubagentRole;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ROLE: &str = "subagent_invalid_role";
 const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;
@@ -17,14 +18,14 @@ pub(super) fn record_subagent_action(
     options: SubagentActionOptions,
 ) -> Option<&'static str> {
     let role_token = role.trim();
-    let Some(role) = crate::agent_runtime_contract::SubagentRole::parse_token(role_token) else {
+    let Some(role) = SubagentRole::parse_token(role_token) else {
         loop_state.task_observations.push(json!({
             "schema_version": 1,
             "owner_layer": "subagent_runtime",
             "status": "rejected",
             "error_code": "subagent_role_not_allowed",
             "role": role_token,
-            "allowed_roles": ["observe", "review", "test"],
+            "allowed_roles": SubagentRole::all_tokens(),
             "write_enabled": false,
             "external_publish_enabled": false,
             "global_step": global_step,
@@ -43,6 +44,10 @@ pub(super) fn record_subagent_action(
     let allowed_capabilities = safe_machine_token_list(&options.allowed_capabilities);
     let context_ref_count = context_refs.len();
     let allowed_capability_count = allowed_capabilities.len();
+    let role_metadata = role_metadata_summary(role);
+    let budget_summary = subagent_budget_summary(options.budget.as_ref());
+    let timeout_policy = subagent_timeout_policy(&budget_summary);
+    let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
     loop_state.task_observations.push(json!({
         "schema_version": 1,
         "owner_layer": "subagent_runtime",
@@ -50,19 +55,22 @@ pub(super) fn record_subagent_action(
         "execution_mode": "inline_readonly_child_run",
         "child_run_id": child_run_id.as_str(),
         "role": role.as_token(),
+        "role_metadata": role_metadata,
         "objective_present": !objective.trim().is_empty(),
         "objective_char_count": objective.chars().count(),
         "context_refs": &context_refs,
         "context_ref_count": context_ref_count,
         "allowed_capabilities": &allowed_capabilities,
         "allowed_capability_count": allowed_capability_count,
-        "budget": subagent_budget_summary(options.budget.as_ref()),
+        "budget": budget_summary,
+        "timeout_policy": timeout_policy,
+        "cancellation_policy": cancellation_policy,
         "parent_task_ref": machine_ref_or_empty(options.parent_task_id.as_deref().unwrap_or_default()),
         "context_slice": context_slice_summary(options.context_slice.as_ref()),
         "result_contract": result_contract_summary(options.result_contract.as_ref()),
         "child_request": child_request_envelope(
             child_run_id.as_str(),
-            role.as_token(),
+            role,
             context_ref_count,
             allowed_capability_count,
             options.budget.as_ref(),
@@ -89,6 +97,7 @@ pub(super) fn record_subagent_action(
             "role": role.as_token(),
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
+            "role_family": role.family_token(),
             "write_enabled": false,
             "external_publish_enabled": false,
             "failure_isolated": true
@@ -99,9 +108,11 @@ pub(super) fn record_subagent_action(
             "result_status": "completed",
             "outcome_code": "subagent_inline_readonly_completed",
             "role": role.as_token(),
+            "role_family": role.family_token(),
             "context_ref_count": context_ref_count,
             "allowed_capability_count": allowed_capability_count,
             "result_contract_present": options.result_contract.is_some(),
+            "result_contract_required": role.result_contract_required(),
             "write_enabled": false,
             "external_publish_enabled": false,
             "failure_isolated": true
@@ -250,6 +261,46 @@ fn subagent_budget_summary(budget: Option<&Value>) -> Value {
     })
 }
 
+fn role_metadata_summary(role: SubagentRole) -> Value {
+    json!({
+        "schema_version": 1,
+        "role": role.as_token(),
+        "role_family": role.family_token(),
+        "default_scope": role.default_scope_token(),
+        "tool_permission_profile": "read_only",
+        "parallel_eligible": true,
+        "result_contract_required": role.result_contract_required(),
+        "write_enabled": false,
+        "external_publish_enabled": false,
+    })
+}
+
+fn subagent_timeout_policy(budget_summary: &Value) -> Value {
+    let timeout_ms = budget_summary
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0);
+    json!({
+        "schema_version": 1,
+        "policy": "bounded",
+        "timeout_ms": timeout_ms,
+        "timeout_required": true,
+        "timeout_source": if timeout_ms.is_some() { "budget.timeout_ms" } else { "parent_loop_default" },
+        "terminal_status_on_timeout": "timeout",
+    })
+}
+
+fn subagent_cancellation_policy(timeout_policy: &Value) -> Value {
+    json!({
+        "schema_version": 1,
+        "cancellable": true,
+        "cancel_status": "cancelled",
+        "cancel_scope": "child_run",
+        "parent_failure_policy": "isolate_optional_child_failure",
+        "timeout_policy_ref": timeout_policy.get("policy").and_then(Value::as_str),
+    })
+}
+
 fn context_slice_summary(context_slice: Option<&Value>) -> Value {
     let Some(context_slice) = context_slice.and_then(Value::as_object) else {
         return json!({
@@ -268,20 +319,25 @@ fn context_slice_summary(context_slice: Option<&Value>) -> Value {
 
 fn child_request_envelope(
     child_run_id: &str,
-    role: &str,
+    role: SubagentRole,
     context_ref_count: usize,
     allowed_capability_count: usize,
     budget: Option<&Value>,
 ) -> Value {
+    let budget_summary = subagent_budget_summary(budget);
+    let timeout_policy = subagent_timeout_policy(&budget_summary);
     json!({
         "schema_version": 1,
         "request_ref": child_run_id,
-        "role": role,
+        "role": role.as_token(),
+        "role_metadata": role_metadata_summary(role),
         "state": "completed",
         "execution_mode": "inline_readonly_child_run",
         "context_ref_count": context_ref_count,
         "allowed_capability_count": allowed_capability_count,
-        "budget": subagent_budget_summary(budget),
+        "budget": budget_summary,
+        "timeout_policy": timeout_policy,
+        "cancellation_policy": subagent_cancellation_policy(&timeout_policy),
         "write_enabled": false,
         "external_publish_enabled": false,
         "failure_isolated": true,

@@ -24,6 +24,21 @@ fn subagent_action_records_safe_machine_observation() {
     assert_eq!(observation["owner_layer"], "subagent_runtime");
     assert_eq!(observation["status"], "accepted");
     assert_eq!(observation["role"], "review");
+    assert_eq!(observation["role_metadata"]["role_family"], "reviewer");
+    assert_eq!(
+        observation["role_metadata"]["tool_permission_profile"],
+        "read_only"
+    );
+    assert_eq!(
+        observation["role_metadata"]["result_contract_required"],
+        true
+    );
+    assert_eq!(observation["timeout_policy"]["policy"], "bounded");
+    assert_eq!(
+        observation["timeout_policy"]["timeout_source"],
+        "parent_loop_default"
+    );
+    assert_eq!(observation["cancellation_policy"]["cancellable"], true);
     assert_eq!(observation["execution_mode"], "inline_readonly_child_run");
     assert_eq!(observation["write_enabled"], false);
     assert_eq!(observation["external_publish_enabled"], false);
@@ -51,6 +66,9 @@ fn subagent_action_rejects_unknown_role_as_machine_state() {
     assert_eq!(observation["owner_layer"], "subagent_runtime");
     assert_eq!(observation["status"], "rejected");
     assert_eq!(observation["error_code"], "subagent_role_not_allowed");
+    assert_eq!(observation["allowed_roles"][0], "observe");
+    assert_eq!(observation["allowed_roles"][1], "explorer");
+    assert_eq!(observation["allowed_roles"][6], "verifier");
     assert_eq!(observation["write_enabled"], false);
     assert_eq!(observation["external_publish_enabled"], false);
 }
@@ -67,7 +85,8 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
         "budget": {
             "max_rounds": 1,
             "max_tool_calls": 2,
-            "max_context_chars": 4096
+            "max_context_chars": 4096,
+            "timeout_ms": 2500
         },
         "context_slice": {
             "refs": ["step_1:evidence:1", "unsafe ref"],
@@ -90,6 +109,15 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
     );
     assert_eq!(observation["allowed_capabilities"][1]["token"], "");
     assert_eq!(observation["budget"]["max_tool_calls"], 2);
+    assert_eq!(observation["timeout_policy"]["timeout_ms"], 2500);
+    assert_eq!(
+        observation["timeout_policy"]["terminal_status_on_timeout"],
+        "timeout"
+    );
+    assert_eq!(
+        observation["cancellation_policy"]["cancel_scope"],
+        "child_run"
+    );
     assert_eq!(observation["parent_task_ref"], "task_123");
     assert_eq!(
         observation["context_slice"]["refs"][0]["ref"],
@@ -101,6 +129,14 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
         "merged"
     );
     assert_eq!(observation["child_request"]["state"], "completed");
+    assert_eq!(
+        observation["child_request"]["role_metadata"]["role_family"],
+        "verifier"
+    );
+    assert_eq!(
+        observation["child_request"]["timeout_policy"]["timeout_ms"],
+        2500
+    );
     assert_eq!(
         observation["child_request"]["execution_mode"],
         "inline_readonly_child_run"
@@ -125,9 +161,44 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
         "merged"
     );
     assert_eq!(observation["child_result"]["status"], "completed");
+    assert_eq!(observation["child_result"]["role_family"], "verifier");
+    assert_eq!(
+        observation["child_result"]["result_contract_required"],
+        true
+    );
     assert_eq!(
         observation["child_result"]["outcome_code"],
         "subagent_inline_readonly_completed"
     );
     assert_eq!(observation["write_enabled"], false);
+}
+
+#[test]
+fn subagent_new_role_tokens_preserve_readonly_policy() {
+    let mut loop_state = LoopState::new(2);
+
+    let stop_signal = record_subagent_action(
+        &mut loop_state,
+        1,
+        1,
+        "worker",
+        "Collect bounded evidence.",
+        &[],
+        SubagentActionOptions::default(),
+    );
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["role"], "worker");
+    assert_eq!(observation["role_metadata"]["role_family"], "worker");
+    assert_eq!(
+        observation["role_metadata"]["default_scope"],
+        "read_only_worker"
+    );
+    assert_eq!(observation["write_enabled"], false);
+    assert_eq!(observation["external_publish_enabled"], false);
+    assert_eq!(
+        observation["cancellation_policy"]["cancel_status"],
+        "cancelled"
+    );
 }
