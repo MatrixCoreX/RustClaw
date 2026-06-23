@@ -16,7 +16,6 @@ import {
   Wrench,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { ActiveTasksPanel } from "./components/ActiveTasksPanel";
 import { AuthKeysPage } from "./components/AuthKeysPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
@@ -24,14 +23,13 @@ import { ConsoleLayout } from "./components/ConsoleLayout";
 import { DashboardPage } from "./components/DashboardPage";
 import { FactoryResetModal } from "./components/FactoryResetModal";
 import { LogsPage } from "./components/LogsPage";
-import { ManualTaskSubmitPanel } from "./components/ManualTaskSubmitPanel";
 import { MemoryPage } from "./components/MemoryPage";
 import { ModelConfigPage } from "./components/ModelConfigPage";
 import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
 import { SkillImportPanel } from "./components/SkillImportPanel";
 import { SkillSwitchPanel } from "./components/SkillSwitchPanel";
-import { TaskResultPanel } from "./components/TaskResultPanel";
+import { TasksPage } from "./components/TasksPage";
 import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
@@ -4740,90 +4738,69 @@ export default function App() {
           ) : null}
 
           {currentPage === "tasks" ? (
-            <>
-              <ActiveTasksPanel
-                lang={lang}
-                t={t}
-                activeTasks={activeTasks}
-                activeTasksLoading={activeTasksLoading}
-                activeTasksError={activeTasksError}
-                activeTasksLastUpdated={activeTasksLastUpdated}
-                resumeTaskError={resumeTaskError}
-                resumeTaskMessage={resumeTaskMessage}
-                cancelTaskError={cancelTaskError}
-                cancelTaskMessage={cancelTaskMessage}
-                cancelingTaskIndex={cancelingTaskIndex}
-                canUseInteractionContext={interactionUserId != null && interactionChatId != null}
-                resumeDrafts={resumeDrafts}
-                resumeSubmittingTaskId={resumeSubmittingTaskId}
-                toLocalTime={toLocalTime}
-                onFetchActiveTasks={fetchActiveTasks}
-                onViewTask={(taskIdToView) => {
-                  setTaskId(taskIdToView);
-                  return queryTaskById(taskIdToView);
-                }}
-                onCancelTask={cancelActiveTask}
-                onResumeDraftChange={(taskIdToResume, value) =>
-                  setResumeDrafts((prev) => ({
-                    ...prev,
-                    [taskIdToResume]: value,
-                  }))
-                }
-                onSubmitResume={submitResumeForTask}
-              />
-
-              <ManualTaskSubmitPanel
-                t={t}
-                tSlash={tSlash}
-                interactionKind={interactionKind}
-                interactionChannel={interactionChannel}
-                interactionAdapter={interactionAdapter}
-                interactionExternalUserId={interactionExternalUserId}
-                interactionExternalChatId={interactionExternalChatId}
-                interactionRole={interactionRole}
-                localContextLoading={localContextLoading}
-                localContextError={localContextError}
-                interactionAskText={interactionAskText}
-                interactionAgentMode={interactionAgentMode}
-                interactionSkillName={interactionSkillName}
-                interactionSkillArgs={interactionSkillArgs}
-                interactionLoading={interactionLoading}
-                interactionSubmittedTaskId={interactionSubmittedTaskId}
-                trackingTaskId={trackingTaskId}
-                interactionError={interactionError}
-                onInteractionKindChange={setInteractionKind}
-                onInteractionChannelChange={setInteractionChannel}
-                onInteractionAdapterChange={setInteractionAdapter}
-                onInteractionExternalUserIdChange={setInteractionExternalUserId}
-                onInteractionExternalChatIdChange={setInteractionExternalChatId}
-                onInteractionAskTextChange={setInteractionAskText}
-                onInteractionAgentModeChange={setInteractionAgentMode}
-                onInteractionSkillNameChange={setInteractionSkillName}
-                onInteractionSkillArgsChange={setInteractionSkillArgs}
-                onSubmitInteractionTask={submitInteractionTask}
-              />
-
-              <TaskResultPanel
-                lang={lang}
-                t={t}
-                tSlash={tSlash}
-                taskId={taskId}
-                taskLoading={taskLoading}
-                taskError={taskError}
-                taskResult={taskResult}
-                resumeDrafts={resumeDrafts}
-                resumeSubmittingTaskId={resumeSubmittingTaskId}
-                onTaskIdChange={setTaskId}
-                onQueryTask={queryTask}
-                onResumeDraftChange={(taskIdToResume, value) =>
-                  setResumeDrafts((prev) => ({
-                    ...prev,
-                    [taskIdToResume]: value,
-                  }))
-                }
-                onSubmitResume={submitResumeForTask}
-              />
-            </>
+            <TasksPage
+              lang={lang}
+              t={t}
+              tSlash={tSlash}
+              activeTasks={activeTasks}
+              activeTasksLoading={activeTasksLoading}
+              activeTasksError={activeTasksError}
+              activeTasksLastUpdated={activeTasksLastUpdated}
+              resumeTaskError={resumeTaskError}
+              resumeTaskMessage={resumeTaskMessage}
+              cancelTaskError={cancelTaskError}
+              cancelTaskMessage={cancelTaskMessage}
+              cancelingTaskIndex={cancelingTaskIndex}
+              canUseInteractionContext={interactionUserId != null && interactionChatId != null}
+              resumeDrafts={resumeDrafts}
+              resumeSubmittingTaskId={resumeSubmittingTaskId}
+              toLocalTime={toLocalTime}
+              onFetchActiveTasks={fetchActiveTasks}
+              onViewTask={(taskIdToView) => {
+                setTaskId(taskIdToView);
+                return queryTaskById(taskIdToView);
+              }}
+              onCancelTask={cancelActiveTask}
+              onResumeDraftChange={(taskIdToResume, value) =>
+                setResumeDrafts((prev) => ({
+                  ...prev,
+                  [taskIdToResume]: value,
+                }))
+              }
+              onSubmitResume={submitResumeForTask}
+              interactionKind={interactionKind}
+              interactionChannel={interactionChannel}
+              interactionAdapter={interactionAdapter}
+              interactionExternalUserId={interactionExternalUserId}
+              interactionExternalChatId={interactionExternalChatId}
+              interactionRole={interactionRole}
+              localContextLoading={localContextLoading}
+              localContextError={localContextError}
+              interactionAskText={interactionAskText}
+              interactionAgentMode={interactionAgentMode}
+              interactionSkillName={interactionSkillName}
+              interactionSkillArgs={interactionSkillArgs}
+              interactionLoading={interactionLoading}
+              interactionSubmittedTaskId={interactionSubmittedTaskId}
+              trackingTaskId={trackingTaskId}
+              interactionError={interactionError}
+              onInteractionKindChange={setInteractionKind}
+              onInteractionChannelChange={setInteractionChannel}
+              onInteractionAdapterChange={setInteractionAdapter}
+              onInteractionExternalUserIdChange={setInteractionExternalUserId}
+              onInteractionExternalChatIdChange={setInteractionExternalChatId}
+              onInteractionAskTextChange={setInteractionAskText}
+              onInteractionAgentModeChange={setInteractionAgentMode}
+              onInteractionSkillNameChange={setInteractionSkillName}
+              onInteractionSkillArgsChange={setInteractionSkillArgs}
+              onSubmitInteractionTask={submitInteractionTask}
+              taskId={taskId}
+              taskLoading={taskLoading}
+              taskError={taskError}
+              taskResult={taskResult}
+              onTaskIdChange={setTaskId}
+              onQueryTask={queryTask}
+            />
           ) : null}
     </ConsoleLayout>
   );
