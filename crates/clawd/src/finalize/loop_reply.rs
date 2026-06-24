@@ -476,6 +476,9 @@ fn prefer_latest_synthesis_for_compound_observation_delivery(
     let current = final_answer_text_from_delivery(delivery_messages)
         .trim()
         .to_string();
+    if delivery_message_is_json_container(&current) {
+        return false;
+    }
     let Some(synthesis) = latest_publishable_synthesis_step_output(loop_state)
         .or_else(|| latest_contractual_synthesis_output(loop_state))
         .or_else(|| latest_publishable_terminal_language_output(loop_state))
@@ -1422,6 +1425,14 @@ pub(crate) async fn finalize_loop_reply(
             &loop_state.delivery_messages,
             priority_last_respond,
         );
+    if attach_machine_envelope_delivery_from_loop(
+        task,
+        &mut loop_state,
+        &mut finalizer_summary,
+        agent_run_context,
+    ) {
+        delivery_deduped = loop_state.delivery_messages.clone();
+    }
 
     if delivery_deduped.is_empty() {
         if let Some(reply) = missing_file_delivery_reply_from_loop(

@@ -341,6 +341,16 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_clawcli_resume_surface"
     );
     return_deterministic_plan!(
+        subagent_bounded_batch_surface_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+        ),
+        "plan_deterministic_subagent_bounded_batch_surface"
+    );
+    return_deterministic_plan!(
         subagent_review_boundary_surface_deterministic_plan_result(
             state,
             goal,
