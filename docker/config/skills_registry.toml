@@ -607,10 +607,10 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
 output_kind = "text"
 planner_capabilities = [
-  { name = "rss.latest_news", action = "latest", effect = "observe", optional = ["category", "limit", "timeout_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
-  { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+  { name = "rss.latest_news", action = "latest", effect = "observe", optional = ["category", "limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
+  { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds", "topic", "topic_token"], risk_level = "low", idempotent = true, dedup_scope = "args" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["latest", "fetch"] }, category = { type = "string" }, url = { type = "string" }, feed_url = { type = "string" }, feed_urls = { type = "array", items = { type = "string" } }, limit = { type = "integer" }, timeout_seconds = { type = "integer" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["latest", "fetch"] }, category = { type = "string" }, topic = { type = "string" }, topic_token = { type = "string" }, url = { type = "string" }, feed_url = { type = "string" }, feed_urls = { type = "array", items = { type = "string" } }, limit = { type = "integer" }, timeout_seconds = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]

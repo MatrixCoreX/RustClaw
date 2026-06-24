@@ -111,6 +111,9 @@ struct RssCategoryConfig {
     output_language: Option<String>,
     #[serde(default)]
     bilingual_summary: Option<bool>,
+    /// Stable machine topic token used for grouping/summary labels.
+    #[serde(default)]
+    topic: Option<String>,
 }
 
 /// 返回配置中所有废弃 URL 的集合；默认抓取时不抓这些。
@@ -444,6 +447,7 @@ fn fetch_single_feed(
         .and_then(|v| v.as_u64())
         .unwrap_or(15)
         .clamp(3, 60);
+    let topic = news_topic_token(None, obj, None);
     let xml = fetch_feed_xml(url, timeout_seconds)?;
     let text = render_feed(&xml, limit);
     let items = parse_feed_items(&xml, limit)
@@ -451,7 +455,7 @@ fn fetch_single_feed(
         .map(|mut item| {
             item.source = url.to_string();
             item.layer = "feed".to_string();
-            feed_item_extra(&item)
+            feed_item_extra(&item, &topic)
         })
         .collect::<Vec<_>>();
     let titles = feed_item_titles(&items);
@@ -543,6 +547,7 @@ fn fetch_layered_news(
     let output_i18n = TextCatalog::for_lang(&output_language);
     let summary_i18n = TextCatalog::for_lang("zh-CN");
     let feed_urls = explicit_feed_urls(obj);
+    let topic = news_topic_token(Some(cfg), obj, Some(&category));
 
     let threshold = cfg.rss.deprecate_after_failures.unwrap_or(3);
 
@@ -651,12 +656,16 @@ fn fetch_layered_news(
         failed_count,
         items.len()
     );
-    let extra_items = items.iter().map(feed_item_extra).collect::<Vec<_>>();
+    let extra_items = items
+        .iter()
+        .map(|item| feed_item_extra(item, &topic))
+        .collect::<Vec<_>>();
     let titles = feed_item_titles(&extra_items);
     let body = format_layered_news_output(
         items.clone(),
         classify,
         bilingual_summary,
+        &topic,
         &output_i18n,
         &summary_i18n,
     );
@@ -769,6 +778,52 @@ fn explicit_feed_urls(obj: &serde_json::Map<String, Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn news_topic_token(
+    cfg: Option<&RootConfig>,
+    obj: &serde_json::Map<String, Value>,
+    category: Option<&str>,
+) -> String {
+    topic_token_from_args(obj)
+        .or_else(|| {
+            let cfg = cfg?;
+            let category = category?;
+            cfg.rss
+                .categories
+                .get(category)
+                .and_then(|cat| cat.topic.as_deref())
+                .and_then(normalize_topic_token)
+        })
+        .unwrap_or_else(|| "other".to_string())
+}
+
+fn topic_token_from_args(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    obj.get("topic")
+        .or_else(|| obj.get("topic_token"))
+        .and_then(Value::as_str)
+        .and_then(normalize_topic_token)
+}
+
+fn normalize_topic_token(raw: &str) -> Option<String> {
+    let token = raw.trim().to_ascii_lowercase();
+    if token.is_empty() || token.len() > 64 {
+        return None;
+    }
+    if !token
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    {
+        return None;
+    }
+    if !token
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(token)
+}
+
 /// 按 date 字符串降序（新在前）；无 date 的排到末尾。
 fn sort_feed_items_by_date(items: &mut [FeedItem]) {
     items.sort_by(|a, b| {
@@ -863,16 +918,22 @@ fn format_layered_news_output(
     items: Vec<FeedItem>,
     classify: bool,
     bilingual_summary: bool,
+    topic: &str,
     output_i18n: &TextCatalog,
     summary_i18n: &TextCatalog,
 ) -> String {
     if classify {
-        return format_classified_news_output(items, bilingual_summary, output_i18n, summary_i18n);
+        return format_classified_news_output(
+            items,
+            bilingual_summary,
+            topic,
+            output_i18n,
+            summary_i18n,
+        );
     }
     let mut out = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         let host = source_host(&item.source);
-        let cls = classify_news_topic(&item.title);
         let mut line = format!(
             "{}. [{}][{}] {}",
             idx + 1,
@@ -889,7 +950,7 @@ fn format_layered_news_output(
                 "   {}",
                 output_i18n.text_or("rss.msg.summary_header", "🧾 Summary:")
             ));
-            for line in build_summary_lines(item, &host, cls, summary_i18n) {
+            for line in build_summary_lines(item, &host, topic, summary_i18n) {
                 out.push(format!("   {}", line));
             }
         }
@@ -904,8 +965,7 @@ fn format_layered_news_output(
     out.join("\n")
 }
 
-fn feed_item_extra(item: &FeedItem) -> Value {
-    let topic = classify_news_topic(&item.title);
+fn feed_item_extra(item: &FeedItem, topic: &str) -> Value {
     json!({
         "title": compact_text(&item.title),
         "link": compact_text(&item.link),
@@ -913,7 +973,7 @@ fn feed_item_extra(item: &FeedItem) -> Value {
         "source": compact_text(&item.source),
         "source_host": source_host(&item.source),
         "layer": compact_text(&item.layer),
-        "topic": topic,
+        "topic": normalize_topic_token(topic).unwrap_or_else(|| "other".to_string()),
     })
 }
 
@@ -928,124 +988,53 @@ fn feed_item_titles(items: &[Value]) -> Vec<String> {
 fn format_classified_news_output(
     items: Vec<FeedItem>,
     bilingual_summary: bool,
+    topic: &str,
     output_i18n: &TextCatalog,
     summary_i18n: &TextCatalog,
 ) -> String {
-    let mut buckets: HashMap<&'static str, Vec<FeedItem>> = HashMap::new();
-    let mut order = Vec::new();
-    for item in items {
-        let cls = classify_news_topic(&item.title);
-        if !buckets.contains_key(cls) {
-            order.push(cls);
-        }
-        buckets.entry(cls).or_default().push(item);
-    }
-
+    let cls = normalize_topic_token(topic).unwrap_or_else(|| "other".to_string());
     let mut out = Vec::new();
-    for cls in order {
-        let Some(group) = buckets.get(cls) else {
-            continue;
-        };
-        let icon = class_emoji(cls);
-        out.push(output_i18n.render(
-            "rss.msg.class_header",
-            &[
-                ("icon", icon.to_string()),
-                ("label", localized_class_label(cls, output_i18n)),
-                ("count", group.len().to_string()),
-            ],
-            "{icon} {label} · {count} items",
-        ));
-        for (idx, item) in group.iter().enumerate() {
-            let host = source_host(&item.source);
-            let mut line = format!(
-                "{}. [{}][{}] {}",
-                idx + 1,
-                item.layer,
-                host,
-                compact_text(&item.title)
-            );
-            if !item.date.is_empty() {
-                line.push_str(&format!(" [{}]", compact_text(&item.date)));
+    let icon = class_emoji(&cls);
+    out.push(output_i18n.render(
+        "rss.msg.class_header",
+        &[
+            ("icon", icon.to_string()),
+            ("label", localized_class_label(&cls, output_i18n)),
+            ("count", items.len().to_string()),
+        ],
+        "{icon} {label} · {count} items",
+    ));
+    for (idx, item) in items.iter().enumerate() {
+        let host = source_host(&item.source);
+        let mut line = format!(
+            "{}. [{}][{}] {}",
+            idx + 1,
+            item.layer,
+            host,
+            compact_text(&item.title)
+        );
+        if !item.date.is_empty() {
+            line.push_str(&format!(" [{}]", compact_text(&item.date)));
+        }
+        out.push(line);
+        if bilingual_summary {
+            out.push(format!(
+                "   {}",
+                output_i18n.text_or("rss.msg.summary_header", "🧾 Summary:")
+            ));
+            for line in build_summary_lines(item, &host, &cls, summary_i18n) {
+                out.push(format!("   {}", line));
             }
-            out.push(line);
-            if bilingual_summary {
-                out.push(format!(
-                    "   {}",
-                    output_i18n.text_or("rss.msg.summary_header", "🧾 Summary:")
-                ));
-                for line in build_summary_lines(item, &host, cls, summary_i18n) {
-                    out.push(format!("   {}", line));
-                }
-            }
-            if !item.link.is_empty() {
-                out.push(format!(
-                    "   {} {}",
-                    output_i18n.text_or("rss.msg.link_prefix", "🔗"),
-                    compact_text(&item.link)
-                ));
-            }
+        }
+        if !item.link.is_empty() {
+            out.push(format!(
+                "   {} {}",
+                output_i18n.text_or("rss.msg.link_prefix", "🔗"),
+                compact_text(&item.link)
+            ));
         }
     }
     out.join("\n")
-}
-
-fn classify_news_topic(title: &str) -> &'static str {
-    let t = title.to_ascii_lowercase();
-    if has_any(
-        &t,
-        &["sec", "senate", "bill", "policy", "regulat", "ban", "cbdc"],
-    ) {
-        return "policy_regulation";
-    }
-    if has_any(
-        &t,
-        &[
-            "hack",
-            "exploit",
-            "breach",
-            "attack",
-            "drain",
-            "vulnerability",
-        ],
-    ) {
-        return "security_incident";
-    }
-    if has_any(
-        &t,
-        &[
-            "ipo", "earnings", "results", "revenue", "funding", "acquire", "merger",
-        ],
-    ) {
-        return "company_business";
-    }
-    if has_any(
-        &t,
-        &[
-            "etf",
-            "inflation",
-            "fed",
-            "interest rate",
-            "macro",
-            "economy",
-            "jobs",
-        ],
-    ) {
-        return "macro_market";
-    }
-    if has_any(
-        &t,
-        &[
-            "upgrade", "launch", "mainnet", "protocol", "rollup", "layer 2", "l2",
-        ],
-    ) {
-        return "tech_ecosystem";
-    }
-    "other"
-}
-
-fn has_any(text: &str, keywords: &[&str]) -> bool {
-    keywords.iter().any(|k| text.contains(k))
 }
 
 fn localized_class_label(class_key: &str, i18n: &TextCatalog) -> String {

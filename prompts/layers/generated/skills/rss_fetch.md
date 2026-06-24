@@ -14,12 +14,14 @@
 - **`fetch`** is **direct-feed only**: one or more explicit `http(s)` URLs. It does **not** fall back to category/config sources.
 - **`latest`** and **`news`** use **category mode**: all **active** sources for the category (from config) are fetched by default. Same merge/dedupe/sort behavior; `news` is an alias of `latest` (default category for `news` when omitted follows config / `general` as documented below).
 - **Category semantics**: A category uses a single list of sources; all listed sources are fetched by default (no primary/fallback tiers). Single-source failure is skipped; only when all sources fail (or return no items) does the skill return an error.
+- **Topic semantics**: `extra.items[].topic` is a stable machine token from `args.topic` / `args.topic_token` or `[rss.categories.<name>].topic`. The skill must not classify titles with language keyword lists; if no machine topic is configured, use `other`.
 - **Deprecated sources**: Default fetch uses only active sources. Sources that consecutively fail (e.g. `deprecate_after_failures = 3` in config) are moved into `[rss.deprecated]` and no longer fetched; success on a source resets its failure count. Deprecated sources are not used for `latest`/`news` unless restored in config.
 
 ## Config Entry Points (from interface)
 - Main RSS config: `configs/rss.toml`.
 - Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.
 - Defaults: `rss.default_category`, `rss.default_limit`, and `rss.timeout_seconds`.
+- Optional category topic token: `[rss.categories.<name>].topic`, a lowercase machine token such as `macro_market`, `tech_ecosystem`, or `other`.
 
 ## Actions (from interface)
 - `fetch` — direct RSS/Atom URL(s) only; requires `url` or `feed_url` or `feed_urls`.
@@ -43,13 +45,16 @@ The schedule / `run_skill` persistence layer does **not** rewrite these; normali
 | `fetch` | `url` or `feed_url` or `feed_urls` | yes | string/array | - | **At least one** http(s) feed URL. `feed_urls`: JSON array of strings; empty or all-invalid → error. |
 | `fetch` | `limit` | no | number | impl default | Per-feed item cap (single URL). |
 | `fetch` | `timeout_seconds` | no | number | impl default | Request timeout override. |
+| `fetch` | `topic` / `topic_token` | no | string | `other` | Stable lowercase machine topic token for `extra.items[].topic`; do not pass user-language phrases. |
 | `latest` | `category` | no | string | impl default | Must be a key under `[rss.categories]` in `configs/rss.toml`; all **active** sources for that category are fetched. If unmappable, prefer `general` / `rss.default_category`. Do not invent categories. |
 | `latest` | `limit` | no | number | impl default | Maximum returned items (applied after merge/dedupe/sort). |
 | `latest` | `timeout_seconds` | no | number | impl default | Request timeout override. |
+| `latest` | `topic` / `topic_token` | no | string | category config / `other` | Stable lowercase machine topic override for `extra.items[].topic`; invalid sentence-like values are ignored. |
 | `latest` | `url` / `feed_url` / `feed_urls` | no | string/array | - | Optional: if provided, fetches **only** these URLs (explicit list) instead of category config; still uses `latest` merge/deprecation rules for **non-explicit** category fetches only — when using explicit URLs, deprecation state is not updated. |
 | `news` | `category` | no | string | `general` | Same as `latest` (category-based); same `[rss.categories]` key rule and no invented category strings. |
 | `news` | `limit` | no | number | impl default | Same as `latest`. |
 | `news` | `timeout_seconds` | no | number | impl default | Same as `latest`. |
+| `news` | `topic` / `topic_token` | no | string | category config / `other` | Same topic-token rule as `latest`. |
 
 ## Error Contract (from interface)
 - Unknown or unconfigured `category` (no entry under `[rss.categories]` or no active sources) → readable `error_text` (e.g. `no configured feeds for category=...`).

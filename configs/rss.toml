@@ -16,6 +16,7 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+topic = "other"
 
 [rss.categories.tech]
 sources = [
@@ -31,6 +32,7 @@ secondary = []
 fallback = []
 output_language = "en-US"
 bilingual_summary = true
+topic = "tech_ecosystem"
 
 [[rss.categories.tech.source_entries]]
 url = "https://www.theverge.com/rss/index.xml"
@@ -78,6 +80,7 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+topic = "other"
 
 [[rss.categories.general.source_entries]]
 url = "https://feeds.bbci.co.uk/news/rss.xml"
@@ -104,6 +107,7 @@ secondary = []
 fallback = []
 output_language = "en-US"
 bilingual_summary = true
+topic = "tech_ecosystem"
 
 [rss.categories.crypto]
 sources = [
@@ -118,6 +122,7 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+topic = "macro_market"
 
 [[rss.categories.crypto.source_entries]]
 url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
@@ -164,6 +169,7 @@ secondary = []
 fallback = []
 output_language = "en-US"
 bilingual_summary = true
+topic = "other"
 
 [rss.categories.china]
 sources = [
@@ -179,6 +185,7 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+topic = "other"
 
 [rss.categories.business]
 sources = [
@@ -193,6 +200,7 @@ secondary = []
 fallback = []
 output_language = "en-US"
 bilingual_summary = true
+topic = "macro_market"
 
 [[rss.categories.business.source_entries]]
 url = "https://feeds.bloomberg.com/markets/news.rss"
