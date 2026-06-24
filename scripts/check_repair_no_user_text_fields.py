@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -63,20 +64,52 @@ def is_allowed_presence_check(relative: str, line: str) -> bool:
     )
 
 
-def main() -> int:
+def scan_source(relative: str, text: str) -> list[str]:
+    findings: list[str] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if any(pattern.search(line) for pattern in STRING_READ_PATTERNS):
+            findings.append(f"{relative}:{line_no}: string_read: {line.strip()}")
+            continue
+        has_forbidden_reference = any(
+            pattern.search(line) for pattern in FORBIDDEN_PATTERNS
+        )
+        if has_forbidden_reference and not is_allowed_presence_check(relative, line):
+            findings.append(f"{relative}:{line_no}: {line.strip()}")
+    return findings
+
+
+def scan_repo() -> list[str]:
     findings: list[str] = []
     for relative in MONITORED_FILES:
         path = ROOT / relative
         text = path.read_text(encoding="utf-8")
-        for line_no, line in enumerate(text.splitlines(), start=1):
-            if any(pattern.search(line) for pattern in STRING_READ_PATTERNS):
-                findings.append(f"{relative}:{line_no}: string_read: {line.strip()}")
-                continue
-            has_forbidden_reference = any(
-                pattern.search(line) for pattern in FORBIDDEN_PATTERNS
-            )
-            if has_forbidden_reference and not is_allowed_presence_check(relative, line):
-                findings.append(f"{relative}:{line_no}: {line.strip()}")
+        findings.extend(scan_source(relative, text))
+    return findings
+
+
+def run_self_test() -> int:
+    core_bad = 'fn bad(value: &Value) { let text = value.get("text").and_then(Value::as_str); }'
+    core_presence_bad = 'fn bad(value: &Value) -> bool { value.get("text").is_some() }'
+    lifecycle_presence_ok = 'fn ok(value: &Value) -> bool { value.get("text").is_none() }'
+    lifecycle_read_bad = (
+        'fn bad(value: &Value) { let text = value.get("error_text").and_then(Value::as_str); }'
+    )
+    assert scan_source(CORE_RECOVERY_FILES[0], core_bad)
+    assert scan_source(CORE_RECOVERY_FILES[0], core_presence_bad)
+    assert not scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_presence_ok)
+    assert scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_read_bad)
+    print("SELF_TEST_OK")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
+    findings = scan_repo()
 
     if findings:
         print("REPAIR_USER_TEXT_FIELD_CHECK findings={}".format(len(findings)))
@@ -93,4 +126,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
