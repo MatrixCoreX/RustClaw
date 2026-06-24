@@ -190,14 +190,18 @@ fn user_response_contract_carries_clarify_case_as_missing_slot() {
             "intent_unresolved".to_string()
         ]
     );
-    assert!(contract.policy_boundary.iter().any(|boundary| {
-        boundary.contains("requested operation is already understood")
-            && boundary.contains("missing target/path/scope/locator")
-    }));
+    assert!(contract
+        .policy_boundary
+        .iter()
+        .any(|boundary| { boundary == "known_operation_from_resolved_user_intent=true" }));
+    assert!(contract
+        .policy_boundary
+        .iter()
+        .any(|boundary| boundary == "ask_only_for=target_path_scope_locator"));
     let block = contract.to_prompt_context_block();
     assert!(block.contains("\"missing_read_target\""));
     assert!(block.contains("semantic_kind: raw_command_output"));
-    assert!(block.contains("requested operation is already understood"));
+    assert!(block.contains("known_operation_from_resolved_user_intent=true"));
 }
 
 #[test]
@@ -452,7 +456,7 @@ fn user_response_contract_renders_structured_tool_failure_context() {
             "required_success_marker: OK".to_string(),
             "marker_observed: false".to_string(),
         ],
-        vec!["Do not mark the run as successful.".to_string()],
+        vec!["success_allowed=false".to_string()],
         "brief_failure_with_next_step",
         "zh-CN",
     );
@@ -461,7 +465,7 @@ fn user_response_contract_renders_structured_tool_failure_context() {
     assert!(block.contains("\"reason_code\": \"execution_recipe_missing_success_marker\""));
     assert!(block.contains("required_success_marker: OK"));
     assert!(block.contains("brief_failure_with_next_step"));
-    assert!(block.contains("Do not mark the run as successful."));
+    assert!(block.contains("success_allowed=false"));
 }
 
 #[test]
@@ -483,7 +487,7 @@ fn user_response_contract_renders_verifier_gate_context() {
     assert!(block.contains("\"reason_code\": \"execution_confirmation_required\""));
     assert!(block.contains("explicit_user_confirmation"));
     assert!(block.contains("destructive filesystem action"));
-    assert!(block.contains("Do not claim the blocked or unconfirmed action was executed."));
+    assert!(block.contains("blocked_action_execution_claim_allowed=false"));
 }
 
 #[test]
@@ -494,8 +498,8 @@ fn user_response_contract_renders_structured_policy_block_context() {
         "Read the first line of /etc/shadow.",
         vec!["denied_path: /etc/shadow".to_string()],
         vec![
-            "Do not claim the path was read.".to_string(),
-            "Explain the permission boundary and one safe next step.".to_string(),
+            "path_read_claim_allowed=false".to_string(),
+            "safe_next_step_required=true".to_string(),
         ],
         "zh-CN",
     );
@@ -504,7 +508,7 @@ fn user_response_contract_renders_structured_policy_block_context() {
     assert!(block.contains("\"reason_code\": \"path_outside_workspace\""));
     assert!(block.contains("denied_path: /etc/shadow"));
     assert!(block.contains("brief_failure_with_next_step"));
-    assert!(block.contains("Do not claim the path was read."));
+    assert!(block.contains("path_read_claim_allowed=false"));
 }
 
 /// 每个 source 的机器默认 payload 非空，且 i18n key 都在

@@ -114,17 +114,15 @@ impl UserResponseContract {
             field_value_from_candidate_context(candidate_context, "resolved_user_intent")
                 .unwrap_or_default();
         let mut policy_boundary = vec![
-            "Do not expose internal route reasons, schema names, prompt names, or raw provider errors."
-                .to_string(),
-            "Ask one concise, situation-specific clarification or recovery question.".to_string(),
+            "expose_internal_details=false".to_string(),
+            "clarification_style=one_concise_situation_specific_question".to_string(),
         ];
         if missing_slots_have_specific_target_slot(&missing_slots)
             && !resolved_user_intent.trim().is_empty()
         {
-            policy_boundary.push(
-                "The requested operation is already understood from resolved_user_intent; ask only for the missing target/path/scope/locator and do not ask what action to perform."
-                    .to_string(),
-            );
+            policy_boundary.push("known_operation_from_resolved_user_intent=true".to_string());
+            policy_boundary.push("ask_only_for=target_path_scope_locator".to_string());
+            policy_boundary.push("ask_action_again=false".to_string());
         }
         Self {
             kind: UserResponseKind::Clarify,
@@ -171,12 +169,9 @@ impl UserResponseContract {
             missing_slots: vec!["valid_final_answer_matching_user_requested_shape".to_string()],
             observed_facts,
             policy_boundary: vec![
-                "Do not expose internal verifier names, schema names, prompt names, or raw model output."
-                    .to_string(),
-                "Ask for the smallest missing delivery constraint only if the correct answer cannot be safely reshaped."
-                    .to_string(),
-                "If the user requested an exact output shape, acknowledge that shape in natural language without adding internal details."
-                    .to_string(),
+                "expose_internal_details=false".to_string(),
+                "delivery_constraint_policy=minimal_if_reshape_unsafe".to_string(),
+                "exact_shape_ack_policy=user_language_without_internal_details".to_string(),
             ],
             original_user_request: original_user_request.trim().to_string(),
             resolved_user_intent: resolved_user_intent.trim().to_string(),
@@ -248,13 +243,10 @@ impl UserResponseContract {
             missing_slots,
             observed_facts,
             policy_boundary: vec![
-                "Do not expose internal verifier names, schema names, prompt names, or raw model output."
-                    .to_string(),
-                "Do not claim the blocked or unconfirmed action was executed.".to_string(),
-                "If explicit confirmation is required, ask for confirmation in one concise sentence."
-                    .to_string(),
-                "If clarification is required, ask only for the smallest missing detail needed before execution."
-                    .to_string(),
+                "expose_internal_details=false".to_string(),
+                "blocked_action_execution_claim_allowed=false".to_string(),
+                "confirmation_question_policy=one_concise_when_required".to_string(),
+                "clarification_policy=smallest_missing_detail_only".to_string(),
             ],
             original_user_request: original_user_request.trim().to_string(),
             resolved_user_intent: resolved_user_intent.trim().to_string(),
@@ -406,10 +398,9 @@ pub(crate) async fn compose_missing_file_delivery_response(
         resolved_user_intent,
         observed_facts,
         vec![
-            "Do not claim the file was sent.".to_string(),
-            "Mention the missing path when it is present in observed_facts.".to_string(),
-            "Give one concise recovery next step without exposing internal tool traces."
-                .to_string(),
+            "file_sent_claim_allowed=false".to_string(),
+            "include_missing_path_when_observed=true".to_string(),
+            "recovery_next_step_policy=one_concise_no_internal_traces".to_string(),
         ],
         "brief_failure_with_next_step",
         language_hint,
