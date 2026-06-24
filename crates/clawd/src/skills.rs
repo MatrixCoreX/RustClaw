@@ -1392,8 +1392,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
                 format!("policy_token: {policy_token}"),
             ],
             vec![
-                "Do not execute the blocked skill.".to_string(),
-                "Explain that the current tools policy blocks this capability.".to_string(),
+                "action=execute_skill".to_string(),
+                "policy=tools_policy".to_string(),
+                "required_decision=allow".to_string(),
             ],
         ));
     }
@@ -1408,8 +1409,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
                 format!("enabled_skills: {}", allowed.join(", ")),
             ],
             vec![
-                "Do not execute skills that are not enabled.".to_string(),
-                "Tell the user to enable the skill in config before retrying.".to_string(),
+                "action=execute_skill".to_string(),
+                "required_state=skill_enabled".to_string(),
+                "config_scope=skills_list_or_skill_switches".to_string(),
             ],
         ));
     }
@@ -1421,8 +1423,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
                 format!("agent_id: {}", state.task_agent_id(task)),
             ],
             vec![
-                "Do not execute skills disabled for the current agent.".to_string(),
-                "Tell the user to enable the skill for this agent before retrying.".to_string(),
+                "action=execute_skill".to_string(),
+                "required_state=agent_skill_enabled".to_string(),
+                "config_scope=agent_skill_policy".to_string(),
             ],
         ));
     }
