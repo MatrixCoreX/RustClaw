@@ -648,12 +648,10 @@ pub(super) async fn compose_recent_artifacts_machine_field_delivery(
         missing_slots: Vec::new(),
         observed_facts,
         policy_boundary: vec![
-            "Use only observed_facts for entry names, paths, kinds, sizes, and classifications."
-                .to_string(),
-            "Do not output raw key=value machine fields, JSON, trace names, or schema names."
-                .to_string(),
-            "Cover the selected recent entries and the grounded judgment requested by the user."
-                .to_string(),
+            "evidence_source=observed_facts_only".to_string(),
+            "raw_machine_field_output_allowed=false".to_string(),
+            "expose_internal_details=false".to_string(),
+            "response_scope=selected_recent_entries_and_grounded_judgment".to_string(),
         ],
         original_user_request: user_text.trim().to_string(),
         resolved_user_intent: route.resolved_intent.trim().to_string(),
@@ -1141,6 +1139,33 @@ fn delivery_omits_observed_document_file(
     mentioned > 0 && mentioned < files.len()
 }
 
+fn delivery_omits_relevant_document_file(
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery: &str,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+        || !route.output_contract.requires_content_evidence
+        || delivery.trim().is_empty()
+    {
+        return false;
+    }
+    let Some(files) = latest_inventory_document_files(loop_state) else {
+        return false;
+    };
+    if files.len() < 2 {
+        return false;
+    }
+    let reads = read_range_observations(loop_state);
+    let Some(relevant) = select_relevant_inventory_document_file(&files, &reads) else {
+        return false;
+    };
+    !delivery_mentions_inventory_document_file(delivery, &relevant)
+}
+
 fn delivery_mentions_inventory_document_file(delivery: &str, file: &InventoryDocumentFile) -> bool {
     let exact_surface = normalize_path_for_directory_purpose(delivery);
     let spaced_surface = normalize_document_identity_surface(delivery);
@@ -1424,6 +1449,8 @@ pub(super) fn replace_delivery_with_deterministic_directory_purpose_answer(
                 == crate::OutputSemanticKind::DirectoryPurposeSummary
         })
         && current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery)
+        && !delivery_mentions_unobserved_document_file(loop_state, current_delivery)
+        && !delivery_omits_relevant_document_file(loop_state, agent_run_context, current_delivery)
     {
         loop_state.last_user_visible_respond = Some(current_delivery.trim().to_string());
         log_deterministic_delivery_record(
