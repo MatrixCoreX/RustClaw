@@ -613,7 +613,9 @@ Use the smallest affected NL set while code is still moving, then widen coverage
 4. Canary: 500 client-like cases before changing default authority or deleting old gates.
 5. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
 
-Current `configs/agent_guard.toml` defaults use `semantic_route_authority = "agent_loop_default"`, `answer_verifier_enforce_required_scope = "all"`, and `registry_idempotency_guard_scope = "all"`. The older `agent_decides_semantic_route` and `agent_decides_migration_class` names are ignored historical config keys; use `semantic_route_authority` and `agent_loop_canary_bucket` for route-authority rollback/debug. The 500 / 2100+ gates still matter before physically deleting the remaining compatibility or rollback code paths.
+Current `configs/agent_guard.toml` defaults use `semantic_route_authority = "agent_loop_default"`, `answer_verifier_enforce_required_scope = "all"`, and `registry_idempotency_guard_scope = "all"`. The older `agent_decides_semantic_route` and `agent_decides_migration_class` names are ignored historical config keys; use `semantic_route_authority` and `agent_loop_canary_bucket` for route-authority rollback/debug.
+
+Before physically deleting remaining compatibility or rollback code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 285 rows covering 318/318 categories), route-delta review with no unexplained mismatch, and the route/repair/static guards. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.
 
 Focused long-tail closed-loop entries:
 
