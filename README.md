@@ -50,6 +50,8 @@ flowchart TD
     Q -->|respond| R[Terminal response]
     Q -->|synthesize_answer| S[Grounded synthesis]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
+    QP -->|long-tail async_start| AS[Async job start adapter<br/>pending_async_job + checkpoint]
+    AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after]
     QP -->|call_tool| T[Tool execution]
     QP -->|call_skill| U[Shared skill dispatch]
     RS --> U
@@ -66,6 +68,8 @@ flowchart TD
     Y --> Z[Output-contract guard + task result]
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
+    ASP --> AA
+    ASP --> AB
     Z -. optional .-> AC[Background memory refresh]
 ```
 
@@ -78,6 +82,7 @@ flowchart TD
 - `Agent-loop semantic authority`: ordinary eligible work enters the loop, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
+- `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
 - `RepairEnvelope`: repair is bounded loop recovery. Runtime supplies machine fields such as `repair_source`, `issue_codes`, `missing_evidence`, `permission_decision`, `provider_status`, `attempt_fingerprint`, `side_effect_fingerprint`, `checkpoint_id`, and `next_recovery_kind`; planner/finalizer can use those fields to replan, clarify, wait in background, or fail structurally without parsing localized prose.
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
@@ -97,9 +102,11 @@ flowchart TD
     F -->|compat/direct/schedule| H[Compatibility finalization path]
     G --> I{Round source}
     I -->|runtime can prove plan| J[Deterministic plan]
+    I -->|runtime async command contract| JA[Deterministic async job start plan]
     I -->|needs reasoning| K[LLM: planner round]
     K --> L[Plan JSON steps]
     J --> M[CapabilityResolver]
+    JA --> M
     L --> M
     N[Skill registry<br/>planner_capabilities] --> M
     O[Generated INTERFACE prompts] --> K
@@ -108,9 +115,11 @@ flowchart TD
     Q -->|call_capability| R[Resolved tool or skill]
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
+    QA -->|runtime async marker| AR[Allow async_start + strip internal marker]
     QA -->|subagent tool| SS[Bounded read-only subagent batch<br/>role/config + aggregation]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
+    AR --> T
     T --> U{Skill kind}
     U -->|builtin| V[In-process builtin]
     U -->|external| W[External adapter]
@@ -138,6 +147,7 @@ flowchart TD
 - `Planner prompt`: is built only for loop rounds that need model reasoning. Narrow observation contracts can use runtime-built plans without an extra planner call.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
+- `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
 - `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`). It does not grant write or external-publish permission.
@@ -331,6 +341,8 @@ flowchart TD
     Y --> Z
     Z --> ZA{projection}
     ZA -->|reschedule| I
+    ZA -->|terminal async poll| ZAP[Terminal async projection<br/>final_result_json + machine reply if needed]
+    ZAP --> ZB
     ZA -->|terminal success/failure| ZB[Persist result_json/status]
     J --> ZC[Heartbeat + process ask/run_skill]
     ZC --> ZD{agent loop outcome}
@@ -364,7 +376,8 @@ Important lifecycle details:
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` reads the flattened `/v1/capabilities` machine endpoint. Add `--json` when another script should consume the response.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
-- Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and let worker recovery poll through `poll_async_job`.
+- Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Worker recovery later polls through `poll_async_job`.
+- Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; current runtime uses `tasks.updated_at` plus checkpoint `resume_executor` machine fields, so new database lease columns are deferred until multi-worker claims require them.
