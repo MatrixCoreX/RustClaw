@@ -172,6 +172,40 @@ pub(super) fn restore_explicit_extension_assess_gap_to_command_summary(
     true
 }
 
+pub(super) fn promote_runtime_surface_contract_to_command_summary(
+    prompt: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !(route_result.is_execute_gate() || route_result.is_clarify_gate())
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !runtime_surface_route_can_plan_without_locator(prompt, route_result)
+    {
+        return false;
+    }
+
+    route_result.needs_clarify = false;
+    route_result.clarify_question.clear();
+    route_result.set_execute_gate();
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    if route_result.output_contract.response_shape == crate::OutputResponseShape::Strict {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    }
+    append_route_reason(
+        route_result,
+        "runtime_surface_contract_promoted_to_command_output_summary",
+    );
+    true
+}
+
 fn route_contains_machine_token(route_result: &crate::RouteResult, token: &str) -> bool {
     let token = token.trim();
     if token.is_empty() {
@@ -189,6 +223,48 @@ fn route_requests_extension_assess_gap(route_result: &crate::RouteResult) -> boo
     route_contains_machine_token(route_result, "extension.assess_gap")
         || (route_contains_machine_token(route_result, "extension_manager")
             && route_contains_machine_token(route_result, "assess_gap"))
+}
+
+fn runtime_surface_route_can_plan_without_locator(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    runtime_surface_has_all_machine_token_groups(prompt, route_result, &[&["clawcli"], &["resume"]])
+        || runtime_surface_has_all_machine_token_groups(
+            prompt,
+            route_result,
+            &[
+                &["agent_hooks", "agent.hooks"],
+                &["pre_tool_use", "pretooluse"],
+            ],
+        )
+}
+
+fn runtime_surface_has_all_machine_token_groups(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    token_groups: &[&[&str]],
+) -> bool {
+    token_groups.iter().all(|tokens| {
+        tokens
+            .iter()
+            .any(|token| runtime_surface_has_machine_token(prompt, route_result, token))
+    })
+}
+
+fn runtime_surface_has_machine_token(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    token: &str,
+) -> bool {
+    [
+        prompt,
+        route_result.resolved_intent.as_str(),
+        route_result.route_reason.as_str(),
+        route_result.agent_display_name_hint.as_str(),
+    ]
+    .into_iter()
+    .any(|text| machine_token_present(text, token))
 }
 
 fn machine_token_present(text: &str, token: &str) -> bool {

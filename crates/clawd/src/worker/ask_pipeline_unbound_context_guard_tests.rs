@@ -2,6 +2,7 @@ use super::super::deictic_missing_locator_reason_code;
 use super::super::route_reason_has_marker;
 use super::{
     promote_broad_current_workspace_content_summary_to_directory_purpose,
+    promote_runtime_surface_contract_to_command_summary,
     repair_directory_purpose_command_summary_contract,
     repair_directory_purpose_quantity_comparison_contract,
     restore_explicit_extension_assess_gap_to_command_summary,
@@ -449,6 +450,57 @@ fn extension_assess_gap_directory_contract_restores_to_command_summary() {
     assert!(!route.needs_clarify);
     assert!(route.clarify_question.is_empty());
     assert!(route.is_execute_gate());
+}
+
+#[test]
+fn runtime_surface_clawcli_resume_promotes_to_command_summary_without_locator() {
+    let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.clarify_question = "clarify".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "Inspect clawcli resume surface and report resume_task_id fields".to_string();
+
+    assert!(promote_runtime_surface_contract_to_command_summary(
+        "clawcli resume resume_task_id",
+        &mut route,
+    ));
+    assert!(!route.needs_clarify);
+    assert!(route.clarify_question.is_empty());
+    assert!(route.is_execute_gate());
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+    );
+    assert!(route
+        .route_reason
+        .contains("runtime_surface_contract_promoted_to_command_output_summary"));
+
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "clawcli resume resume_task_id",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
 }
 
 #[test]
