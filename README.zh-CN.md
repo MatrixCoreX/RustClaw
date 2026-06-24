@@ -50,6 +50,8 @@ flowchart TD
     Q -->|respond| R[终端回复]
     Q -->|synthesize_answer| S[基于证据合成]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
+    QP -->|long-tail async_start| AS[Async job start adapter<br/>pending_async_job + checkpoint]
+    AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after]
     QP -->|call_tool| T[工具执行]
     QP -->|call_skill| U[共享技能调度]
     RS --> U
@@ -66,6 +68,8 @@ flowchart TD
     Y --> Z[输出契约护栏 + 任务结果]
     Z --> AA[通道交付]
     Z --> AB[Journal + 会话更新]
+    ASP --> AA
+    ASP --> AB
     Z -. 可选 .-> AC[后台记忆刷新]
 ```
 
@@ -78,6 +82,7 @@ flowchart TD
 - `Agent-loop 语义权威`：普通 eligible 工作进入循环，由 planner/runtime 决定回复、调用能力、执行工具或技能、按证据合成、修复或停止。
 - `CapabilityResolver / PlanVerifier`：把 `call_capability` 解析到当前 tool 或 skill 实现，再检查可见性、必填参数、allowed action、risk/effect、confirmation 和输出契约。
 - `permission_decision`：verifier 和 preflight blocker 输出 `allowed`、`needs_confirmation`、`denied_by_policy`、`dry_run_required`、`external_provider_blocked`、`risk_level`、`action_effect`、registry dedup/idempotency 等机器字段。UI、API、finalizer 和 i18n 应消费这些字段渲染说明，而不是解析 runtime prose。
+- `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
 - `RepairEnvelope`：repair 是有边界的循环内恢复。运行时提供 `repair_source`、`issue_codes`、`missing_evidence`、`permission_decision`、`provider_status`、`attempt_fingerprint`、`side_effect_fingerprint`、`checkpoint_id`、`next_recovery_kind` 等机器字段；planner/finalizer 可以据此重新规划、澄清、转后台等待或结构化失败，而不是解析本地化 prose。
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
@@ -97,9 +102,11 @@ flowchart TD
     F -->|兼容 / 直答 / 调度| H[兼容收尾路径]
     G --> I{轮次来源}
     I -->|运行时可证明计划| J[确定性计划]
+    I -->|runtime async command contract| JA[确定性 async job start 计划]
     I -->|需要推理| K[LLM: planner round]
     K --> L[Plan JSON steps]
     J --> M[CapabilityResolver]
+    JA --> M
     L --> M
     N[技能注册表<br/>planner_capabilities] --> M
     O[生成的 INTERFACE prompts] --> K
@@ -108,9 +115,11 @@ flowchart TD
     Q -->|call_capability| R[解析后的 tool 或 skill]
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
+    QA -->|runtime async marker| AR[允许 async_start + 移除内部 marker]
     QA -->|subagent tool| SS[有界只读子代理 batch<br/>role/config + aggregation]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
+    AR --> T
     T --> U{Skill kind}
     U -->|builtin| V[进程内 builtin]
     U -->|external| W[External adapter]
@@ -138,6 +147,7 @@ flowchart TD
 - `Planner prompt`：只在循环轮次需要模型推理时构建；窄范围观测契约可直接使用运行时构建的计划。
 - `call_capability`：推荐的 planner action，把 tool/skill 选择放到 registry metadata 与 resolver policy 后面。
 - `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
+- `Command payload contract repair`：声明了 command payload 的任务会按需要归一到 `RawCommandOutput` 或 `CommandOutputSummary` 机器契约，包括上游提示误标成 service-status 的情况。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
 - `subagent tool`：planner 授权的子代理必须显式、只读。单个 child run 或有界 `children` batch 都通过 role/config 校验、timeout/cancellation policy 字段、optional/required failure 隔离，以及只包含机器字段的聚合（`child_results`、`finding_refs`、`evidence_refs`）记录；不会授予写入或外部发布权限。
@@ -288,6 +298,8 @@ flowchart TD
     Y --> Z
     Z --> ZA{projection}
     ZA -->|reschedule| I
+    ZA -->|terminal async poll| ZAP[Terminal async projection<br/>final_result_json + 必要时补机器回复]
+    ZAP --> ZB
     ZA -->|terminal success/failure| ZB[Persist result_json/status]
     J --> ZC[Heartbeat + process ask/run_skill]
     ZC --> ZD{agent loop outcome}
@@ -321,7 +333,8 @@ flowchart TD
 - `clawcli run-skill <skill_name> --args-json '{...}'` 提交显式 `kind=run_skill` 任务，不走自然语言路由；加 `--wait` 可轮询同一个 `task_id`。
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
 - 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
-- async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，再由 worker recovery 通过 `poll_async_job` 继续轮询。
+- async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；后续由 worker recovery 通过 `poll_async_job` 继续轮询。
+- terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
 - seeded resume 会恢复 checkpoint 中的预算计数、observations、artifact refs、repair budget 字段和已完成 side-effect fingerprints，再重新进入 agent loop。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
 - Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；当前 runtime 使用 `tasks.updated_at` 与 checkpoint `resume_executor` 机器字段，新的数据库 lease columns 会等到 multi-worker claim 真正需要时再加入。
