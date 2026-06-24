@@ -27,6 +27,7 @@ pub(super) struct PrePlannerExitInventoryItem {
     pub(super) migration_stage: &'static str,
     pub(super) migration_order: u8,
     pub(super) nl_gate_refs: &'static [&'static str],
+    pub(super) deletion_gate: &'static str,
     pub(super) owner_layer: &'static str,
 }
 
@@ -40,6 +41,7 @@ impl PrePlannerExitInventoryItem {
             "migration_stage": self.migration_stage,
             "migration_order": self.migration_order,
             "nl_gate_refs": self.nl_gate_refs,
+            "deletion_gate": self.deletion_gate,
             "owner_layer": self.owner_layer,
         })
     }
@@ -53,6 +55,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "keep_boundary",
         migration_order: 0,
         nl_gate_refs: &[],
+        deletion_gate: "keep_boundary",
         owner_layer: "ask_flow_self_extension",
     },
     PrePlannerExitInventoryItem {
@@ -62,6 +65,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_alias_binding_followup_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -71,6 +75,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_active_ordered_entries_count_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -80,6 +85,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_recent_count_comparison_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -89,6 +95,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "keep_boundary",
         migration_order: 0,
         nl_gate_refs: &[],
+        deletion_gate: "keep_boundary",
         owner_layer: "ask_flow_permission_boundary",
     },
     PrePlannerExitInventoryItem {
@@ -98,6 +105,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_session_alias_target_en"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -107,6 +115,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_runtime_fact_direct_scalar_en"],
+        deletion_gate: "delete_after_agent_loop_default",
         owner_layer: "ask_flow_normalizer_compat",
     },
     PrePlannerExitInventoryItem {
@@ -116,6 +125,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_active_file_basename_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -125,6 +135,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_runtime_scalar_path_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
@@ -134,6 +145,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "chat_respond_agent_loop",
         migration_order: 20,
         nl_gate_refs: &["nl_chat_answer_general_zh"],
+        deletion_gate: "delete_after_agent_loop_default",
         owner_layer: "ask_flow_normalizer_compat",
     },
     PrePlannerExitInventoryItem {
@@ -143,6 +155,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "active_task_followup_or_chat_rewrite",
         migration_order: 20,
         nl_gate_refs: &["nl_active_task_followup_rewrite_zh"],
+        deletion_gate: "delete_after_agent_loop_default",
         owner_layer: "ask_flow_normalizer_compat",
     },
     PrePlannerExitInventoryItem {
@@ -155,6 +168,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
             "nl_inline_json_transform_strict_zh",
             "nl_inline_json_transform_table_en",
         ],
+        deletion_gate: "delete_after_selected_class_release_gate",
         owner_layer: "ask_flow_planner_promotion",
     },
     PrePlannerExitInventoryItem {
@@ -164,6 +178,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "test_fixture_compat",
         migration_order: 0,
         nl_gate_refs: &[],
+        deletion_gate: "test_fixture_only",
         owner_layer: "ask_flow_planner_promotion",
     },
     PrePlannerExitInventoryItem {
@@ -173,6 +188,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "chat_respond_agent_loop",
         migration_order: 20,
         nl_gate_refs: &["nl_chat_answer_general_en"],
+        deletion_gate: "delete_after_selected_class_release_gate",
         owner_layer: "ask_flow_planner_promotion",
     },
     PrePlannerExitInventoryItem {
@@ -182,6 +198,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "selected_local_observe_or_direct_scalar",
         migration_order: 10,
         nl_gate_refs: &["nl_recent_count_comparison_zh"],
+        deletion_gate: "keep_machine_fact_fast_path",
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
@@ -191,6 +208,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "clarify_repair_boundary_to_planner_slots",
         migration_order: 40,
         nl_gate_refs: &["nl_clarify_missing_target_zh"],
+        deletion_gate: "keep_boundary",
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
@@ -203,6 +221,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
             "nl_selected_local_observe_en",
             "nl_direct_scalar_runtime_status_zh",
         ],
+        deletion_gate: "delete_after_selected_class_release_gate",
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
@@ -215,6 +234,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
             "nl_active_task_followup_rewrite_zh",
             "nl_chat_answer_general_zh",
         ],
+        deletion_gate: "delete_after_selected_class_release_gate",
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
@@ -224,6 +244,7 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         migration_stage: "clarify_repair_boundary_to_planner_slots",
         migration_order: 40,
         nl_gate_refs: &["nl_clarify_missing_slot_en"],
+        deletion_gate: "keep_boundary",
         owner_layer: "ask_flow_clarify_boundary",
     },
 ];
@@ -261,6 +282,7 @@ mod tests {
             if item.kind == PrePlannerExitKind::OrdinarySemantic {
                 assert!(!item.migration_target.trim().is_empty());
                 assert!(!item.migration_stage.trim().is_empty());
+                assert!(item.deletion_gate.starts_with("delete_after_"));
                 assert!(item.migration_order > 0);
                 assert!((1..=3).contains(&item.nl_gate_refs.len()));
                 for case_ref in item.nl_gate_refs {
