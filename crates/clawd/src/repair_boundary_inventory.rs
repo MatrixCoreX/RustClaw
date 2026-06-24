@@ -36,6 +36,7 @@ pub(crate) struct RepairBoundaryInventoryItem {
     pub(crate) forbidden_input_fields: &'static [&'static str],
     pub(crate) migration_target: &'static str,
     pub(crate) next_recovery_kind: &'static str,
+    pub(crate) deletion_gate: &'static str,
 }
 
 impl RepairBoundaryInventoryItem {
@@ -51,6 +52,7 @@ impl RepairBoundaryInventoryItem {
             "forbidden_input_fields": self.forbidden_input_fields,
             "migration_target": self.migration_target,
             "next_recovery_kind": self.next_recovery_kind,
+            "deletion_gate": self.deletion_gate,
         })
     }
 }
@@ -81,6 +83,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "keep_schema_compat_only",
         next_recovery_kind: "schema_repair",
+        deletion_gate: "keep_schema_compat_boundary",
     },
     RepairBoundaryInventoryItem {
         reason_code: "contract_repair_judge_schema_boundary",
@@ -106,6 +109,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "limit_to_schema_and_boundary_repair",
         next_recovery_kind: "schema_repair",
+        deletion_gate: "keep_schema_compat_boundary",
     },
     RepairBoundaryInventoryItem {
         reason_code: "current_turn_missing_locator_boundary_repair",
@@ -132,6 +136,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "planner_clarify_or_structured_locator_recovery",
         next_recovery_kind: "clarify",
+        deletion_gate: "keep_boundary_safety",
     },
     RepairBoundaryInventoryItem {
         reason_code: "active_text_followup_route_repair",
@@ -154,6 +159,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "migrate_to_agent_loop_followup_recovery",
         next_recovery_kind: "replan",
+        deletion_gate: "delete_after_agent_loop_followup_gate",
     },
     RepairBoundaryInventoryItem {
         reason_code: "post_route_legacy_semantic_repair_deferral",
@@ -179,6 +185,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "defer_selected_agent_loop_routes_to_loop",
         next_recovery_kind: "replan",
+        deletion_gate: "delete_after_agent_loop_default",
     },
     RepairBoundaryInventoryItem {
         reason_code: "plan_repair_loop_recovery",
@@ -206,6 +213,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "keep_inside_agent_loop_bounded_recovery",
         next_recovery_kind: "replan",
+        deletion_gate: "keep_loop_bounded_recovery",
     },
     RepairBoundaryInventoryItem {
         reason_code: "answer_verifier_missing_evidence_repair",
@@ -235,6 +243,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "repair_envelope_to_loop_recovery",
         next_recovery_kind: "replan",
+        deletion_gate: "keep_loop_bounded_recovery",
     },
     RepairBoundaryInventoryItem {
         reason_code: "plan_verifier_issue_repair",
@@ -264,6 +273,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "repair_envelope_to_loop_recovery",
         next_recovery_kind: "replan",
+        deletion_gate: "keep_loop_bounded_recovery",
     },
     RepairBoundaryInventoryItem {
         reason_code: "permission_contract_repair",
@@ -294,6 +304,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "deny_or_require_confirmation_without_bypass",
         next_recovery_kind: "needs_user",
+        deletion_gate: "keep_policy_boundary",
     },
     RepairBoundaryInventoryItem {
         reason_code: "provider_blocker_recovery",
@@ -323,6 +334,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "wait_background_or_structured_blocker",
         next_recovery_kind: "wait_background",
+        deletion_gate: "keep_loop_bounded_recovery",
     },
     RepairBoundaryInventoryItem {
         reason_code: "checkpoint_resume_recovery",
@@ -353,6 +365,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         ],
         migration_target: "resume_from_checkpoint_without_replaying_side_effects",
         next_recovery_kind: "wait_background",
+        deletion_gate: "keep_lifecycle_recovery",
     },
 ];
 
