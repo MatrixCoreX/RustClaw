@@ -178,6 +178,10 @@ use machine_envelope::{
     attach_machine_envelope_delivery_from_loop, mark_machine_envelope_delivery_complete,
 };
 
+#[path = "loop_reply_clarify_envelope.rs"]
+mod clarify_envelope;
+use clarify_envelope::attach_route_clarify_machine_envelope;
+
 #[path = "loop_reply_delivery_backfill.rs"]
 mod delivery_backfill;
 use delivery_backfill::{
@@ -1571,6 +1575,13 @@ pub(crate) async fn finalize_loop_reply(
         task,
         &mut loop_state,
         &delivery_deduped,
+        &mut finalizer_summary,
+        agent_run_context,
+    );
+    attach_route_clarify_machine_envelope(
+        task,
+        &mut loop_state,
+        &mut delivery_deduped,
         &mut finalizer_summary,
         agent_run_context,
     );

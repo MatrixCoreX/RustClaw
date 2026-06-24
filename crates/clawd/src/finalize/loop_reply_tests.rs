@@ -142,6 +142,9 @@ mod matrix_shape_tests;
 #[path = "loop_reply_machine_envelope_tests.rs"]
 mod machine_envelope_tests;
 
+#[path = "loop_reply_clarify_envelope_tests.rs"]
+mod clarify_envelope_tests;
+
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
 
