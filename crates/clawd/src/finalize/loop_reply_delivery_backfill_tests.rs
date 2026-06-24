@@ -56,6 +56,61 @@ fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
     );
 }
 
+#[test]
+fn backfill_delivery_uses_free_answer_respond_step() {
+    let task = claimed_task("task-free-answer-respond-step");
+    let answer =
+        "Dry run - RepairEnvelope recovery keeps structured verifier fields and excludes skill text.";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_output = Some(answer.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", answer));
+    let mut route = free_route_result();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert_eq!(loop_state.delivery_messages, vec![answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer)
+    );
+}
+
+#[test]
+fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
+    let task = claimed_task("task-content-evidence-respond-step");
+    let answer = "Dry run - content evidence routes must not backfill from a plain respond step.";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_output = Some(answer.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", answer));
+    let mut route = free_route_result();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert!(loop_state.delivery_messages.is_empty());
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
     let state = test_state();

@@ -72,6 +72,29 @@ fn contractual_last_respond_delivery_value(
     }
 }
 
+fn free_answer_route_allows_terminal_respond_delivery(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    !route.output_contract.delivery_required
+        && !route.output_contract.requires_content_evidence
+        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+}
+
+fn latest_publishable_respond_step_output(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "respond")
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| planned_delivery_is_publishable_model_language_answer(output))
+}
+
 pub(super) fn last_respond_matches_single_line_observation(
     loop_state: &LoopState,
     answer: &str,
@@ -187,6 +210,27 @@ pub(super) fn backfill_delivery_from_last_outputs(
             log_deterministic_delivery_record(
                 &task.task_id,
                 "final_result_use_contractual_last_respond",
+                "backfilled",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty()
+        && free_answer_route_allows_terminal_respond_delivery(agent_run_context)
+    {
+        if let Some(answer) = latest_publishable_respond_step_output(loop_state).map(str::to_string)
+        {
+            append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                answer.clone(),
+            );
+            loop_state.last_user_visible_respond = Some(answer);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "final_result_use_free_answer_respond_step",
                 "backfilled",
                 agent_run_context,
                 loop_state.executed_step_results.len(),
