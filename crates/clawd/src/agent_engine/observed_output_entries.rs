@@ -231,6 +231,12 @@ pub(super) fn execution_failed_step_guard_entry(
             continue;
         };
         let structured = crate::skills::parse_structured_skill_error(error);
+        if structured
+            .as_ref()
+            .is_some_and(structured_error_is_contract_policy_gap)
+        {
+            continue;
+        }
         let dedupe_key = execution_failed_step_dedupe_key(step, error, structured.as_ref());
         if !seen_failed_actions.insert(dedupe_key) {
             continue;
@@ -296,6 +302,15 @@ pub(super) fn execution_failed_step_guard_entry(
         }
     }
     (failed_count > 0).then(|| format!("### execution_failed_step_guard\n{}", lines.join("\n")))
+}
+
+fn structured_error_is_contract_policy_gap(
+    structured: &crate::skills::StructuredSkillError,
+) -> bool {
+    matches!(
+        structured.error_kind.as_str(),
+        "contract_action_rejected" | "contract_arg_rejected" | "contract_policy_violation"
+    )
 }
 
 pub(super) fn execution_failed_step_dedupe_key(
