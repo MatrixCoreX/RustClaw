@@ -330,6 +330,34 @@ fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout
 }
 
 #[test]
+fn execution_failed_step_guard_skips_contract_policy_gap_errors() {
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(3);
+    loop_state.executed_step_results.push(error_step(
+        "step_1",
+        "make_dir",
+        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"planned tool step was not allowed for this request","extra":{"failure_attribution":"contract_gap"},"skill":"make_dir"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_2", "run_cmd", "note.txt alpha beta removed\n"));
+
+    let guard = execution_failed_step_guard_entry(&loop_state, ctx.route_result.as_ref());
+
+    assert!(
+        guard.is_none(),
+        "contract policy gaps are loop recovery signals, not final failed-step evidence: {guard:?}"
+    );
+}
+
+#[test]
 fn scalar_path_observed_route_rejects_content_evidence_contract() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
