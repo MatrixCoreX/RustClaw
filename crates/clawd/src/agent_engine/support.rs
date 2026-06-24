@@ -458,12 +458,22 @@ fn parse_agent_loop_canary_bucket(root: &TomlValue) -> String {
     }
 }
 
-fn parse_semantic_route_authority(root: &TomlValue) -> Option<SemanticRouteAuthority> {
+fn default_semantic_route_authority() -> SemanticRouteAuthority {
+    SemanticRouteAuthority::AgentLoopDefault
+}
+
+fn parse_semantic_route_authority(root: &TomlValue) -> SemanticRouteAuthority {
     let mut cursor = root;
     for key in ["agent", "loop_guard", "semantic_route_authority"] {
-        cursor = cursor.get(key)?;
+        let Some(next) = cursor.get(key) else {
+            return default_semantic_route_authority();
+        };
+        cursor = next;
     }
-    SemanticRouteAuthority::from_token(cursor.as_str().unwrap_or("legacy"))
+    cursor
+        .as_str()
+        .and_then(SemanticRouteAuthority::from_token)
+        .unwrap_or(SemanticRouteAuthority::Legacy)
 }
 
 fn parse_answer_verifier_required_evidence_scope(
@@ -532,8 +542,7 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         .ok()
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
         .unwrap_or(TomlValue::Table(Default::default()));
-    let semantic_route_authority =
-        parse_semantic_route_authority(&parsed).unwrap_or(SemanticRouteAuthority::Legacy);
+    let semantic_route_authority = parse_semantic_route_authority(&parsed);
     let answer_verifier_enforce_required_scope =
         parse_answer_verifier_required_evidence_scope(&parsed)
             .unwrap_or(AnswerVerifierRequiredEvidenceScope::Off);

@@ -466,7 +466,7 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
 }
 
 #[test]
-fn rollout_switches_default_to_false_when_config_missing() {
+fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
     let root = temp_support_workspace("rollout-defaults");
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root.clone();
@@ -479,9 +479,10 @@ fn rollout_switches_default_to_false_when_config_missing() {
     );
     assert_eq!(
         policy.semantic_route_authority,
-        SemanticRouteAuthority::Legacy
+        SemanticRouteAuthority::AgentLoopDefault
     );
-    assert!(!policy.records_agent_decides_attribution());
+    assert!(policy.records_agent_decides_attribution());
+    assert!(policy.uses_agent_loop_semantic_authority());
     assert_eq!(policy.agent_loop_canary_bucket, "none");
     assert!(!policy.structured_evidence_required_for_selected_contracts);
 
@@ -1101,10 +1102,11 @@ agent_decides_migration_class = "structured_field_read"
 
     assert_eq!(
         policy.semantic_route_authority,
-        SemanticRouteAuthority::Legacy
+        SemanticRouteAuthority::AgentLoopDefault
     );
     assert_eq!(policy.agent_loop_canary_bucket, "none");
-    assert!(!policy.records_agent_decides_attribution());
+    assert!(policy.records_agent_decides_attribution());
+    assert!(policy.uses_agent_loop_semantic_authority());
 
     let _ = std::fs::remove_dir_all(root);
 }
