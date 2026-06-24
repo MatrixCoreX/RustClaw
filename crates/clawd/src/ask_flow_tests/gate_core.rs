@@ -634,8 +634,12 @@ fn direct_answer_gate_keeps_alias_bindings_patch_with_extra_fields_direct() {
 }
 
 #[test]
-fn runtime_approval_wait_status_defers_structured_status_to_language_path() {
+fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
     let mut route = chat_route_for_gate();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.set_execute_gate();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -654,7 +658,17 @@ fn runtime_approval_wait_status_defers_structured_status_to_language_path() {
         ..Default::default()
     };
 
-    assert!(runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").is_none());
+    let candidate =
+        runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").expect("candidate");
+    assert!(candidate.contains("\"approval_wait\":false"), "{candidate}");
+    assert!(
+        candidate.contains("\"runtime_status_query\""),
+        "{candidate}"
+    );
+    assert!(
+        candidate.contains("\"state\":\"not_waiting_for_user_confirmation\""),
+        "{candidate}"
+    );
 }
 
 #[test]

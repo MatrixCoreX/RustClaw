@@ -929,19 +929,15 @@ pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
 ) -> Option<String> {
     let ctx = agent_run_context?;
     let route = ctx.route_result.as_ref()?;
-    if route.needs_clarify || route.is_execute_gate() {
-        return None;
-    }
-    if route.output_contract.requires_content_evidence
+    if route.needs_clarify
         || route.output_contract.delivery_required
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+        || route.wants_file_delivery
         || !matches!(
             route.output_contract.delivery_intent,
             crate::OutputDeliveryIntent::None
         )
+        || route.schedule_kind != crate::ScheduleKind::None
+        || route.risk_ceiling == crate::RiskCeiling::High
     {
         return None;
     }
@@ -957,7 +953,21 @@ pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
     if status_query.get("scope").and_then(Value::as_str) != Some("current_task") {
         return None;
     }
-    None
+    Some(
+        serde_json::json!({
+            "output_format": "machine_json",
+            "owner_layer": "runtime_status_query",
+            "runtime_status_query": {
+                "kind": "approval_wait",
+                "scope": "current_task"
+            },
+            "approval_wait": false,
+            "state": "not_waiting_for_user_confirmation",
+            "evidence_source": "turn_analysis.state_patch.runtime_status_query",
+            "schema_version": 1
+        })
+        .to_string(),
+    )
 }
 
 pub(super) fn runtime_scalar_path_direct_answer_candidate(

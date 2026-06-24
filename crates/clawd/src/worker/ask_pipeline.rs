@@ -161,6 +161,7 @@ use unbound_context_guard::{
     deictic_memory_only_route_should_force_clarify,
     execute_route_without_input_locator_should_plan,
     promote_broad_current_workspace_content_summary_to_directory_purpose,
+    promote_runtime_surface_contract_to_command_summary,
     raw_command_output_without_locator_can_plan_via_contract,
     repair_directory_purpose_command_summary_contract,
     repair_directory_purpose_quantity_comparison_contract,
@@ -733,6 +734,7 @@ fn apply_ask_post_route(
     repair_directory_purpose_command_summary_contract(state, prompt, &mut route_result);
     repair_directory_purpose_quantity_comparison_contract(state, prompt, &mut route_result);
     restore_explicit_extension_assess_gap_to_command_summary(&mut route_result);
+    promote_runtime_surface_contract_to_command_summary(prompt, &mut route_result);
     promote_locatorless_git_capability_to_repository_state(&mut route_result);
     promote_locatorless_scalar_child_metadata_to_quantity_comparison(
         state,
