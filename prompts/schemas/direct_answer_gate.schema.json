@@ -53,7 +53,7 @@
       }
     },
     "state_patch": {
-      "description": "Optional structured state patch for already-observed direct-answer follow-ups, such as quantity_comparison={source,selection,candidates,winner}. Runtime consumes this as machine state, not user-visible prose.",
+      "description": "Optional structured state patch for already-observed direct-answer follow-ups, such as quantity_comparison={source,selection,candidates,winner} or required_machine_fields=[\"decision_envelope.control_intent\"] when the final answer must include agent/runtime control machine fields. Runtime consumes this as machine state, not user-visible prose.",
       "type": ["object", "null"],
       "default": null
     },

@@ -442,15 +442,19 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     route.output_contract.requires_content_evidence = true;
     let noisy_result_path = temp.path.join("mentioned_inside_result.toml");
     fs::write(&noisy_result_path, "ignored = true\n").expect("write noisy result file");
+    let gate_context = serde_json::json!({
+        "direct_answer_gate": {
+            "resolved_intent": "compare the file before last and last file",
+        }
+    });
     let plan_context = format!(
         "### RECENT_EXECUTION_EVENTS\n\
              - ts=2 kind=ask request=read {} result=mentions {}\n\
-             - ts=1 kind=ask request=read {} result=ok\n\n\
-             Direct answer gate resolved execution intent:\n\
-             compare the file before last and last file",
+             - ts=1 kind=ask request=read {} result=ok\n\n{}",
         second.display(),
         noisy_result_path.display(),
-        first.display()
+        first.display(),
+        gate_context
     );
     let actions = vec![
         AgentAction::SynthesizeAnswer {

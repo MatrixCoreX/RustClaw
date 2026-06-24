@@ -382,6 +382,198 @@ fn plan_result_with_raw_text(raw_plan_text: &str) -> crate::PlanResult {
     }
 }
 
+#[tokio::test]
+async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
+    let state = test_state();
+    let task = claimed_task("task-control-envelope");
+    let mut route = scalar_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "required_machine_fields": [
+                    "decision_envelope.control_intent",
+                    "decision_envelope.capability_ref"
+                ]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.decision_envelope".to_string(),
+        serde_json::json!({
+            "control_intent": "act",
+            "terminal_intent": "continue",
+            "decision": "call_capability",
+            "capability_ref": "fs_basic",
+            "control_reason_code": "agent_loop_control_act_first_action"
+        })
+        .to_string(),
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return heading and decision envelope control fields",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should attach requested control envelope");
+
+    let envelope = reply
+        .messages
+        .iter()
+        .find_map(|message| {
+            let payload = serde_json::from_str::<serde_json::Value>(message.trim()).ok()?;
+            (payload
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("agent_loop_control"))
+            .then_some(payload)
+        })
+        .expect("agent_loop_control envelope");
+    assert_eq!(
+        envelope
+            .pointer("/decision_envelope/control_intent")
+            .and_then(serde_json::Value::as_str),
+        Some("act")
+    );
+    assert_eq!(
+        envelope
+            .pointer("/decision_envelope/capability_ref")
+            .and_then(serde_json::Value::as_str),
+        Some("fs_basic")
+    );
+    assert!(reply.text.contains("control_intent"));
+    assert!(reply.text.contains("# RustClaw"));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured_request() {
+    let state = test_state();
+    let task = claimed_task("task-no-control-envelope");
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(scalar_route_result()),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.first_act_decision_envelope".to_string(),
+        serde_json::json!({
+            "control_intent": "act",
+            "terminal_intent": "continue",
+            "decision": "call_capability",
+            "capability_ref": "fs_basic"
+        })
+        .to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.decision_envelope".to_string(),
+        serde_json::json!({
+            "control_intent": "answer",
+            "terminal_intent": "answer",
+            "decision": "synthesize_answer",
+            "capability_ref": "synthesize_answer"
+        })
+        .to_string(),
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return heading",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should not attach control envelope");
+
+    assert!(!reply.messages.iter().any(|message| {
+        serde_json::from_str::<serde_json::Value>(message.trim())
+            .ok()
+            .and_then(|payload| {
+                payload
+                    .get("owner_layer")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|owner| owner == "agent_loop_control")
+            })
+            .unwrap_or(false)
+    }));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_attaches_control_envelope_from_route_machine_token() {
+    let state = test_state();
+    let task = claimed_task("task-control-envelope-route-token");
+    let mut route = scalar_route_result();
+    route.route_reason = "runtime requested control_intent=act machine token".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.delivery_messages.push("# RustClaw".to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.first_act_decision_envelope".to_string(),
+        serde_json::json!({
+            "control_intent": "act",
+            "terminal_intent": "continue",
+            "decision": "call_capability",
+            "capability_ref": "fs_basic"
+        })
+        .to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.decision_envelope".to_string(),
+        serde_json::json!({
+            "control_intent": "answer",
+            "terminal_intent": "answer",
+            "decision": "synthesize_answer",
+            "capability_ref": "synthesize_answer"
+        })
+        .to_string(),
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return heading",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should attach control envelope from route machine token");
+
+    let envelope = reply
+        .messages
+        .iter()
+        .find_map(|message| {
+            let payload = serde_json::from_str::<serde_json::Value>(message.trim()).ok()?;
+            (payload
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("agent_loop_control"))
+            .then_some(payload)
+        })
+        .expect("agent_loop_control envelope");
+    assert_eq!(
+        envelope
+            .pointer("/decision_envelope/control_intent")
+            .and_then(serde_json::Value::as_str),
+        Some("act")
+    );
+}
+
 fn ok_step_result(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
     StepExecutionResult {
         step_id: step_id.to_string(),

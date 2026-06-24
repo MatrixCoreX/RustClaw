@@ -15,6 +15,7 @@ use super::{
     direct_answer_gate_can_skip_for_self_contained_payload,
     direct_answer_gate_can_skip_for_standalone_freeform_repair,
     direct_answer_gate_candidate_needs_unbound_context_clarify,
+    direct_answer_gate_direct_answer_should_enter_agent_loop,
     direct_answer_gate_planner_needs_unbound_locator_clarify,
     direct_answer_gate_promotion_depends_only_on_background_context,
     direct_answer_gate_promotion_needs_unbound_deictic_clarify,

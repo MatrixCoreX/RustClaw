@@ -914,6 +914,21 @@ pub(crate) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResu
         && direct_answer_gate_contract_is_pure_chat(&route.output_contract)
 }
 
+pub(super) fn direct_answer_gate_direct_answer_should_enter_agent_loop(
+    state: &AppState,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+        && !route.needs_clarify
+        && !route.wants_file_delivery
+        && route.risk_ceiling != crate::RiskCeiling::High
+        && matches!(route.schedule_kind, crate::ScheduleKind::None)
+        && !route.output_contract.delivery_required
+}
+
 pub(super) fn direct_answer_gate_self_contained_inline_json_chat(
     current_user_request: &str,
 ) -> bool {
