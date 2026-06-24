@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 const REDACTED: &str = "[REDACTED]";
+const REDACTED_RUNTIME_TEMPLATE: &str = "[RUNTIME_TEMPLATE]";
 
 pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
     const MARKERS: &[&str] = &[
@@ -34,7 +35,8 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let redacted = redact_sensitive_url_params(&stripped);
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
-    redact_authorization_values(&redacted)
+    let redacted = redact_authorization_values(&redacted);
+    redact_runtime_template_placeholders(&redacted)
 }
 
 fn compact_internal_json_log_lines(text: &str) -> String {
@@ -361,6 +363,17 @@ fn redact_authorization_values(text: &str) -> String {
                 REDACTED
             )
         })
+        .into_owned()
+}
+
+fn redact_runtime_template_placeholders(text: &str) -> String {
+    static TEMPLATE_RE: OnceLock<Regex> = OnceLock::new();
+    TEMPLATE_RE
+        .get_or_init(|| {
+            Regex::new(r"\{\{\s*[^{}\r\n]{1,200}\s*\}\}")
+                .expect("runtime_template_placeholder_regex")
+        })
+        .replace_all(text, REDACTED_RUNTIME_TEMPLATE)
         .into_owned()
 }
 
