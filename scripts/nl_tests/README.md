@@ -62,8 +62,9 @@ Static compact coverage guard:
 
 This guard does not call `clawd` or a model. It verifies that the source-controlled
 compact tier files cover the required basic skill, route/lifecycle, and media
-dry-run classes, that default compact media rows are dry-run only, and that
-X/Twitter live publish tags are not part of the compact gate.
+dry-run classes, including clarify/direct-answer/act/recover control-trace and
+repair-envelope cases, that default compact media rows are dry-run only, and
+that X/Twitter live publish tags are not part of the compact gate.
 
 Client-like continuous regression:
 
