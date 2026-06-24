@@ -607,10 +607,11 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 Use the smallest affected NL set while code is still moving, then widen coverage only at phase or release gates:
 
-1. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
-2. Typical aggregate: compressed representative coverage after a phase batch.
-3. Canary: 500 client-like cases before changing default authority or deleting old gates.
-4. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
+1. Static compact coverage: `python3 scripts/nl_tests/check_compact_coverage.py --report` verifies that the compact source-controlled case files cover basic skills, route/lifecycle classes, and media dry-run cases without calling a provider.
+2. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
+3. Typical aggregate: compressed representative coverage after a phase batch.
+4. Canary: 500 client-like cases before changing default authority or deleting old gates.
+5. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
 
 Current `configs/agent_guard.toml` defaults use `semantic_route_authority = "agent_loop_default"`, `answer_verifier_enforce_required_scope = "all"`, and `registry_idempotency_guard_scope = "all"`. The older `agent_decides_semantic_route` and `agent_decides_migration_class` names are ignored historical config keys; use `semantic_route_authority` and `agent_loop_canary_bucket` for route-authority rollback/debug. The 500 / 2100+ gates still matter before physically deleting the remaining compatibility or rollback code paths.
 
