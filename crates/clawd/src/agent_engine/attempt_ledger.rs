@@ -396,6 +396,7 @@ fn contract_policy_from_structured_error(error_text: &str) -> Option<Value> {
     Some(json!({
         "error_kind": structured.error_kind.as_str(),
         "decision": extra.get("decision").and_then(Value::as_str),
+        "policy_decision": extra.get("policy_decision").and_then(Value::as_str),
         "action": extra.get("action").and_then(Value::as_str),
         "original_action_ref": extra.get("original_action_ref").and_then(Value::as_str),
         "replacement_action_ref": extra.get("replacement_action_ref").and_then(Value::as_str),

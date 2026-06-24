@@ -289,6 +289,9 @@ fn generated_media_path_run_cmd_policy_error(
             "message_key": "clawd.contract.media_artifact_requires_media_skill",
             "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
             "decision": crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed.as_str(),
+            "policy_decision": crate::policy_decision::PolicyDecision::from_contract_action_policy(
+                crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+            ).as_token(),
             "action": "run_cmd",
             "original_action_ref": "run_cmd",
             "contract_match": crate::OutputSemanticKind::GeneratedFilePathReport.as_str(),
@@ -584,6 +587,9 @@ pub(super) fn contract_matrix_arg_policy_error(
             "reason_code": "contract_arg_rejected",
             "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
             "decision": policy.decision.as_str(),
+            "policy_decision": crate::policy_decision::PolicyDecision::from_contract_arg_policy(
+                policy.decision
+            ).as_token(),
             "action": policy.action_key,
             "contract_match": policy.contract_match,
             "required_evidence": policy.required_evidence,
@@ -700,6 +706,12 @@ fn contract_policy_retry_instruction(
     structured: &crate::skills::StructuredSkillError,
 ) -> Option<String> {
     let decision = structured_error_extra_string(structured, "decision")?;
+    let policy_decision = structured_error_extra_string(structured, "policy_decision")
+        .unwrap_or_else(|| {
+            crate::policy_decision::PolicyDecision::Deny
+                .as_token()
+                .to_string()
+        });
     let action = structured_error_extra_string(structured, "action")
         .unwrap_or_else(|| "unknown_action".to_string());
     let contract = structured_error_extra_string(structured, "contract_match")
@@ -707,6 +719,7 @@ fn contract_policy_retry_instruction(
     let mut parts = vec![format!(
         "contract_policy_decision={decision};rejected_action={action};contract={contract}"
     )];
+    parts.push(format!("policy_decision={policy_decision}"));
     let preferred = structured_error_extra_string_list(structured, "preferred_actions");
     if !preferred.is_empty() {
         parts.push(format!("preferred_actions={}", preferred.join("|")));

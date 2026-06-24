@@ -352,6 +352,13 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
             .and_then(|extra| extra.get("reason_code")),
         Some(&serde_json::json!("media_artifact_requires_media_skill"))
     );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("policy_decision")),
+        Some(&serde_json::json!("deny"))
+    );
     let permission = parsed
         .extra
         .as_ref()
@@ -382,6 +389,7 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
     );
     let metadata = preflight_failure_metadata(&err);
     assert_eq!(metadata.reason, "contract_action_rejected");
+    assert!(metadata.retry_instruction.contains("policy_decision=deny"));
     assert!(metadata.retry_instruction.contains("image_edit"));
 }
 
@@ -676,6 +684,13 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
         parsed
             .extra
             .as_ref()
+            .and_then(|extra| extra.get("policy_decision")),
+        Some(&serde_json::json!("deny"))
+    );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
             .and_then(|extra| extra.get("failure_attribution")),
         Some(&serde_json::json!("model_error"))
     );
@@ -685,6 +700,7 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
     assert!(metadata
         .retry_instruction
         .contains("contract_policy_decision=missing_target_binding"));
+    assert!(metadata.retry_instruction.contains("policy_decision=deny"));
     assert!(metadata.retry_instruction.contains("path"));
 }
 

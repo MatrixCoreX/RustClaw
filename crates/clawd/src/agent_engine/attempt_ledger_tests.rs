@@ -231,6 +231,7 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
         None,
         Some(serde_json::json!({
             "decision": "rejected_not_allowed",
+            "policy_decision": "deny",
             "action": "run_cmd",
             "original_action_ref": "run_cmd",
             "replacement_action_ref": "fs_basic.list_dir",
@@ -261,6 +262,7 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
 
     assert!(ledger.contains("\"contract_policy\""));
     assert!(ledger.contains("\"decision\": \"rejected_not_allowed\""));
+    assert!(ledger.contains("\"policy_decision\": \"deny\""));
     assert!(ledger.contains("\"preferred_actions\""));
     assert!(ledger.contains("fs_basic.list_dir"));
     let value = ledger_value(&ledger);
