@@ -340,6 +340,10 @@ fn ordinary_clarify_should_enter_agent_loop(
         && crate::agent_engine::agent_loop_semantic_authority_enabled(state)
 }
 
+fn post_route_allows_legacy_semantic_repair(state: &crate::AppState) -> bool {
+    !crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+}
+
 fn subagent_boundary_clarify_should_enter_agent_loop(
     state: &crate::AppState,
     route_result: &crate::RouteResult,
@@ -948,9 +952,7 @@ fn apply_ask_post_route(
             crate::post_route_policy::LocatorResolution::None
         };
     let post_route_options = crate::post_route_policy::PostRoutePolicyOptions {
-        allow_legacy_semantic_repair:
-            crate::agent_engine::agent_loop_authority_selected_migration_class(state, &route_result)
-                .is_none(),
+        allow_legacy_semantic_repair: post_route_allows_legacy_semantic_repair(state),
     };
     let mut post_route = crate::post_route_policy::apply_post_route_policy_with_options(
         route_result.clone(),

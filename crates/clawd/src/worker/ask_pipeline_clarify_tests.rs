@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::ordinary_clarify_should_enter_agent_loop;
+use super::{ordinary_clarify_should_enter_agent_loop, post_route_allows_legacy_semantic_repair};
 
 fn temp_root(label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
@@ -53,4 +53,16 @@ fn ordinary_clarify_keeps_legacy_path_under_rollback_authority() {
         &state,
         crate::post_route_policy::ClarifyReasonKind::RouteReasonText
     ));
+}
+
+#[test]
+fn post_route_legacy_semantic_repair_is_disabled_under_agent_authority() {
+    let state = state_with_semantic_route_authority("agent_loop_default");
+    assert!(!post_route_allows_legacy_semantic_repair(&state));
+}
+
+#[test]
+fn post_route_legacy_semantic_repair_remains_available_for_rollback_authority() {
+    let state = state_with_semantic_route_authority("legacy");
+    assert!(post_route_allows_legacy_semantic_repair(&state));
 }
