@@ -13,12 +13,15 @@ use crate::{repo, run_skill_with_runner_outcome};
 
 #[path = "skill_execution_preflight.rs"]
 mod skill_execution_preflight;
+#[path = "skill_execution_subagent.rs"]
+mod skill_execution_subagent;
 
 use skill_execution_preflight::{
     contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
     handle_preflight_argument_failure, structured_observation_path_argument_error,
     unresolved_runtime_template_argument_error, validate_skill_output_contract,
 };
+use skill_execution_subagent::record_subagent_step_execution;
 
 #[cfg(test)]
 use skill_execution_preflight::{
@@ -1413,6 +1416,14 @@ pub(super) async fn execute_prepared_skill_action(
             &subagent_config,
         )
         .map(str::to_string);
+        record_subagent_step_execution(
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            action_trace_kind,
+            stop_signal.as_deref(),
+        );
         return Ok(SkillActionOutcome {
             ended_with_user_visible_output: false,
             stop_signal,

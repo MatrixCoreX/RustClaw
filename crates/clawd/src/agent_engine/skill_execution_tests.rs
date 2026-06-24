@@ -7,10 +7,10 @@ use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
-    preflight_failure_metadata, skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
-    AgentLoopGuardPolicy, LoopState,
+    preflight_failure_metadata, record_subagent_step_execution, skill_extra_requests_user_input,
+    structured_extra_evidence_output, structured_observation_path_argument_error,
+    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
@@ -172,6 +172,58 @@ fn test_policy() -> AgentLoopGuardPolicy {
         multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     }
+}
+
+#[test]
+fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
+    let task = test_task();
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 2;
+    loop_state.task_observations.push(serde_json::json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_runtime",
+        "status": "accepted",
+        "execution_mode": "bounded_parallel_readonly_child_runs",
+        "aggregation": {
+            "status": "completed",
+            "finding_refs": [
+                "subagent-batch:2:3:1:explorer",
+                "subagent-batch:2:3:2:verifier"
+            ]
+        },
+        "global_step": 7,
+        "step_in_round": 3,
+        "round_no": 2
+    }));
+
+    record_subagent_step_execution(&task, &mut loop_state, 7, 3, "call_tool", None);
+
+    assert_eq!(loop_state.executed_step_results.len(), 1);
+    let step = &loop_state.executed_step_results[0];
+    assert!(step.is_ok());
+    assert_eq!(step.skill, "subagent");
+    let output = step.output.as_deref().expect("subagent output");
+    let parsed: serde_json::Value = serde_json::from_str(output).expect("machine json");
+    assert_eq!(parsed["output_format"], "machine_json");
+    assert_eq!(parsed["owner_layer"], "subagent_runtime");
+    assert_eq!(
+        parsed["execution_mode"],
+        "bounded_parallel_readonly_child_runs"
+    );
+    assert_eq!(
+        parsed["aggregation"]["finding_refs"]
+            .as_array()
+            .expect("finding refs")
+            .len(),
+        2
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("skill.subagent.last_output")
+            .map(String::as_str),
+        Some(output)
+    );
 }
 
 #[test]

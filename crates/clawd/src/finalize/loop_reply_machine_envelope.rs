@@ -12,13 +12,8 @@ pub(super) fn attach_machine_envelope_delivery_from_loop(
     let Some(message) = latest_machine_envelope_message(loop_state) else {
         return false;
     };
-    if !loop_state
-        .delivery_messages
-        .iter()
-        .any(|existing| existing.trim() == message)
-    {
-        append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, message);
-    }
+    loop_state.delivery_messages.clear();
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, message);
     mark_machine_envelope_loop_complete(task, loop_state, finalizer_summary, agent_run_context)
 }
 
@@ -81,6 +76,16 @@ fn latest_machine_envelope_message(loop_state: &LoopState) -> Option<String> {
                 .last_user_visible_respond
                 .as_deref()
                 .and_then(|message| {
+                    machine_envelope_payload(message).map(|_| message.trim().to_string())
+                })
+        })
+        .or_else(|| {
+            loop_state
+                .executed_step_results
+                .iter()
+                .rev()
+                .filter_map(|step| step.output.as_deref())
+                .find_map(|message| {
                     machine_envelope_payload(message).map(|_| message.trim().to_string())
                 })
         })

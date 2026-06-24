@@ -99,6 +99,7 @@ use super::{
     structured_dry_run_response_deterministic_plan_result, structured_field_selectors,
     structured_keys_deterministic_plan_result,
     structured_scalar_field_auto_locator_deterministic_plan_result,
+    subagent_bounded_batch_surface_deterministic_plan_result,
     subagent_review_boundary_surface_deterministic_plan_result,
     task_control_get_deterministic_plan_result, task_control_list_deterministic_plan_result,
     web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,

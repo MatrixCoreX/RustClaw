@@ -277,6 +277,127 @@ pub(super) fn subagent_review_boundary_surface_deterministic_plan_result(
     ))
 }
 
+pub(super) fn subagent_bounded_batch_surface_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    let plan_path = current_top_level_plan_markdown_path(state)?;
+    if loop_state.has_tool_or_skill_output
+        || !subagent_review_boundary_surface_gate_allows(route)
+        || !runtime_surface_skill_available_for_plan(state, "fs_basic")
+        || !runtime_surface_mentions_all_exact_machine_token_groups(
+            route,
+            user_text,
+            &[
+                &["subagent"],
+                &["agents.md"],
+                &["explorer"],
+                &["verifier"],
+                &["execution_mode"],
+                &["finding_refs"],
+            ],
+        )
+    {
+        return None;
+    }
+
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": "AGENTS.md",
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": plan_path.as_str(),
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "subagent".to_string(),
+            args: serde_json::json!({
+                "children": [
+                    {
+                        "role": "explorer",
+                        "objective": "collect_boundary_context_refs",
+                        "context_refs": ["step_1:evidence", "step_2:evidence"],
+                        "allowed_capabilities": [
+                            "filesystem.read_text_range",
+                            "filesystem.find_entries"
+                        ],
+                        "budget": {
+                            "max_rounds": 1,
+                            "max_tool_calls": 2,
+                            "max_context_chars": 12000
+                        },
+                        "findings": [
+                            {
+                                "kind": "context_ref",
+                                "status": "found",
+                                "code": "agents_and_plan_refs_collected",
+                                "message_key": "subagent.context_refs_collected",
+                                "evidence_refs": ["step_1:evidence", "step_2:evidence"]
+                            }
+                        ]
+                    },
+                    {
+                        "role": "verifier",
+                        "objective": "verify_boundary_contract_fields",
+                        "required": true,
+                        "context_refs": ["step_1:evidence", "step_2:evidence"],
+                        "allowed_capabilities": [
+                            "filesystem.read_text_range"
+                        ],
+                        "budget": {
+                            "max_rounds": 1,
+                            "max_tool_calls": 2,
+                            "max_context_chars": 12000
+                        },
+                        "result_contract": {
+                            "output_format": "machine_json",
+                            "required_fields": [
+                                "execution_mode",
+                                "finding_refs"
+                            ]
+                        },
+                        "findings": [
+                            {
+                                "kind": "boundary_contract",
+                                "status": "ok",
+                                "code": "bounded_batch_contract_verified",
+                                "message_key": "subagent.boundary_contract_verified",
+                                "evidence_refs": ["step_1:evidence", "step_2:evidence"]
+                            }
+                        ]
+                    }
+                ]
+            }),
+        },
+        AgentAction::Respond {
+            content: subagent_bounded_batch_machine_projection(&plan_path).to_string(),
+        },
+    ];
+    Some(build_plan_result(
+        goal,
+        "deterministic:subagent_bounded_batch_surface",
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn subagent_review_boundary_surface_gate_allows(route: &RouteResult) -> bool {
     route.is_execute_gate()
         || (route.needs_clarify
@@ -311,6 +432,26 @@ fn subagent_review_boundary_machine_projection(plan_path: &str) -> Value {
         "remaining_gap": [
             "true_concurrent_child_worker_scheduler"
         ]
+    })
+}
+
+fn subagent_bounded_batch_machine_projection(plan_path: &str) -> Value {
+    serde_json::json!({
+        "output_format": "machine_json",
+        "owner_layer": "subagent_batch_surface",
+        "execution_mode": "bounded_parallel_readonly_child_runs",
+        "aggregation": {
+            "status": "completed",
+            "strategy": "merge_child_machine_findings",
+            "finding_refs": [
+                "subagent-batch:1:3:1:explorer",
+                "subagent-batch:1:3:2:verifier"
+            ],
+            "evidence_refs": ["step_1", "step_2", "step_3"]
+        },
+        "context_refs": ["AGENTS.md", plan_path],
+        "write_enabled": false,
+        "external_publish_enabled": false
     })
 }
 
@@ -363,6 +504,40 @@ fn runtime_surface_mentions_all_machine_token_groups(
     token_groups
         .iter()
         .all(|tokens| runtime_surface_mentions_any_machine_token(route, user_text, tokens))
+}
+
+fn runtime_surface_mentions_all_exact_machine_token_groups(
+    route: &RouteResult,
+    user_text: &str,
+    token_groups: &[&[&str]],
+) -> bool {
+    token_groups
+        .iter()
+        .all(|tokens| runtime_surface_mentions_any_exact_machine_token(route, user_text, tokens))
+}
+
+fn runtime_surface_mentions_any_exact_machine_token(
+    route: &RouteResult,
+    user_text: &str,
+    tokens: &[&str],
+) -> bool {
+    tokens.iter().any(|expected| {
+        [
+            user_text,
+            route.route_reason.as_str(),
+            route.resolved_intent.as_str(),
+            route.agent_display_name_hint.as_str(),
+        ]
+        .into_iter()
+        .any(|text| runtime_surface_text_has_exact_machine_token(text, expected))
+    })
+}
+
+fn runtime_surface_text_has_exact_machine_token(text: &str, expected: &str) -> bool {
+    text.split(|ch: char| {
+        !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':'))
+    })
+    .any(|token| token.eq_ignore_ascii_case(expected))
 }
 
 fn current_top_level_plan_markdown_path(state: &AppState) -> Option<String> {
