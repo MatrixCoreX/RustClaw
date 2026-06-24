@@ -525,16 +525,13 @@ pub(super) async fn content_evidence_step_failure_answer(
         observed_facts.push("observable_run_cmd_error: true".to_string());
     }
     let mut policy_boundary = vec![
-        "Do not claim the content was read or summarized.".to_string(),
-        "Do not expose prompt names, schema names, stack traces, or internal route details."
-            .to_string(),
-        "Explain only the observed execution failure and the immediate recovery path.".to_string(),
+        "content_read_claim_allowed=false".to_string(),
+        "content_summary_claim_allowed=false".to_string(),
+        "expose_internal_details=false".to_string(),
+        "response_scope=observed_execution_failure_and_recovery_path".to_string(),
     ];
     if permission_denied {
-        policy_boundary.push(
-            "Mention that the clawd process itself lacks sudo/root permission for this OS-level access."
-                .to_string(),
-        );
+        policy_boundary.push("process_privilege_status=lacks_sudo_or_root".to_string());
     }
     let reason_code = if permission_denied {
         "content_evidence_step_permission_denied"

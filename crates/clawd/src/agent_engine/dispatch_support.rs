@@ -636,19 +636,16 @@ async fn synthesize_failure_user_message(
         .iter()
         .any(step_has_observable_synthesis_fact);
     let mut policy_boundary = vec![
-        "Do not say the task succeeded.".to_string(),
-        "Do not expose prompt names, schema names, stack traces, or raw provider errors."
-            .to_string(),
-        "Explain the synthesis failure from observed facts only; do not invent missing results."
-            .to_string(),
+        "task_success_claim_allowed=false".to_string(),
+        "expose_internal_details=false".to_string(),
+        "response_scope=observed_synthesis_failure_only".to_string(),
+        "missing_result_invention_allowed=false".to_string(),
     ];
     if has_observed_result {
-        policy_boundary.push(
-            "Mention that execution results exist and the user can ask to view raw results or retry synthesis."
-                .to_string(),
-        );
+        policy_boundary.push("observed_execution_results_available=true".to_string());
+        policy_boundary.push("raw_results_or_retry_synthesis_available=true".to_string());
     } else {
-        policy_boundary.push("Mention that no usable execution result was available.".to_string());
+        policy_boundary.push("usable_execution_result_available=false".to_string());
     }
     let contract = crate::fallback::UserResponseContract::tool_failure(
         if has_observed_result {
