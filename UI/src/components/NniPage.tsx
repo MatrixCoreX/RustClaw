@@ -219,12 +219,19 @@ export function NniPage({
               <button
                 type="button"
                 onClick={() => void onTestJoin()}
-                disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                disabled={Boolean(nniActionLoading) || nniStatusLoading}
                 className="theme-secondary-btn px-3 py-2 text-sm"
-                title={t(
-                  "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
-                  "Test join only signs a local timestamp and does not contact the remote NNI server.",
-                )}
+                title={
+                  nniChipMissing
+                    ? t(
+                        "上次检测未找到签名芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
+                        "The last check did not find a signature chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
+                      )
+                    : t(
+                        "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
+                        "Test join only signs a local timestamp and does not contact the remote NNI server.",
+                      )
+                }
               >
                 {nniActionLoading === "sign_timestamp" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

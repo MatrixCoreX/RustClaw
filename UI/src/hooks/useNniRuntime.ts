@@ -427,18 +427,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const testJoinNni = async () => {
-    const status = nniStatus ?? (await fetchNniDeviceStatus(false));
-    if (!status?.signature_chip_present) {
-      setNniActionError(
-        status?.message ||
-          t(
-            "未检测到设备签名芯片，暂时不能执行 NNI 测试加入。",
-            "No device signature chip was detected, so this device cannot run the NNI test join yet.",
-          ),
-      );
-      await setNniJoinedPersisted(false);
-      return;
-    }
     const result = await runNniDeviceAction("sign_timestamp");
     if (result?.payload?.signature) {
       setNniActionMessage(
