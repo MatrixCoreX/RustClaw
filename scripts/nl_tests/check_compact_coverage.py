@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -168,6 +169,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
         "--case-file",
         action="append",
@@ -178,8 +180,52 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def write_case_file(path: Path, tags: set[str]) -> None:
+    rows = []
+    attach_dry_run = "dry_run" in tags
+    row_tags = sorted(tag for tag in tags if tag != "dry_run")
+    for index, tag in enumerate(row_tags, start=1):
+        tag_field = f"{tag},dry_run" if attach_dry_run else tag
+        rows.append(f"self_test|case_{index:03d}|{tag_field}|prompt for {tag}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def run_self_test() -> int:
+    required_tags = REQUIRED_BASIC | REQUIRED_ROUTE_LIFECYCLE | REQUIRED_MEDIA_DRY_RUN | {"dry_run"}
+    tmp_parent = ROOT / "tmp"
+    tmp_parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tmp_parent) as tmp:
+        root = Path(tmp)
+        ok_path = root / "ok.txt"
+        missing_path = root / "missing.txt"
+        live_media_path = root / "live_media.txt"
+        forbidden_path = root / "forbidden.txt"
+
+        write_case_file(ok_path, required_tags)
+        ok_report = coverage_for([ok_path])
+        assert not ok_report["missing"], ok_report
+        assert not ok_report["media_rows_without_dry_run"], ok_report
+        assert not ok_report["forbidden_live_publish_rows"], ok_report
+
+        write_case_file(missing_path, required_tags - {"repair_envelope"})
+        missing_report = coverage_for([missing_path])
+        assert "repair_envelope" in missing_report["missing"]["route_lifecycle"], missing_report
+
+        write_case_file(live_media_path, required_tags - {"dry_run"})
+        live_media_report = coverage_for([live_media_path])
+        assert live_media_report["media_rows_without_dry_run"], live_media_report
+
+        write_case_file(forbidden_path, required_tags | {"twitter"})
+        forbidden_report = coverage_for([forbidden_path])
+        assert forbidden_report["forbidden_live_publish_rows"], forbidden_report
+    print("SELF_TEST_OK")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
+    if args.self_test:
+        return run_self_test()
     paths = [path if path.is_absolute() else ROOT / path for path in (args.case_file or DEFAULT_CASE_FILES)]
     report = coverage_for(paths)
     ok = (
