@@ -358,6 +358,126 @@ pub(super) fn filesystem_mutation_lifecycle_structured_answer(
     )
 }
 
+pub(super) fn kb_filesystem_mutation_structured_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilesystemMutationResult {
+        return None;
+    }
+
+    let mut steps = Vec::new();
+    let mut actions = Vec::new();
+    let mut namespaces = Vec::new();
+    let mut paths = Vec::new();
+
+    for step in loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && step.skill == "kb")
+    {
+        let Some(payload) = step.output.as_deref().and_then(skill_output_payload) else {
+            continue;
+        };
+        let Some(action) = kb_action_from_payload(&payload) else {
+            continue;
+        };
+
+        push_unique_string(&mut actions, action);
+        if let Some(namespace) = payload.get("namespace").and_then(Value::as_str) {
+            push_unique_string(&mut namespaces, namespace);
+        }
+        if let Some(path) = payload.get("path").and_then(Value::as_str) {
+            push_unique_string(&mut paths, path);
+        }
+        if let Some(payload_paths) = payload.get("paths").and_then(Value::as_array) {
+            for path in payload_paths.iter().filter_map(Value::as_str) {
+                push_unique_string(&mut paths, path);
+            }
+        }
+
+        let mut step_value = serde_json::Map::new();
+        step_value.insert("step_id".to_string(), Value::String(step.step_id.clone()));
+        step_value.insert("skill".to_string(), Value::String(step.skill.clone()));
+        step_value.insert("status".to_string(), Value::String("ok".to_string()));
+        step_value.insert("action".to_string(), Value::String(action.to_string()));
+        copy_string_field(&payload, &mut step_value, "namespace");
+        copy_string_field(&payload, &mut step_value, "path");
+        copy_value_field(&payload, &mut step_value, "paths");
+        copy_value_field(&payload, &mut step_value, "stats");
+        if let Some(hits) = payload.get("hits").and_then(Value::as_array) {
+            step_value.insert(
+                "hit_count".to_string(),
+                Value::Number(serde_json::Number::from(hits.len())),
+            );
+            step_value.insert(
+                "hits".to_string(),
+                Value::Array(hits.iter().take(3).cloned().collect()),
+            );
+        }
+        steps.push(Value::Object(step_value));
+    }
+
+    if steps.is_empty() {
+        return None;
+    }
+
+    let mut observed = BTreeSet::new();
+    for action in &actions {
+        observed.insert(action.as_str());
+    }
+
+    Some(
+        serde_json::json!({
+            "schema_version": 1,
+            "semantic_kind": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
+            "capability": "kb",
+            "status": "ok",
+            "observed_actions": actions,
+            "observed_action_count": observed.len(),
+            "namespaces": namespaces,
+            "paths": paths,
+            "steps": steps,
+        })
+        .to_string(),
+    )
+}
+
+fn kb_action_from_payload(payload: &Value) -> Option<&'static str> {
+    match payload.get("action").and_then(Value::as_str).map(str::trim) {
+        Some("ingest") => return Some("ingest"),
+        Some("search") => return Some("search"),
+        Some("stats") => return Some("stats"),
+        Some("list_namespaces") => return Some("list_namespaces"),
+        _ => {}
+    }
+
+    let stats = payload.get("stats").filter(|value| value.is_object());
+    if payload.get("hits").and_then(Value::as_array).is_some() {
+        return Some("search");
+    }
+    if payload
+        .get("namespaces")
+        .and_then(Value::as_array)
+        .is_some()
+    {
+        return Some("list_namespaces");
+    }
+    if stats
+        .and_then(|stats| stats.get("ingested_docs"))
+        .and_then(Value::as_u64)
+        .is_some()
+        || payload.get("paths").and_then(Value::as_array).is_some()
+    {
+        return Some("ingest");
+    }
+    if stats.is_some() {
+        return Some("stats");
+    }
+    None
+}
+
 fn filesystem_mutation_lifecycle_action(action: &str) -> bool {
     matches!(
         action,

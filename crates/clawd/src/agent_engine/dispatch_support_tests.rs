@@ -5,9 +5,9 @@ use std::sync::{Arc, RwLock};
 use super::{
     archive_database_aggregate_structured_answer, classify_skill_failure_recovery,
     deterministic_observed_execution_status_answer, deterministic_scalar_markdown_heading_answer,
-    filesystem_mutation_lifecycle_structured_answer, package_docker_probe_structured_answer,
-    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
-    synthesize_answer_allows_direct_fallback,
+    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
+    package_docker_probe_structured_answer, strip_internal_execution_args,
+    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
     synthesize_contract_matrix_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
