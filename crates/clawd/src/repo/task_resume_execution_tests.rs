@@ -1524,3 +1524,166 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
         "terminal_failed"
     );
 }
+
+#[test]
+fn terminal_async_poll_projection_preserves_visible_ask_reply() {
+    let state = state_with_tasks_table();
+    let now = 9_500;
+    let mut seed = terminal_projection_seed(
+        "ask-visible-terminal",
+        "ckpt-ask-visible-terminal",
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now,
+    );
+    seed["text"] = json!("checkpoint_id=ckpt-ask-visible-terminal");
+    seed["messages"] = json!(["checkpoint_id=ckpt-ask-visible-terminal"]);
+    insert_task(&state, "ask-visible-terminal", "running", Some(&seed), now);
+
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        "ask-visible-terminal",
+        "ckpt-ask-visible-terminal",
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now + 1,
+        10,
+    )
+    .expect("claim completed projection")
+    .expect("completed projection claimed");
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            "ask-visible-terminal",
+            "ckpt-ask-visible-terminal",
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_completed",
+            &json!({
+                "schema_version": 1,
+                "task_id": "ask-visible-terminal",
+                "checkpoint_id": "ckpt-ask-visible-terminal",
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job",
+                "executor_result_status": "async_poll_completed",
+                "result_projection_state": "project_async_poll_completed",
+                "final_result_json": {
+                    "status": "ok",
+                    "output": "RUSTCLAW_ASYNC_SMOKE"
+                }
+            }),
+            now + 2,
+        )
+        .expect("record completed projection")
+    );
+
+    let (status, error_text, result) =
+        stored_task_status_error_result(&state, "ask-visible-terminal");
+    assert_eq!(status, "succeeded");
+    assert_eq!(error_text, None);
+    assert_eq!(
+        result["messages"][0],
+        "checkpoint_id=ckpt-ask-visible-terminal"
+    );
+    assert_eq!(result.get("output"), None);
+    assert_eq!(result["task_lifecycle"]["state"], "succeeded");
+    assert_eq!(
+        result["task_lifecycle"]["resume_executor_result_projection"]["final_result_json"]
+            ["output"],
+        "RUSTCLAW_ASYNC_SMOKE"
+    );
+}
+
+#[test]
+fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
+    let state = state_with_tasks_table();
+    let now = 9_700;
+    let checkpoint_id =
+        "agent-loop:ask-machine-terminal:round-1:step-1:async-job:local_process:poll-1";
+    let mut seed = terminal_projection_seed(
+        "ask-machine-terminal",
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now,
+    );
+    seed["task_lifecycle"]["poll_ref"] = json!("local_process:poll-1");
+    seed["task_lifecycle"]["next_check_after"] = json!(2);
+    seed["task_lifecycle"]["async_job_message_key"] = json!("clawd.task.async_job_pending");
+    insert_task(&state, "ask-machine-terminal", "running", Some(&seed), now);
+
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        "ask-machine-terminal",
+        checkpoint_id,
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_completed",
+        now + 1,
+        10,
+    )
+    .expect("claim completed projection")
+    .expect("completed projection claimed");
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            "ask-machine-terminal",
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_completed",
+            &json!({
+                "schema_version": 1,
+                "task_id": "ask-machine-terminal",
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job",
+                "executor_result_status": "async_poll_completed",
+                "result_projection_state": "project_async_poll_completed",
+                "final_result_json": {
+                    "status": "ok",
+                    "job_id": "local_process:poll-1",
+                    "output": "RUSTCLAW_ASYNC_SMOKE"
+                }
+            }),
+            now + 2,
+        )
+        .expect("record completed projection")
+    );
+
+    let (status, error_text, result) =
+        stored_task_status_error_result(&state, "ask-machine-terminal");
+    assert_eq!(status, "succeeded");
+    assert_eq!(error_text, None);
+    let reply = result["messages"][0].as_str().expect("machine reply");
+    assert!(reply.contains("checkpoint_id"));
+    assert!(reply.contains("poll_ref"));
+    assert!(reply.contains("next_check_after"));
+    assert_eq!(result["machine_reply"]["checkpoint_id"], checkpoint_id);
+    assert_eq!(result["machine_reply"]["poll_ref"], "local_process:poll-1");
+    assert_eq!(result["machine_reply"]["next_check_after"], 2);
+    assert_eq!(
+        result["machine_reply"]["final_result_json"]["output"],
+        "RUSTCLAW_ASYNC_SMOKE"
+    );
+    assert_eq!(result["task_lifecycle"]["state"], "succeeded");
+}

@@ -432,6 +432,7 @@ fn strip_internal_execution_args(args: &mut Value) {
         obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
         obj.remove(super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG);
         obj.remove(super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG);
+        obj.remove(super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG);
         obj.remove(super::CLAWD_USER_NAMED_OUTPUT_PATH_ARG);
         obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);
     }

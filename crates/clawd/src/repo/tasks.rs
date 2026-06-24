@@ -123,6 +123,28 @@ pub(crate) fn update_task_success(
         params![task_id, result_json, now_ts()],
     )?;
     if changed == 0 {
+        let existing = db
+            .query_row(
+                "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+                params![task_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        if let Some((status, Some(existing_result_json))) = existing {
+            if status == "succeeded"
+                && async_poll_terminal_projection_without_visible_reply(&existing_result_json)
+            {
+                let changed = db.execute(
+                    "UPDATE tasks
+                     SET result_json = ?2, error_text = NULL, updated_at = ?3
+                     WHERE task_id = ?1 AND status = 'succeeded' AND result_json = ?4",
+                    params![task_id, result_json, now_ts(), existing_result_json],
+                )?;
+                if changed > 0 {
+                    return Ok(());
+                }
+            }
+        }
         warn!(
             "update_task_success skipped: task_id={} is no longer running",
             task_id
@@ -158,6 +180,76 @@ pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::
         )
         .optional()?;
     Ok(matches!(status.as_deref(), Some("running")))
+}
+
+pub(crate) fn is_task_still_running_or_pending_ask_success_projection(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<bool> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let row = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((status, result_json)) = row else {
+        return Ok(false);
+    };
+    if status == "running" {
+        return Ok(true);
+    }
+    Ok(status == "succeeded"
+        && result_json
+            .as_deref()
+            .is_some_and(async_poll_terminal_projection_without_visible_reply))
+}
+
+fn async_poll_terminal_projection_without_visible_reply(raw_result_json: &str) -> bool {
+    let Ok(result_json) = serde_json::from_str::<Value>(raw_result_json) else {
+        return false;
+    };
+    if result_has_visible_reply(&result_json) {
+        return false;
+    }
+    let Some(lifecycle) = result_json.get("task_lifecycle") else {
+        return false;
+    };
+    lifecycle
+        .get("terminal_executor_action")
+        .and_then(Value::as_str)
+        == Some("poll_async_job")
+        && lifecycle
+            .get("terminal_executor_result_status")
+            .and_then(Value::as_str)
+            == Some("async_poll_completed")
+        && lifecycle
+            .get("resume_executor_result_projection")
+            .and_then(|value| value.get("final_result_json"))
+            .is_some()
+}
+
+fn result_has_visible_reply(result_json: &Value) -> bool {
+    result_json
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        || result_json
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .is_some_and(|value| !value.is_empty())
+                })
+            })
 }
 
 pub(crate) fn update_task_progress_result(

@@ -2,6 +2,7 @@ use serde_json::json;
 
 use super::{
     build_pending_async_job_checkpoint_progress_payload, pending_async_job_ref_from_extra,
+    pending_async_job_visible_reply_from_progress_payload,
 };
 use crate::agent_engine::LoopState;
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -123,6 +124,45 @@ fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
         payload["task_checkpoint"]["completed_side_effect_refs"][0],
         "skill:video_basic:action:start_generation"
     );
+}
+
+#[test]
+fn pending_async_job_visible_reply_carries_checkpoint_markers() {
+    let loop_state = LoopState::new(4);
+    let job = pending_async_job_ref_from_extra(Some(&json!({
+        "pending_async_job": {
+            "job_id": "job-visible",
+            "status": "accepted",
+            "poll_after_seconds": 12,
+            "expires_at": 3000,
+            "cancel_ref": "cancel:job-visible",
+            "message_key": "clawd.task.async_job_pending"
+        }
+    })))
+    .expect("parse")
+    .expect("job");
+    let payload = build_pending_async_job_checkpoint_progress_payload(
+        &test_task(),
+        &loop_state,
+        "run_cmd",
+        1,
+        1,
+        &job,
+        None,
+        1000,
+    );
+
+    let reply = pending_async_job_visible_reply_from_progress_payload(&payload)
+        .expect("visible machine reply");
+    let reply_json: serde_json::Value = serde_json::from_str(&reply).expect("reply json");
+
+    assert_eq!(reply_json["output_format"], "machine_json");
+    assert_eq!(reply_json["status"], "accepted");
+    assert_eq!(reply_json["poll_ref"], "job-visible");
+    assert_eq!(reply_json["next_check_after"], 1012);
+    assert!(reply_json["checkpoint_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("agent-loop:task-async-start:")));
 }
 
 #[test]

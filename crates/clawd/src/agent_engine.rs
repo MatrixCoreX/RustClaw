@@ -144,6 +144,7 @@ const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
 const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
+const CLAWD_RUNTIME_ASYNC_JOB_START_ARG: &str = "_clawd_runtime_async_job_start";
 const CLAWD_USER_NAMED_OUTPUT_PATH_ARG: &str = "_clawd_user_named_output_path";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";

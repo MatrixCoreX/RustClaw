@@ -6,6 +6,7 @@ use super::{register_failed_step_output, AppState, ClaimedTask, LoopState, Skill
 use crate::agent_engine::{
     action_has_user_named_output_path_marker, attempt_ledger,
     maybe_publish_execution_recipe_phase_hint, CLAWD_LITERAL_COMMAND_ARG,
+    CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
 };
 
 fn matches_json_schema_type(value: &Value, expected_type: &str) -> bool {
@@ -189,6 +190,17 @@ pub(super) fn contract_matrix_action_policy_error(
         );
         return None;
     }
+    if runtime_async_job_start_allows_run_cmd_despite_contract(
+        normalized_skill,
+        classification_args,
+        policy.decision,
+    ) {
+        info!(
+            "preflight_keep_runtime_async_job_start_despite_contract skill={} action={} contract={}",
+            normalized_skill, policy.action_key, policy.contract_match
+        );
+        return None;
+    }
     if registry_action_can_extend_summary_contract(
         state,
         normalized_skill,
@@ -253,6 +265,43 @@ pub(super) fn contract_matrix_action_policy_error(
             ),
         })),
     ))
+}
+
+fn runtime_async_job_start_allows_run_cmd_despite_contract(
+    normalized_skill: &str,
+    classification_args: &Value,
+    decision: crate::contract_matrix::ActionPolicyDecision,
+) -> bool {
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
+        || !matches!(
+            decision,
+            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+        )
+        || classification_args
+            .get(CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+            .and_then(Value::as_str)
+            != Some("async_job_protocol")
+        || classification_args
+            .get("async_start")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || classification_args
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return false;
+    }
+    positive_bounded_i64_arg(classification_args, "poll_after_seconds", 1, 86_400)
+        && positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800)
+}
+
+fn positive_bounded_i64_arg(args: &Value, key: &str, min: i64, max: i64) -> bool {
+    args.get(key)
+        .and_then(Value::as_i64)
+        .is_some_and(|value| value >= min && value <= max)
 }
 
 fn generated_media_path_run_cmd_policy_error(

@@ -594,6 +594,11 @@ fn async_job_protocol_prefers_run_cmd_async_start_over_service_status_shortcut()
         args.get("poll_after_seconds").and_then(Value::as_u64),
         Some(2)
     );
+    assert_eq!(
+        args.get(CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+            .and_then(Value::as_str),
+        Some("async_job_protocol")
+    );
 }
 
 #[test]
@@ -661,6 +666,11 @@ fn async_job_protocol_injects_async_start_into_planned_run_cmd() {
     assert_eq!(
         args.get("expires_in_seconds").and_then(Value::as_u64),
         Some(600)
+    );
+    assert_eq!(
+        args.get(CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+            .and_then(Value::as_str),
+        Some("async_job_protocol")
     );
 }
 

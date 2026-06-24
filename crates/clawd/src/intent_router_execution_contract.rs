@@ -156,7 +156,10 @@ pub(super) fn apply_command_payload_contract_repair(
         *needs_clarify,
         false,
     );
-    if matches!(output_contract.semantic_kind, OutputSemanticKind::None) {
+    if matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::None | OutputSemanticKind::ServiceStatus
+    ) {
         output_contract.semantic_kind = if preserve_command_summary_contract {
             OutputSemanticKind::CommandOutputSummary
         } else {

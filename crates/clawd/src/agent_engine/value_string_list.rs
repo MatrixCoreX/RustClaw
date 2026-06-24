@@ -1331,7 +1331,8 @@ pub(super) fn async_job_start_deterministic_plan_result(
             "command": command,
             "async_start": true,
             "poll_after_seconds": 2,
-            "expires_in_seconds": 600
+            "expires_in_seconds": 600,
+            super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
         }),
     };
     Some(build_plan_result(
