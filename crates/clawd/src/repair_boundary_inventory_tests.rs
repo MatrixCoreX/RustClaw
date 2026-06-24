@@ -50,6 +50,20 @@ fn repair_inventory_items_are_machine_field_bounded() {
         assert!(!item.forbidden_input_fields.is_empty());
         assert!(!item.migration_target.trim().is_empty());
         assert!(!item.next_recovery_kind.trim().is_empty());
+        assert!(!item.deletion_gate.trim().is_empty());
+        assert!(
+            item.deletion_gate
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
+            "{} deletion_gate must be a machine token",
+            item.reason_code
+        );
+        assert!(
+            item.deletion_gate.starts_with("keep_")
+                || item.deletion_gate.starts_with("delete_after_"),
+            "{} deletion_gate must be keep_* or delete_after_*",
+            item.reason_code
+        );
 
         assert!(
             item.forbidden_input_fields.contains(&"user_prompt_phrase"),
@@ -102,6 +116,11 @@ fn ordinary_semantic_repair_is_marked_for_loop_migration() {
             item.forbidden_input_fields
                 .contains(&"language_phrase_array"),
             "{} must forbid language phrase arrays",
+            item.reason_code
+        );
+        assert!(
+            item.deletion_gate.starts_with("delete_after_"),
+            "{} must have an explicit deletion gate",
             item.reason_code
         );
     }
@@ -204,6 +223,10 @@ fn trace_value_exposes_auditable_machine_fields() {
     assert_eq!(
         value.get("next_recovery_kind").and_then(Value::as_str),
         Some("needs_user")
+    );
+    assert_eq!(
+        value.get("deletion_gate").and_then(Value::as_str),
+        Some("keep_policy_boundary")
     );
     assert!(value
         .get("forbidden_input_fields")
