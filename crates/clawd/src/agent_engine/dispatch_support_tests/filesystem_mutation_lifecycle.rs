@@ -1,4 +1,7 @@
-use super::{filesystem_mutation_lifecycle_structured_answer, ok_step};
+use super::{
+    filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
+    ok_step,
+};
 use crate::agent_engine::{AgentRunContext, LoopState};
 
 #[test]
@@ -72,6 +75,76 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
     assert!(answer.contains("alpha"), "answer: {answer}");
     assert!(answer.contains("beta"), "answer: {answer}");
     assert!(answer.contains("remove_path"), "answer: {answer}");
+}
+
+#[test]
+fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback() {
+    let mut loop_state = LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","excerpt":"1|# Service Notes","total_lines":7}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "kb",
+        r#"{"extra":{"action":"ingest","status":"ok","namespace":"nl_basic_skill_coverage","path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","paths":["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],"stats":{"ingested_docs":1,"total_docs":1,"total_chunks":1,"unified_index_synced":true}}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "kb",
+        r#"{"extra":{"action":"search","status":"ok","namespace":"nl_basic_skill_coverage","hits":[{"path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","score":0.288,"text":"service status"}],"stats":{"returned_hits":1,"total_candidates":1}}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "kb",
+        r#"{"extra":{"action":"stats","status":"ok","namespace":"nl_basic_skill_coverage","stats":{"docs":1,"chunks":1,"file_types":{"md":1}}}}"#,
+    ));
+    let ctx = AgentRunContext {
+        route_result: Some(filesystem_mutation_route()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = kb_filesystem_mutation_structured_answer(&loop_state, Some(&ctx))
+        .expect("kb filesystem mutation answer");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
+
+    assert_eq!(
+        value
+            .pointer("/capability")
+            .and_then(serde_json::Value::as_str),
+        Some("kb")
+    );
+    assert_eq!(
+        value
+            .pointer("/observed_actions")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(
+        value
+            .pointer("/steps/1/action")
+            .and_then(serde_json::Value::as_str),
+        Some("search")
+    );
+    assert_eq!(
+        value
+            .pointer("/steps/1/hit_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        value
+            .pointer("/steps/2/stats/docs")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        answer.contains("nl_basic_skill_coverage"),
+        "answer: {answer}"
+    );
+    assert!(answer.contains("service_notes.md"), "answer: {answer}");
 }
 
 fn filesystem_mutation_route() -> crate::RouteResult {

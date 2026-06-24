@@ -477,6 +477,44 @@ fn filesystem_mutation_result_allows_kb_ingest_path_evidence() {
 }
 
 #[test]
+fn filesystem_mutation_result_allows_kb_followup_observation_actions() {
+    let contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
+        response_shape: OutputResponseShape::OneSentence,
+        ..IntentOutputContract::default()
+    };
+
+    for (action, args) in [
+        (
+            "search",
+            serde_json::json!({
+                "action": "search",
+                "namespace": "demo_docs_nl",
+                "query": "service status"
+            }),
+        ),
+        (
+            "stats",
+            serde_json::json!({
+                "action": "stats",
+                "namespace": "demo_docs_nl"
+            }),
+        ),
+    ] {
+        let policy = action_policy_for_output_contract(Some(&contract), "kb", &args)
+            .unwrap_or_else(|| panic!("missing policy decision for kb.{action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert!(policy.action_matches_preferred(), "{policy:?}");
+        assert_eq!(policy.action_key, format!("kb.{action}"));
+        assert_eq!(policy.contract_match, "filesystem_mutation_result");
+    }
+}
+
+#[test]
 fn content_excerpt_summary_allows_supplemental_directory_inventory() {
     let contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::ContentExcerptSummary,

@@ -382,6 +382,7 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         };
 
     Ok(json!({
+        "action": "ingest",
         "status":"ok",
         "namespace": ingest.namespace,
         "path": ingest.paths.first().cloned().unwrap_or_default(),
@@ -509,6 +510,7 @@ fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     }
 
     Ok(json!({
+        "action": "search",
         "status":"ok",
         "namespace": s.namespace,
         "hits": hits,
@@ -584,6 +586,7 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
                     acc
                 });
         return Ok(json!({
+            "action": "stats",
             "status": "ok",
             "namespace": namespace,
             "stats": {
@@ -602,6 +605,7 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
         .map(|items| items.len())
         .unwrap_or_default();
     Ok(json!({
+        "action": "stats",
         "status": "ok",
         "stats": {
             "namespace_count": count,

@@ -70,6 +70,10 @@ fn ingest_success_extra_includes_path_evidence_fields() {
         Some("README.md")
     );
     assert_eq!(
+        out.get("action").and_then(|value| value.as_str()),
+        Some("ingest")
+    );
+    assert_eq!(
         out.get("paths")
             .and_then(|value| value.as_array())
             .and_then(|items| items.first())
