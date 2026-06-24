@@ -1195,6 +1195,11 @@ fn route_requires_clarify_before_tools(
         return false;
     }
     !route_clarify_can_defer_to_runtime_status_plan(state, route, plan_result)
+        && !route_clarify_can_defer_to_subagent_review_boundary_surface_plan(
+            state,
+            route,
+            plan_result,
+        )
 }
 
 fn route_clarify_can_defer_to_runtime_status_plan(
@@ -1253,6 +1258,54 @@ fn route_clarify_can_defer_to_runtime_status_plan(
         }
     }
     saw_runtime_status_observation
+}
+
+fn route_clarify_can_defer_to_subagent_review_boundary_surface_plan(
+    state: &AppState,
+    route: &crate::RouteResult,
+    plan_result: &PlanResult,
+) -> bool {
+    if !is_subagent_review_boundary_surface_plan(plan_result)
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+
+    let mut saw_subagent = false;
+    let mut saw_read_range = false;
+    for step in plan_result.steps.iter().filter(|step| {
+        matches!(
+            step.action_type.as_str(),
+            "call_skill" | "call_tool" | "call_capability"
+        )
+    }) {
+        if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+            return false;
+        }
+        let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+        if !subagent_review_boundary_surface_action_allowed(
+            plan_result,
+            &normalized_skill,
+            &step.args,
+        ) {
+            return false;
+        }
+        match normalized_skill.as_str() {
+            "subagent" => saw_subagent = true,
+            "fs_basic" => saw_read_range = true,
+            _ => {}
+        }
+    }
+
+    saw_subagent && saw_read_range
 }
 
 fn verify_execution_recipe(
@@ -1650,7 +1703,9 @@ pub(crate) fn verify_plan(
             });
         } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
-            if !visible_skills.contains(&normalized_skill) {
+            if !visible_skills.contains(&normalized_skill)
+                && !planner_internal_tool_is_visible(&normalized_skill)
+            {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
                     kind: VerifyIssueKind::SkillNotVisible,
@@ -1658,6 +1713,12 @@ pub(crate) fn verify_plan(
                 });
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
+            let subagent_review_boundary_surface_action_allowed =
+                subagent_review_boundary_surface_action_allowed(
+                    &effective_plan_result,
+                    &normalized_skill,
+                    &step.args,
+                );
             if let Some(policy) = crate::contract_matrix::action_policy_for_output_contract(
                 input.route_result.map(|route| &route.output_contract),
                 &normalized_skill,
@@ -1677,6 +1738,7 @@ pub(crate) fn verify_plan(
                         &step.args,
                         &policy.contract_match,
                     )
+                    && !subagent_review_boundary_surface_action_allowed
                 {
                     issues.push(VerifyIssue {
                         step_id: step.step_id.clone(),
@@ -1689,7 +1751,9 @@ pub(crate) fn verify_plan(
                             policy.final_answer_shape
                         ),
                     });
-                } else if !policy.preferred_actions.is_empty() && !policy.action_matches_preferred()
+                } else if !policy.preferred_actions.is_empty()
+                    && !policy.action_matches_preferred()
+                    && !subagent_review_boundary_surface_action_allowed
                 {
                     issues.push(VerifyIssue {
                         step_id: step.step_id.clone(),
@@ -1706,6 +1770,7 @@ pub(crate) fn verify_plan(
                 && !route_contract_missing
                 && crate::contract_matrix::ActionRef::from_skill_args(&normalized_skill, &step.args)
                     .is_none()
+                && !subagent_review_boundary_surface_action_allowed
             {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
@@ -1833,6 +1898,40 @@ pub(crate) fn verify_plan(
         needs_confirmation,
         rewritten_steps,
         issues,
+    }
+}
+
+fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {
+    matches!(normalized_skill, "subagent")
+}
+
+fn is_subagent_review_boundary_surface_plan(plan_result: &PlanResult) -> bool {
+    plan_result.raw_plan_text.trim() == "deterministic:subagent_review_boundary_surface"
+}
+
+fn subagent_review_boundary_surface_action_allowed(
+    plan_result: &PlanResult,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    if !is_subagent_review_boundary_surface_plan(plan_result) {
+        return false;
+    }
+    match normalized_skill {
+        "subagent" => {
+            args.get("role")
+                .and_then(Value::as_str)
+                .map(normalize_schema_token)
+                .is_some_and(|role| role == "review")
+                && args.get("objective").and_then(Value::as_str).map(str::trim)
+                    == Some("runtime_boundary_alignment_audit")
+        }
+        "fs_basic" => args
+            .get("action")
+            .and_then(Value::as_str)
+            .map(normalize_schema_token)
+            .is_some_and(|action| action == "read_text_range"),
+        _ => false,
     }
 }
 

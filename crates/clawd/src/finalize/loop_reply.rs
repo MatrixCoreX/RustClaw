@@ -172,6 +172,12 @@ use matrix_shape::{
     should_try_observed_output_language_fallback, synthetic_task_for_matrix_shape_check,
 };
 
+#[path = "loop_reply_machine_envelope.rs"]
+mod machine_envelope;
+use machine_envelope::{
+    attach_machine_envelope_delivery_from_loop, mark_machine_envelope_delivery_complete,
+};
+
 #[path = "loop_reply_delivery_backfill.rs"]
 mod delivery_backfill;
 use delivery_backfill::{
@@ -668,6 +674,12 @@ pub(crate) async fn finalize_loop_reply(
     );
     backfill_delivery_from_last_outputs(task, &mut loop_state, agent_run_context);
     let mut finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary> = None;
+    attach_machine_envelope_delivery_from_loop(
+        task,
+        &mut loop_state,
+        &mut finalizer_summary,
+        agent_run_context,
+    );
     if let Some(reply) =
         filesystem_mutation_synthesis_reply(task, user_text, &loop_state, agent_run_context)
     {
@@ -1554,6 +1566,13 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
         &mut finalizer_summary,
+    );
+    mark_machine_envelope_delivery_complete(
+        task,
+        &mut loop_state,
+        &delivery_deduped,
+        &mut finalizer_summary,
+        agent_run_context,
     );
     if let Some(rendered) = compose_recent_artifacts_machine_field_delivery(
         state,

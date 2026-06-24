@@ -340,6 +340,70 @@ fn ordinary_clarify_should_enter_agent_loop(
         && crate::agent_engine::agent_loop_semantic_authority_enabled(state)
 }
 
+fn subagent_boundary_clarify_should_enter_agent_loop(
+    state: &crate::AppState,
+    route_result: &crate::RouteResult,
+) -> bool {
+    if !route_result.needs_clarify
+        || !route_result.ask_mode.is_clarify_only()
+        || route_result.risk_ceiling == crate::RiskCeiling::High
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.output_contract.delivery_required
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.response_shape != crate::OutputResponseShape::Strict
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    let hint = route_result
+        .agent_display_name_hint
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| part.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let review_role = hint
+        .iter()
+        .any(|part| matches!(part.as_str(), "review" | "reviewer"));
+    if !review_role {
+        return false;
+    }
+    current_top_level_plan_markdown_path(state).is_some()
+}
+
+fn current_top_level_plan_markdown_path(state: &crate::AppState) -> Option<String> {
+    let plan_dir = state.skill_rt.workspace_root.join("plan");
+    let mut files = std::fs::read_dir(&plan_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file()
+                || path.extension().and_then(|value| value.to_str()) != Some("md")
+            {
+                return None;
+            }
+            let modified = metadata.modified().ok();
+            let name = path.file_name()?.to_str()?.to_string();
+            Some((modified, name))
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|(left_time, left_name), (right_time, right_name)| {
+        right_time
+            .cmp(left_time)
+            .then_with(|| left_name.cmp(right_name))
+    });
+    files
+        .into_iter()
+        .next()
+        .map(|(_, name)| format!("plan/{name}"))
+}
+
 fn apply_ask_post_route(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1109,6 +1173,31 @@ fn apply_ask_post_route(
         &mut resolved_prompt_for_execution,
         &mut prompt_with_memory_for_execution,
     );
+    if subagent_boundary_clarify_should_enter_agent_loop(state, &post_route.execution_route_result)
+    {
+        let before_gate_kind = post_route.execution_route_result.gate_kind();
+        post_route.execution_route_result.needs_clarify = false;
+        post_route.execution_route_result.clarify_question.clear();
+        post_route
+            .execution_route_result
+            .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+        );
+        append_route_reason(
+            &mut post_route.execution_route_result,
+            "subagent_boundary_clarify_deferred_to_agent_loop",
+        );
+        log_route_guard_record(
+            task,
+            "worker_agent_loop_boundary",
+            "subagent_boundary_clarify_deferred_to_agent_loop",
+            "deferred",
+            before_gate_kind,
+            &post_route.execution_route_result,
+        );
+    }
     AppliedAskPostRoute {
         execution_route_result: post_route.execution_route_result,
         auto_locator_path: post_route.auto_locator_path,

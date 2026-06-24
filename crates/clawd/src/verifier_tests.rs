@@ -1191,6 +1191,186 @@ fn enforce_mode_blocks_skill_not_visible() {
 }
 
 #[test]
+fn enforce_mode_allows_internal_subagent_tool_visibility() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "subagent".to_string(),
+                args: json!({
+                    "role": "review",
+                    "objective": "runtime_boundary_alignment_audit",
+                    "context_refs": ["AGENTS.md"],
+                    "budget": {"max_rounds": 1, "max_tool_calls": 3}
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| { matches!(issue.kind, VerifyIssueKind::SkillNotVisible) }));
+}
+
+#[test]
+fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejection() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::ConfigValidation);
+    let mut plan = plan_result(vec![
+        PlanStep {
+            step_id: "s1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "subagent".to_string(),
+            args: json!({
+                "role": "review",
+                "objective": "runtime_boundary_alignment_audit",
+                "context_refs": ["AGENTS.md", "plan/current.md"],
+                "budget": {"max_rounds": 1, "max_tool_calls": 3}
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        PlanStep {
+            step_id: "s2".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "AGENTS.md",
+                "start_line": 1,
+                "end_line": 260
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        PlanStep {
+            step_id: "s3".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "plan/current.md",
+                "start_line": 1,
+                "end_line": 260
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        PlanStep {
+            step_id: "s4".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "{\"output_format\":\"machine_json\",\"owner_layer\":\"subagent_boundary_review\",\"boundary\":{\"write_enabled\":false,\"external_publish_enabled\":false}}"
+            }),
+            depends_on: vec!["s1".to_string(), "s2".to_string(), "s3".to_string()],
+            why: String::new(),
+        },
+    ]);
+    plan.raw_plan_text = "deterministic:subagent_review_boundary_surface".to_string();
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractPolicyViolation)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::SkillNotVisible)));
+}
+
+#[test]
+fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structured() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::ConfigValidation);
+    route.needs_clarify = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+    let mut plan = plan_result(vec![
+        PlanStep {
+            step_id: "s1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "subagent".to_string(),
+            args: json!({
+                "role": "review",
+                "objective": "runtime_boundary_alignment_audit",
+                "context_refs": ["AGENTS.md", "plan/current.md"],
+                "budget": {"max_rounds": 1, "max_tool_calls": 3}
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        PlanStep {
+            step_id: "s2".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "AGENTS.md",
+                "start_line": 1,
+                "end_line": 260
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+    ]);
+    plan.raw_plan_text = "deterministic:subagent_review_boundary_surface".to_string();
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: Some("structured_current_plan_locator"),
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
+}
+
+#[test]
 fn enforce_mode_blocks_primary_fallback_conflict() {
     let state = test_state();
     let task = test_task();

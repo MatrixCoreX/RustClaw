@@ -1284,6 +1284,66 @@ fn post_route_promotes_current_workspace_multifile_excerpt_judgment() {
 }
 
 #[test]
+fn post_route_defers_subagent_boundary_clarify_to_agent_loop_when_current_plan_exists() {
+    let root = make_temp_root("post_route_subagent_boundary_plan");
+    std::fs::write(root.join("AGENTS.md"), "# Agent Rules\n").expect("agents");
+    std::fs::create_dir_all(root.join("plan")).expect("plan dir");
+    std::fs::write(root.join("plan/current.md"), "# Current Plan\n").expect("plan");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "post-route-subagent-boundary-plan".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let prompt = "review subagent boundary audit";
+    let resolved_intent = "review subagent boundary audit";
+    let mut route = executable_filename_route();
+    route.resolved_intent = resolved_intent.to_string();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.agent_display_name_hint = "review-subagent".to_string();
+    route.risk_ceiling = crate::RiskCeiling::Low;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.route_reason = "structured_locator_contract_repair".to_string();
+
+    let applied = apply_ask_post_route(
+        &state,
+        &task,
+        prompt,
+        resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert!(
+        !applied.execution_route_result.needs_clarify,
+        "{}",
+        applied.execution_route_result.route_reason
+    );
+    assert!(applied.execution_route_result.is_execute_gate());
+    assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "subagent_boundary_clarify_deferred_to_agent_loop"
+    ));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn post_route_quantity_compare_preserves_explicit_directory_pair_over_parent_locator() {
     let root = make_temp_root("quantity_pair_over_parent_locator");
     std::fs::create_dir_all(root.join("scripts/nl_tests/fixtures/device_local/docs"))

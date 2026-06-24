@@ -201,19 +201,19 @@ pub(super) fn subagent_review_boundary_surface_deterministic_plan_result(
     user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
+    let plan_path = current_top_level_plan_markdown_path(state)?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
+        || !subagent_review_boundary_surface_gate_allows(route)
         || !runtime_surface_skill_available_for_plan(state, "fs_basic")
         || !runtime_surface_mentions_all_machine_token_groups(
             route,
             user_text,
-            &[&["agents.md"], &["plan"], &["review"]],
+            &[&["agents.md"], &["review"]],
         )
     {
         return None;
     }
 
-    let plan_path = current_top_level_plan_markdown_path(state)?;
     let actions = vec![
         AgentAction::CallTool {
             tool: "subagent".to_string(),
@@ -275,6 +275,18 @@ pub(super) fn subagent_review_boundary_surface_deterministic_plan_result(
         PlanKind::Single,
         &actions,
     ))
+}
+
+fn subagent_review_boundary_surface_gate_allows(route: &RouteResult) -> bool {
+    route.is_execute_gate()
+        || (route.needs_clarify
+            && route.output_contract.requires_content_evidence
+            && matches!(
+                route.output_contract.locator_kind,
+                crate::OutputLocatorKind::Filename
+                    | crate::OutputLocatorKind::Path
+                    | crate::OutputLocatorKind::CurrentWorkspace
+            ))
 }
 
 fn subagent_review_boundary_machine_projection(plan_path: &str) -> Value {

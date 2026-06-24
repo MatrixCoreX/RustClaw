@@ -703,15 +703,18 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    if !loop_state.has_tool_or_skill_output {
-        return true;
-    }
     if loop_state
         .delivery_messages
         .last()
         .is_some_and(|last| last.trim() == trimmed)
     {
         return false;
+    }
+    if respond_machine_envelope_payload(trimmed) {
+        return true;
+    }
+    if !loop_state.has_tool_or_skill_output {
+        return true;
     }
     if loop_state
         .last_output
@@ -722,6 +725,22 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
         return false;
     }
     true
+}
+
+fn respond_machine_envelope_payload(text: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    payload.is_object()
+        && payload
+            .get("output_format")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == "machine_json")
+        && payload
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|owner| !owner.is_empty())
 }
 
 fn route_requires_file_token_delivery(agent_run_context: Option<&AgentRunContext>) -> bool {
