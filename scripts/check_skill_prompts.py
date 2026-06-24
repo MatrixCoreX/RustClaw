@@ -12,6 +12,8 @@ and keeps prompt-layer rules machine-checkable:
 - vendor skill patches stay small overlays instead of copied full skill documents.
 - generated skill prompts stay within a bounded line budget so skill growth does
   not silently crowd planner context.
+- final rendered prompts stay within a bounded size budget after base, overlay,
+  and vendor patches are composed.
 Does not touch production code or clawd.
 """
 from __future__ import annotations
@@ -19,6 +21,8 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+
+import render_prompt_layers as prompt_renderer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
@@ -39,6 +43,10 @@ FULL_SKILL_SECTION_HEADINGS = (
 )
 MAX_GENERATED_SKILL_PROMPT_LINES = 320
 MAX_GENERATED_SKILL_PROMPT_TOTAL_LINES = 6000
+MAX_RENDERED_PROMPT_LINES = 900
+MAX_RENDERED_PROMPT_BYTES = 260_000
+MAX_RENDERED_SKILL_PROMPT_LINES = 420
+MAX_RENDERED_SKILL_PROMPT_BYTES = 40_000
 
 
 def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
@@ -159,6 +167,73 @@ def check_generated_skill_prompt_budget() -> list[str]:
     return errors
 
 
+def prompt_vendors() -> list[str]:
+    vendors = {"default"}
+    if VENDOR_PATCHES.exists():
+        vendors.update(
+            child.name
+            for child in VENDOR_PATCHES.iterdir()
+            if child.is_dir() and child.name.strip()
+        )
+    return sorted(vendors)
+
+
+def _rendered_size_error(
+    *,
+    label: str,
+    vendor: str,
+    logical_path: str,
+    line_count: int,
+    byte_count: int,
+    max_lines: int,
+    max_bytes: int,
+) -> str | None:
+    if line_count <= max_lines and byte_count <= max_bytes:
+        return None
+    return (
+        f"{label} rendered prompt exceeds budget for vendor={vendor} "
+        f"path={logical_path} ({line_count} lines/{byte_count} bytes; "
+        f"max {max_lines} lines/{max_bytes} bytes)"
+    )
+
+
+def check_rendered_prompt_budget(skills: list[tuple[str, str]]) -> list[str]:
+    errors: list[str] = []
+    manifest = prompt_renderer.load_manifest()
+    vendors = prompt_vendors()
+
+    for vendor in vendors:
+        for logical_path in sorted(manifest):
+            rendered = prompt_renderer.render_prompt(vendor, logical_path, manifest)
+            maybe_error = _rendered_size_error(
+                label="Manifest",
+                vendor=vendor,
+                logical_path=logical_path,
+                line_count=len(rendered.splitlines()),
+                byte_count=len(rendered.encode("utf-8")),
+                max_lines=MAX_RENDERED_PROMPT_LINES,
+                max_bytes=MAX_RENDERED_PROMPT_BYTES,
+            )
+            if maybe_error:
+                errors.append(maybe_error)
+
+        for skill_name, logical_path in skills:
+            rendered = prompt_renderer.render_prompt(vendor, logical_path, manifest)
+            maybe_error = _rendered_size_error(
+                label=f"Skill `{skill_name}`",
+                vendor=vendor,
+                logical_path=logical_path,
+                line_count=len(rendered.splitlines()),
+                byte_count=len(rendered.encode("utf-8")),
+                max_lines=MAX_RENDERED_SKILL_PROMPT_LINES,
+                max_bytes=MAX_RENDERED_SKILL_PROMPT_BYTES,
+            )
+            if maybe_error:
+                errors.append(maybe_error)
+
+    return errors
+
+
 def main() -> int:
     if not REGISTRY_PATH.exists():
         print(f"Registry not found: {REGISTRY_PATH}", file=sys.stderr)
@@ -198,6 +273,7 @@ def main() -> int:
         check_multilingual_reinforcement_blocks()
         + check_vendor_skill_patches_are_overlays()
         + check_generated_skill_prompt_budget()
+        + check_rendered_prompt_budget(skills)
     )
     if prompt_errors:
         for error in prompt_errors:
