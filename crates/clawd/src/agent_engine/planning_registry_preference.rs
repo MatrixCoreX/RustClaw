@@ -77,6 +77,11 @@ pub(super) fn actions_use_ad_hoc_command_without_route_preferred_skill(
         {
             return false;
         }
+        if canonical.eq_ignore_ascii_case("run_cmd")
+            && action_has_runtime_async_job_start_marker(action)
+        {
+            return false;
+        }
         if action_satisfies_structured_key_listing_contract(route_result, action) {
             return false;
         }
@@ -169,6 +174,21 @@ fn action_has_internal_literal_command_marker(action: &AgentAction) -> bool {
             .get(super::CLAWD_LITERAL_COMMAND_ARG)
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        AgentAction::CallCapability { .. } => false,
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn action_has_runtime_async_job_start_marker(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. } => {
+            args.get(super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+                .and_then(Value::as_str)
+                == Some("async_job_protocol")
+                && args.get("async_start").and_then(Value::as_bool) == Some(true)
+        }
         AgentAction::CallCapability { .. } => false,
         AgentAction::Think { .. }
         | AgentAction::Respond { .. }
