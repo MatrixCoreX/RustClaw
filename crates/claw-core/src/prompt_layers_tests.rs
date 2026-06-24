@@ -45,6 +45,11 @@ fn test_skill_prompt_layering_supports_logical_and_legacy_vendor_paths() {
     );
     write_file(
         &root,
+        "prompts/layers/vendor_patches/claude/skills/common.md",
+        "claude common patch",
+    );
+    write_file(
+        &root,
         "prompts/layers/vendor_patches/claude/skills/demo.md",
         "claude patch",
     );
@@ -57,7 +62,10 @@ fn test_skill_prompt_layering_supports_logical_and_legacy_vendor_paths() {
         "",
     );
 
-    assert_eq!(logical.0, "base rules\n\ndemo body\n\nclaude patch");
+    assert_eq!(
+        logical.0,
+        "base rules\n\ndemo body\n\nclaude common patch\n\nclaude patch"
+    );
     assert_eq!(legacy.0, logical.0);
     assert!(logical.1.contains("prompts/skills/demo.md"));
     assert!(legacy.1.contains("prompts/skills/demo.md"));
