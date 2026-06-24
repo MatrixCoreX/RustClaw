@@ -24,7 +24,7 @@
 #     --case-file scripts/nl_tests/cases/nl_cases_codex_task_resume_release_smoke_20260621.txt \
 #     --prompt-reply-only --fail-fast 3
 
-codex_task_resume_release_smoke|ask_readonly_repo_orientation_zh|covers:ask,doc_parse,fs_basic;requires_tool_call=true;local_readonly|阅读 README.md 和 plan/background_task_resume_convergence_plan_20260621.md，只总结当前任务执行架构里前台 task_id、后台 worker、checkpoint/resume 三个关键词各自代表什么；不要修改文件。|expect=task_id
+codex_task_resume_release_smoke|ask_readonly_repo_orientation_zh|covers:ask,doc_parse,fs_basic;requires_tool_call=true;local_readonly|阅读 README.md 和 docs/task_lifecycle_lease_model.md，只总结当前任务执行架构里前台 task_id、后台 worker、checkpoint/resume 三个关键词各自代表什么；不要修改文件。|expect=task_id
 
 codex_task_resume_release_smoke|direct_run_skill_boundary_zh|covers:run_skill,task_boundary;requires_tool_call=true;local_readonly|根据 README 说明 kind=ask 和 kind=run_skill 的执行边界：run_skill 是否经过 normalizer/planner、是否走共享 skill dispatcher、结果是否仍进入 task 查询；只回答这些结构化差异，不要提交新任务。|expect=run_skill
 
@@ -58,7 +58,7 @@ codex_task_resume_release_smoke|extension_gap_dry_run_zh|covers:extension_manage
 
 codex_task_resume_release_smoke|install_module_no_install_dry_run_zh|covers:install_module,package_manager,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装任何包或模块；说明应该走系统包管理器还是语言模块安装。|expect=dry
 
-codex_task_resume_release_smoke|checkpoint_resume_machine_fields_zh|covers:agent_loop,checkpoint,resume;requires_tool_call=true;local_readonly|根据 README.md 和 plan/background_task_resume_convergence_plan_20260621.md 说明 soft budget 后的 checkpoint/resume 机器字段链路：checkpoint_id、resume_entrypoint、resume_work_item、resume_executor、dispatch_state、result_projection_state；不要新增任务。|expect=checkpoint_id
+codex_task_resume_release_smoke|checkpoint_resume_machine_fields_zh|covers:agent_loop,checkpoint,resume;requires_tool_call=true;local_readonly|根据 README.md 和 docs/task_lifecycle_lease_model.md 说明 soft budget 后的 checkpoint/resume 机器字段链路：checkpoint_id、resume_entrypoint、resume_work_item、resume_executor、dispatch_state、result_projection_state；不要新增任务。|expect=checkpoint_id
 
 codex_task_resume_release_smoke|async_job_poll_contract_dry_run_zh|covers:async_poll,checkpoint,resume,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry-run：说明一个长尾工具应如何返回 pending_async_job，并由 worker 通过 poll_async_job、next_check_after、expires_at、message_key 继续轮询；不要启动真实长任务。|expect=poll_async_job
 
