@@ -68,10 +68,14 @@ pub(crate) async fn verify_answer_observe_only(
         }
     };
     let task_contract = TaskContract::from_route_result(route_result);
+    let user_request_for_prompt = answer_verifier_user_request_for_prompt(task, user_request);
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
     let prompt = crate::render_prompt_template(
         &resolved.template,
         &[
-            ("__USER_REQUEST__", user_request.trim()),
+            ("__USER_REQUEST__", user_request_for_prompt.trim()),
+            ("__REQUEST_LANGUAGE_HINT__", request_language_hint.as_str()),
             (
                 "__TASK_CONTRACT__",
                 &task_contract_prompt_block(&task_contract),
@@ -168,6 +172,13 @@ pub(crate) async fn verify_answer_observe_only(
         );
     }
     Some(validation)
+}
+
+pub(super) fn answer_verifier_user_request_for_prompt(
+    task: &ClaimedTask,
+    user_request: &str,
+) -> String {
+    crate::language_policy::task_user_request_for_prompt(task, user_request)
 }
 
 pub(super) fn backend_identity_metadata_answer_verifier_guard(
