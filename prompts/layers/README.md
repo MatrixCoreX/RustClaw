@@ -54,6 +54,8 @@ python3 scripts/render_prompt_layers.py --vendor claude --prompt prompts/clarify
 - Task-specific prompt body belongs in `overlay`
 - Only model-specific adaptation belongs in `vendor_patch`
 - Avoid maintaining new full vendor prompt copies unless absolutely necessary
+- Run `python3 scripts/check_skill_prompts.py` after prompt-layer, skill `INTERFACE.md`, generated prompt, or vendor patch edits. It checks the EOF multilingual block, generated skill prompt budgets, thin vendor overlays, and final rendered prompt budgets.
+- If a rendered prompt exceeds budget, first reduce duplication in the interface or overlay, split optional context into a narrower prompt, or move model-specific guidance into a thin vendor patch.
 
 ## EOF multilingual reinforcement block
 

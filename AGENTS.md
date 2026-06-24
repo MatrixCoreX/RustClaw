@@ -205,8 +205,8 @@ A skill is considered available only when “mapping complete + compile pass + r
 
 - **`prompts/` 下所有真正的 prompt markdown 文件**在文件末尾保留统一的 **Multilingual Reinforcement** 区块（固定标题与注释模板），用于 zh-CN / en 等语言特有补充；通用规则仍写在正文。说明类 README（如 `prompts/layers/README.md`）不追加该区块，仅文档化规范。
   **All real prompt markdown files under `prompts/`** keep a unified **Multilingual Reinforcement** block at EOF (fixed heading + comment template) for language-specific nuance (e.g. zh-CN / en); general rules stay in the main body. Explainer READMEs (e.g. `prompts/layers/README.md`) do not get the block—document the convention only.
-- 修改技能 `INTERFACE.md`、生成 prompt、vendor patch 或 `prompts/layers` 下真实 prompt 文件后，必须运行 `python3 scripts/check_skill_prompts.py`；生成技能 prompt 要保持在脚本预算内，超预算时优先精简 `INTERFACE.md` 或做按需/分层提示，不要把长篇全量说明塞进全局 overlay。
-  After changing skill `INTERFACE.md`, generated prompts, vendor patches, or real prompt files under `prompts/layers`, run `python3 scripts/check_skill_prompts.py`; generated skill prompts must stay within the script budget. If over budget, first tighten `INTERFACE.md` or use on-demand/layered prompting instead of putting long full docs into global overlays.
+- 修改技能 `INTERFACE.md`、生成 prompt、vendor patch 或 `prompts/layers` 下真实 prompt 文件后，必须运行 `python3 scripts/check_skill_prompts.py`；生成技能 prompt 和最终渲染 prompt 都要保持在脚本预算内，超预算时优先精简 `INTERFACE.md`、拆分按需上下文或做分层提示，不要把长篇全量说明塞进全局 overlay。
+  After changing skill `INTERFACE.md`, generated prompts, vendor patches, or real prompt files under `prompts/layers`, run `python3 scripts/check_skill_prompts.py`; generated skill prompts and final rendered prompts must stay within the script budget. If over budget, first tighten `INTERFACE.md`, split on-demand context, or use layered prompting instead of putting long full docs into global overlays.
 - 优先增量改动，不重构无关模块。
   Prefer incremental changes; avoid unrelated refactors.
 - 长文件必须持续拆分：生产 Rust 单文件超过约 1,500 行时应优先拆分，但可因功能边界完整性灵活保留到 2,000 行以内；生产与测试 Rust 单文件硬上限都是 2,000 行，超过后不得继续把新职责追加进去，应拆到同名目录子模块、专属 `*_tests.rs`、fixtures 或 helper 模块。已有超长文件（如 5,000+ 行）只允许做必要小修或净减少，新增大段逻辑前必须先拆分相关责任区。每次改动导致文件新增超过约 300 行时，也要优先拆分。
