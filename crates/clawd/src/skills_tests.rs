@@ -290,6 +290,12 @@ async fn disabled_skill_preflight_returns_policy_decision_payload() {
 
     assert_eq!(parsed.reason_code, "skill_disabled");
     assert_eq!(parsed.decision, "deny");
+    assert!(parsed.policy_boundary.iter().all(|item| {
+        item.contains('=')
+            && item
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '=' | '-'))
+    }));
     assert_eq!(
         normalized
             .pointer("/permission_decision/decision")
