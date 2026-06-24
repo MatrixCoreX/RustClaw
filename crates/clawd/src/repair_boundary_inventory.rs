@@ -310,6 +310,9 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "status_code",
             "retry_after_seconds",
             "external_provider_blocked",
+            "provider_supported",
+            "unsupported_reason",
+            "message_key",
         ],
         forbidden_input_fields: &[
             "user_prompt_phrase",
