@@ -1359,8 +1359,9 @@ async fn compose_policy_block_delivery(
     let default_text =
         crate::skills::policy_block_default_text(state, task, user_text, policy_block);
     let mut policy_boundary = policy_block.policy_boundary.clone();
-    policy_boundary.push("Do not claim the blocked action was executed.".to_string());
-    policy_boundary.push("Do not expose raw policy payloads or internal action names.".to_string());
+    policy_boundary.push("blocked_action_execution_claim_allowed=false".to_string());
+    policy_boundary.push("expose_raw_policy_payload=false".to_string());
+    policy_boundary.push("expose_internal_action_names=false".to_string());
     let contract = crate::fallback::UserResponseContract::policy_block(
         &policy_block.reason_code,
         user_text,

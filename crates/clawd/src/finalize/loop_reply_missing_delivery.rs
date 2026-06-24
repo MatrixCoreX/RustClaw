@@ -287,13 +287,10 @@ async fn missing_delivery_after_observation_message(
         &route_resolved_intent(agent_run_context),
         observed_execution_facts_for_missing_delivery(loop_state, clarify_reason),
         vec![
-            "Do not claim the task succeeded.".to_string(),
-            "Do not ask which item the user wants if execution outputs are already attached."
-                .to_string(),
-            "Use observed execution facts to explain the blocker or incomplete result."
-                .to_string(),
-            "Offer one concrete next step only when the observed facts do not already answer the user's request."
-                .to_string(),
+            "task_success_claim_allowed=false".to_string(),
+            "ask_item_selection_when_outputs_attached=false".to_string(),
+            "response_scope=observed_blocker_or_incomplete_result".to_string(),
+            "next_step_policy=only_if_observed_facts_do_not_answer_request".to_string(),
         ],
         "brief_failure_with_next_step",
         &language_hint,

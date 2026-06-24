@@ -827,8 +827,9 @@ fn resolve_workspace_path(
             "path_parent_traversal",
             vec![format!("requested_path: {input}")],
             vec![
-                "Do not access paths containing parent traversal.".to_string(),
-                "Ask for a concrete path inside the workspace.".to_string(),
+                "path_parent_traversal_allowed=false".to_string(),
+                "required_path_scope=workspace".to_string(),
+                "required_path_form=concrete".to_string(),
             ],
         ));
     }
@@ -842,8 +843,9 @@ fn resolve_workspace_path(
                 format!("workspace_root: {}", normalized_root.display()),
             ],
             vec![
-                "Do not access paths outside the workspace for non-admin tasks.".to_string(),
-                "Explain the workspace boundary and one safe next step.".to_string(),
+                "workspace_escape_allowed=false".to_string(),
+                "required_auth=admin_authorized_task".to_string(),
+                "safe_next_step_required=true".to_string(),
             ],
         ));
     }
