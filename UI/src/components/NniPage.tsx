@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
 import {
@@ -96,6 +97,8 @@ const NNI_DEVICE_ACTIONS = [
   "tng_root_cert",
 ];
 
+const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
+
 export function NniPage({
   lang,
   t,
@@ -151,6 +154,8 @@ export function NniPage({
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
+  const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
+  const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.signature_chip_present === false;
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
@@ -159,7 +164,32 @@ export function NniPage({
   const nniHeartbeatErrorsCanPrev = nniHeartbeatErrorsPage > 1;
   const nniHeartbeatErrorsCanNext = nniHeartbeatErrorsPage < nniHeartbeatErrorsTotalPages;
   const actionLabel = (action: string) => nniActionLabel(action, lang);
-  const nniRuntimeActivity = nniJoined || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
+  const nniRuntimeActivity =
+    nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
+
+  useEffect(() => {
+    return () => {
+      if (nniTestJoinPulseTimer.current !== null) {
+        window.clearTimeout(nniTestJoinPulseTimer.current);
+      }
+    };
+  }, []);
+
+  const runTestJoinWithRuntimePulse = async () => {
+    if (nniTestJoinPulseTimer.current !== null) {
+      window.clearTimeout(nniTestJoinPulseTimer.current);
+      nniTestJoinPulseTimer.current = null;
+    }
+    setNniTestJoinPulse(true);
+    try {
+      await Promise.resolve(onTestJoin());
+    } finally {
+      nniTestJoinPulseTimer.current = window.setTimeout(() => {
+        setNniTestJoinPulse(false);
+        nniTestJoinPulseTimer.current = null;
+      }, NNI_TEST_JOIN_ACTIVITY_MS);
+    }
+  };
 
   const copyPrimaryHex = () => {
     if (!nniPrimaryHex) return;
@@ -219,7 +249,7 @@ export function NniPage({
             {!nniJoined ? (
               <button
                 type="button"
-                onClick={() => void onTestJoin()}
+                onClick={() => void runTestJoinWithRuntimePulse()}
                 disabled={Boolean(nniActionLoading) || nniStatusLoading}
                 className="theme-secondary-btn px-3 py-2 text-sm"
                 title={
