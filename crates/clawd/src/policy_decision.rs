@@ -66,6 +66,27 @@ impl PolicyDecision {
             Self::Allow
         }
     }
+
+    pub(crate) fn from_contract_action_policy(
+        decision: crate::contract_matrix::ActionPolicyDecision,
+    ) -> Self {
+        match decision {
+            crate::contract_matrix::ActionPolicyDecision::Allowed => Self::Allow,
+            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+            | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+            | crate::contract_matrix::ActionPolicyDecision::RejectedNoActionsAllowed => Self::Deny,
+        }
+    }
+
+    pub(crate) fn from_contract_arg_policy(
+        decision: crate::contract_matrix::ArgPolicyDecision,
+    ) -> Self {
+        match decision {
+            crate::contract_matrix::ArgPolicyDecision::Allowed => Self::Allow,
+            crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
+            | crate::contract_matrix::ArgPolicyDecision::MissingTargetBinding => Self::Deny,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +144,46 @@ mod tests {
         assert_eq!(
             PolicyDecision::BackgroundWait.pre_tool_use_reason_code(),
             "pre_tool_use_background_wait"
+        );
+    }
+
+    #[test]
+    fn contract_matrix_policies_map_to_closed_policy_decisions() {
+        assert_eq!(
+            PolicyDecision::from_contract_action_policy(
+                crate::contract_matrix::ActionPolicyDecision::Allowed
+            ),
+            PolicyDecision::Allow
+        );
+        assert_eq!(
+            PolicyDecision::from_contract_action_policy(
+                crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+            ),
+            PolicyDecision::Deny
+        );
+        assert_eq!(
+            PolicyDecision::from_contract_action_policy(
+                crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+            ),
+            PolicyDecision::Deny
+        );
+        assert_eq!(
+            PolicyDecision::from_contract_arg_policy(
+                crate::contract_matrix::ArgPolicyDecision::Allowed
+            ),
+            PolicyDecision::Allow
+        );
+        assert_eq!(
+            PolicyDecision::from_contract_arg_policy(
+                crate::contract_matrix::ArgPolicyDecision::MissingTargetBinding
+            ),
+            PolicyDecision::Deny
+        );
+        assert_eq!(
+            PolicyDecision::from_contract_arg_policy(
+                crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
+            ),
+            PolicyDecision::Deny
         );
     }
 }
