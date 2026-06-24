@@ -159,6 +159,7 @@ export function NniPage({
   const nniHeartbeatErrorsCanPrev = nniHeartbeatErrorsPage > 1;
   const nniHeartbeatErrorsCanNext = nniHeartbeatErrorsPage < nniHeartbeatErrorsTotalPages;
   const actionLabel = (action: string) => nniActionLabel(action, lang);
+  const nniRuntimeActivity = nniJoined || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
 
   const copyPrimaryHex = () => {
     if (!nniPrimaryHex) return;
@@ -334,8 +335,25 @@ export function NniPage({
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("加入状态", "Join state")}</p>
               <h4 className="mt-2 text-lg font-semibold">{t("NNI 运行入口", "NNI runtime entry")}</h4>
             </div>
-            <span className={nniJoined ? "setup-status setup-status-done" : "setup-status setup-status-todo"}>
-              {nniJoined ? t("心跳挑战中", "Heartbeat active") : t("未加入", "Not joined")}
+            <span
+              className={
+                nniJoined
+                  ? "setup-status setup-status-done"
+                  : nniRuntimeActivity
+                    ? "setup-status"
+                    : "setup-status setup-status-todo"
+              }
+            >
+              {nniJoined ? (
+                t("心跳挑战中", "Heartbeat active")
+              ) : nniRuntimeActivity ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t("测试中", "Testing")}
+                </>
+              ) : (
+                t("未加入", "Not joined")
+              )}
             </span>
           </div>
 
@@ -386,7 +404,7 @@ export function NniPage({
 
           <div
             className={`nni-runtime-board mt-4 min-h-[180px] rounded-2xl border p-4 ${
-              nniJoined ? "nni-runtime-board-active" : "nni-runtime-board-idle"
+              nniRuntimeActivity ? "nni-runtime-board-active" : "nni-runtime-board-idle"
             }`}
           >
             <div className="grid h-full min-h-[148px] grid-cols-6 gap-2 sm:grid-cols-8">
@@ -394,12 +412,12 @@ export function NniPage({
                 <div
                   key={index}
                   className={`nni-runtime-tile rounded-lg border ${
-                    nniJoined ? "nni-runtime-tile-active" : "nni-runtime-tile-idle"
+                    nniRuntimeActivity ? "nni-runtime-tile-active" : "nni-runtime-tile-idle"
                   }`}
                   style={{
                     animationDelay: `${tile.delay}s`,
                     animationDuration: `${tile.duration}s`,
-                    opacity: nniJoined ? undefined : tile.idleOpacity,
+                    opacity: nniRuntimeActivity ? undefined : tile.idleOpacity,
                   }}
                 />
               ))}
