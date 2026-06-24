@@ -1420,6 +1420,17 @@ fn ensure_run_cmd_async_start_args(args: &mut Value) -> bool {
         obj.insert("expires_in_seconds".to_string(), Value::from(600));
         changed = true;
     }
+    if obj
+        .get(super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+        .and_then(Value::as_str)
+        != Some("async_job_protocol")
+    {
+        obj.insert(
+            super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG.to_string(),
+            Value::String("async_job_protocol".to_string()),
+        );
+        changed = true;
+    }
     changed
 }
 

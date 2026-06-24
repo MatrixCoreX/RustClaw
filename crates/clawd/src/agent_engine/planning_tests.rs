@@ -104,7 +104,9 @@ use super::{
     task_control_get_deterministic_plan_result, task_control_list_deterministic_plan_result,
     web_search_summary_deterministic_plan_result, LoopState, PlanningPromptClass,
 };
-use crate::agent_engine::{CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG};
+use crate::agent_engine::{
+    CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
+};
 use crate::{
     AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, IntentOutputContract,
     OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind,

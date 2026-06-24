@@ -49,7 +49,8 @@ pub(crate) use task_resume_execution::{
 pub(crate) use tasks::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    is_task_still_running, list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
+    is_task_still_running, is_task_still_running_or_pending_ask_success_projection,
+    list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,

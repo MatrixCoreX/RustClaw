@@ -1,5 +1,5 @@
 use rusqlite::{params, OptionalExtension};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{AppState, ClaimedTask};
 
@@ -638,19 +638,19 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let raw_result_json = db
+    let task_row = db
         .query_row(
-            "SELECT result_json
+            "SELECT kind, result_json
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
              LIMIT 1",
             params![task_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?
-        .flatten();
-    let Some(raw_result_json) = raw_result_json else {
+        .and_then(|(kind, result_json)| result_json.map(|raw| (kind, raw)));
+    let Some((task_kind, raw_result_json)) = task_row else {
         return Ok(false);
     };
     let result_json = match serde_json::from_str::<Value>(&raw_result_json) {
@@ -741,6 +741,22 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
 
     let (db_status, error_text, mut terminal_result) =
         terminal_task_projection_result(executor_result_status, projection_payload)?;
+    if let Some(existing_result) =
+        preserved_visible_ask_result_for_terminal_projection(&task_kind, &result_json, db_status)
+    {
+        terminal_result = existing_result;
+    } else if let Some(machine_reply_result) = ask_agent_loop_async_poll_terminal_machine_reply(
+        &task_kind,
+        &result_json,
+        db_status,
+        checkpoint_id,
+        executor_action,
+        executor_result_status,
+        projection_payload,
+        &terminal_result,
+    ) {
+        terminal_result = machine_reply_result;
+    }
     let Some(result_obj) = terminal_result.as_object_mut() else {
         return Ok(false);
     };
@@ -781,6 +797,165 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         ],
     )?;
     Ok(changed > 0)
+}
+
+fn preserved_visible_ask_result_for_terminal_projection(
+    task_kind: &str,
+    result_json: &Value,
+    db_status: &str,
+) -> Option<Value> {
+    if task_kind != "ask" || db_status != "succeeded" || !result_has_visible_reply(result_json) {
+        return None;
+    }
+    result_json.as_object().map(|_| result_json.clone())
+}
+
+fn ask_agent_loop_async_poll_terminal_machine_reply(
+    task_kind: &str,
+    source_result_json: &Value,
+    db_status: &str,
+    checkpoint_id: &str,
+    executor_action: &str,
+    executor_result_status: &str,
+    projection_payload: &Value,
+    terminal_result: &Value,
+) -> Option<Value> {
+    if task_kind != "ask"
+        || db_status != "succeeded"
+        || executor_action != "poll_async_job"
+        || executor_result_status != "async_poll_completed"
+        || !checkpoint_id.starts_with("agent-loop:")
+        || result_has_visible_reply(terminal_result)
+    {
+        return None;
+    }
+
+    let mut reply = Map::new();
+    reply.insert("schema_version".to_string(), serde_json::json!(1));
+    reply.insert(
+        "output_format".to_string(),
+        serde_json::json!("machine_json"),
+    );
+    reply.insert("status".to_string(), serde_json::json!("succeeded"));
+    reply.insert(
+        "checkpoint_id".to_string(),
+        serde_json::json!(checkpoint_id),
+    );
+    if let Some(value) = first_machine_value(
+        source_result_json,
+        projection_payload,
+        &[
+            "/task_lifecycle/poll_ref",
+            "/task_checkpoint/pending_async_job/job_id",
+            "/task_checkpoint/pending_async_job/cancel_ref",
+        ],
+        &[
+            "/poll_ref",
+            "/job_id",
+            "/cancel_ref",
+            "/final_result_json/poll_ref",
+            "/final_result_json/job_id",
+            "/final_result_json/cancel_ref",
+        ],
+    ) {
+        reply.insert("poll_ref".to_string(), value);
+    }
+    if let Some(value) = first_machine_value(
+        source_result_json,
+        projection_payload,
+        &[
+            "/task_lifecycle/next_check_after",
+            "/task_lifecycle/poll_after_seconds",
+            "/task_checkpoint/pending_async_job/poll_after_seconds",
+        ],
+        &[
+            "/next_check_after",
+            "/poll_after_seconds",
+            "/final_result_json/next_check_after",
+            "/final_result_json/poll_after_seconds",
+        ],
+    ) {
+        reply.insert("next_check_after".to_string(), value);
+    }
+    if let Some(value) = first_machine_value(
+        source_result_json,
+        projection_payload,
+        &[
+            "/task_lifecycle/async_job_message_key",
+            "/task_checkpoint/pending_async_job/message_key",
+        ],
+        &["/message_key", "/final_result_json/message_key"],
+    ) {
+        reply.insert("message_key".to_string(), value);
+    }
+    if let Some(value) = first_machine_value(
+        source_result_json,
+        projection_payload,
+        &["/task_id"],
+        &["/task_id", "/final_result_json/task_id"],
+    ) {
+        reply.insert("task_id".to_string(), value);
+    }
+    if let Some(final_result_json) = projection_payload
+        .get("final_result_json")
+        .cloned()
+        .filter(Value::is_object)
+    {
+        reply.insert("final_result_json".to_string(), final_result_json);
+    }
+
+    let machine_reply = Value::Object(reply);
+    let reply_text = machine_reply.to_string();
+    Some(serde_json::json!({
+        "text": reply_text,
+        "messages": [reply_text],
+        "machine_reply": machine_reply,
+    }))
+}
+
+fn first_machine_value(
+    primary: &Value,
+    fallback: &Value,
+    primary_pointers: &[&str],
+    fallback_pointers: &[&str],
+) -> Option<Value> {
+    machine_value_by_pointers(primary, primary_pointers)
+        .or_else(|| machine_value_by_pointers(fallback, fallback_pointers))
+}
+
+fn machine_value_by_pointers(root: &Value, pointers: &[&str]) -> Option<Value> {
+    pointers
+        .iter()
+        .find_map(|pointer| machine_value_at_pointer(root, pointer))
+}
+
+fn machine_value_at_pointer(root: &Value, pointer: &str) -> Option<Value> {
+    match root.pointer(pointer)? {
+        Value::String(value) => {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| serde_json::json!(trimmed))
+        }
+        Value::Number(_) | Value::Bool(_) => root.pointer(pointer).cloned(),
+        _ => None,
+    }
+}
+
+fn result_has_visible_reply(result_json: &Value) -> bool {
+    result_json
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        || result_json
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .is_some_and(|value| !value.is_empty())
+                })
+            })
 }
 
 fn recorded_paused_checkpoint_resume_dispatch_result_from_result_json(

@@ -261,10 +261,7 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert!(contract.requires_content_evidence);
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::CommandOutputSummary
-    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
 }
@@ -755,6 +752,43 @@ fn command_payload_contract_repair_preserves_command_summary_contract() {
         contract.semantic_kind,
         OutputSemanticKind::CommandOutputSummary
     );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn command_payload_contract_repair_overrides_service_status_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ServiceStatus,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_raw_output_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
 }

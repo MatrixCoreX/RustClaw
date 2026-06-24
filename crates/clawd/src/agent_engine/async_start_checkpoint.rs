@@ -67,6 +67,11 @@ pub(super) fn publish_pending_async_job_start_checkpoint(
             format!("async_job_start_checkpoint_publish_failed: {err}")
         },
     )?;
+    if let Some(visible_reply) = pending_async_job_visible_reply_from_progress_payload(&payload) {
+        if let Some(step) = loop_state.executed_step_results.last_mut() {
+            step.output = Some(visible_reply);
+        }
+    }
     debug!(
         "async_start_checkpoint_published task_id={} skill={} job_id={} poll_after_seconds={}",
         task.task_id, normalized_skill, job.job_id, job.poll_after_seconds
@@ -176,6 +181,44 @@ fn build_pending_async_job_checkpoint_progress_payload(
         },
         "task_checkpoint": checkpoint.to_machine_json(),
     })
+}
+
+fn pending_async_job_visible_reply_from_progress_payload(payload: &Value) -> Option<String> {
+    let lifecycle = payload.get("task_lifecycle")?.as_object()?;
+    let checkpoint_id = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let poll_ref = lifecycle
+        .get("poll_ref")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let next_check_after = lifecycle.get("next_check_after")?.clone();
+    let mut reply = json!({
+        "schema_version": 1,
+        "output_format": "machine_json",
+        "status": "accepted",
+        "checkpoint_id": checkpoint_id,
+        "poll_ref": poll_ref,
+        "next_check_after": next_check_after,
+    });
+    if let Some(obj) = reply.as_object_mut() {
+        for key in [
+            "poll_after_seconds",
+            "async_job_expires_at",
+            "async_job_message_key",
+            "can_poll",
+            "can_cancel",
+            "cancel_ref",
+        ] {
+            if let Some(value) = lifecycle.get(key) {
+                obj.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    Some(reply.to_string())
 }
 
 fn checkpoint_step_observations(loop_state: &LoopState) -> Vec<Value> {

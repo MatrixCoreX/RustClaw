@@ -1211,7 +1211,8 @@ pub(crate) async fn finalize_ask_result(
     }
     match result {
         Ok(answer) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
+            if !repo::is_task_still_running_or_pending_ask_success_projection(state, &task.task_id)?
+            {
                 state.clear_task_llm_call_count(&task.task_id);
                 info!(
                     "task_call_end task_id={} kind=ask status=canceled path=normal",

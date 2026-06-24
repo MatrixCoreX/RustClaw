@@ -326,6 +326,54 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
 }
 
 #[test]
+fn contract_matrix_preflight_allows_runtime_async_job_start_marker() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "async_start": true,
+        "poll_after_seconds": 2,
+        "expires_in_seconds": 600,
+        super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        "runtime async job starts are classified by the machine contract before execution"
+    );
+}
+
+#[test]
+fn contract_matrix_preflight_rejects_async_start_without_runtime_marker() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "async_start": true,
+        "poll_after_seconds": 2,
+        "expires_in_seconds": 600
+    });
+
+    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
+        .expect("generic path contracts still reject unclassified run_cmd starts");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("contract policy error should be structured");
+    assert_eq!(parsed.error_kind, "contract_action_rejected");
+}
+
+#[test]
 fn contract_matrix_preflight_allows_registry_observe_config_preview_for_summary() {
     let state = test_state();
     install_test_registry(

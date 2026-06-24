@@ -79,6 +79,49 @@ fn stored_result_json(state: &crate::AppState, task_id: &str) -> serde_json::Val
     serde_json::from_str(&raw).expect("parse result_json")
 }
 
+#[test]
+fn update_task_success_can_replace_async_poll_projection_without_visible_reply() {
+    let state = state_with_tasks_table();
+    let initial = json!({
+        "schema_version": 1,
+        "source": "local_process_async_job",
+        "output": "RUSTCLAW_ASYNC_SMOKE\n",
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "succeeded",
+            "terminal_executor_action": "poll_async_job",
+            "terminal_executor_result_status": "async_poll_completed",
+            "resume_executor_result_projection": {
+                "final_result_json": {
+                    "output": "RUSTCLAW_ASYNC_SMOKE\n"
+                }
+            }
+        }
+    });
+    insert_task(
+        &state,
+        "async-visible-replace",
+        "succeeded",
+        Some(&initial),
+        1,
+    );
+
+    super::update_task_success(
+        &state,
+        "async-visible-replace",
+        &json!({
+            "text": "checkpoint_id=ckpt",
+            "messages": ["checkpoint_id=ckpt"]
+        })
+        .to_string(),
+    )
+    .expect("update success");
+
+    let result = stored_result_json(&state, "async-visible-replace");
+    assert_eq!(result["messages"][0], "checkpoint_id=ckpt");
+    assert_eq!(result.get("output"), None);
+}
+
 fn stored_task_status_and_error(
     state: &crate::AppState,
     task_id: &str,
