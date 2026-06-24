@@ -320,6 +320,36 @@ mod tests {
     }
 
     #[test]
+    fn kept_direct_answer_gate_exits_are_boundary_or_machine_fact_only() {
+        for item in PRE_PLANNER_EXIT_INVENTORY {
+            if item.owner_layer != "direct_answer_gate" {
+                continue;
+            }
+            if item.deletion_gate.starts_with("delete_after_") {
+                continue;
+            }
+            assert!(matches!(
+                item.kind,
+                PrePlannerExitKind::BoundarySafety | PrePlannerExitKind::MachineFactFastPath
+            ));
+        }
+    }
+
+    #[test]
+    fn machine_fact_fast_paths_are_kept_as_observed_machine_evidence() {
+        for item in PRE_PLANNER_EXIT_INVENTORY {
+            if item.kind != PrePlannerExitKind::MachineFactFastPath {
+                continue;
+            }
+            assert_eq!(item.deletion_gate, "keep_machine_fact_fast_path");
+            assert!(
+                item.migration_target.contains("machine_fact")
+                    || item.migration_target.contains("direct_scalar")
+            );
+        }
+    }
+
+    #[test]
     fn trace_context_exposes_machine_fields() {
         let item = pre_planner_exit_for_reason("inline_json_transform_promoted_to_planner")
             .expect("inventory item");
