@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
 EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
 # Canonical generated skill prompt body. Vendor-specific behavior should stay in
+# prompts/layers/vendor_patches/<vendor>/skills/common.md or
 # prompts/layers/vendor_patches/<vendor>/skills/<name>.md instead of forking this file tree.
 PROMPTS_DIR = REPO_ROOT / "prompts" / "layers" / "generated" / "skills"
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"

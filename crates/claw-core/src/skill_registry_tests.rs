@@ -4,6 +4,7 @@ use super::*;
 /// (e.g. prompts/skills/run_cmd.md).
 /// Runtime in clawd assembles skill prompts from
 /// prompts/layers/generated/skills/<name>.md plus optional
+/// prompts/layers/vendor_patches/<vendor>/skills/common.md and
 /// prompts/layers/vendor_patches/<vendor>/skills/<name>.md.
 #[test]
 fn test_registry_resolve_and_timeout() {

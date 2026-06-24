@@ -95,11 +95,12 @@ def render_skill_prompt(vendor: str, logical_path: str) -> str:
         parts.append(read_required(SKILL_BASE_PATH))
     default_skill_path = SKILL_BODY_DIR / skill_name
     parts.append(read_required(default_skill_path))
-    for candidate in vendor_patch_candidates(vendor, f"skills/{skill_name}"):
-        patch = read_optional(candidate)
-        if patch:
-            parts.append(patch)
-            break
+    for patch_rel in ("skills/common.md", f"skills/{skill_name}"):
+        for candidate in vendor_patch_candidates(vendor, patch_rel):
+            patch = read_optional(candidate)
+            if patch:
+                parts.append(patch)
+                break
     return "\n\n".join(part.strip() for part in parts if part.strip())
 
 

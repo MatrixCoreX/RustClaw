@@ -316,13 +316,18 @@ fn load_layered_skill_prompt_with_meta(
         version = extract_prompt_version(&default_skill_raw);
     }
     parts.push(normalize_prompt_part_body(&default_skill_raw));
-    for candidate in vendor_patch_candidates(vendor, &format!("skills/{skill_name}")) {
-        if let Some(patch_raw) = read_optional_prompt_part_raw(workspace_root, &candidate) {
-            if version.is_none() {
-                version = extract_prompt_version(&patch_raw);
+    for patch_rel in [
+        "skills/common.md".to_string(),
+        format!("skills/{skill_name}"),
+    ] {
+        for candidate in vendor_patch_candidates(vendor, &patch_rel) {
+            if let Some(patch_raw) = read_optional_prompt_part_raw(workspace_root, &candidate) {
+                if version.is_none() {
+                    version = extract_prompt_version(&patch_raw);
+                }
+                parts.push(normalize_prompt_part_body(&patch_raw));
+                break;
             }
-            parts.push(normalize_prompt_part_body(&patch_raw));
-            break;
         }
     }
     let parts_filtered: Vec<String> = parts.into_iter().filter(|s| !s.is_empty()).collect();

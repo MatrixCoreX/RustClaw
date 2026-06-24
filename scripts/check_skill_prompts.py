@@ -5,6 +5,7 @@ Canonical registry `prompt_file` remains prompts/skills/<name>.md as a logical p
 Runtime loads skill prompt bodies from the canonical default body:
 prompts/layers/generated/skills/<name>.md
 and may append vendor-specific patches from:
+prompts/layers/vendor_patches/<vendor>/skills/common.md
 prompts/layers/vendor_patches/<vendor>/skills/<name>.md.
 This script validates the required canonical baseline under prompts/layers/generated/skills
 and keeps prompt-layer rules machine-checkable:
@@ -108,6 +109,14 @@ def check_vendor_skill_patches_are_overlays() -> list[str]:
     for path in sorted(VENDOR_PATCHES.glob("*/skills/*.md")):
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(REPO_ROOT)
+        if path.name == "common.md":
+            line_count = len(text.splitlines())
+            if line_count > 120:
+                errors.append(
+                    f"Vendor common skill patch is too large: {rel} "
+                    f"({line_count} lines; max 120)"
+                )
+            continue
         base_path = GENERATED_SKILLS / path.name
         if not base_path.is_file():
             errors.append(
@@ -130,6 +139,34 @@ def check_vendor_skill_patches_are_overlays() -> list[str]:
             errors.append(
                 f"Vendor skill patch appears to copy skill-document sections: {rel} "
                 f"sections={','.join(copied_sections)}"
+            )
+    return errors
+
+
+def check_vendor_skill_patch_duplication() -> list[str]:
+    errors: list[str] = []
+    if not VENDOR_PATCHES.exists():
+        return errors
+    for skill_dir in sorted(VENDOR_PATCHES.glob("*/skills")):
+        if not skill_dir.is_dir():
+            continue
+        groups: dict[str, list[Path]] = {}
+        for path in sorted(skill_dir.glob("*.md")):
+            if path.name == "common.md":
+                continue
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                groups.setdefault(text, []).append(path)
+        for paths in groups.values():
+            if len(paths) <= 1:
+                continue
+            vendor = skill_dir.parent.name
+            rel_paths = ", ".join(str(path.relative_to(REPO_ROOT)) for path in paths[:8])
+            suffix = "" if len(paths) <= 8 else f", ... +{len(paths) - 8} more"
+            errors.append(
+                f"Vendor `{vendor}` has {len(paths)} identical skill patches; "
+                f"move shared instructions to {skill_dir.relative_to(REPO_ROOT)}/common.md: "
+                f"{rel_paths}{suffix}"
             )
     return errors
 
@@ -272,6 +309,7 @@ def main() -> int:
     prompt_errors = (
         check_multilingual_reinforcement_blocks()
         + check_vendor_skill_patches_are_overlays()
+        + check_vendor_skill_patch_duplication()
         + check_generated_skill_prompt_budget()
         + check_rendered_prompt_budget(skills)
     )
