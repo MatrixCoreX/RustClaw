@@ -1,7 +1,7 @@
 <!--
 Purpose: verify whether a final user-visible answer satisfies the task contract and observed execution evidence.
 Component: clawd answer verifier (`crates/clawd/src/answer_verifier.rs`)
-Version: 2026-05-11.2
+Version: 2026-06-24.1
 -->
 
 You validate whether the candidate final answer fully satisfies the user's request using the task contract and observed execution evidence.
@@ -10,6 +10,9 @@ Return exactly one JSON object that satisfies the schema.
 
 User request:
 __USER_REQUEST__
+
+Request language hint:
+__REQUEST_LANGUAGE_HINT__
 
 Task contract:
 __TASK_CONTRACT__
@@ -41,7 +44,7 @@ Judgment fields:
 
 Hard rejection checklist:
 - If any hard rejection condition below matches, set `pass=false` even when the answer is otherwise useful or fluent.
-- If the current user request has a clear response language or explicitly asks for a target language, the candidate must use that language for user-visible prose. Do not pass an answer that switches to the configured/default/fallback language when the request language is clear. For this gap, use `missing_evidence_fields=["output_format"]`, `should_retry=true`, and ask the next attempt to rewrite the same grounded answer in the request language while preserving observed machine tokens.
+- If the current user request has a clear response language or explicitly asks for a target language, the candidate must use that language for user-visible prose. Prefer the Request language hint and the Original user request when the User request block also contains a resolved semantic request. Do not pass an answer that switches to the configured/default/fallback language when the original request language is clear. For this gap, use `missing_evidence_fields=["output_format"]`, `should_retry=true`, and ask the next attempt to rewrite the same grounded answer in the request language while preserving observed machine tokens.
 - When `evidence_required=false` and no tool/execution evidence is needed, validate the candidate against the user's requested transformation, drafting, rewrite, translation, format, length, tone, language target, and completion constraints. Do not require external evidence for these direct response tasks; reject only when the candidate itself fails the requested deliverable.
 - For direct response gaps that can be fixed by rewriting the answer without tools, set `missing_evidence_fields=["output_format"]` or another stable semantic field, `should_retry=true`, and make `retry_instruction` ask for a corrected final answer from the original request and output contract.
 - For low-risk chat-only drafting, planning, template, outline, article, proposal, or rewrite requests where `evidence_required=false`, `delivery_required=false`, and no tool/system/file action is needed, broad or underspecified subtype/topic/audience details are optional specificity, not required execution parameters. A useful generic draft/template/outline may pass even if it invites the user to add details later. If the candidate only asks for missing details and gives no usable deliverable, set `pass=false`, `missing_evidence_fields=["output_format"]`, `should_retry=true`, and make `retry_instruction` ask for a best-effort generic draft/template under neutral assumptions instead of treating the missing details as non-retryable required parameters.

@@ -4,9 +4,10 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::{
-    backend_identity_metadata_answer_verifier_guard, execution_evidence_prompt_block,
-    local_compound_listing_answer_verifier_gap, local_missing_evidence_verifier_gap,
-    observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
+    answer_verifier_user_request_for_prompt, backend_identity_metadata_answer_verifier_guard,
+    execution_evidence_prompt_block, local_compound_listing_answer_verifier_gap,
+    local_missing_evidence_verifier_gap, observed_scalar_values_from_evidence_map,
+    observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
     output_contract_prompt_block, should_verify_answer, structural_satisfaction_can_skip_verifier,
@@ -53,6 +54,37 @@ fn state_with_mimo_provider() -> crate::AppState {
         breaker: Arc::new(crate::providers::CircuitBreaker::new()),
     })];
     state
+}
+
+#[test]
+fn answer_verifier_prompt_request_preserves_original_language_over_resolved_intent() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-verifier-language-source".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({
+            "text": "用合适的只读文件读取能力查看 README.md 前 20 行，只回答文件是否存在、读取到的行数，以及标题中是否出现 RustClaw；不要用 shell cat 兜底。"
+        })
+        .to_string(),
+    };
+    let resolved = "Use a read-only file reading capability to read README.md head 20 lines.";
+
+    let request_for_prompt = answer_verifier_user_request_for_prompt(&task, resolved);
+    let language_hint =
+        crate::language_policy::task_response_language_hint(&state, &task, resolved);
+
+    assert_eq!(language_hint, "zh-CN");
+    assert!(request_for_prompt.contains("Original user request:"));
+    assert!(request_for_prompt.contains("只回答文件是否存在"));
+    assert!(request_for_prompt.contains("Resolved semantic request:"));
+    assert!(request_for_prompt.contains("Use a read-only file reading capability"));
+    assert!(request_for_prompt.contains("preserve the original user's language"));
 }
 
 fn backend_identity_guard_route() -> crate::RouteResult {
