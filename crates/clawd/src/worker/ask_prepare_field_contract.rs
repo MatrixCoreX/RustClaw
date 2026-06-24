@@ -40,6 +40,14 @@ pub(super) fn repair_structured_field_target_from_prompt(
     ) else {
         return;
     };
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
+    {
+        route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector = Some(selector);
+        return;
+    }
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route_result.output_contract.locator_hint = path.display().to_string();
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
