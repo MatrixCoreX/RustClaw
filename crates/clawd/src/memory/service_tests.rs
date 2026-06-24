@@ -1,9 +1,13 @@
 use super::{
-    estimate_context_window_tokens, knowledge_source_ref, parse_long_term_refresh_llm_out,
-    validate_knowledge_candidate, KnowledgeCandidateLlmOut, KNOWLEDGE_KIND_PROJECT_FACT,
-    KNOWLEDGE_KIND_RULE, KNOWLEDGE_KIND_TRANSIENT, KNOWLEDGE_KIND_USER_PREFERENCE,
-    KNOWLEDGE_KIND_USER_PROFILE_FACT, KNOWLEDGE_NAMESPACE_NONE, KNOWLEDGE_NAMESPACE_PROJECT_FACTS,
-    KNOWLEDGE_NAMESPACE_USER_PROFILE,
+    estimate_context_window_tokens, knowledge_source_ref, memory_trace_for_structured_context,
+    parse_long_term_refresh_llm_out, structured_memory_context_block, validate_knowledge_candidate,
+    KnowledgeCandidateLlmOut, KNOWLEDGE_KIND_PROJECT_FACT, KNOWLEDGE_KIND_RULE,
+    KNOWLEDGE_KIND_TRANSIENT, KNOWLEDGE_KIND_USER_PREFERENCE, KNOWLEDGE_KIND_USER_PROFILE_FACT,
+    KNOWLEDGE_NAMESPACE_NONE, KNOWLEDGE_NAMESPACE_PROJECT_FACTS, KNOWLEDGE_NAMESPACE_USER_PROFILE,
+};
+use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
+use crate::memory::use_policy::{
+    filter_structured_memory_context, MemoryUseDecision, MemoryUseProfile,
 };
 use claw_core::config::{LlmProviderConfig, LlmProviderParams};
 use serde_json::Value;
@@ -66,6 +70,71 @@ fn parse_long_term_refresh_output_falls_back_to_legacy_parse_on_schema_mismatch(
     assert_eq!(parsed.summary, "durable summary");
     assert_eq!(parsed.knowledge_candidates.len(), 1);
     assert_eq!(parsed.knowledge_candidates[0].kind, "oops_kind");
+}
+
+fn retrieved_item(kind: &str, text: &str) -> RetrievedMemoryItem {
+    RetrievedMemoryItem {
+        role: Some(kind.to_string()),
+        text: text.to_string(),
+        score: 0.87,
+        source_label: Some(format!("{kind}_source")),
+    }
+}
+
+#[test]
+fn memory_trace_records_policy_token_and_only_included_structured_sources() {
+    let decision = MemoryUseDecision {
+        profile: MemoryUseProfile::SkillScoped,
+        mode: MemoryContextMode::Skill,
+        include_preferences: true,
+        include_long_term_summary: false,
+        include_recent_related_events: false,
+        include_assistant_results: false,
+        include_similar_triggers: false,
+        include_unfinished_goals: false,
+        include_relevant_facts: false,
+        include_knowledge_docs: true,
+        include_recent_snippets: false,
+        max_chars: 900,
+        reason: "registry_skill_memory_policy".to_string(),
+    };
+    let structured = StructuredMemoryContext {
+        long_term_summary: Some("summary should be omitted".to_string()),
+        preferences: vec![("response_language".to_string(), "zh-CN".to_string())],
+        similar_triggers: vec![retrieved_item("similar", "similar should be omitted")],
+        relevant_facts: vec![retrieved_item("fact", "fact should be omitted")],
+        knowledge_docs: vec![retrieved_item("doc", "doc should be included")],
+        recent_related_events: vec![retrieved_item("event", "event should be omitted")],
+        assistant_results: vec![retrieved_item("assistant", "assistant should be omitted")],
+        unfinished_goals: vec![retrieved_item("goal", "goal should be omitted")],
+        recalled_recent: vec![(
+            "assistant".to_string(),
+            "recent should be omitted".to_string(),
+        )],
+    };
+
+    let filtered = filter_structured_memory_context(structured, &decision);
+    assert!(filtered.long_term_summary.is_none());
+    assert!(filtered.similar_triggers.is_empty());
+    assert!(filtered.relevant_facts.is_empty());
+    assert!(filtered.recent_related_events.is_empty());
+    assert!(filtered.assistant_results.is_empty());
+    assert!(filtered.unfinished_goals.is_empty());
+    assert!(filtered.recalled_recent.is_empty());
+    assert_eq!(filtered.preferences.len(), 1);
+    assert_eq!(filtered.knowledge_docs.len(), 1);
+
+    let block = structured_memory_context_block(&filtered, decision.mode, decision.max_chars);
+    let trace = memory_trace_for_structured_context("skill", &decision, &filtered, &block);
+    assert_eq!(trace["stage"], "skill");
+    assert_eq!(trace["use_policy"], "skill_scoped");
+    assert_eq!(trace["reason"], "registry_skill_memory_policy");
+    let recalled = trace["recalled"].as_array().expect("recalled array");
+    let kinds = recalled
+        .iter()
+        .map(|item| item["source_kind"].as_str().expect("source_kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, vec!["preference", "knowledge_doc"]);
 }
 
 #[test]
