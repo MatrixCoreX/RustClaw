@@ -32,6 +32,7 @@ fn make_cfg_legacy_only(
         fallback,
         output_language: None,
         bilingual_summary: None,
+        topic: None,
     };
     categories.insert(category.to_string(), cat);
     RootConfig {
@@ -612,7 +613,7 @@ fn feed_item_extra_exposes_structured_news_fields() {
         layer: "feed".to_string(),
     };
 
-    let extra = feed_item_extra(&item);
+    let extra = feed_item_extra(&item, "macro_market");
 
     assert_eq!(
         extra.get("title").and_then(Value::as_str),
@@ -627,5 +628,40 @@ fn feed_item_extra_exposes_structured_news_fields() {
         Some("example.com")
     );
     assert_eq!(extra.get("layer").and_then(Value::as_str), Some("feed"));
-    assert!(extra.get("topic").and_then(Value::as_str).is_some());
+    assert_eq!(
+        extra.get("topic").and_then(Value::as_str),
+        Some("macro_market")
+    );
+}
+
+#[test]
+fn feed_item_topic_uses_machine_token_not_title_keywords() {
+    let item = FeedItem {
+        title: "SEC hack funding launch macro jobs".to_string(),
+        link: "https://example.com/news/1".to_string(),
+        date: "2026-06-02T10:00:00Z".to_string(),
+        source: "https://example.com/feed.xml".to_string(),
+        layer: "feed".to_string(),
+    };
+
+    let extra = feed_item_extra(&item, "tech_ecosystem");
+
+    assert_eq!(
+        extra.get("topic").and_then(Value::as_str),
+        Some("tech_ecosystem")
+    );
+}
+
+#[test]
+fn news_topic_token_prefers_machine_config_and_rejects_sentence_values() {
+    let mut cfg = make_cfg_with_sources("tech", vec!["https://example.com/feed.xml".to_string()]);
+    cfg.rss.categories.get_mut("tech").expect("category").topic =
+        Some("Tech_Ecosystem".to_string());
+    let args = serde_json::json!({"topic": "please classify this title"});
+    let args = args.as_object().unwrap().clone();
+
+    assert_eq!(
+        news_topic_token(Some(&cfg), &args, Some("tech")),
+        "tech_ecosystem"
+    );
 }
