@@ -415,17 +415,98 @@ async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim()
     );
 }
 
+#[tokio::test]
+async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
+    let temp = TempDirGuard::new("runtime_restart_terminal");
+    let db_path = temp.path.join("tasks.sqlite");
+    let first_state = file_backed_state_with_schema(&db_path);
+    let mut checkpoint = valid_checkpoint_json("ckpt-terminal-restart", "verify_and_finalize");
+    checkpoint["pending_action"] = json!({
+        "final_result_json": {
+            "status": "ok",
+            "output": "RUSTCLAW_RESTART_TERMINAL_DONE"
+        }
+    });
+    checkpoint["completed_side_effect_refs"] = json!(["write_file:tmp/report.txt"]);
+    let due = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "agent_loop_soft_budget",
+            "resume_reason": "verify_and_finalize",
+            "next_check_after": 1,
+            "checkpoint_id": "ckpt-terminal-restart"
+        },
+        "task_checkpoint": checkpoint
+    });
+    {
+        let db = first_state.core.db.get().expect("get first db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at
+            )
+            VALUES ('runtime-terminal-restart', 42, 7, 'test-key', 'ui', 'ask', ?1, 'running', ?2, NULL, '1', '1')",
+            rusqlite::params![
+                json!({"text": "checkpoint task"}).to_string(),
+                due.to_string()
+            ],
+        )
+        .expect("insert file-backed terminal checkpoint task");
+    }
+    drop(first_state);
+
+    let restarted_state = file_backed_state_with_schema(&db_path);
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&restarted_state)
+        .await
+        .expect("runtime recovery terminal projection after restart");
+    let (status, result) = task_status_result_json(&restarted_state, "runtime-terminal-restart");
+    assert_eq!(status, "succeeded");
+    assert_eq!(result["output"], "RUSTCLAW_RESTART_TERMINAL_DONE");
+    assert_eq!(result["task_lifecycle"]["state"], "succeeded");
+    assert_eq!(
+        result["task_lifecycle"]["checkpoint_id"],
+        "ckpt-terminal-restart"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["terminal_executor_action"],
+        "verify_and_finalize"
+    );
+    drop(restarted_state);
+
+    let second_restarted_state = file_backed_state_with_schema(&db_path);
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&second_restarted_state)
+        .await
+        .expect("runtime recovery after terminal projection restart");
+    let (second_status, second_result) =
+        task_status_result_json(&second_restarted_state, "runtime-terminal-restart");
+    assert_eq!(second_status, "succeeded");
+    assert_eq!(second_result["output"], "RUSTCLAW_RESTART_TERMINAL_DONE");
+    assert_eq!(
+        second_result["task_lifecycle"]["terminal_executor_result_status"],
+        "finalize_completed"
+    );
+}
+
 fn runtime_restart_result_json(state: &crate::AppState) -> serde_json::Value {
+    let (status, result) = task_status_result_json(state, "runtime-restart");
+    assert_eq!(status, "running");
+    result
+}
+
+fn task_status_result_json(state: &crate::AppState, task_id: &str) -> (String, serde_json::Value) {
     let db = state.core.db.get().expect("get restart db");
     let (status, raw_result): (String, String) = db
         .query_row(
-            "SELECT status, result_json FROM tasks WHERE task_id = 'runtime-restart'",
-            [],
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("query runtime restart task");
-    assert_eq!(status, "running");
-    serde_json::from_str(&raw_result).expect("parse restart result")
+        .expect("query runtime task");
+    (
+        status,
+        serde_json::from_str(&raw_result).expect("parse restart result"),
+    )
 }
 
 #[test]
