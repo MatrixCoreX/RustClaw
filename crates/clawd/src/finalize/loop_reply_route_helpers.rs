@@ -63,7 +63,7 @@ pub(super) fn route_structured_clarify_context(
     )
 }
 
-fn route_clarify_reason_code(route_reason: &str) -> Option<&'static str> {
+pub(super) fn route_clarify_reason_code(route_reason: &str) -> Option<&'static str> {
     for token in route_reason.split(|ch: char| {
         ch.is_whitespace() || matches!(ch, ';' | ',' | '|' | '[' | ']' | '(' | ')')
     }) {
@@ -74,6 +74,8 @@ fn route_clarify_reason_code(route_reason: &str) -> Option<&'static str> {
         return match code {
             "missing_count_target" => Some("missing_count_target"),
             "missing_delivery_locator" => Some("missing_delivery_locator"),
+            "missing_file_locator" => Some("missing_file_locator"),
+            "missing_locator" => Some("missing_locator"),
             "missing_service_target" => Some("missing_service_target"),
             "missing_search_locator" => Some("missing_search_locator"),
             "missing_read_target" => Some("missing_read_target"),
