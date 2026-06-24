@@ -705,24 +705,21 @@ fn contract_policy_retry_instruction(
     let contract = structured_error_extra_string(structured, "contract_match")
         .unwrap_or_else(|| "unknown_contract".to_string());
     let mut parts = vec![format!(
-        "ContractPolicyDecision={decision}; rejected_action={action}; contract={contract}."
+        "contract_policy_decision={decision};rejected_action={action};contract={contract}"
     )];
     let preferred = structured_error_extra_string_list(structured, "preferred_actions");
     if !preferred.is_empty() {
-        parts.push(format!(
-            "Use preferred action(s): {}.",
-            preferred.join(", ")
-        ));
+        parts.push(format!("preferred_actions={}", preferred.join("|")));
     }
     let expected_targets = structured_error_extra_string_list(structured, "expected_target_args");
     if !expected_targets.is_empty() {
         parts.push(format!(
-            "Bind required target arg(s): {}.",
-            expected_targets.join(", ")
+            "required_target_args={}",
+            expected_targets.join("|")
         ));
     }
-    parts.push("Do not repeat the same rejected action unless the contract changes.".to_string());
-    Some(parts.join(" "))
+    parts.push("retry_policy=no_repeat_rejected_action_without_contract_change".to_string());
+    Some(parts.join(";"))
 }
 
 pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata {
@@ -739,7 +736,7 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
             .as_ref()
             .and_then(contract_policy_retry_instruction)
             .unwrap_or_else(|| {
-                "Choose an action allowed by the task contract, or revise the plan before retrying."
+                "contract_policy_decision=unavailable;retry_policy=choose_allowed_action_or_replan"
                     .to_string()
             });
         return PreflightFailureMetadata {
@@ -761,13 +758,17 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
         return PreflightFailureMetadata {
             reason: "structured_observation_embedded_in_path_arg",
             error_kind,
-            retry_instruction: "Do not embed structured observations in path arguments. Select one concrete observed path or ask for clarification.".to_string(),
+            retry_instruction:
+                "path_arg_policy=concrete_observed_path_or_clarify;structured_observation_embedded=false"
+                    .to_string(),
         };
     }
     PreflightFailureMetadata {
         reason: "unresolved_runtime_placeholder",
         error_kind,
-        retry_instruction: "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.".to_string(),
+        retry_instruction:
+            "placeholder_policy=resolve_from_observed_value_or_synthesize_or_pipeline;retry_same_placeholder=false"
+                .to_string(),
     }
 }
 

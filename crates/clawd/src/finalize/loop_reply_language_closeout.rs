@@ -103,10 +103,10 @@ pub(super) async fn execution_recipe_budget_exhausted_message(
             "result_validated: false".to_string(),
         ],
         vec![
-            "Do not mark the run as successful.".to_string(),
-            "Do not claim validation passed.".to_string(),
-            "Explain the blocker and ask for permission to continue with a different approach or more context."
-                .to_string(),
+            "success_allowed=false".to_string(),
+            "validation_status=failed".to_string(),
+            "continue_with_different_approach_available=true".to_string(),
+            "additional_context_may_unblock=true".to_string(),
         ],
         "brief_failure_with_next_step",
         &language_hint,
@@ -138,10 +138,9 @@ pub(super) async fn execution_recipe_missing_success_marker_message(
             "result_marked_success: false".to_string(),
         ],
         vec![
-            "Do not mark the run as successful.".to_string(),
-            "Do not invent the required verification marker.".to_string(),
-            "Explain that the required verification signal is missing and offer to continue verification."
-                .to_string(),
+            "success_allowed=false".to_string(),
+            "verification_marker_required=true".to_string(),
+            "continue_verification_available=true".to_string(),
         ],
         "brief_failure_with_next_step",
         &language_hint,

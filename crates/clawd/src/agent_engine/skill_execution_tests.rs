@@ -269,7 +269,7 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
     assert_eq!(metadata.error_kind, "contract_action_rejected");
     assert!(metadata
         .retry_instruction
-        .contains("ContractPolicyDecision=rejected_not_allowed"));
+        .contains("contract_policy_decision=rejected_not_allowed"));
     assert!(metadata.retry_instruction.contains("fs_basic.list_dir"));
 }
 
@@ -684,7 +684,7 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
     assert_eq!(metadata.error_kind, "contract_arg_rejected");
     assert!(metadata
         .retry_instruction
-        .contains("ContractPolicyDecision=missing_target_binding"));
+        .contains("contract_policy_decision=missing_target_binding"));
     assert!(metadata.retry_instruction.contains("path"));
 }
 
