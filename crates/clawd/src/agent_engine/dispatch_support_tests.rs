@@ -28,6 +28,8 @@ use claw_core::skill_registry::SkillsRegistry;
 mod active_recipe_terminal_discussion;
 #[path = "dispatch_support_tests/filesystem_mutation_lifecycle.rs"]
 mod filesystem_mutation_lifecycle;
+#[path = "dispatch_support_tests/machine_envelope.rs"]
+mod machine_envelope;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]
 mod synthesize_failure_replan;
 

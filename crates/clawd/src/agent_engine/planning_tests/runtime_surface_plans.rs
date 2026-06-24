@@ -173,3 +173,77 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
         "{content}"
     );
 }
+
+#[test]
+fn subagent_review_boundary_surface_resolves_current_plan_when_route_requested_clarify() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let plan_dir = state.skill_rt.workspace_root.join("plan");
+    fs::create_dir_all(&plan_dir).expect("create plan dir");
+    fs::write(plan_dir.join("current_runtime_plan.md"), "# Current Plan\n")
+        .expect("write plan file");
+    let mut route = base_route_result();
+    route.ask_mode = AskMode::clarify();
+    route.needs_clarify = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint.clear();
+    route.resolved_intent =
+        "Review AGENTS.md and current plan boundary with read-only subagent".to_string();
+    route.route_reason =
+        "reason_code=missing_locator source=current_plan_boundary_surface".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = subagent_review_boundary_surface_deterministic_plan_result(
+        &state,
+        "review runtime boundary",
+        Some(&route),
+        &loop_state,
+        "review AGENTS.md plan",
+    )
+    .expect("current plan surface should resolve bounded route clarify into readonly plan");
+
+    assert_eq!(plan.steps.len(), 4);
+    let plan_read = plan.steps[2].to_agent_action().expect("agent action");
+    let plan_args = expect_planned_call(&plan_read, "fs_basic", "read_text_range");
+    assert_eq!(
+        plan_args.get("path").and_then(Value::as_str),
+        Some("plan/current_runtime_plan.md")
+    );
+}
+
+#[test]
+fn subagent_review_boundary_surface_uses_current_plan_without_plan_text_token() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let plan_dir = state.skill_rt.workspace_root.join("plan");
+    fs::create_dir_all(&plan_dir).expect("create plan dir");
+    fs::write(plan_dir.join("current_runtime_plan.md"), "# Current Plan\n")
+        .expect("write plan file");
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint = "AGENTS.md".to_string();
+    route.agent_display_name_hint = "review".to_string();
+    route.resolved_intent = "只读 review 子代理检查 AGENTS.md 和当前文件执行边界".to_string();
+    route.route_reason =
+        "subagent_roles=review; current_workspace_scope_from_current_request".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = subagent_review_boundary_surface_deterministic_plan_result(
+        &state,
+        "review runtime boundary",
+        Some(&route),
+        &loop_state,
+        "只读 review 子代理检查 AGENTS.md 和当前文件执行边界",
+    )
+    .expect("current plan file discovery should not depend on language-specific plan text");
+
+    let plan_read = plan.steps[2].to_agent_action().expect("agent action");
+    let plan_args = expect_planned_call(&plan_read, "fs_basic", "read_text_range");
+    assert_eq!(
+        plan_args.get("path").and_then(Value::as_str),
+        Some("plan/current_runtime_plan.md")
+    );
+}

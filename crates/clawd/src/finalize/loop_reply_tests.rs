@@ -139,6 +139,9 @@ mod markdown_scalar_tests;
 #[path = "loop_reply_matrix_shape_tests.rs"]
 mod matrix_shape_tests;
 
+#[path = "loop_reply_machine_envelope_tests.rs"]
+mod machine_envelope_tests;
+
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
 
