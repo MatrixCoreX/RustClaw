@@ -243,6 +243,60 @@ fn apply_structured_respond_clarify_to_loop_state(
     }
 }
 
+fn record_agent_loop_decision_envelope_output_vars(
+    loop_state: &mut LoopState,
+    route: Option<&RouteResult>,
+    plan: &crate::PlanResult,
+) {
+    let Some(route) = route else {
+        return;
+    };
+    let envelope =
+        crate::task_journal::agent_loop_round_plan_decision_envelope_for_runtime(route, plan);
+    loop_state.output_vars.insert(
+        "agent_loop.decision_envelope".to_string(),
+        envelope.to_string(),
+    );
+    loop_state
+        .output_vars
+        .entry("agent_loop.first_decision_envelope".to_string())
+        .or_insert_with(|| envelope.to_string());
+    if envelope
+        .get("control_intent")
+        .and_then(Value::as_str)
+        .is_some_and(|intent| intent == "act")
+    {
+        loop_state
+            .output_vars
+            .entry("agent_loop.first_act_decision_envelope".to_string())
+            .or_insert_with(|| envelope.to_string());
+    }
+    for field in [
+        "decision",
+        "terminal_intent",
+        "control_intent",
+        "control_reason_code",
+        "reason_code",
+        "validation_status",
+        "validation_reason_code",
+        "capability_ref",
+        "semantic_authority",
+        "initial_gate_ref",
+        "answer_shape",
+        "risk_level",
+    ] {
+        if let Some(value) = envelope.get(field).and_then(Value::as_str) {
+            loop_state
+                .output_vars
+                .insert(format!("agent_loop.{field}"), value.to_string());
+            loop_state.output_vars.insert(
+                format!("agent_loop.decision_envelope.{field}"),
+                value.to_string(),
+            );
+        }
+    }
+}
+
 fn last_executable_action(actions: &[AgentAction]) -> Option<&AgentAction> {
     actions.iter().rev().find(|action| {
         matches!(
@@ -652,6 +706,12 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    record_agent_loop_decision_envelope_output_vars(
+        loop_state,
+        route_result,
+        &prepared_round.plan_result,
+    );
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
         loop_state.output_contract = Some(output_contract.clone());
         loop_state.output_vars.insert(
@@ -659,7 +719,6 @@ async fn run_agent_round(
             output_contract.semantic_kind.as_str().to_string(),
         );
     }
-    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let budget_profile =
         AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
     maybe_record_agent_decides_shadow_first_action_attribution(
@@ -1256,6 +1315,10 @@ fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
         || route_reason_has_marker(route, "direct_answer_gate_recent_file_context_execute")
         || route_reason_has_marker(route, "direct_answer_gate_artifact_listing_execute")
         || route_reason_has_marker(route, "direct_answer_gate_workspace_child_context_execute")
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_direct_answer_deferred_to_agent_loop",
+        )
         || route_reason_has_marker(route, "direct_answer_gate_execute")
     {
         return "semantic_execution_promotion";

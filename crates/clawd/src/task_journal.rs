@@ -43,6 +43,13 @@ const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
 const MAX_OBSERVED_MULTILINE_EXCERPT_LINES: usize = 12;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
 const MAX_OBSERVED_ARRAY_VALUE_SAMPLES: usize = 48;
+
+pub(crate) fn agent_loop_round_plan_decision_envelope_for_runtime(
+    route: &crate::RouteResult,
+    plan: &crate::PlanResult,
+) -> Value {
+    agent_loop_round_plan_decision_envelope_json(route, plan)
+}
 const MAX_RESULT_TRACE_BYTES: usize = 128 * 1024;
 const MAX_RESULT_TRACE_ARRAY_ITEMS: usize = 24;
 const MAX_RESULT_TRACE_STRING_CHARS: usize = 768;

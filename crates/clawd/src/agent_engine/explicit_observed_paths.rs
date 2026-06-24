@@ -394,12 +394,8 @@ pub(super) fn scoped_plan_context_file_targets(
     };
     let mut targets = Vec::new();
     if let Some((_, tail)) = plan_context.split_once("### RECENT_EXECUTION_EVENTS") {
-        let section = tail
-            .split("\n\nDirect answer gate resolved execution intent:")
-            .next()
-            .unwrap_or(tail);
         let mut event_request_targets = Vec::new();
-        for line in section.lines() {
+        for line in tail.lines() {
             let Some((_, request_tail)) = line.split_once(" request=") else {
                 continue;
             };
@@ -424,11 +420,14 @@ pub(super) fn scoped_plan_context_file_targets(
             }
         }
     }
-    for marker in [
-        "Direct answer gate resolved execution intent:",
-        "Resolved semantic request:",
-        "Turn analysis:",
-    ] {
+    for section in direct_answer_gate_context_resolved_intents(plan_context) {
+        for path in collect_existing_file_targets_from_text(state, &section) {
+            if !targets.iter().any(|existing: &String| existing == &path) {
+                targets.push(path);
+            }
+        }
+    }
+    for marker in ["Resolved semantic request:", "Turn analysis:"] {
         let Some((_, tail)) = plan_context.split_once(marker) else {
             continue;
         };
@@ -440,6 +439,21 @@ pub(super) fn scoped_plan_context_file_targets(
         }
     }
     targets
+}
+
+fn direct_answer_gate_context_resolved_intents(plan_context: &str) -> Vec<String> {
+    plan_context
+        .split("\n\n")
+        .filter_map(|section| {
+            let value: Value = serde_json::from_str(section.trim()).ok()?;
+            value
+                .pointer("/direct_answer_gate/resolved_intent")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|resolved_intent| !resolved_intent.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }
 
 pub(super) fn authoritative_current_file_target_path(

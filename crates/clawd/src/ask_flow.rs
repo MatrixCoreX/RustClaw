@@ -169,6 +169,23 @@ async fn execute_via_planner_loop(
     .await
 }
 
+fn direct_answer_gate_promoted_prompt_with_memory(
+    prompt_with_memory: &str,
+    resolved_intent: &str,
+) -> String {
+    let prompt_with_memory = prompt_with_memory.trim();
+    let resolved_intent = resolved_intent.trim();
+    if resolved_intent.is_empty() || resolved_intent == prompt_with_memory {
+        return prompt_with_memory.to_string();
+    }
+    let gate_context = json!({
+        "direct_answer_gate": {
+            "resolved_intent": resolved_intent,
+        }
+    });
+    format!("{}\n\n{}", prompt_with_memory, gate_context)
+}
+
 pub(crate) async fn execute_ask_routed(
     state: &AppState,
     task: &ClaimedTask,
@@ -720,6 +737,53 @@ pub(crate) async fn execute_ask_routed(
                                     "direct_answer_gate_recent_count_comparison",
                                 ));
                             }
+                            if direct_answer_gate_direct_answer_should_enter_agent_loop(
+                                state,
+                                gate_ctx.route_result.as_ref(),
+                            ) {
+                                if let Some(route) = gate_ctx.route_result.as_mut() {
+                                    route.set_planner_execute_finalize(
+                                        ActFinalizeStyle::ChatWrapped,
+                                    );
+                                    append_route_reason(
+                                        route,
+                                        "direct_answer_gate_direct_answer_deferred_to_agent_loop",
+                                    );
+                                }
+                                tracing::info!(
+                                    "{} worker_once: ask direct_answer_gate_direct_answer_deferred_to_agent_loop task_id={}",
+                                    crate::highlight_tag("routing"),
+                                    task.task_id
+                                );
+                                let promoted_prompt_with_memory = gate_ctx
+                                    .route_result
+                                    .as_ref()
+                                    .map(|route| route.resolved_intent.trim())
+                                    .map(|intent| {
+                                        direct_answer_gate_promoted_prompt_with_memory(
+                                            prompt_with_memory,
+                                            intent,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| prompt_with_memory.to_string());
+                                let reply = execute_via_planner_loop(
+                                    state,
+                                    task,
+                                    &promoted_prompt_with_memory,
+                                    execution_user_request,
+                                    &crate::AskMode::planner_execute_chat_wrapped(),
+                                    Some(gate_ctx.clone()),
+                                )
+                                .await?;
+                                return Ok(with_pre_planner_exit_snapshot(
+                                    state,
+                                    task,
+                                    &current_turn_user_request,
+                                    reply,
+                                    Some(&gate_ctx),
+                                    "direct_answer_gate_promoted_to_planner",
+                                ));
+                            }
                         }
                         DirectAnswerPreflight::Clarify(question) => {
                             tracing::info!(
@@ -776,14 +840,10 @@ pub(crate) async fn execute_ask_routed(
                                 .route_result
                                 .as_ref()
                                 .map(|route| route.resolved_intent.trim())
-                                .filter(|intent| {
-                                    !intent.is_empty() && *intent != prompt_with_memory.trim()
-                                })
                                 .map(|intent| {
-                                    format!(
-                                        "{}\n\nDirect answer gate resolved execution intent:\n{}",
-                                        prompt_with_memory.trim(),
-                                        intent
+                                    direct_answer_gate_promoted_prompt_with_memory(
+                                        prompt_with_memory,
+                                        intent,
                                     )
                                 })
                                 .unwrap_or_else(|| prompt_with_memory.to_string());
