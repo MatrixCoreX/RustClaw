@@ -86,24 +86,27 @@ export function buildTaskLifecycleView(
     tone: "attention" as const,
   };
   const nextCheck = timestampLabel(lang, lifecycle?.next_check_after);
+  const nextPoll = timestampLabel(lang, lifecycle?.next_poll_after);
   const heartbeat = timestampLabel(lang, lifecycle?.last_heartbeat_ts);
-  const meta = [
-    `${t(lang, "可查询", "Pollable")}: ${boolLabel(lang, lifecycle?.can_poll)}`,
-    `${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle?.can_cancel)}`,
-  ];
-  if (heartbeat) meta.push(`${t(lang, "最近心跳", "Last heartbeat")}: ${heartbeat}`);
-  if (nextCheck) meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
-  if (lifecycle?.state_source) meta.push(`${t(lang, "状态来源", "State source")}: ${lifecycle.state_source}`);
-  if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
+  const meta: string[] = [];
   if (lifecycle?.next_action_kind) meta.push(`${t(lang, "下一步", "Next action")}: ${lifecycle.next_action_kind}`);
   if (lifecycle?.next_action_ref !== undefined && lifecycle?.next_action_ref !== null) {
     meta.push(`${t(lang, "下一步引用", "Next action ref")}: ${String(lifecycle.next_action_ref)}`);
   }
+  if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
   if (Number.isFinite(lifecycle?.resume_wait_seconds)) {
     meta.push(`${t(lang, "恢复等待", "Resume wait")}: ${Math.max(0, Number(lifecycle?.resume_wait_seconds))}s`);
   }
   if (lifecycle?.checkpoint_id) meta.push(`${t(lang, "检查点", "Checkpoint")}: ${lifecycle.checkpoint_id}`);
   if (lifecycle?.pending_job_ref) meta.push(`${t(lang, "后台任务", "Background job")}: ${lifecycle.pending_job_ref}`);
+  if (nextPoll) meta.push(`${t(lang, "下次轮询", "Next poll")}: ${nextPoll}`);
+  meta.push(
+    `${t(lang, "可查询", "Pollable")}: ${boolLabel(lang, lifecycle?.can_poll)}`,
+    `${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle?.can_cancel)}`,
+  );
+  if (heartbeat) meta.push(`${t(lang, "最近心跳", "Last heartbeat")}: ${heartbeat}`);
+  if (nextCheck) meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
+  if (lifecycle?.state_source) meta.push(`${t(lang, "状态来源", "State source")}: ${lifecycle.state_source}`);
   if (lifecycle?.poll_ref) meta.push(`${t(lang, "轮询引用", "Poll ref")}: ${lifecycle.poll_ref}`);
   if (lifecycle?.cancel_ref) meta.push(`${t(lang, "取消引用", "Cancel ref")}: ${lifecycle.cancel_ref}`);
   if (lifecycle?.resume_owner) meta.push(`${t(lang, "恢复执行者", "Resume owner")}: ${lifecycle.resume_owner}`);

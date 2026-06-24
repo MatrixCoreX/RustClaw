@@ -68,6 +68,35 @@ test("surfaces due resume window without exposing checkpoint json", () => {
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-ready"));
 });
 
+test("prioritizes next action fields for active task summaries", () => {
+  const view = buildTaskLifecycleView(
+    {
+      state: "background",
+      can_poll: true,
+      can_cancel: true,
+      last_heartbeat_ts: 1781796641,
+      next_check_after: 1781800300,
+      waiting_reason_code: "provider_backoff",
+      next_action_kind: "poll_async_job",
+      next_action_ref: "job-9",
+      resume_wait_seconds: 45,
+      checkpoint_id: "ckpt-9",
+    },
+    "running",
+    "en",
+  );
+
+  assert.deepEqual(view.meta.slice(0, 4), [
+    "Next action: poll_async_job",
+    "Next action ref: job-9",
+    "Wait reason: provider_backoff",
+    "Resume wait: 45s",
+  ]);
+  assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-9"));
+  assert.ok(view.meta.some((item) => item === "Pollable: Yes"));
+  assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
+});
+
 test("falls back to database status when lifecycle is absent", () => {
   const view = buildTaskLifecycleView(null, "canceled", "en");
 
