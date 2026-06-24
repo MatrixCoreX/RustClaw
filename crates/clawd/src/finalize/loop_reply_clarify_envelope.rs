@@ -18,6 +18,9 @@ pub(super) fn attach_route_clarify_machine_envelope(
     else {
         return false;
     };
+    if completed_act_delivery_should_own_terminal_state(loop_state, delivery_messages) {
+        return false;
+    }
     if delivery_messages
         .iter()
         .any(|message| delivery_has_terminal_clarify_machine_fields(message))
@@ -97,6 +100,19 @@ fn route_allows_terminal_clarify_envelope(
             &route.route_reason,
             "subagent_boundary_clarify_deferred_to_agent_loop",
         )
+}
+
+fn completed_act_delivery_should_own_terminal_state(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> bool {
+    !loop_state.pending_user_input_required
+        && loop_state
+            .output_vars
+            .contains_key("agent_loop.first_act_decision_envelope")
+        && delivery_messages
+            .iter()
+            .any(|message| !delivery_has_terminal_clarify_machine_fields(message))
 }
 
 fn route_reason_has_machine_token(route_reason: &str, expected: &str) -> bool {
