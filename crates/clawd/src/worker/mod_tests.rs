@@ -1,4 +1,30 @@
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
 use serde_json::json;
+
+struct TempDirGuard {
+    path: PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_{prefix}_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
 
 fn memory_tasks_db() -> rusqlite::Connection {
     let db = rusqlite::Connection::open_in_memory().expect("open memory db");
@@ -41,6 +67,29 @@ fn state_with_runtime_tasks_table() -> crate::AppState {
     .expect("create runtime tasks table");
     drop(db);
     state
+}
+
+fn file_db_pool(path: &Path) -> crate::db_init::DbPool {
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(
+        |conn: &mut rusqlite::Connection| {
+            conn.busy_timeout(Duration::from_millis(5_000))?;
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+            conn.pragma_update(None, "foreign_keys", "ON")?;
+            Ok(())
+        },
+    );
+    r2d2::Pool::builder()
+        .max_size(2)
+        .build(manager)
+        .expect("build file-backed test db pool")
+}
+
+fn file_backed_state_with_schema(db_path: &Path) -> crate::AppState {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.core.db = file_db_pool(db_path);
+    state.worker.database_sqlite_path = db_path.to_path_buf();
+    state.with_seeded_db_schema()
 }
 
 fn valid_checkpoint_json(checkpoint_id: &str, resume_entrypoint: &str) -> serde_json::Value {
@@ -292,6 +341,91 @@ async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
     assert!(lifecycle["resume_work_item"].get("error_text").is_none());
     assert!(lifecycle["resume_executor"].get("text").is_none());
     assert!(lifecycle["resume_executor"].get("error_text").is_none());
+}
+
+#[tokio::test]
+async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim() {
+    let temp = TempDirGuard::new("runtime_restart_checkpoint");
+    let db_path = temp.path.join("tasks.sqlite");
+    let first_state = file_backed_state_with_schema(&db_path);
+    let mut checkpoint = valid_checkpoint_json("ckpt-restart", "await_user_input");
+    checkpoint["completed_side_effect_refs"] = json!(["write_file:tmp/report.txt"]);
+    let due = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "agent_loop_soft_budget",
+            "resume_reason": "await_user_input",
+            "next_check_after": 1,
+            "checkpoint_id": "ckpt-restart"
+        },
+        "task_checkpoint": checkpoint
+    });
+    {
+        let db = first_state.core.db.get().expect("get first db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at
+            )
+            VALUES ('runtime-restart', 42, 7, 'test-key', 'ui', 'ask', ?1, 'running', ?2, NULL, '1', '1')",
+            rusqlite::params![
+                json!({"text": "checkpoint task"}).to_string(),
+                due.to_string()
+            ],
+        )
+        .expect("insert file-backed due task");
+    }
+    drop(first_state);
+
+    let restarted_state = file_backed_state_with_schema(&db_path);
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&restarted_state)
+        .await
+        .expect("runtime recovery after restart");
+
+    let first_result = runtime_restart_result_json(&restarted_state);
+    assert_eq!(first_result["task_lifecycle"]["state"], "needs_user");
+    assert_eq!(
+        first_result["task_lifecycle"]["checkpoint_id"],
+        "ckpt-restart"
+    );
+    assert_eq!(
+        first_result["task_checkpoint"]["completed_side_effect_refs"],
+        json!(["write_file:tmp/report.txt"])
+    );
+    assert_eq!(
+        first_result["task_lifecycle"]["resume_executor"]["executor_state"],
+        "awaiting_user"
+    );
+    drop(restarted_state);
+
+    let second_restarted_state = file_backed_state_with_schema(&db_path);
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&second_restarted_state)
+        .await
+        .expect("runtime recovery after second restart");
+    let second_result = runtime_restart_result_json(&second_restarted_state);
+    assert_eq!(second_result["task_lifecycle"]["state"], "needs_user");
+    assert_eq!(
+        second_result["task_checkpoint"]["completed_side_effect_refs"],
+        json!(["write_file:tmp/report.txt"])
+    );
+    assert_eq!(
+        second_result["task_lifecycle"]["resume_executor"]["executor_state"],
+        "awaiting_user"
+    );
+}
+
+fn runtime_restart_result_json(state: &crate::AppState) -> serde_json::Value {
+    let db = state.core.db.get().expect("get restart db");
+    let (status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = 'runtime-restart'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query runtime restart task");
+    assert_eq!(status, "running");
+    serde_json::from_str(&raw_result).expect("parse restart result")
 }
 
 #[test]
