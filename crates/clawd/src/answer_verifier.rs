@@ -7,7 +7,8 @@ use crate::{AppState, ClaimedTask, RouteResult, TaskContract};
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
 const MAX_VERIFIER_STEPS: usize = 8;
-const DEFAULT_RETRY_INSTRUCTION: &str = "Re-answer using the observed execution evidence and the original user request/output contract. Do not repeat the rejected answer.";
+const DEFAULT_RETRY_INSTRUCTION: &str =
+    "retry_policy=use_observed_evidence_and_original_contract;repeat_rejected_answer=false";
 
 #[path = "answer_verifier_delivery_raw.rs"]
 mod answer_verifier_delivery_raw;

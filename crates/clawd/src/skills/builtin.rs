@@ -145,8 +145,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 format!("policy_token: {policy_token}"),
             ],
             vec![
-                "Do not execute the blocked skill.".to_string(),
-                "Explain that the current tools policy blocks this capability.".to_string(),
+                "action=execute_builtin_skill".to_string(),
+                "policy=tools_policy".to_string(),
+                "required_decision=allow".to_string(),
             ],
         ));
     }
@@ -1118,14 +1119,18 @@ async fn run_safe_command_detailed(
     }
 
     if !allow_sudo && command.split_whitespace().any(|p| p == "sudo") {
-        return Err(RunSafeCommandError::Policy(crate::skills::policy_block_error(
-            "sudo_not_allowed",
-            vec!["command_requested_sudo: true".to_string()],
-            vec![
-                "Do not run sudo when allow_sudo is false for this task.".to_string(),
-                "Explain that elevated access requires an admin-authorized run and sudo-enabled policy.".to_string(),
-            ],
-        )));
+        return Err(RunSafeCommandError::Policy(
+            crate::skills::policy_block_error(
+                "sudo_not_allowed",
+                vec!["command_requested_sudo: true".to_string()],
+                vec![
+                    "action=run_command".to_string(),
+                    "requested_privilege=sudo".to_string(),
+                    "required_policy=allow_sudo".to_string(),
+                    "required_auth=admin_authorized_task".to_string(),
+                ],
+            ),
+        ));
     }
 
     let mut cmd = Command::new("bash");

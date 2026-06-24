@@ -1339,18 +1339,16 @@ async fn build_resume_context_error(
         observed_facts.push(format!("completed_steps_count: {}", completed_steps.len()));
     }
     let mut policy_boundary = vec![
-        "Do not expose raw resume_context JSON, internal action schema, stack traces, or prompt names."
-            .to_string(),
-        "Do not claim the failed step succeeded.".to_string(),
-        "Keep the reply focused on the failed step and the immediate recovery path.".to_string(),
+        "expose_internal_details=false".to_string(),
+        "failed_step_success_claim_allowed=false".to_string(),
+        "response_focus=failed_step_and_recovery_path".to_string(),
     ];
     if has_remaining_actions {
-        policy_boundary.push(
-            "Mention that remaining steps are paused and the user can reply continue to resume them."
-                .to_string(),
-        );
+        policy_boundary.push("remaining_steps_state=paused".to_string());
+        policy_boundary.push("resume_available=true".to_string());
     } else {
-        policy_boundary.push("Do not invent remaining work or a continuation option.".to_string());
+        policy_boundary.push("remaining_work_claim_allowed=false".to_string());
+        policy_boundary.push("continuation_option_claim_allowed=false".to_string());
     }
     let contract = crate::fallback::UserResponseContract::tool_failure(
         if has_remaining_actions {

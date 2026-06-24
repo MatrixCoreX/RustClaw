@@ -1251,8 +1251,9 @@ fn ensure_config_mutation_allowed(
         "config_requires_web_admin",
         vec![format!("skill: {skill_name}")],
         vec![
-            "Do not modify high-risk config files from a non-admin task.".to_string(),
-            "Tell the user to use the Web admin console or an admin-authorized key.".to_string(),
+            "action=mutate_config".to_string(),
+            "required_auth=admin_authorized_task".to_string(),
+            "preferred_surface=web_admin_console".to_string(),
         ],
     ))
 }
