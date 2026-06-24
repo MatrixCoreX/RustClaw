@@ -74,3 +74,19 @@ fn compacts_internal_model_io_json_lines() {
     assert!(!sanitized.contains("RAW_RESPONSE_SHOULD_NOT_SHOW"));
     assert!(!sanitized.contains("PAYLOAD_SHOULD_NOT_SHOW"));
 }
+
+#[test]
+fn redacts_runtime_template_placeholders_from_visible_text() {
+    let raw =
+        "Planner artifacts like `{{last_output.foo}}` and `{{ s1.output }}` must not be visible.";
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert_eq!(
+        sanitized,
+        "Planner artifacts like `[RUNTIME_TEMPLATE]` and `[RUNTIME_TEMPLATE]` must not be visible."
+    );
+    assert!(!sanitized.contains("{{"));
+    assert!(!sanitized.contains("}}"));
+    assert!(!sanitized.contains("last_output.foo"));
+}

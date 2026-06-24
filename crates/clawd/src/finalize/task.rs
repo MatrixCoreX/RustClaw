@@ -27,10 +27,15 @@ fn ask_result_payload(
     answer_messages: &[String],
     journal: Option<&crate::task_journal::TaskJournal>,
 ) -> Value {
-    let base_result = if answer_messages.is_empty() {
-        json!({ "text": answer_text })
+    let visible_answer_text = crate::visible_text::sanitize_user_visible_text(answer_text);
+    let visible_answer_messages = answer_messages
+        .iter()
+        .map(|message| crate::visible_text::sanitize_user_visible_text(message))
+        .collect::<Vec<_>>();
+    let base_result = if visible_answer_messages.is_empty() {
+        json!({ "text": visible_answer_text })
     } else {
-        json!({ "text": answer_text, "messages": answer_messages })
+        json!({ "text": visible_answer_text, "messages": visible_answer_messages })
     };
     match journal {
         Some(journal) => journal.attach_to_result(base_result),
