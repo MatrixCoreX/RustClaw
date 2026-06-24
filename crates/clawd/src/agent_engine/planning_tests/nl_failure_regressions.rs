@@ -161,3 +161,28 @@ fn web_search_summary_prefers_quoted_query_over_full_instruction() {
     );
     assert_eq!(args.get("top_k").and_then(Value::as_u64), Some(3));
 }
+
+#[test]
+fn chat_wrapped_text_loop_terminal_respond_does_not_force_plan_repair() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+    let actions = vec![AgentAction::Respond {
+        content:
+            r#"{"status":"ok","message_key":"provider_blocker","category":"external_blocker"}"#
+                .to_string(),
+    }];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}

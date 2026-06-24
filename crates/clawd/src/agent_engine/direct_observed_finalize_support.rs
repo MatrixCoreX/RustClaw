@@ -1029,7 +1029,10 @@ fn route_allows_pure_chat_submode_terminal_respond(
     route_result: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if !route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode")
+    let chat_wrapped_text_loop = route_result.ask_mode.finalize_chat_wrapped();
+    let pure_chat_submode =
+        route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode");
+    if !(pure_chat_submode || chat_wrapped_text_loop)
         || route_result.needs_clarify
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
         || route_result.output_contract.requires_content_evidence
@@ -1037,6 +1040,7 @@ fn route_allows_pure_chat_submode_terminal_respond(
         || route_result.wants_file_delivery
         || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !route_allows_model_language_terminal_respond(Some(route_result))
     {
         return false;
     }
