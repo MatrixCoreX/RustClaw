@@ -32,6 +32,13 @@ KNOWN_KINDS = {
     "CompatTrace",
     "OrdinarySemantic",
 }
+KNOWN_DELETION_GATES = {
+    "keep_boundary",
+    "keep_machine_fact_fast_path",
+    "delete_after_agent_loop_default",
+    "delete_after_selected_class_release_gate",
+    "test_fixture_only",
+}
 
 
 def rust_files() -> list[Path]:
@@ -74,6 +81,7 @@ def parse_inventory_items() -> list[dict[str, object]]:
                 "migration_stage": fields.get("migration_stage", ""),
                 "migration_order": int(order.group("order")) if order else -1,
                 "nl_gate_refs": refs,
+                "deletion_gate": fields.get("deletion_gate", ""),
                 "owner_layer": fields.get("owner_layer", ""),
             }
         )
@@ -90,6 +98,7 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
         stage = str(item["migration_stage"])
         target = str(item["migration_target"])
         owner = str(item["owner_layer"])
+        deletion_gate = str(item.get("deletion_gate", ""))
         order = int(item["migration_order"])
         refs = item["nl_gate_refs"]
         assert isinstance(refs, list)
@@ -107,6 +116,10 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
             findings.append(f"{prefix}: missing_migration_target")
         if not owner:
             findings.append(f"{prefix}: missing_owner_layer")
+        if deletion_gate not in KNOWN_DELETION_GATES:
+            findings.append(
+                f"{prefix}: invalid_deletion_gate={deletion_gate or '<missing>'}"
+            )
         if order < 0:
             findings.append(f"{prefix}: missing_migration_order")
         if kind == "OrdinarySemantic":
@@ -115,6 +128,10 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
             if not (1 <= len(refs) <= 3):
                 findings.append(
                     f"{prefix}: ordinary_semantic_requires_1_to_3_nl_gate_refs"
+                )
+            if not deletion_gate.startswith("delete_after_"):
+                findings.append(
+                    f"{prefix}: ordinary_semantic_requires_delete_after_gate"
                 )
         for ref in refs:
             if not re.fullmatch(r"[a-z0-9_]+", str(ref)):
