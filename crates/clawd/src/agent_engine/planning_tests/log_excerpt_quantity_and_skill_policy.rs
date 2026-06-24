@@ -928,6 +928,45 @@ fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
 }
 
 #[test]
+fn runtime_async_job_marker_skips_preferred_skill_repair() {
+    let state = test_state_with_registry();
+    let loop_state = LoopState::new(2);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.route_reason =
+        "async_job_protocol required_job_fields=job_id|status|poll_after_seconds".to_string();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({
+            "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+            "async_start": true,
+            "poll_after_seconds": 2,
+            "expires_in_seconds": 600,
+            super::super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
+        }),
+    }];
+
+    assert!(super::super::registry_preferred_skill_matches_route(
+        &state, &route
+    ));
+    assert!(
+        !super::super::actions_use_ad_hoc_command_without_route_preferred_skill(
+            &state, &route, &actions
+        )
+    );
+    assert!(!should_force_actionable_plan_repair(
+        &state,
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
     let mut state = test_state_with_registry();
     state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
