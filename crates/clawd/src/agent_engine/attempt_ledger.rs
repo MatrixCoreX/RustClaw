@@ -449,8 +449,25 @@ fn provider_status_from_structured_error(error_text: &str) -> Option<Value> {
     let retry_after_seconds = extra
         .and_then(|extra| extra.get("retry_after_seconds"))
         .and_then(Value::as_i64);
+    let provider_supported = extra
+        .and_then(|extra| extra.get("provider_supported"))
+        .and_then(Value::as_bool);
+    let unsupported_reason = extra
+        .and_then(|extra| extra.get("unsupported_reason"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let message_key = extra
+        .and_then(|extra| extra.get("message_key"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     let is_provider_status = external_provider_blocked
+        || provider_supported == Some(false)
+        || unsupported_reason.is_some()
         || provider.is_some()
         || provider_error_class.is_some()
         || retry_after_seconds.is_some()
@@ -472,6 +489,9 @@ fn provider_status_from_structured_error(error_text: &str) -> Option<Value> {
         "status_code": status_code,
         "provider": provider,
         "provider_error_class": provider_error_class,
+        "provider_supported": provider_supported,
+        "unsupported_reason": unsupported_reason,
+        "message_key": message_key,
         "external_provider_blocked": external_provider_blocked,
         "retry_after_seconds": retry_after_seconds,
     }))

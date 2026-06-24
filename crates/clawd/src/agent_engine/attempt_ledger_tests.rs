@@ -438,6 +438,46 @@ fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
 }
 
 #[test]
+fn attempt_ledger_exposes_provider_unsupported_machine_fields() {
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let err = crate::skills::structured_skill_error_from_parts(
+        "video_generate",
+        "provider_unsupported",
+        "provider_unsupported",
+        None,
+        Some(serde_json::json!({
+            "provider_supported": false,
+            "unsupported_reason": "video_generation_not_supported",
+            "message_key": "clawd.provider.video_generation_not_supported"
+        })),
+    );
+    super::record_attempt(
+        &mut loop_state,
+        "video_generate",
+        "action=generate",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let ledger = build_attempt_ledger_compact(&loop_state);
+    let value = ledger_value(&ledger);
+    let provider_status = value
+        .pointer("/0/repair_signal/repair_envelope/provider_status")
+        .expect("provider_status");
+    assert_eq!(provider_status["provider_supported"], false);
+    assert_eq!(
+        provider_status["unsupported_reason"],
+        "video_generation_not_supported"
+    );
+    assert_eq!(
+        provider_status["message_key"],
+        "clawd.provider.video_generation_not_supported"
+    );
+}
+
+#[test]
 fn attempt_ledger_marks_terminal_failures_non_retryable() {
     for kind in [
         "confirmed_not_found",
