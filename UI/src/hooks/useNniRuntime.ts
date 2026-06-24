@@ -436,6 +436,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
     }
+    return result;
   };
 
   const joinNni = async () => {

@@ -99,6 +99,11 @@ const NNI_DEVICE_ACTIONS = [
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
 
+function nniDeviceActionHasSignature(value: unknown): value is NniDeviceActionResponse {
+  const payload = (value as NniDeviceActionResponse | null | undefined)?.payload;
+  return typeof payload?.signature === "string" && payload.signature.trim().length > 0;
+}
+
 export function NniPage({
   lang,
   t,
@@ -181,13 +186,19 @@ export function NniPage({
       nniTestJoinPulseTimer.current = null;
     }
     setNniTestJoinPulse(true);
+    let shouldHoldPulse = false;
     try {
-      await Promise.resolve(onTestJoin());
+      const result = await Promise.resolve(onTestJoin());
+      shouldHoldPulse = nniDeviceActionHasSignature(result);
     } finally {
-      nniTestJoinPulseTimer.current = window.setTimeout(() => {
+      if (shouldHoldPulse) {
+        nniTestJoinPulseTimer.current = window.setTimeout(() => {
+          setNniTestJoinPulse(false);
+          nniTestJoinPulseTimer.current = null;
+        }, NNI_TEST_JOIN_ACTIVITY_MS);
+      } else {
         setNniTestJoinPulse(false);
-        nniTestJoinPulseTimer.current = null;
-      }, NNI_TEST_JOIN_ACTIVITY_MS);
+      }
     }
   };
 
