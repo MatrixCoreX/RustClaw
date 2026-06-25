@@ -69,7 +69,6 @@ export function useChatRuntime({
   const [chatRecording, setChatRecording] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const chatVoiceInputRef = useRef<HTMLInputElement | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chatAudioChunksRef = useRef<Blob[]>([]);
   const chatInputValueRef = useRef("");
@@ -132,38 +131,6 @@ export function useChatRuntime({
     });
   };
 
-  const handleChatVoiceFileSelection = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    try {
-      const file = fileList[0];
-      if (!file) return;
-      const attachment = await fileToChatAttachment(file, "audio");
-      const attached = [...chatAttachmentsValueRef.current, attachment].slice(0, CHAT_MAX_ATTACHMENTS);
-      setChatError(null);
-      if (chatVoiceInputRef.current) {
-        chatVoiceInputRef.current.value = "";
-      }
-      void submitChatMessageSnapshot(chatInputValueRef.current, attached, {
-        clearInput: true,
-        clearAttachments: true,
-      });
-    } catch (err) {
-      setChatError(
-        err instanceof Error ? err.message : t("读取语音文件失败。", "Failed to read voice file."),
-      );
-    }
-  };
-
-  const openVoiceFileFallback = () => {
-    const input = chatVoiceInputRef.current;
-    if (!input) {
-      setChatError(t("无法打开语音文件选择。", "Unable to open the voice file picker."));
-      return;
-    }
-    setChatError(null);
-    input.click();
-  };
-
   const startChatVoiceRecording = async () => {
     if (chatRecordingValueRef.current || chatSendingValueRef.current) return;
     const canRecordDirectly =
@@ -171,7 +138,12 @@ export function useChatRuntime({
       Boolean(navigator.mediaDevices?.getUserMedia) &&
       typeof MediaRecorder !== "undefined";
     if (!canRecordDirectly) {
-      openVoiceFileFallback();
+      setChatError(
+        t(
+          "当前浏览器不允许直接录音。请用 HTTPS 或 localhost 打开页面，或点“上传图片/文件”选择音频。",
+          "This browser cannot record directly here. Open the page with HTTPS or localhost, or choose an audio file from Upload image/file.",
+        ),
+      );
       return;
     }
     try {
@@ -445,14 +417,12 @@ export function useChatRuntime({
     chatRecording,
     chatError,
     chatAttachmentInputRef,
-    chatVoiceInputRef,
     setChatAgentMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
     handleChatAttachmentSelection,
     removeChatAttachment,
-    handleChatVoiceFileSelection,
     startChatVoiceRecording,
     stopChatVoiceRecording,
     sendChatMessage,
