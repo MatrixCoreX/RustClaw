@@ -568,11 +568,13 @@ export default function App() {
     chatRecording,
     chatError,
     chatAttachmentInputRef,
+    chatVoiceInputRef,
     setChatAgentMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
     handleChatAttachmentSelection,
+    handleChatVoiceFileSelection,
     removeChatAttachment,
     startChatVoiceRecording,
     stopChatVoiceRecording,
@@ -1323,12 +1325,14 @@ export default function App() {
               chatRecording={chatRecording}
               chatError={chatError}
               chatAttachmentInputRef={chatAttachmentInputRef}
+              chatVoiceInputRef={chatVoiceInputRef}
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}
               onAttachmentSelection={handleChatAttachmentSelection}
+              onVoiceFileSelection={handleChatVoiceFileSelection}
               onRemoveAttachment={removeChatAttachment}
               onStartVoiceRecording={startChatVoiceRecording}
               onStopVoiceRecording={stopChatVoiceRecording}

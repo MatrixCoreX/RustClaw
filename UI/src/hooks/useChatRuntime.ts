@@ -69,6 +69,7 @@ export function useChatRuntime({
   const [chatRecording, setChatRecording] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const chatVoiceInputRef = useRef<HTMLInputElement | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chatAudioChunksRef = useRef<Blob[]>([]);
 
@@ -114,10 +115,42 @@ export function useChatRuntime({
     setChatAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleChatVoiceFileSelection = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    try {
+      const file = fileList[0];
+      if (!file) return;
+      const attachment = await fileToChatAttachment(file, "audio");
+      setChatAttachments((prev) => [...prev, attachment].slice(0, CHAT_MAX_ATTACHMENTS));
+      setChatError(null);
+      if (chatVoiceInputRef.current) {
+        chatVoiceInputRef.current.value = "";
+      }
+    } catch (err) {
+      setChatError(
+        err instanceof Error ? err.message : t("读取语音文件失败。", "Failed to read voice file."),
+      );
+    }
+  };
+
+  const openVoiceFileFallback = () => {
+    const input = chatVoiceInputRef.current;
+    if (!input) {
+      setChatError(t("无法打开语音文件选择。", "Unable to open the voice file picker."));
+      return;
+    }
+    setChatError(null);
+    input.click();
+  };
+
   const startChatVoiceRecording = async () => {
     if (chatRecording || chatSending) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setChatError(t("当前浏览器不支持录音。", "This browser does not support voice recording."));
+    const canRecordDirectly =
+      window.isSecureContext &&
+      Boolean(navigator.mediaDevices?.getUserMedia) &&
+      typeof MediaRecorder !== "undefined";
+    if (!canRecordDirectly) {
+      openVoiceFileFallback();
       return;
     }
     try {
@@ -334,12 +367,14 @@ export function useChatRuntime({
     chatRecording,
     chatError,
     chatAttachmentInputRef,
+    chatVoiceInputRef,
     setChatAgentMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
     handleChatAttachmentSelection,
     removeChatAttachment,
+    handleChatVoiceFileSelection,
     startChatVoiceRecording,
     stopChatVoiceRecording,
     sendChatMessage,
