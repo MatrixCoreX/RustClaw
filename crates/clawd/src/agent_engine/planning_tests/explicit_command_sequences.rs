@@ -973,6 +973,103 @@ fn existence_with_path_current_workspace_single_file_target_uses_path_batch_fact
 }
 
 #[test]
+fn missing_existing_file_delivery_uses_find_name_probe() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::FileToken,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint =
+        "definitely_missing_named_file_route_cleanup_001.txt".to_string();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.wants_file_delivery = true;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = existence_with_path_locator_deterministic_plan_result(
+        "deliver an existing file if present",
+        Some(&route),
+        &loop_state,
+        None,
+        "把 definitely_missing_named_file_route_cleanup_001.txt 发给我",
+    )
+    .expect("file delivery existence route should probe the named target");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    match &plan.steps[0].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("find_entries")
+            );
+            assert_eq!(
+                args.get("pattern").and_then(Value::as_str),
+                Some("definitely_missing_named_file_route_cleanup_001.txt")
+            );
+            assert_eq!(args.get("root").and_then(Value::as_str), Some("."));
+        }
+        other => panic!("expected fs_basic find_entries action, got {other:?}"),
+    }
+}
+
+#[test]
+fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::FileToken,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint =
+        "definitely_missing_named_file_route_cleanup_001.txt".to_string();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.wants_file_delivery = true;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    let plan = existing_file_delivery_probe_deterministic_plan_result(
+        "deliver an existing file if present",
+        Some(&route),
+        &loop_state,
+        Some(&analysis),
+        None,
+        "把 definitely_missing_named_file_route_cleanup_001.txt 发给我",
+    )
+    .expect("filename generated-delivery without content patch should probe existing file");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    match &plan.steps[0].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("find_entries")
+            );
+            assert_eq!(
+                args.get("pattern").and_then(Value::as_str),
+                Some("definitely_missing_named_file_route_cleanup_001.txt")
+            );
+        }
+        other => panic!("expected fs_basic find_entries action, got {other:?}"),
+    }
+}
+
+#[test]
 fn existence_with_path_current_workspace_service_file_target_uses_path_batch_facts() {
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),

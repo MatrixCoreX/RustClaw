@@ -594,6 +594,17 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_file_facts_auto_locator"
         );
         return_deterministic_plan!(
+            existing_file_delivery_probe_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                turn_analysis_for_prompt,
+                auto_locator_path,
+                &original_user_text_for_policy,
+            ),
+            "plan_deterministic_existing_file_delivery_probe"
+        );
+        return_deterministic_plan!(
             existence_with_path_locator_deterministic_plan_result(
                 goal,
                 route_result,

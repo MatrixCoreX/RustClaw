@@ -1117,9 +1117,12 @@ pub(super) fn existence_with_path_locator_observation_plan(
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if route.needs_clarify
-        || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
     {
+        return None;
+    }
+    let single_file_delivery_probe = route_requests_single_file_delivery_probe(route);
+    if route.output_contract.delivery_required && !single_file_delivery_probe {
         return None;
     }
 
@@ -1144,6 +1147,10 @@ pub(super) fn existence_with_path_locator_observation_plan(
         .into_iter()
         .take(8)
         .collect::<Vec<_>>();
+    if single_file_delivery_probe {
+        return single_file_delivery_probe_action(route, auto_locator_path, &explicit_targets)
+            .map(|action| vec![action]);
+    }
     if explicit_targets.len() == 1
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
     {
@@ -1240,6 +1247,93 @@ pub(super) fn existence_with_path_locator_observation_plan(
         }
         _ => None,
     }
+}
+
+pub(super) fn existing_file_delivery_probe_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    auto_locator_path: Option<&str>,
+    current_user_text: &str,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFileDelivery
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::Filename
+        || !route_requests_single_file_delivery_probe(route)
+        || turn_analysis
+            .and_then(|analysis| analysis.state_patch.as_ref())
+            .is_some()
+    {
+        return None;
+    }
+    let explicit_targets = explicit_existence_file_targets(current_user_text)
+        .into_iter()
+        .take(1)
+        .collect::<Vec<_>>();
+    let action = single_file_delivery_probe_action(route, auto_locator_path, &explicit_targets)?;
+    let actions = canonicalize_legacy_file_config_capabilities(vec![action]);
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn route_requests_single_file_delivery_probe(route: &RouteResult) -> bool {
+    route.output_contract.delivery_required
+        && route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+        && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
+        && route.wants_file_delivery
+}
+
+fn single_file_delivery_probe_action(
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+    explicit_targets: &[String],
+) -> Option<AgentAction> {
+    let hint = route.output_contract.locator_hint.trim();
+    let target = explicit_targets
+        .first()
+        .map(String::as_str)
+        .or_else(|| {
+            auto_locator_path
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+        })
+        .or_else(|| (!hint.is_empty()).then_some(hint))?;
+    let path_like = target.contains(['/', '\\'])
+        || Path::new(target).is_absolute()
+        || matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+    if path_like {
+        return Some(AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "path_batch_facts",
+                "paths": [target],
+                "include_missing": true,
+            }),
+        });
+    }
+    Some(AgentAction::CallSkill {
+        skill: "fs_search".to_string(),
+        args: serde_json::json!({
+            "action": "find_name",
+            "pattern": target,
+            "root": ".",
+            "max_results": 50,
+        }),
+    })
 }
 
 pub(super) fn single_filename_target_for_directory_locator(
