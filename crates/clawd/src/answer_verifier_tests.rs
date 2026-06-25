@@ -598,6 +598,33 @@ fn pure_chat_agent_loop_submode_skips_answer_verifier_for_freeform_response() {
 }
 
 #[test]
+fn pure_chat_agent_loop_submode_skips_answer_verifier_after_terminal_respond_step() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.wants_file_delivery = false;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            "candidate response",
+        ));
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
+}
+
+#[test]
 fn pure_chat_agent_loop_backend_identity_marker_still_uses_answer_verifier() {
     let mut route = backend_identity_guard_route();
     route.output_contract.requires_content_evidence = false;

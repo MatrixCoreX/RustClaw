@@ -10,6 +10,24 @@ fn agent_loop_selected_route_for_gate() -> crate::RouteResult {
     route
 }
 
+fn state_with_route_authority(authority: &str, label: &str) -> (TempDirGuard, crate::AppState) {
+    let root = TempDirGuard::new(label);
+    let config_dir = root.path.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("agent_guard.toml"),
+        format!(
+            r#"[agent.loop_guard]
+semantic_route_authority = "{authority}"
+"#
+        ),
+    )
+    .expect("write agent guard");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    (root, state)
+}
+
 #[test]
 fn pure_chat_route_allows_agent_loop_submode_without_execution_contract() {
     let route = chat_route_for_gate();
@@ -22,6 +40,24 @@ fn pure_chat_route_submode_rejects_content_evidence_contract() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
     assert!(!route_allows_agent_loop_pure_chat_submode(&route));
+}
+
+#[test]
+fn normalizer_compat_fast_path_is_disabled_under_agent_loop_authority() {
+    let (_root, state) = state_with_route_authority(
+        "agent_loop_default",
+        "normalizer_compat_agent_loop_authority",
+    );
+
+    assert!(!normalizer_compat_direct_answer_fast_path_allowed(&state));
+}
+
+#[test]
+fn normalizer_compat_fast_path_remains_available_for_legacy_rollback() {
+    let (_root, state) =
+        state_with_route_authority("legacy", "normalizer_compat_legacy_authority");
+
+    assert!(normalizer_compat_direct_answer_fast_path_allowed(&state));
 }
 
 #[test]

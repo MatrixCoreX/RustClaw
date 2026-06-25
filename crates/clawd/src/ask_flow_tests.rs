@@ -25,6 +25,7 @@ use super::{
     locator_hint_mentions_current_request, normalizer_answer_candidate_from_resolved_prompt,
     normalizer_chat_direct_answer_candidate,
     normalizer_chat_direct_answer_candidate_with_context_summary,
+    normalizer_compat_direct_answer_fast_path_allowed,
     normalizer_runtime_fact_direct_answer_candidate, output_contract_from_direct_answer_gate,
     preferred_route_clarify_question, promote_active_anchor_observed_judgment_to_chat,
     promote_clarify_config_risk_assessment_default_config_to_planner,

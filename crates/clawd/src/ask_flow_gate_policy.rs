@@ -24,6 +24,10 @@ pub(super) fn transform_skill_available_for_plan(state: &AppState) -> bool {
     enabled_skills.is_empty() || enabled_skills.contains("transform")
 }
 
+pub(super) fn normalizer_compat_direct_answer_fast_path_allowed(state: &AppState) -> bool {
+    !crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+}
+
 pub(super) fn package_manager_skill_available_for_plan(state: &AppState) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains("package_manager")
