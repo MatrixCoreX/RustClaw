@@ -32,6 +32,7 @@ use super::{
     directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
     ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
     existence_with_path_locator_deterministic_plan_result,
+    existing_file_delivery_probe_deterministic_plan_result,
     explicit_command_deterministic_plan_result, file_facts_auto_locator_deterministic_plan_result,
     file_facts_auto_locator_observation_plan, file_names_auto_locator_deterministic_plan_result,
     file_paths_locator_deterministic_plan_result, filesystem_mutation_deterministic_plan_result,
