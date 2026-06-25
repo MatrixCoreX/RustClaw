@@ -206,6 +206,39 @@ fn audio_synthesize_input_alias_normalizes_to_text() {
 }
 
 #[test]
+fn service_control_machine_aliases_normalize_to_contract_fields() {
+    let mut args = json!({
+        "action": "status",
+        "unit": "ssh",
+        "manager": "systemd"
+    });
+
+    assert!(normalize_skill_arg_aliases("service_control", &mut args));
+    assert_eq!(
+        args.get("target").and_then(|value| value.as_str()),
+        Some("ssh")
+    );
+    assert_eq!(
+        args.get("manager_type").and_then(|value| value.as_str()),
+        Some("systemd")
+    );
+}
+
+#[test]
+fn service_control_name_alias_normalizes_to_target() {
+    let mut args = json!({
+        "action": "status",
+        "name": "sshd"
+    });
+
+    assert!(normalize_skill_arg_aliases("service_control", &mut args));
+    assert_eq!(
+        args.get("target").and_then(|value| value.as_str()),
+        Some("sshd")
+    );
+}
+
+#[test]
 fn video_generate_description_alias_normalizes_to_prompt() {
     let mut args = json!({
         "description": "status panel product video",
