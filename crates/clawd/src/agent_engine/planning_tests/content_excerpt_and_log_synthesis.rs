@@ -1015,6 +1015,57 @@ fn content_excerpt_summary_log_directory_auto_locator_uses_log_analyze_plan() {
 }
 
 #[test]
+fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_plan() {
+    let root = TempDirGuard::new("content_excerpt_summary_single_log_file_no_slice");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("app.log");
+    fs::write(&log, "INFO ok\nWARN slow provider\nERROR timeout\n").expect("write log");
+    let log_path = log.display().to_string();
+    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.clone();
+    route.output_contract.delivery_required = false;
+
+    assert!(
+        content_excerpt_explicit_file_targets_deterministic_plan_result(
+            &state,
+            "inspect the log target",
+            Some(&route),
+            &LoopState::new(1),
+            "",
+            None,
+            Some(&log_path),
+        )
+        .is_none()
+    );
+
+    let plan = generic_path_content_log_analyze_deterministic_plan_result(
+        "inspect the log target",
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        Some(&log_path),
+    )
+    .expect("single log summary should use log_analyze");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].action_type, "call_skill");
+    assert_eq!(plan.steps[0].skill, "log_analyze");
+    assert_eq!(
+        plan.steps[0].args.get("path").and_then(Value::as_str),
+        Some(log_path.as_str())
+    );
+}
+
+#[test]
 fn content_excerpt_with_summary_log_file_does_not_use_log_analyze_plan() {
     let root = TempDirGuard::new("content_excerpt_with_summary_log_file_auto_locator");
     let logs_dir = root.path.join("logs");
