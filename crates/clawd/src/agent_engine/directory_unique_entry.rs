@@ -649,6 +649,25 @@ fn filename_prefix_pattern(path: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
+fn explicit_log_file_target_for_slice_plan(
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    for candidate in [auto_locator_path.map(str::trim), {
+        let hint = route.output_contract.locator_hint.trim();
+        (!hint.is_empty()).then_some(hint)
+    }]
+    .into_iter()
+    .flatten()
+    {
+        let path = Path::new(candidate);
+        if path.is_file() && log_analyze_supported_path(candidate) {
+            return Some(path.display().to_string());
+        }
+    }
+    explicit_log_file_target_under_directory_locator(route, auto_locator_path)
+}
+
 pub(super) fn content_excerpt_summary_directory_log_slice_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -670,7 +689,7 @@ pub(super) fn content_excerpt_summary_directory_log_slice_deterministic_plan_res
         return None;
     }
     let spec = route_content_slice_spec(route)?;
-    let path = explicit_log_file_target_under_directory_locator(route, auto_locator_path)?;
+    let path = explicit_log_file_target_for_slice_plan(route, auto_locator_path)?;
     let root = Path::new(&path)
         .parent()
         .map(|parent| parent.display().to_string())?;

@@ -96,6 +96,9 @@ pub(super) fn actions_use_ad_hoc_command_without_route_preferred_skill(
     if preferred_skills.is_empty() {
         return false;
     }
+    if structured_bounded_log_slice_plan_satisfies_route(route_result, actions) {
+        return false;
+    }
     if actions.iter().any(|action| {
         planned_action_skill_name(action).is_some_and(|skill| {
             let canonical = state.resolve_canonical_skill_name(skill);
@@ -131,6 +134,68 @@ pub(super) fn actions_use_ad_hoc_command_without_route_preferred_skill(
             action,
         )
     })
+}
+
+fn structured_bounded_log_slice_plan_satisfies_route(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !route_targets_log_analysis(route_result) {
+        return false;
+    }
+    let mut saw_bounded_log_read = false;
+    let mut saw_executable = false;
+    let mut saw_terminal_synthesis = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                if !skill.eq_ignore_ascii_case("fs_basic") {
+                    return false;
+                }
+                let Some(action_name) = args.get("action").and_then(Value::as_str).map(str::trim)
+                else {
+                    return false;
+                };
+                saw_executable = true;
+                match action_name {
+                    "list_dir" | "find_entries" => {}
+                    "read_text_range" if read_text_range_uses_bounded_slice(args) => {
+                        saw_bounded_log_read = true;
+                    }
+                    _ => return false,
+                }
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {
+                saw_terminal_synthesis = true;
+            }
+            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
+        }
+    }
+    saw_executable && saw_bounded_log_read && saw_terminal_synthesis
+}
+
+fn read_text_range_uses_bounded_slice(args: &Value) -> bool {
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    if obj.get("start_line").is_some()
+        || obj.get("end_line").is_some()
+        || obj.get("line_start").is_some()
+        || obj.get("line_end").is_some()
+    {
+        return true;
+    }
+    obj.get("mode")
+        .or_else(|| obj.get("range"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .is_some_and(|mode| {
+            !mode.eq_ignore_ascii_case("head")
+                && !mode.eq_ignore_ascii_case("full")
+                && !mode.eq_ignore_ascii_case("all")
+        })
 }
 
 fn action_satisfies_structured_key_listing_contract(
