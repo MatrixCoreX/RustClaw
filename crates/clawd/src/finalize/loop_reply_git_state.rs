@@ -7,8 +7,10 @@ fn route_git_repository_state_requires_language_synthesis(route: &crate::RouteRe
     route.output_contract.semantic_kind == crate::OutputSemanticKind::GitRepositoryState
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && (route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
-            || route.output_contract.exact_sentence_count.is_some())
+        && (matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        ) || route.output_contract.exact_sentence_count.is_some())
 }
 
 pub(super) async fn replace_git_repository_state_machine_delivery_with_observed_synthesis(
