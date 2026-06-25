@@ -20,6 +20,7 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.pending_user_input_required = true;
     let model_question = "Which file should I read from?";
     loop_state
         .delivery_messages
@@ -99,6 +100,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.pending_user_input_required = true;
     let model_question = "Which file should I read from?";
     loop_state
         .delivery_messages
@@ -226,6 +228,55 @@ async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_ac
         }),
         "reply messages should not include clarify envelope: {:?}",
         reply.messages
+    );
+    assert_ne!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_does_not_mark_answer_delivery_as_clarify_from_route_marker_only() {
+    let state = test_state();
+    let task = claimed_task("task-route-marker-answer-delivery");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.needs_clarify = true;
+    route.route_reason =
+        "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
+            .to_string();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let answer = "1. login module scope\n2. auth session\n3. user recovery";
+    loop_state.delivery_messages.push(answer.to_string());
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return to the previous plan and keep three login module points",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve answer delivery");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("login module scope"));
+    assert!(
+        !reply.text.contains("agent_loop_clarify"),
+        "reply should not expose clarify machine envelope: {}",
+        reply.text
     );
     assert_ne!(
         reply
