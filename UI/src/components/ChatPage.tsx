@@ -21,12 +21,14 @@ export interface ChatPageProps {
   chatRecording: boolean;
   chatError: string | null;
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
+  chatVoiceInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
   onChatAgentModeChange: (value: boolean) => void;
   onClearMessages: () => void;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onAttachmentSelection: (fileList: FileList | null) => unknown | Promise<unknown>;
+  onVoiceFileSelection: (fileList: FileList | null) => unknown | Promise<unknown>;
   onRemoveAttachment: (index: number) => void;
   onStartVoiceRecording: () => unknown | Promise<unknown>;
   onStopVoiceRecording: () => unknown | Promise<unknown>;
@@ -43,12 +45,14 @@ export function ChatPage({
   chatRecording,
   chatError,
   chatAttachmentInputRef,
+  chatVoiceInputRef,
   toLocalTime,
   onChatAgentModeChange,
   onClearMessages,
   onChatInputChange,
   onChatInputKeyDown,
   onAttachmentSelection,
+  onVoiceFileSelection,
   onRemoveAttachment,
   onStartVoiceRecording,
   onStopVoiceRecording,
@@ -138,6 +142,14 @@ export function ChatPage({
               multiple
               className="hidden"
               onChange={(event) => void onAttachmentSelection(event.target.files)}
+            />
+            <input
+              ref={chatVoiceInputRef}
+              type="file"
+              accept="audio/*"
+              capture
+              className="hidden"
+              onChange={(event) => void onVoiceFileSelection(event.target.files)}
             />
             <button
               type="button"
