@@ -159,7 +159,7 @@ pub(super) fn doc_parse_content_presence_direct_answer_candidate(
     })
 }
 
-pub(super) fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
+pub(crate) fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     let lines = excerpt
         .lines()
         .map(str::trim_end)

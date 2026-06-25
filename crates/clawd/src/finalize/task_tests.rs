@@ -4,10 +4,11 @@ use super::{
     answer_verifier_retry_applicable, answer_verifier_retry_observed_trace,
     answer_verifier_should_force_task_failure, ask_runtime_failure_machine_payload,
     assistant_memory_source_text, delivery_path_gap_should_finalize_as_clarify,
-    deterministic_filtered_log_entry_recovery, deterministic_raw_tail_read_failure_recovery,
-    drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
-    journal_has_missing_file_search_evidence, machine_payload_observed_facts,
-    non_failure_final_status, normalize_existing_file_delivery_token_answer,
+    deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
+    deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
+    failed_task_lifecycle_payload, journal_has_missing_file_search_evidence,
+    machine_payload_observed_facts, non_failure_final_status,
+    normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
@@ -579,6 +580,75 @@ fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
     assert_eq!(
         recovered,
         "WARN provider failed: http 401: credential_missing\nWARN memory preference fallback failed: http 401"
+    );
+}
+
+#[test]
+fn content_tail_read_failure_recovery_selects_observed_log_line() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-content-tail-recovery".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/workspace/logs/clawd.run.log".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-content-tail-recovery", "ask", "prompt");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "candidate omitted observed values".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed step outputs".to_string(),
+        confidence: 0.9,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "mode": "tail",
+                    "requested_n": 3,
+                    "path": "/workspace/logs/clawd.run.log",
+                    "resolved_path": "/workspace/logs/clawd.run.log",
+                    "excerpt": "10|2026-06-25T09:12:01Z INFO task_call: executor_step_start step=1\n11|2026-06-25T09:12:02Z INFO task_call: verifier_result approved=true issue_count=0\n12|2026-06-25T09:12:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=content_excerpt"
+                },
+                "text": "{}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let recovered = deterministic_content_tail_read_failure_recovery(
+        &state,
+        &task,
+        "read tail lines",
+        &route,
+        &journal,
+    )
+    .expect("content tail read should recover from observed evidence");
+
+    assert_eq!(
+        recovered,
+        "2026-06-25T09:12:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=content_excerpt"
     );
 }
 

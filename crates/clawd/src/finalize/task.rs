@@ -166,6 +166,19 @@ fn answer_verifier_requests_filtered_entry(journal: &crate::task_journal::TaskJo
         })
 }
 
+fn answer_verifier_requests_content_excerpt(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal
+        .answer_verifier_summary
+        .as_ref()
+        .filter(|summary| summary.high_confidence_retry_gap())
+        .is_some_and(|summary| {
+            summary
+                .missing_evidence_fields
+                .iter()
+                .any(|field| field.trim() == "content_excerpt")
+        })
+}
+
 fn log_path_from_read_range_value(value: &Value) -> Option<String> {
     if value.get("action").and_then(Value::as_str) != Some("read_range") {
         return None;
@@ -281,6 +294,54 @@ fn deterministic_filtered_log_entry_recovery(
     })
 }
 
+fn content_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
+    !matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
+    ) && route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ExcerptKindJudgment
+        )
+}
+
+fn content_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
+    crate::finalize::selected_tail_read_range_line_from_step_output(output, prefer_english)
+        .or_else(|| raw_tail_read_answer_from_step_output(output, prefer_english))
+        .map(|answer| answer.trim().to_string())
+        .filter(|answer| !answer.is_empty())
+}
+
+fn deterministic_content_tail_read_failure_recovery(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    user_request: &str,
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    if !content_tail_read_route_allows_failure_recovery(route_result)
+        || !answer_verifier_requests_content_excerpt(journal)
+    {
+        return None;
+    }
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let prefer_english =
+        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
+    journal.step_results.iter().rev().find_map(|step| {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
+        {
+            return None;
+        }
+        step.output_excerpt
+            .as_deref()
+            .and_then(|output| content_tail_read_answer_from_step_output(output, prefer_english))
+    })
+}
+
 fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
     route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
         && route_result.output_contract.response_shape == crate::OutputResponseShape::Strict
@@ -388,7 +449,7 @@ fn deterministic_raw_tail_read_failure_recovery(
     })
 }
 
-fn mark_answer_verifier_recovered_by_deterministic_filtered_entry(
+fn mark_answer_verifier_recovered_by_deterministic_observed_evidence(
     journal: &mut crate::task_journal::TaskJournal,
 ) {
     journal.record_answer_verifier_summary(crate::answer_verifier::AnswerVerifierOut {
@@ -1401,7 +1462,28 @@ pub(crate) async fn finalize_ask_result(
                     .retain(|message| crate::finalize::is_execution_summary_message(message));
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
-                mark_answer_verifier_recovered_by_deterministic_filtered_entry(&mut journal);
+                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+            }
+            if let Some(recovered_answer) = deterministic_content_tail_read_failure_recovery(
+                state,
+                task,
+                prompt,
+                route_result,
+                &journal,
+            ) {
+                failure_reply = false;
+                semantic_clarify = false;
+                answer_text = recovered_answer;
+                answer_messages
+                    .retain(|message| crate::finalize::is_execution_summary_message(message));
+                answer_messages.push(answer_text.clone());
+                journal.record_final_answer(&answer_text);
+                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+                info!(
+                    "finalize_content_tail_read_failure_recovered task_id={} answer={}",
+                    task.task_id,
+                    crate::truncate_for_log(&answer_text)
+                );
             }
             if delivery_path_gap_should_finalize_as_clarify(
                 route_result,

@@ -149,6 +149,7 @@ use file_missing::{
 
 #[path = "loop_reply_tail_read.rs"]
 mod tail_read;
+pub(crate) use tail_read::selected_tail_read_range_line_from_step_output;
 use tail_read::{
     current_user_visible_delivery_text, latest_path_batch_facts_has_implicit_metadata_fields,
     latest_plan_requested_synthesis, latest_tail_read_range_answer_from_loop,
