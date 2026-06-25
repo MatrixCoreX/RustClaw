@@ -9,6 +9,11 @@ pub(super) fn matrix_strict_list_answer_is_grounded_in_successful_observation(
     if candidate_items.is_empty() {
         return false;
     }
+    if let Some(limit) = strict_list_selector_limit(route) {
+        if candidate_items.len() > limit {
+            return false;
+        }
+    }
     let observed_items = observed_strict_list_items(route, journal);
     if observed_items.is_empty() {
         return false;
@@ -40,6 +45,16 @@ pub(super) fn matrix_strict_list_answer_is_grounded_in_successful_observation(
                 .iter()
                 .any(|candidate| strict_list_candidate_annotates_observed_item(candidate, item))
     })
+}
+
+fn strict_list_selector_limit(route: &RouteResult) -> Option<usize> {
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .limit
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
 }
 
 pub(super) fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {

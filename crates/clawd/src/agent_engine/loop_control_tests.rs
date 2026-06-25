@@ -973,6 +973,85 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
 }
 
 #[test]
+fn latest_terminal_recovery_prefers_strict_list_candidate_that_satisfies_contract() {
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+    route.output_contract.self_extension.list_selector.limit = Some(3);
+    let first_three = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
+    let all_four =
+        format!("{first_three}\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt");
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "latest retry ignored selector limit".to_string(),
+        should_retry: true,
+        retry_instruction: "use the first three observed paths".to_string(),
+        confidence: 0.94,
+    });
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            r#"{"action":"inventory_dir","counts":{"files":4,"total":4},"entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"}]}"#
+                .to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_2".to_string(),
+            skill: "respond".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(first_three.to_string()),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_3".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(all_four.clone()),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_4".to_string(),
+            skill: "respond".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(all_four),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    let mut reply = AskReply::non_llm("failed".to_string())
+        .with_messages(vec!["failed".to_string()])
+        .with_task_journal(journal);
+
+    assert!(try_recover_latest_synthesis_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+    assert_eq!(reply.text, first_three);
+    assert!(!reply.should_fail_task);
+    assert!(reply.error_text.is_none());
+}
+
+#[test]
 fn http_health_verifier_gap_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::WebPageSummary;

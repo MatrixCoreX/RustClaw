@@ -976,12 +976,9 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
         return false;
     }
-    let Some(candidate) = latest_successful_terminal_answer(journal) else {
+    let Some(candidate) = latest_recoverable_terminal_answer(route, journal, reply) else {
         return false;
     };
-    if !latest_terminal_candidate_can_recover_answer_gap(route, journal, reply, &candidate) {
-        return false;
-    }
     let answer = candidate.answer;
     if let Some(journal) = reply.task_journal.as_mut() {
         journal.answer_verifier_summary = None;
@@ -1002,41 +999,46 @@ struct TerminalAnswerCandidate {
     answer: String,
 }
 
-fn latest_successful_terminal_answer(
+fn latest_recoverable_terminal_answer(
+    route: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
+    reply: &AskReply,
 ) -> Option<TerminalAnswerCandidate> {
     journal
         .step_results
         .iter()
         .rev()
-        .find(|step| {
-            matches!(step.skill.as_str(), "respond" | "synthesize_answer")
-                && step.status == crate::executor::StepExecutionStatus::Ok
-                && step
-                    .output_excerpt
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|text| !text.is_empty())
+        .filter_map(terminal_answer_candidate_from_step)
+        .find(|candidate| {
+            latest_terminal_candidate_can_recover_answer_gap(route, journal, reply, candidate)
         })
-        .and_then(|step| {
-            let source_skill = match step.skill.as_str() {
-                "respond" => "respond",
-                "synthesize_answer" => "synthesize_answer",
-                _ => return None,
-            };
-            let answer = step.output_excerpt.as_deref()?.trim();
-            if answer.is_empty()
-                || crate::finalize::looks_like_planner_artifact(answer)
-                || crate::finalize::looks_like_internal_trace_artifact(answer)
-                || crate::finalize::is_execution_summary_message(answer)
-            {
-                return None;
-            }
-            Some(TerminalAnswerCandidate {
-                source_skill,
-                answer: answer.to_string(),
-            })
-        })
+}
+
+fn terminal_answer_candidate_from_step(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> Option<TerminalAnswerCandidate> {
+    if !matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        || step.status != crate::executor::StepExecutionStatus::Ok
+    {
+        return None;
+    }
+    let source_skill = match step.skill.as_str() {
+        "respond" => "respond",
+        "synthesize_answer" => "synthesize_answer",
+        _ => return None,
+    };
+    let answer = step.output_excerpt.as_deref()?.trim();
+    if answer.is_empty()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+        || crate::finalize::is_execution_summary_message(answer)
+    {
+        return None;
+    }
+    Some(TerminalAnswerCandidate {
+        source_skill,
+        answer: answer.to_string(),
+    })
 }
 
 fn latest_terminal_candidate_can_recover_answer_gap(
@@ -1052,6 +1054,9 @@ fn latest_terminal_candidate_can_recover_answer_gap(
     ) {
         return true;
     }
+    if route_requires_structural_terminal_recovery(route) {
+        return false;
+    }
     if reply.text.trim() == candidate.answer.trim() {
         return false;
     }
@@ -1060,6 +1065,11 @@ fn latest_terminal_candidate_can_recover_answer_gap(
         "synthesize_answer" => route_allows_latest_synthesis_retry_recovery(route, journal),
         _ => false,
     }
+}
+
+fn route_requires_structural_terminal_recovery(route: &crate::RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| !shape.allows_model_language())
 }
 
 fn route_allows_latest_synthesis_retry_recovery(
