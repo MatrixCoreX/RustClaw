@@ -431,6 +431,106 @@ fn sqlite_binary_text_read_fallback_rewrites_to_db_basic_list_tables_without_sem
 }
 
 #[test]
+fn sqlite_schema_version_machine_token_wins_over_binary_text_read_fallback() {
+    let mut route = base_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.route_reason = "machine tokens: sqlite_schema_version_target=/tmp/app.sqlite".to_string();
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "fs_basic.read_text_range".to_string(),
+            args: json!({
+                "path": "/tmp/app.sqlite",
+                "mode": "head",
+                "n": 120
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let after_listing = rewrite_sqlite_table_listing_plan_to_db_basic(
+        Some(&route),
+        Some("/tmp/app.sqlite"),
+        false,
+        actions,
+    );
+    assert!(matches!(
+        &after_listing[0],
+        AgentAction::CallCapability { capability, .. }
+            if capability == "fs_basic.read_text_range"
+    ));
+    let rewritten = rewrite_sqlite_schema_version_plan_to_db_basic(
+        Some(&route),
+        Some("/tmp/app.sqlite"),
+        false,
+        after_listing,
+    );
+
+    match &rewritten[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "db_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("schema_version")
+            );
+            assert_eq!(
+                args.get("db_path").and_then(Value::as_str),
+                Some("/tmp/app.sqlite")
+            );
+            assert!(args.get("sql").is_none());
+        }
+        other => panic!("expected db_basic action, got {other:?}"),
+    }
+    assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
+}
+
+#[test]
+fn sqlite_user_version_selector_does_not_trigger_schema_version_rewrite() {
+    let mut route = base_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("user_version".to_string());
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "read_text_range",
+            "path": "/tmp/app.sqlite",
+            "mode": "head",
+            "n": 120
+        }),
+    }];
+
+    let rewritten = rewrite_sqlite_table_listing_plan_to_db_basic(
+        Some(&route),
+        Some("/tmp/app.sqlite"),
+        false,
+        actions,
+    );
+
+    match &rewritten[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "db_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("list_tables")
+            );
+        }
+        other => panic!("expected db_basic list_tables fallback, got {other:?}"),
+    }
+}
+
+#[test]
 fn existence_path_summary_plan_inserts_bounded_content_observation() {
     let state = test_state();
     let loop_state = LoopState::new(1);
