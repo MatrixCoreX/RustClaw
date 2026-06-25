@@ -740,7 +740,13 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
         return None;
     }
 
-    let slice_spec = route_content_slice_spec(route);
+    let slice_spec = content_slice_spec_from_sources([
+        route.resolved_intent.as_str(),
+        route.route_reason.as_str(),
+        goal,
+        user_text,
+        original_user_text.unwrap_or_default(),
+    ]);
     let mut actions = Vec::new();
     for path in &targets {
         let mut args = serde_json::Map::new();

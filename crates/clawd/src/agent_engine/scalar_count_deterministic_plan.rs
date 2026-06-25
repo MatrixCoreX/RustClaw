@@ -594,6 +594,7 @@ pub(super) fn route_prefers_text_excerpt_action_for_contract_hint(route: &RouteR
 pub(super) fn contract_hint_selector_value(original_user_text: &str, key: &str) -> Option<String> {
     crate::intent_router::contract_test_hint_value(original_user_text, key)
         .or_else(|| inline_selector_machine_token_value(original_user_text, key))
+        .or_else(|| json_selector_machine_token_value(original_user_text, key))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
@@ -610,6 +611,31 @@ pub(super) fn inline_selector_machine_token_value(text: &str, key: &str) -> Opti
             .to_string()
     })
     .filter(|value| !value.is_empty())
+}
+
+pub(super) fn json_selector_machine_token_value(text: &str, key: &str) -> Option<String> {
+    let quoted_key = format!("\"{key}\"");
+    let mut remaining = text;
+    while let Some((_, after_key)) = remaining.split_once(&quoted_key) {
+        let after_colon = after_key.trim_start();
+        let Some(after_colon) = after_colon.strip_prefix(':') else {
+            remaining = after_key;
+            continue;
+        };
+        let value = after_colon.trim_start();
+        if let Some(after_quote) = value.strip_prefix('"') {
+            let Some((raw, _)) = after_quote.split_once('"') else {
+                return None;
+            };
+            return (!raw.trim().is_empty()).then(|| raw.trim().to_string());
+        }
+        let raw = value
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+            .collect::<String>();
+        return (!raw.trim().is_empty()).then(|| raw.trim().to_string());
+    }
+    None
 }
 
 pub(super) fn contract_hint_selector_bool(original_user_text: &str, key: &str) -> Option<bool> {
