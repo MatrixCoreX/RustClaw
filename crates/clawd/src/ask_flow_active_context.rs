@@ -953,6 +953,9 @@ pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
     if status_query.get("scope").and_then(Value::as_str) != Some("current_task") {
         return None;
     }
+    if !runtime_status_machine_delivery_requested(ctx) {
+        return Some("approval_wait=false".to_string());
+    }
     Some(
         serde_json::json!({
             "output_format": "machine_json",
@@ -967,6 +970,33 @@ pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
             "schema_version": 1
         })
         .to_string(),
+    )
+}
+
+fn runtime_status_machine_delivery_requested(ctx: &crate::agent_engine::AgentRunContext) -> bool {
+    ctx.turn_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .and_then(|state_patch| state_patch.get("required_machine_fields"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(is_runtime_status_machine_field)
+}
+
+fn is_runtime_status_machine_field(raw: &str) -> bool {
+    let field = raw
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | ';' | ':' | ')' | '('));
+    matches!(
+        field,
+        "runtime_status_query"
+            | "runtime_status_query.kind"
+            | "runtime_status_query.scope"
+            | "approval_wait"
+            | "state"
+            | "not_waiting_for_user_confirmation"
     )
 }
 

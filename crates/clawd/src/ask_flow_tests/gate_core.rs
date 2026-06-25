@@ -651,7 +651,12 @@ fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
                 "runtime_status_query": {
                     "kind": "approval_wait",
                     "scope": "current_task"
-                }
+                },
+                "required_machine_fields": [
+                    "runtime_status_query",
+                    "approval_wait",
+                    "state"
+                ]
             })),
             attachment_processing_required: false,
         }),
@@ -669,6 +674,36 @@ fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
         candidate.contains("\"state\":\"not_waiting_for_user_confirmation\""),
         "{candidate}"
     );
+}
+
+#[test]
+fn runtime_approval_wait_status_defaults_to_minimal_machine_fact() {
+    let mut route = chat_route_for_gate();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.set_execute_gate();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "runtime_status_query": {
+                    "kind": "approval_wait",
+                    "scope": "current_task"
+                }
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    let candidate =
+        runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").expect("candidate");
+    assert_eq!(candidate, "approval_wait=false");
 }
 
 #[test]
