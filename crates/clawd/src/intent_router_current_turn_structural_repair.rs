@@ -276,6 +276,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             output_contract.delivery_intent,
             OutputDeliveryIntent::FileSingle
         )
+        && !matches!(output_contract.locator_kind, OutputLocatorKind::Filename)
         && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
         && output_contract.locator_hint.trim().is_empty()
         && answer_candidate.trim().is_empty()

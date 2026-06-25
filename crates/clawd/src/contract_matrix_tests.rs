@@ -1390,6 +1390,33 @@ fn generic_delivery_allows_structured_missing_file_probes() {
 }
 
 #[test]
+fn generic_delivery_rejects_file_writes() {
+    let contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        delivery_required: true,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        locator_kind: OutputLocatorKind::Filename,
+        response_shape: OutputResponseShape::FileToken,
+        ..IntentOutputContract::default()
+    };
+
+    let policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &json!({
+            "action":"write_text",
+            "path":"definitely_missing_named_file_golden_001.txt",
+            "content":"x"
+        }),
+    )
+    .expect("write policy");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::RejectedNotAllowed);
+    assert_eq!(policy.action_key, "fs_basic.write_text");
+    assert_eq!(policy.contract_match, "generic_delivery");
+}
+
+#[test]
 fn existence_with_path_prefers_path_facts_but_allows_verifier_requested_excerpt() {
     let contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::ExistenceWithPath,
