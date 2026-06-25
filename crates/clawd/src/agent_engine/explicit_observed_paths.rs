@@ -749,6 +749,49 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
     ]);
     if slice_spec.is_none()
         && targets.len() == 1
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+        )
+        && doc_parse_is_enabled(state)
+        && doc_parse_supported_path(&targets[0])
+        && !repo_text_artifact_prefers_bounded_fs_read(&targets[0])
+        && route_allows_single_document_parse_synthesis(route)
+        && route_contract_allows_doc_parse(route)
+    {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "doc_parse".to_string(),
+                args: serde_json::json!({
+                    "action": "parse_doc",
+                    "path": targets[0],
+                    "max_chars": 12000,
+                    "include_metadata": true
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+            .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+        info!(
+            "plan_deterministic_content_excerpt_explicit_doc_parse_target target={}",
+            targets[0]
+        );
+        return Some(build_plan_result(
+            goal,
+            &raw_plan_text,
+            PlanKind::Single,
+            &actions,
+        ));
+    }
+    if slice_spec.is_none()
+        && targets.len() == 1
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
         && log_analyze_is_enabled(state)
         && log_analyze_supported_path(&targets[0])

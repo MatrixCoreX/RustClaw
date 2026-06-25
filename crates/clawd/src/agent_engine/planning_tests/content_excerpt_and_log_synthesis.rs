@@ -1066,6 +1066,48 @@ fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_p
 }
 
 #[test]
+fn content_excerpt_single_doc_file_without_slice_uses_doc_parse_plan() {
+    let root = TempDirGuard::new("content_excerpt_summary_single_doc_file_no_slice");
+    let readme = root.path.join("README.md");
+    fs::write(&readme, "# RustClaw\n\nLocal agent runtime.\n").expect("write readme");
+    let readme_path = readme.display().to_string();
+    let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = readme_path.clone();
+    route.output_contract.delivery_required = false;
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "summarize the resolved document",
+        Some(&route),
+        &LoopState::new(1),
+        "",
+        None,
+        Some(&readme_path),
+    )
+    .expect("single document summary should use doc_parse");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].action_type, "call_skill");
+    assert_eq!(plan.steps[0].skill, "doc_parse");
+    assert_eq!(
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("parse_doc")
+    );
+    assert_eq!(
+        plan.steps[0].args.get("path").and_then(Value::as_str),
+        Some(readme_path.as_str())
+    );
+}
+
+#[test]
 fn content_excerpt_with_summary_log_file_does_not_use_log_analyze_plan() {
     let root = TempDirGuard::new("content_excerpt_with_summary_log_file_auto_locator");
     let logs_dir = root.path.join("logs");
