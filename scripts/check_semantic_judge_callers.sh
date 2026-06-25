@@ -4,6 +4,8 @@
 #
 # 白名单：
 #   - crates/clawd/src/finalize/loop_reply.rs
+#   - crates/clawd/src/finalize/loop_reply_contract_enforce.rs (finalize-tier contract pruning)
+#   - crates/clawd/src/finalize/loop_reply_observed_contract.rs (finalize-tier observed answer gate)
 #   - crates/clawd/src/agent_engine/observed_output.rs (observed_answer_fallback 兜底)
 #
 # 用法：
@@ -19,6 +21,8 @@ cd "$REPO_ROOT"
 
 WHITELIST=(
     "crates/clawd/src/finalize/loop_reply.rs"
+    "crates/clawd/src/finalize/loop_reply_contract_enforce.rs"
+    "crates/clawd/src/finalize/loop_reply_observed_contract.rs"
     "crates/clawd/src/agent_engine/observed_output.rs"
 )
 

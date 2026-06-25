@@ -747,6 +747,15 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
         user_text,
         original_user_text.unwrap_or_default(),
     ]);
+    if slice_spec.is_none()
+        && targets.len() == 1
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+        && log_analyze_is_enabled(state)
+        && log_analyze_supported_path(&targets[0])
+        && contract_allows_log_analyze_for_path(route, &targets[0])
+    {
+        return None;
+    }
     let mut actions = Vec::new();
     for path in &targets {
         let mut args = serde_json::Map::new();
