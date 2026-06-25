@@ -42,7 +42,7 @@ CANONICAL_SUITES = {
 }
 
 AUTH_CONTEXT_VALUES = {"user", "admin"}
-METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:+-]+$")
 
 SIDE_EFFECT_NAME_TOKENS = (
     "absolute_saved_path",
@@ -83,6 +83,7 @@ RISKY_FILE_NAMES = {
 
 GENERATED_FILE_NAMES = {
     "nl_cases_client_like_all_aggregate.txt",
+    "nl_cases_client_like_release_gate_equivalent.txt",
 }
 
 EXCLUDED_SAFE_AGGREGATE_TAGS = {
