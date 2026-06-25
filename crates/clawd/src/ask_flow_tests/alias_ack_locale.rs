@@ -1,5 +1,5 @@
 #[test]
-fn structural_alias_ack_uses_locale_i18n_for_japanese_alias_update() {
+fn structural_alias_ack_defers_japanese_update_without_safe_candidate() {
     let state = crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
     let route = chat_route_for_gate();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -24,15 +24,11 @@ fn structural_alias_ack_uses_locale_i18n_for_japanese_alias_update() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(&state, Some(&ctx), "", "", "ja")
-        .expect("alias update ack");
-
-    assert_eq!(reply.text, "更新しました");
-    assert!(reply.messages.is_empty());
+    assert!(structural_alias_binding_ack(&state, Some(&ctx), "", "", "ja").is_none());
 }
 
 #[test]
-fn structural_alias_ack_uses_locale_i18n_for_korean_alias_update() {
+fn structural_alias_ack_defers_korean_update_without_safe_candidate() {
     let state = crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();
     let route = chat_route_for_gate();
     let ctx = crate::agent_engine::AgentRunContext {
@@ -57,9 +53,5 @@ fn structural_alias_ack_uses_locale_i18n_for_korean_alias_update() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(&state, Some(&ctx), "", "", "ko")
-        .expect("alias update ack");
-
-    assert_eq!(reply.text, "업데이트했습니다");
-    assert!(reply.messages.is_empty());
+    assert!(structural_alias_binding_ack(&state, Some(&ctx), "", "", "ko").is_none());
 }

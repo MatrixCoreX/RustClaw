@@ -924,8 +924,9 @@ pub(super) fn normalizer_runtime_fact_direct_answer_candidate(
 }
 
 pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
+    state: &AppState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-    _language_hint: &str,
+    language_hint: &str,
 ) -> Option<String> {
     let ctx = agent_run_context?;
     let route = ctx.route_result.as_ref()?;
@@ -953,24 +954,32 @@ pub(super) fn runtime_approval_wait_status_direct_answer_candidate(
     if status_query.get("scope").and_then(Value::as_str) != Some("current_task") {
         return None;
     }
-    if !runtime_status_machine_delivery_requested(ctx) {
-        return Some("approval_wait=false".to_string());
-    }
-    Some(
-        serde_json::json!({
-            "output_format": "machine_json",
-            "owner_layer": "runtime_status_query",
-            "runtime_status_query": {
-                "kind": "approval_wait",
-                "scope": "current_task"
-            },
+    let machine_payload = serde_json::json!({
+        "message_key": "clawd.msg.runtime.approval_wait_status",
+        "reason_code": "runtime_approval_wait_status",
+        "output_format": "machine_json",
+        "owner_layer": "runtime_status_query",
+        "runtime_status_query": {
+            "kind": "approval_wait",
+            "scope": "current_task"
+        },
+        "status": {
             "approval_wait": false,
-            "state": "not_waiting_for_user_confirmation",
-            "evidence_source": "turn_analysis.state_patch.runtime_status_query",
-            "schema_version": 1
-        })
-        .to_string(),
-    )
+            "state": "not_waiting_for_user_confirmation"
+        },
+        "evidence_source": "turn_analysis.state_patch.runtime_status_query",
+        "schema_version": 1
+    })
+    .to_string();
+    if runtime_status_machine_delivery_requested(ctx) {
+        return Some(machine_payload);
+    }
+    Some(crate::app_helpers::localized_t_with_default(
+        state,
+        "clawd.msg.runtime.approval_wait_false",
+        &machine_payload,
+        language_hint,
+    ))
 }
 
 fn runtime_status_machine_delivery_requested(ctx: &crate::agent_engine::AgentRunContext) -> bool {
@@ -995,7 +1004,9 @@ fn is_runtime_status_machine_field(raw: &str) -> bool {
             | "runtime_status_query.kind"
             | "runtime_status_query.scope"
             | "approval_wait"
+            | "status.approval_wait"
             | "state"
+            | "status.state"
             | "not_waiting_for_user_confirmation"
     )
 }

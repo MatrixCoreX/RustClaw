@@ -3,3 +3,4 @@ locale = "ja"
 [dict]
 "clawd.msg.memory.alias_remembered" = "記憶しました"
 "clawd.msg.memory.alias_updated" = "更新しました"
+"clawd.msg.runtime.approval_wait_false" = "いいえ、現在あなたの承認待ちではありません。"

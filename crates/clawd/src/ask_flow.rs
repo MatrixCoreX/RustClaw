@@ -362,6 +362,7 @@ pub(crate) async fn execute_ask_routed(
         ));
     }
     if let Some(candidate) = runtime_approval_wait_status_direct_answer_candidate(
+        state,
         agent_run_context.as_ref(),
         &process_language_hint,
     ) {
