@@ -1069,6 +1069,32 @@ pub(super) fn route_requests_sqlite_table_listing(route: &RouteResult) -> bool {
 
 pub(super) fn route_requests_sqlite_schema_version(route: &RouteResult) -> bool {
     route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteSchemaVersion
+        || route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref()
+            .is_some_and(sqlite_schema_version_field_token)
+        || [route.route_reason.as_str(), route.resolved_intent.as_str()]
+            .into_iter()
+            .any(text_has_sqlite_schema_version_machine_token)
+}
+
+fn sqlite_schema_version_field_token(token: &str) -> bool {
+    matches!(
+        token.trim().to_ascii_lowercase().as_str(),
+        "schema_version" | "sqlite_schema_version" | "database.schema_version"
+    )
+}
+
+fn text_has_sqlite_schema_version_machine_token(text: &str) -> bool {
+    [
+        "sqlite_schema_version",
+        "database.schema_version",
+        "db_basic.schema_version",
+    ]
+    .into_iter()
+    .any(|token| text.contains(token))
 }
 
 pub(super) fn sqlite_locator_path_for_route(
@@ -1133,8 +1159,29 @@ pub(super) fn action_is_text_read_of_sqlite_path(action: &AgentAction) -> bool {
                     })
                     .unwrap_or(false)
         }
-        AgentAction::CallCapability { .. }
-        | AgentAction::Think { .. }
+        AgentAction::CallCapability { capability, args } => {
+            let capability = capability.trim().to_ascii_lowercase();
+            matches!(
+                capability.as_str(),
+                "fs_basic.read_text_range"
+                    | "fs_basic.read"
+                    | "fs_basic.read_file"
+                    | "system_basic.read_range"
+                    | "system_basic.read_file"
+                    | "read_file"
+            ) || (capability == "fs_basic"
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| {
+                        matches!(
+                            action.trim().to_ascii_lowercase().as_str(),
+                            "read_range" | "read_text_range" | "read" | "read_file"
+                        )
+                    })
+                    .unwrap_or(false))
+        }
+        AgentAction::Think { .. }
         | AgentAction::Respond { .. }
         | AgentAction::SynthesizeAnswer { .. } => false,
     }
@@ -1173,8 +1220,8 @@ pub(super) fn action_should_be_sqlite_table_query(action: &AgentAction) -> bool 
                     })
                     .unwrap_or(false)
         }
-        AgentAction::CallCapability { .. }
-        | AgentAction::Think { .. }
+        AgentAction::CallCapability { .. } => action_is_text_read_of_sqlite_path(action),
+        AgentAction::Think { .. }
         | AgentAction::Respond { .. }
         | AgentAction::SynthesizeAnswer { .. } => false,
     }

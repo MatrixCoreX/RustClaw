@@ -9,6 +9,9 @@ pub(super) fn rewrite_sqlite_table_listing_plan_to_db_basic(
     if preserve_explicit_command {
         return actions;
     }
+    if route_result.is_some_and(route_requests_sqlite_schema_version) {
+        return actions;
+    }
     let route_requested_listing = route_result.is_some_and(route_requests_sqlite_table_listing);
     let sqlite_text_read_path = actions
         .iter()
@@ -46,19 +49,18 @@ pub(super) fn rewrite_sqlite_table_listing_plan_to_db_basic(
 
 pub(super) fn sqlite_locator_path_from_action(action: &AgentAction) -> Option<String> {
     match action {
-        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. } => {
-            ["db_path", "path"]
-                .into_iter()
-                .filter_map(|key| args.get(key).and_then(Value::as_str))
-                .map(str::trim)
-                .find(|path| {
-                    let lower = path.to_ascii_lowercase();
-                    lower.ends_with(".sqlite") || lower.ends_with(".db")
-                })
-                .map(ToString::to_string)
-        }
-        AgentAction::CallCapability { .. }
-        | AgentAction::Think { .. }
+        AgentAction::CallSkill { args, .. }
+        | AgentAction::CallTool { args, .. }
+        | AgentAction::CallCapability { args, .. } => ["db_path", "path"]
+            .into_iter()
+            .filter_map(|key| args.get(key).and_then(Value::as_str))
+            .map(str::trim)
+            .find(|path| {
+                let lower = path.to_ascii_lowercase();
+                lower.ends_with(".sqlite") || lower.ends_with(".db")
+            })
+            .map(ToString::to_string),
+        AgentAction::Think { .. }
         | AgentAction::Respond { .. }
         | AgentAction::SynthesizeAnswer { .. } => None,
     }
@@ -94,8 +96,20 @@ pub(super) fn action_can_serve_sqlite_schema_version_query(action: &AgentAction)
                 })
                 .unwrap_or(true)
         }
-        AgentAction::CallCapability { .. }
-        | AgentAction::Think { .. }
+        AgentAction::CallCapability { capability, .. } => {
+            let capability = capability.trim().to_ascii_lowercase();
+            action_is_text_read_of_sqlite_path(action)
+                || matches!(
+                    capability.as_str(),
+                    "fs_basic.read_text_range"
+                        | "fs_basic.read"
+                        | "fs_basic.read_file"
+                        | "system_basic.read_range"
+                        | "system_basic.read_file"
+                        | "read_file"
+                )
+        }
+        AgentAction::Think { .. }
         | AgentAction::Respond { .. }
         | AgentAction::SynthesizeAnswer { .. } => false,
     }
