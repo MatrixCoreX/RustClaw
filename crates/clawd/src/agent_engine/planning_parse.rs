@@ -192,6 +192,11 @@ pub(super) async fn parse_single_plan_actions(
         step_values.extend(extract_xml_tool_call_steps(raw));
     }
     if step_values.is_empty() {
+        if let Some(action) = recover_malformed_respond_action(raw) {
+            return Some(vec![action]);
+        }
+    }
+    if step_values.is_empty() {
         let value = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)?;
         let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
         step_values.extend(env.steps);
@@ -216,4 +221,96 @@ pub(super) async fn parse_single_plan_actions(
     } else {
         Some(actions)
     }
+}
+
+fn recover_malformed_respond_action(raw: &str) -> Option<AgentAction> {
+    if !raw.contains("\"steps\"") && !raw.contains("\"actions\"") {
+        return None;
+    }
+    if !json_string_field_equals(raw, "type", "respond") {
+        return None;
+    }
+    let content_start = json_string_field_value_start(raw, "content")?;
+    let content = recover_malformed_json_tail_string(&raw[content_start..])?;
+    let content = decode_json_like_string(&content);
+    (!content.trim().is_empty()).then_some(AgentAction::Respond { content })
+}
+
+fn json_string_field_equals(raw: &str, field: &str, expected: &str) -> bool {
+    let Some(start) = json_string_field_value_start(raw, field) else {
+        return false;
+    };
+    let Some(value) = recover_json_string_until_next_quote(&raw[start..]) else {
+        return false;
+    };
+    value.trim().eq_ignore_ascii_case(expected)
+}
+
+fn json_string_field_value_start(raw: &str, field: &str) -> Option<usize> {
+    let marker = format!("\"{field}\"");
+    for (idx, _) in raw.match_indices(&marker) {
+        let mut cursor = idx + marker.len();
+        cursor = skip_ascii_ws(raw, cursor);
+        if raw[cursor..].chars().next()? != ':' {
+            continue;
+        }
+        cursor += ':'.len_utf8();
+        cursor = skip_ascii_ws(raw, cursor);
+        if raw[cursor..].chars().next()? == '"' {
+            return Some(cursor + '"'.len_utf8());
+        }
+    }
+    None
+}
+
+fn skip_ascii_ws(raw: &str, mut cursor: usize) -> usize {
+    while let Some(ch) = raw[cursor..].chars().next() {
+        if !ch.is_ascii_whitespace() {
+            break;
+        }
+        cursor += ch.len_utf8();
+    }
+    cursor
+}
+
+fn recover_json_string_until_next_quote(raw: &str) -> Option<String> {
+    let mut escaped = false;
+    for (idx, ch) in raw.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            return Some(raw[..idx].to_string());
+        }
+    }
+    None
+}
+
+fn recover_malformed_json_tail_string(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_end();
+    let mut end = trimmed.len();
+    while let Some((idx, ch)) = trimmed[..end].char_indices().next_back() {
+        if matches!(ch, '}' | ']') || ch.is_ascii_whitespace() {
+            end = idx;
+            continue;
+        }
+        break;
+    }
+    let (quote_idx, quote) = trimmed[..end].char_indices().next_back()?;
+    (quote == '"').then(|| trimmed[..quote_idx].to_string())
+}
+
+fn decode_json_like_string(raw: &str) -> String {
+    serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| {
+        raw.replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    })
 }
