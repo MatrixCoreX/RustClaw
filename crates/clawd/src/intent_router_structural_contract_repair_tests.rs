@@ -381,6 +381,42 @@ fn structural_contract_repair_promotes_file_token_delivery_to_generated_artifact
 }
 
 #[test]
+fn structural_contract_repair_keeps_filename_delivery_out_of_generated_artifact() {
+    let req = "把 definitely_missing_named_file_golden_001.txt 发给我";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        locator_kind: OutputLocatorKind::Filename,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
+    assert!(contract.locator_hint.is_empty());
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+}
+
+#[test]
 fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_existing_file() {
     let workspace = make_temp_workspace_with_child("existing_generated_delivery", "docs");
     std::fs::write(
