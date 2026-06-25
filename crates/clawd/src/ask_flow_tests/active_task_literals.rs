@@ -379,7 +379,7 @@ fn structural_alias_ack_uses_unquoted_memory_alias_and_answer_candidate() {
 }
 
 #[test]
-fn structural_alias_ack_uses_i18n_for_alias_state_patch() {
+fn structural_alias_ack_without_safe_candidate_defers_for_alias_state_patch() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.policy.schedule.i18n_dict.insert(
         "clawd.msg.memory.alias_remembered".to_string(),
@@ -404,21 +404,18 @@ fn structural_alias_ack_uses_i18n_for_alias_state_patch() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(
+    assert!(structural_alias_binding_ack(
         &state,
         Some(&ctx),
         "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
         "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
         "zh-CN",
     )
-    .expect("alias state patch ack");
-
-    assert_eq!(reply.text, "alias remembered via i18n");
-    assert!(reply.messages.is_empty());
+    .is_none());
 }
 
 #[test]
-fn structural_alias_ack_accepts_alias_only_state_patch_without_turn_type() {
+fn structural_alias_ack_defers_alias_only_state_patch_without_turn_type() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.policy.schedule.i18n_dict.insert(
         "clawd.msg.memory.alias_remembered".to_string(),
@@ -442,17 +439,14 @@ fn structural_alias_ack_accepts_alias_only_state_patch_without_turn_type() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(
+    assert!(structural_alias_binding_ack(
         &state,
         Some(&ctx),
         "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md.",
         "Establish ALPHA_DOC as a temporary alias for scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
         "zh-CN",
     )
-    .expect("alias-only state patch should be enough for structural ack");
-
-    assert_eq!(reply.text, "alias remembered via i18n");
-    assert!(reply.messages.is_empty());
+    .is_none());
 }
 
 #[test]
@@ -524,21 +518,18 @@ fn structural_alias_ack_rejects_path_candidate_for_alias_state_patch() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(
+    assert!(structural_alias_binding_ack(
         &state,
         Some(&ctx),
         "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md.",
         "Set session alias ALPHA_DOC\nanswer_candidate: ALPHA_DOC -> scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
         "zh-CN",
     )
-    .expect("unsafe path candidate should fall back to i18n");
-
-    assert_eq!(reply.text, "alias remembered via i18n");
-    assert!(reply.messages.is_empty());
+    .is_none());
 }
 
 #[test]
-fn structural_alias_ack_uses_update_key_when_alias_existed() {
+fn structural_alias_ack_defers_update_without_safe_candidate_when_alias_existed() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.policy.schedule.i18n_dict.insert(
         "clawd.msg.memory.alias_updated".to_string(),
@@ -567,17 +558,14 @@ fn structural_alias_ack_uses_update_key_when_alias_existed() {
         ..Default::default()
     };
 
-    let reply = structural_alias_binding_ack(
+    assert!(structural_alias_binding_ack(
         &state,
         Some(&ctx),
         "不对，甲文件改成 /tmp/device/new.md。只回复已更新。",
         "不对，甲文件改成 /tmp/device/new.md。只回复已更新。",
         "zh-CN",
     )
-    .expect("alias update ack");
-
-    assert_eq!(reply.text, "alias updated via i18n");
-    assert!(reply.messages.is_empty());
+    .is_none());
 }
 
 #[test]

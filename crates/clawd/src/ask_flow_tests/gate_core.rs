@@ -635,6 +635,7 @@ fn direct_answer_gate_keeps_alias_bindings_patch_with_extra_fields_direct() {
 
 #[test]
 fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
+    let state = crate::AppState::test_default_with_fixture_provider();
     let mut route = chat_route_for_gate();
     route.ask_mode = crate::AskMode::planner_execute_plain();
     route.set_execute_gate();
@@ -663,8 +664,16 @@ fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
         ..Default::default()
     };
 
-    let candidate =
-        runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").expect("candidate");
+    let candidate = runtime_approval_wait_status_direct_answer_candidate(&state, Some(&ctx), "en")
+        .expect("candidate");
+    assert!(
+        candidate.contains("\"message_key\":\"clawd.msg.runtime.approval_wait_status\""),
+        "{candidate}"
+    );
+    assert!(
+        candidate.contains("\"reason_code\":\"runtime_approval_wait_status\""),
+        "{candidate}"
+    );
     assert!(candidate.contains("\"approval_wait\":false"), "{candidate}");
     assert!(
         candidate.contains("\"runtime_status_query\""),
@@ -677,7 +686,12 @@ fn runtime_approval_wait_status_returns_machine_status_from_state_patch() {
 }
 
 #[test]
-fn runtime_approval_wait_status_defaults_to_minimal_machine_fact() {
+fn runtime_approval_wait_status_uses_i18n_without_machine_fields() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.runtime.approval_wait_false".to_string(),
+        "not waiting via i18n".to_string(),
+    );
     let mut route = chat_route_for_gate();
     route.ask_mode = crate::AskMode::planner_execute_plain();
     route.set_execute_gate();
@@ -701,20 +715,21 @@ fn runtime_approval_wait_status_defaults_to_minimal_machine_fact() {
         ..Default::default()
     };
 
-    let candidate =
-        runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").expect("candidate");
-    assert_eq!(candidate, "approval_wait=false");
+    let candidate = runtime_approval_wait_status_direct_answer_candidate(&state, Some(&ctx), "en")
+        .expect("candidate");
+    assert_eq!(candidate, "not waiting via i18n");
 }
 
 #[test]
 fn runtime_approval_wait_status_ignores_unstructured_chat() {
+    let state = crate::AppState::test_default_with_fixture_provider();
     let route = chat_route_for_gate();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
     };
 
-    assert!(runtime_approval_wait_status_direct_answer_candidate(Some(&ctx), "en").is_none());
+    assert!(runtime_approval_wait_status_direct_answer_candidate(&state, Some(&ctx), "en").is_none());
 }
 
 #[test]

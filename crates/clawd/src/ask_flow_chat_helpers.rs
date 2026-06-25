@@ -194,7 +194,7 @@ pub(super) fn session_alias_target_direct_answer_candidate(
 }
 
 pub(super) fn structural_alias_binding_ack(
-    state: &AppState,
+    _state: &AppState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
     prompt: &str,
     resolved_prompt_for_execution: &str,
@@ -226,9 +226,6 @@ pub(super) fn structural_alias_binding_ack(
         resolved_prompt_for_execution,
     ) {
         return None;
-    }
-    if let Some(answer) = alias_state_patch_ack_answer(state, ctx, language_hint) {
-        return Some(AskReply::non_llm(answer));
     }
     let Some(_binding) = crate::conversation_state::structural_alias_binding_from_memory_prompt(
         prompt,
@@ -288,49 +285,6 @@ pub(super) fn normalizer_memory_ack_answer_candidate(
         return None;
     }
     Some(trimmed.to_string())
-}
-
-pub(super) fn alias_state_patch_ack_answer(
-    state: &AppState,
-    ctx: &crate::agent_engine::AgentRunContext,
-    language_hint: &str,
-) -> Option<String> {
-    let state_patch = ctx
-        .turn_analysis
-        .as_ref()
-        .and_then(|analysis| analysis.state_patch.as_ref())?;
-    let bindings =
-        crate::conversation_state::session_alias_bindings_from_state_patch(Some(state_patch));
-    if bindings.is_empty() {
-        return None;
-    }
-    let key = alias_binding_ack_message_key(&bindings, &ctx.session_alias_bindings);
-    Some(localized_alias_binding_ack(state, key, language_hint))
-}
-
-pub(super) fn alias_binding_ack_message_key(
-    bindings: &[crate::conversation_state::SessionAliasBinding],
-    prior_bindings: &[crate::conversation_state::SessionAliasBinding],
-) -> &'static str {
-    let has_prior_alias = bindings.iter().any(|binding| {
-        prior_bindings
-            .iter()
-            .any(|prior| prior.alias == binding.alias)
-    });
-    if has_prior_alias {
-        "clawd.msg.memory.alias_updated"
-    } else {
-        "clawd.msg.memory.alias_remembered"
-    }
-}
-
-pub(super) fn localized_alias_binding_ack(
-    state: &AppState,
-    key: &str,
-    language_hint: &str,
-) -> String {
-    let fallback = format!("message_key={key}");
-    crate::app_helpers::localized_t_with_default(state, key, &fallback, language_hint)
 }
 
 pub(crate) fn build_resume_continue_execute_prompt(

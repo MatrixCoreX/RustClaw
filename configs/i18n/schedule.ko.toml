@@ -3,3 +3,4 @@ locale = "ko"
 [dict]
 "clawd.msg.memory.alias_remembered" = "기억했습니다"
 "clawd.msg.memory.alias_updated" = "업데이트했습니다"
+"clawd.msg.runtime.approval_wait_false" = "아니요, 현재 승인을 기다리고 있지 않습니다."
