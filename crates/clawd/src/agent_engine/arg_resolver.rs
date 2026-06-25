@@ -145,6 +145,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
         "music_generate" => normalize_music_generate_arg_aliases(args),
+        "service_control" => normalize_service_control_arg_aliases(args),
         "video_generate" => normalize_video_generate_arg_aliases(args),
         _ => false,
     }
@@ -236,6 +237,16 @@ fn normalize_music_generate_arg_aliases(args: &mut Value) -> bool {
         return false;
     };
     move_string_alias_if_missing(obj, "prompt", &["description", "subject", "theme", "text"])
+}
+
+fn normalize_service_control_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    changed |= move_string_alias_if_missing(obj, "target", &["unit", "name"]);
+    changed |= move_string_alias_if_missing(obj, "manager_type", &["manager"]);
+    changed
 }
 
 fn move_size_from_width_height_if_missing(obj: &mut serde_json::Map<String, Value>) -> bool {
