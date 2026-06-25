@@ -1,8 +1,13 @@
 import type { KeyboardEvent, RefObject } from "react";
-import { Loader2, RefreshCw, X } from "lucide-react";
+import { FileText, Loader2, Mic, Paperclip, RefreshCw, Square, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-import type { ChatImageAttachment, ChatMessage } from "../types/api";
+import {
+  attachmentIsAudio,
+  attachmentIsImage,
+  formatAttachmentSize,
+} from "../lib/chat-attachments";
+import type { ChatAttachment, ChatMessage } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -10,18 +15,21 @@ export interface ChatPageProps {
   t: Translate;
   chatMessages: ChatMessage[];
   chatInput: string;
-  chatImageAttachments: ChatImageAttachment[];
+  chatAttachments: ChatAttachment[];
   chatAgentMode: boolean;
   chatSending: boolean;
+  chatRecording: boolean;
   chatError: string | null;
-  chatImageInputRef: RefObject<HTMLInputElement | null>;
+  chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
   onChatAgentModeChange: (value: boolean) => void;
   onClearMessages: () => void;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  onImageSelection: (fileList: FileList | null) => unknown | Promise<unknown>;
-  onRemoveImageAttachment: (index: number) => void;
+  onAttachmentSelection: (fileList: FileList | null) => unknown | Promise<unknown>;
+  onRemoveAttachment: (index: number) => void;
+  onStartVoiceRecording: () => unknown | Promise<unknown>;
+  onStopVoiceRecording: () => unknown | Promise<unknown>;
   onSendMessage: () => unknown | Promise<unknown>;
 }
 
@@ -29,18 +37,21 @@ export function ChatPage({
   t,
   chatMessages,
   chatInput,
-  chatImageAttachments,
+  chatAttachments,
   chatAgentMode,
   chatSending,
+  chatRecording,
   chatError,
-  chatImageInputRef,
+  chatAttachmentInputRef,
   toLocalTime,
   onChatAgentModeChange,
   onClearMessages,
   onChatInputChange,
   onChatInputKeyDown,
-  onImageSelection,
-  onRemoveImageAttachment,
+  onAttachmentSelection,
+  onRemoveAttachment,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
   onSendMessage,
 }: ChatPageProps) {
   return (
@@ -85,14 +96,13 @@ export function ChatPage({
               ) : (
                 <pre className="whitespace-pre-wrap break-words font-sans">{message.text}</pre>
               )}
-              {message.images && message.images.length > 0 ? (
+              {(message.attachments ?? message.images)?.length ? (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {message.images.map((image) => (
-                    <img
-                      key={`${message.id}-${image.name}`}
-                      src={image.dataUrl}
-                      alt={image.name}
-                      className="max-h-40 rounded-lg border border-white/10 object-contain"
+                  {(message.attachments ?? message.images ?? []).map((attachment, index) => (
+                    <AttachmentPreview
+                      key={`${message.id}-${attachment.name}-${index}`}
+                      attachment={attachment}
+                      t={t}
                     />
                   ))}
                 </div>
@@ -104,20 +114,16 @@ export function ChatPage({
 
       <div className="mt-4 grid shrink-0 gap-3 md:grid-cols-[1fr_auto]">
         <div className="min-w-0">
-          {chatImageAttachments.length > 0 ? (
+          {chatAttachments.length > 0 ? (
             <div className="mb-3 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-2">
-              {chatImageAttachments.map((image, index) => (
-                <div key={`${image.name}-${index}`} className="relative">
-                  <img
-                    src={image.dataUrl}
-                    alt={image.name}
-                    className="h-20 w-20 rounded-lg border border-white/10 object-cover"
-                  />
+              {chatAttachments.map((attachment, index) => (
+                <div key={`${attachment.name}-${index}`} className="relative">
+                  <AttachmentPreview attachment={attachment} t={t} compact />
                   <button
                     type="button"
-                    onClick={() => onRemoveImageAttachment(index)}
+                    onClick={() => onRemoveAttachment(index)}
                     className="absolute -right-2 -top-2 rounded-full border border-white/15 bg-black/70 p-1 text-white/80 hover:bg-black/85"
-                    title={t("移除图片", "Remove image")}
+                    title={t("移除附件", "Remove attachment")}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -127,27 +133,49 @@ export function ChatPage({
           ) : null}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <input
-              ref={chatImageInputRef}
+              ref={chatAttachmentInputRef}
               type="file"
-              accept="image/*"
               multiple
               className="hidden"
-              onChange={(event) => void onImageSelection(event.target.files)}
+              onChange={(event) => void onAttachmentSelection(event.target.files)}
             />
             <button
               type="button"
-              onClick={() => chatImageInputRef.current?.click()}
-              className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+              onClick={() => chatAttachmentInputRef.current?.click()}
+              disabled={chatSending || chatRecording}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {t("选图片", "Choose images")}
+              <Paperclip className="h-3.5 w-3.5" />
+              {t("上传图片/文件", "Upload image/file")}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void (chatRecording ? onStopVoiceRecording() : onStartVoiceRecording())
+              }
+              disabled={chatSending}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {chatRecording ? (
+                <Square className="h-3.5 w-3.5" />
+              ) : (
+                <Mic className="h-3.5 w-3.5" />
+              )}
+              {chatRecording ? t("停止录音", "Stop recording") : t("输入语音", "Voice input")}
             </button>
             <span className="text-xs text-white/45">
-              {t("可直接发图，也可以带一句说明。", "You can send images directly or add a short instruction.")}
+              {t(
+                "可直接发送图片、文件或语音，也可以带一句说明。",
+                "Send images, files, or voice directly, with an optional note.",
+              )}
             </span>
           </div>
           <textarea
             className="theme-input min-h-24 w-full resize-none"
-            placeholder={t("例如：你好，请告诉我你现在能做什么；或发一张图片让我看看", "For example: Hello, tell me what you can do; or send an image for analysis")}
+            placeholder={t(
+              "例如：你好，请告诉我你现在能做什么；或上传附件让我看看",
+              "For example: Hello, tell me what you can do; or upload an attachment for review",
+            )}
             value={chatInput}
             onChange={(event) => onChatInputChange(event.target.value)}
             onKeyDown={onChatInputKeyDown}
@@ -156,10 +184,16 @@ export function ChatPage({
         <button
           type="button"
           onClick={() => void onSendMessage()}
-          disabled={chatSending || (!chatInput.trim() && chatImageAttachments.length === 0)}
+          disabled={
+            chatSending || chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
+          }
           className="theme-accent-btn shrink-0"
         >
-          {chatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {chatSending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
           {t("发送", "Send")}
         </button>
       </div>
@@ -169,5 +203,70 @@ export function ChatPage({
         </p>
       ) : null}
     </section>
+  );
+}
+
+function AttachmentPreview({
+  attachment,
+  t,
+  compact = false,
+}: {
+  attachment: ChatAttachment;
+  t: Translate;
+  compact?: boolean;
+}) {
+  if (attachmentIsImage(attachment)) {
+    return (
+      <img
+        src={attachment.dataUrl}
+        alt={attachment.name}
+        className={
+          compact
+            ? "h-20 w-20 rounded-lg border border-white/10 object-cover"
+            : "max-h-40 rounded-lg border border-white/10 object-contain"
+        }
+      />
+    );
+  }
+  if (attachmentIsAudio(attachment)) {
+    return (
+      <div
+        className={
+          compact
+            ? "w-52 rounded-lg border border-white/10 bg-black/25 p-2"
+            : "w-64 rounded-lg border border-white/10 bg-black/25 p-2"
+        }
+      >
+        <div className="mb-2 flex items-center gap-2 text-xs text-white/75">
+          <Mic className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 truncate" title={attachment.name}>
+            {attachment.name}
+          </span>
+        </div>
+        <audio
+          controls
+          src={attachment.dataUrl}
+          className="h-8 w-full"
+          title={t("语音预览", "Voice preview")}
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={
+        compact
+          ? "flex h-20 w-44 items-center gap-2 rounded-lg border border-white/10 bg-black/25 p-2"
+          : "flex max-w-72 items-center gap-2 rounded-lg border border-white/10 bg-black/25 p-2"
+      }
+    >
+      <FileText className="h-5 w-5 shrink-0 text-white/70" />
+      <div className="min-w-0 text-xs">
+        <div className="truncate text-white/80" title={attachment.name}>
+          {attachment.name}
+        </div>
+        <div className="text-white/45">{formatAttachmentSize(attachment.size)}</div>
+      </div>
+    </div>
   );
 }

@@ -1219,7 +1219,7 @@ pub(super) async fn prepare_ask_routing(
     payload: &Value,
     prompt: &str,
     source: &str,
-) -> PreparedAskRouting {
+) -> anyhow::Result<PreparedAskRouting> {
     let agent_mode = payload
         .get("agent_mode")
         .and_then(|v| v.as_bool())
@@ -1228,7 +1228,13 @@ pub(super) async fn prepare_ask_routing(
     let (now_iso, timezone_str, schedule_rules) =
         schedule_service::schedule_context_for_normalizer(state);
     let session_snapshot = crate::conversation_state::load_active_session_snapshot(state, task);
-    let routed_prompt = prompt.to_string();
+    let routed_prompt =
+        match crate::transcribe_attached_audio_for_ask(state, task, payload, prompt).await? {
+            Some(transcribed_prompt) => transcribed_prompt,
+            None => prompt.to_string(),
+        };
+    let routed_prompt =
+        crate::ui_attachments::prompt_with_ui_attachment_context(&routed_prompt, payload);
     let routed_prompt_surface =
         crate::intent::surface_signals::analyze_prompt_surface(&routed_prompt);
     let mut clarify_followup_resolution =
@@ -1288,14 +1294,14 @@ pub(super) async fn prepare_ask_routing(
             task.task_id,
             route_result.route_reason
         );
-        return PreparedAskRouting {
+        return Ok(PreparedAskRouting {
             route_result,
             execution_recipe_hint: None,
             turn_analysis: None,
             clarify_fallback_source: None,
             resolved_prompt,
             agent_mode,
-        };
+        });
     }
     let normalizer_prompt = match &clarify_followup_resolution {
         crate::intent::continuation_resolver::ClarifyFollowupResolution::NormalizerRewrite {
@@ -1533,14 +1539,14 @@ pub(super) async fn prepare_ask_routing(
         resume_runtime.should_apply_context,
     );
     route_result.ask_mode = ask_mode;
-    PreparedAskRouting {
+    Ok(PreparedAskRouting {
         route_result,
         execution_recipe_hint,
         turn_analysis,
         clarify_fallback_source,
         resolved_prompt,
         agent_mode,
-    }
+    })
 }
 
 #[cfg(test)]

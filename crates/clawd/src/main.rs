@@ -79,6 +79,7 @@ mod task_context_builder;
 mod task_contract;
 mod task_journal;
 mod task_lifecycle;
+mod ui_attachments;
 mod verifier;
 mod virtual_tools;
 mod visible_text;
@@ -93,7 +94,7 @@ pub(crate) use app_helpers::{
 };
 pub(crate) use ask_flow::{
     analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
-    build_resume_followup_discussion_prompt, execute_ask_routed,
+    build_resume_followup_discussion_prompt, execute_ask_routed, transcribe_attached_audio_for_ask,
 };
 use bootstrap::{
     active_prompt_vendor_name, load_command_intent_runtime, load_feishu_send_config,
@@ -971,6 +972,19 @@ async fn submit_task(
 
     let task_id = Uuid::new_v4();
     let call_id = task_id.to_string();
+    if let Err(err) = ui_attachments::materialize_ui_task_attachments(
+        &state,
+        &mut req.payload,
+        effective_user_id,
+        effective_chat_id,
+        &call_id,
+    ) {
+        warn!(
+            "ui attachment materialize failed call_id={} user_id={} chat_id={} err={}",
+            call_id, effective_user_id, effective_chat_id, err
+        );
+        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, err);
+    }
     let kind = task_kind_name(&req.kind);
     let payload = build_submit_task_payload(
         req.payload,

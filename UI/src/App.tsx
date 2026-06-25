@@ -562,17 +562,20 @@ export default function App() {
   const {
     chatMessages,
     chatInput,
-    chatImageAttachments,
+    chatAttachments,
     chatAgentMode,
     chatSending,
+    chatRecording,
     chatError,
-    chatImageInputRef,
+    chatAttachmentInputRef,
     setChatAgentMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
-    handleChatImageSelection,
-    removeChatImageAttachment,
+    handleChatAttachmentSelection,
+    removeChatAttachment,
+    startChatVoiceRecording,
+    stopChatVoiceRecording,
     sendChatMessage,
   } = useChatRuntime({
     apiFetch,
@@ -1314,18 +1317,21 @@ export default function App() {
               t={t}
               chatMessages={chatMessages}
               chatInput={chatInput}
-              chatImageAttachments={chatImageAttachments}
+              chatAttachments={chatAttachments}
               chatAgentMode={chatAgentMode}
               chatSending={chatSending}
+              chatRecording={chatRecording}
               chatError={chatError}
-              chatImageInputRef={chatImageInputRef}
+              chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}
-              onImageSelection={handleChatImageSelection}
-              onRemoveImageAttachment={removeChatImageAttachment}
+              onAttachmentSelection={handleChatAttachmentSelection}
+              onRemoveAttachment={removeChatAttachment}
+              onStartVoiceRecording={startChatVoiceRecording}
+              onStopVoiceRecording={stopChatVoiceRecording}
               onSendMessage={sendChatMessage}
             />
           ) : null}

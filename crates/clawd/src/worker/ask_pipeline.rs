@@ -1267,7 +1267,7 @@ pub(super) async fn prepare_ask_flow(
     prompt: &str,
     source: &str,
 ) -> Result<PreparedAskFlow> {
-    let prepared_routing = super::prepare_ask_routing(state, task, payload, prompt, source).await;
+    let prepared_routing = super::prepare_ask_routing(state, task, payload, prompt, source).await?;
     let semantic_answer_candidate_draft =
         embedded_normalizer_answer_candidate(&prepared_routing.route_result.resolved_intent)
             .map(ToOwned::to_owned);
