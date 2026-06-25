@@ -79,7 +79,8 @@ use contract_repair::{
     repair_config_validation_findings_contract,
     repair_generic_path_content_grounded_summary_contract,
     repair_session_alias_listing_plus_content_summary_contract,
-    repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_version_contract,
+    repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_table_listing_contract,
+    repair_sqlite_structured_version_contract,
     repair_summary_only_content_excerpt_with_summary_contract,
 };
 use default_config::{
@@ -546,6 +547,12 @@ fn apply_ask_post_route(
     repair_generic_path_content_grounded_summary_contract(&mut route_result);
     repair_sqlite_path_excerpt_judgment_contract(state, prompt, resolved_prompt, &mut route_result);
     repair_sqlite_structured_version_contract(state, prompt, resolved_prompt, &mut route_result);
+    repair_sqlite_structured_table_listing_contract(
+        state,
+        prompt,
+        resolved_prompt,
+        &mut route_result,
+    );
     repair_config_validation_findings_contract(state, prompt, resolved_prompt, &mut route_result);
     prebind_file_delivery_locator_from_recent_ordered_resolved_prompt(
         state,
