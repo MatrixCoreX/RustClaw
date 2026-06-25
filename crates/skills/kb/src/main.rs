@@ -380,19 +380,40 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
                 return Err(anyhow!(warnings.join("; ")));
             }
         };
+    let total_docs = index.docs.len();
+    let total_chunks = index.chunks.len();
+    let warnings_empty = warnings.is_empty();
+    let effective_success = kb_ingest_effective_success(
+        ingested_docs,
+        total_docs,
+        unified_index_synced,
+        warnings_empty,
+    );
+    let idempotent_success = ingested_docs == 0 && effective_success;
+    let result_kind = kb_ingest_result_kind(
+        ingested_docs,
+        total_docs,
+        unified_index_synced,
+        unified_index_rows,
+        warnings_empty,
+    );
 
     Ok(json!({
         "action": "ingest",
         "status":"ok",
+        "effective_status": if effective_success { "ok" } else { "needs_attention" },
+        "result_kind": result_kind,
+        "effective_success": effective_success,
+        "idempotent_success": idempotent_success,
         "namespace": ingest.namespace,
         "path": ingest.paths.first().cloned().unwrap_or_default(),
         "paths": ingest.paths,
-        "summary": format!("ingest completed: {} docs updated", ingested_docs),
+        "summary": result_kind,
         "stats": {
             "ingested_docs": ingested_docs,
             "removed_docs": removed_docs,
-            "total_docs": index.docs.len(),
-            "total_chunks": index.chunks.len(),
+            "total_docs": total_docs,
+            "total_chunks": total_chunks,
             "skipped_files": skipped_files,
             "chunk_size": ingest.chunk_size,
             "chunk_overlap": ingest.chunk_overlap,
@@ -401,6 +422,33 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             "warnings": warnings
         }
     }))
+}
+
+fn kb_ingest_effective_success(
+    ingested_docs: usize,
+    total_docs: usize,
+    unified_index_synced: bool,
+    warnings_empty: bool,
+) -> bool {
+    warnings_empty && unified_index_synced && (ingested_docs > 0 || total_docs > 0)
+}
+
+fn kb_ingest_result_kind(
+    ingested_docs: usize,
+    total_docs: usize,
+    unified_index_synced: bool,
+    unified_index_rows: usize,
+    warnings_empty: bool,
+) -> &'static str {
+    if ingested_docs > 0 {
+        "updated"
+    } else if warnings_empty && total_docs > 0 && unified_index_synced && unified_index_rows > 0 {
+        "already_indexed"
+    } else if total_docs > 0 {
+        "no_new_documents"
+    } else {
+        "no_documents_indexed"
+    }
 }
 
 fn do_search(runtime: &KbRuntime, args: &Value) -> Result<Value> {

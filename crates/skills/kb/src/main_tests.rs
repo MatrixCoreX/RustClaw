@@ -90,6 +90,70 @@ fn ingest_success_extra_includes_path_evidence_fields() {
 }
 
 #[test]
+fn ingest_unchanged_file_marks_idempotent_success() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_kb_ingest_idempotent_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp kb workspace");
+    fs::write(root.join("README.md"), "# Demo\n\nIndexed content.").expect("write README fixture");
+    let runtime = KbRuntime {
+        scope_user_key: "user:test".to_string(),
+        workspace_root: root.clone(),
+        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
+        unified_index_busy_timeout_ms: None,
+    };
+    let args = json!({
+        "action": "ingest",
+        "namespace": "demo_docs_nl",
+        "paths": ["README.md"]
+    });
+
+    let first = do_ingest(&runtime, &args).expect("first ingest succeeds");
+    let second = do_ingest(&runtime, &args).expect("second ingest succeeds");
+
+    assert_eq!(
+        first.get("result_kind").and_then(|value| value.as_str()),
+        Some("updated")
+    );
+    assert_eq!(
+        second
+            .pointer("/stats/ingested_docs")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
+        second
+            .get("effective_status")
+            .and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert_eq!(
+        second.get("result_kind").and_then(|value| value.as_str()),
+        Some("already_indexed")
+    );
+    assert_eq!(
+        second.get("summary").and_then(|value| value.as_str()),
+        Some("already_indexed")
+    );
+    assert_eq!(
+        second
+            .get("idempotent_success")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        second
+            .get("effective_success")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn tokenize_supports_cjk_queries() {
     let terms = tokenize("基础健康检查");
     assert!(terms.contains(&"基础".to_string()));

@@ -25,6 +25,10 @@ fn output_format_machine_payload_gap_detects_structured_reply_only() {
         &verifier,
         r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
     ));
+    assert!(answer_verifier_output_format_machine_payload_gap(
+        &verifier,
+        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+    ));
     assert!(!answer_verifier_output_format_machine_payload_gap(
         &verifier,
         "configs/config.toml has one observed risk."

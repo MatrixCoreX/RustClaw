@@ -1,13 +1,13 @@
 use super::*;
 
 #[tokio::test]
-async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis() {
+async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis_for_strict_contract() {
     let state = test_state();
     let task = claimed_task("task-filesystem-mutation-lifecycle");
     let mut route = free_route_result();
     route.resolved_intent = "filesystem mutation lifecycle".to_string();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
@@ -116,4 +116,90 @@ async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis() {
     assert!(reply.text.contains("note.txt"));
     assert!(reply.text.contains("alpha"));
     assert!(reply.text.contains("remove_path"));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_uses_status_line_for_visible_filesystem_mutation_success() {
+    let state = test_state();
+    let task = claimed_task("task-kb-visible-filesystem-mutation");
+    let mut route = free_route_result();
+    route.resolved_intent = "kb ingest status".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let synthesis = serde_json::json!({
+        "schema_version": 1,
+        "semantic_kind": "filesystem_mutation_result",
+        "capability": "kb",
+        "status": "ok",
+        "effective_status": "ok",
+        "effective_success": true,
+        "idempotent_success": true,
+        "result_kinds": ["already_indexed"],
+        "observed_actions": ["ingest"],
+        "namespaces": ["demo_docs_nl"],
+        "paths": ["README.md"],
+        "steps": [{
+            "step_id": "step_1",
+            "skill": "kb",
+            "status": "ok",
+            "effective_status": "ok",
+            "effective_success": true,
+            "idempotent_success": true,
+            "action": "ingest",
+            "namespace": "demo_docs_nl",
+            "path": "README.md",
+            "paths": ["README.md"],
+            "result_kind": "already_indexed",
+            "stats": {
+                "ingested_docs": 0,
+                "total_docs": 1,
+                "total_chunks": 59,
+                "unified_index_rows": 59,
+                "unified_index_synced": true
+            }
+        }]
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_publishable_synthesis_output = Some(synthesis.clone());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "kb",
+        r#"{"status":"ok","extra":{"action":"ingest","namespace":"demo_docs_nl","path":"README.md","effective_status":"ok","result_kind":"already_indexed","effective_success":true,"idempotent_success":true,"stats":{"total_chunks":59}}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        &synthesis,
+    ));
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "ingest README.md into demo_docs_nl",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(
+        reply.text,
+        "status=ok effective_status=ok result_kind=already_indexed action=ingest path=README.md namespace=demo_docs_nl total_chunks=59"
+    );
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
 }

@@ -301,6 +301,12 @@ fn visible_answer_is_machine_payload(text: &str) -> bool {
                 || object.contains_key("reason_code")
                 || object.contains_key("candidates")
                 || object.contains_key("risks")
+                || object.contains_key("semantic_kind")
+                || object
+                    .get("output_format")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|format| format == "machine_json")
+                || (object.contains_key("status") && object.contains_key("steps"))
         })
 }
 
