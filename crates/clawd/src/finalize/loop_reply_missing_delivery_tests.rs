@@ -190,6 +190,84 @@ fn language_rendered_failed_step_message_counts_as_publishable_completion() {
     assert_eq!(summary.format_ok, Some(true));
 }
 
+#[test]
+fn observed_language_delivery_with_complete_contract_evidence_counts_as_publishable() {
+    let task = claimed_task("task-observed-language-evidence-complete");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "log_analyze",
+        r#"{"action":"analyze_log","keyword_counts":{},"level_counts":{},"path":"/tmp/app.log","total_lines":42}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/app.log".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let summary = crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+        contract_ok: false,
+        completion_ok: Some(false),
+        grounded_ok: Some(false),
+        format_ok: Some(false),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    };
+
+    assert!(observed_delivery_has_complete_contract_evidence(
+        &task,
+        "summarize the observed log analysis",
+        &loop_state,
+        Some(&ctx),
+        Some(&summary),
+        "no notable log findings"
+    ));
+
+    let promoted = promote_observed_language_delivery_summary(Some(summary), &loop_state);
+    assert_eq!(
+        promoted.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+    assert_eq!(promoted.contract_ok, true);
+    assert_eq!(promoted.completion_ok, Some(true));
+    assert_eq!(promoted.grounded_ok, Some(true));
+    assert_eq!(promoted.format_ok, Some(true));
+    assert_eq!(promoted.needs_clarify, Some(false));
+
+    let (status, should_fail) =
+        observed_execution_without_publishable_delivery_outcome(true, Some(&promoted));
+    assert_eq!(status, crate::task_journal::TaskJournalFinalStatus::Success);
+    assert!(!should_fail);
+}
+
+#[test]
+fn free_none_observed_delivery_does_not_promote_empty_contract_coverage() {
+    let task = claimed_task("task-observed-language-free-none");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", "alpha\nbeta\n"));
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(free_route_result()),
+        ..Default::default()
+    };
+
+    assert!(!observed_delivery_has_complete_contract_evidence(
+        &task,
+        "inspect command output",
+        &loop_state,
+        Some(&ctx),
+        None,
+        "alpha beta"
+    ));
+}
+
 #[tokio::test]
 async fn observed_execution_without_delivery_skips_summary_for_extract_field_result() {
     let state = test_state();

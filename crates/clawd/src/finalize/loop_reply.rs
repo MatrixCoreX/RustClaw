@@ -265,8 +265,9 @@ use missing_delivery::{
 #[cfg(test)]
 use missing_delivery::{
     language_rendered_failed_step_finalizer_summary,
+    observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
-    verify_summary_requires_resume_confirmation,
+    promote_observed_language_delivery_summary, verify_summary_requires_resume_confirmation,
 };
 
 #[path = "loop_reply_route_helpers.rs"]

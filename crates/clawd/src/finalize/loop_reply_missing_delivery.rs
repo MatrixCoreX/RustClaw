@@ -212,6 +212,7 @@ async fn missing_delivery_after_observation_message(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
     clarify_reason: &str,
+    observed_contract_evidence_complete: bool,
 ) -> String {
     let prefer_language_rendered_failed_step =
         route_prefers_language_rendered_execution_failed_step(agent_run_context);
@@ -281,20 +282,39 @@ async fn missing_delivery_after_observation_message(
         return answer;
     }
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let contract = crate::fallback::UserResponseContract::tool_failure(
-        "final_answer_missing_after_observed_execution",
-        user_text,
-        &route_resolved_intent(agent_run_context),
-        observed_execution_facts_for_missing_delivery(loop_state, clarify_reason),
-        vec![
-            "task_success_claim_allowed=false".to_string(),
-            "ask_item_selection_when_outputs_attached=false".to_string(),
-            "response_scope=observed_blocker_or_incomplete_result".to_string(),
-            "next_step_policy=only_if_observed_facts_do_not_answer_request".to_string(),
-        ],
-        "brief_failure_with_next_step",
-        &language_hint,
-    );
+    let observed_facts = observed_execution_facts_for_missing_delivery(loop_state, clarify_reason);
+    let contract = if observed_contract_evidence_complete {
+        crate::fallback::UserResponseContract {
+            kind: crate::fallback::UserResponseKind::FinalAnswer,
+            reason_code: "observed_execution_contract_evidence_complete".to_string(),
+            missing_slots: Vec::new(),
+            observed_facts,
+            policy_boundary: vec![
+                "task_success_claim_allowed=true".to_string(),
+                "answer_only_from_observed_facts=true".to_string(),
+                "ask_item_selection_when_outputs_attached=false".to_string(),
+            ],
+            original_user_request: user_text.trim().to_string(),
+            resolved_user_intent: route_resolved_intent(agent_run_context),
+            response_shape: "brief_answer_from_observed_facts".to_string(),
+            language_hint,
+        }
+    } else {
+        crate::fallback::UserResponseContract::tool_failure(
+            "final_answer_missing_after_observed_execution",
+            user_text,
+            &route_resolved_intent(agent_run_context),
+            observed_facts,
+            vec![
+                "task_success_claim_allowed=false".to_string(),
+                "ask_item_selection_when_outputs_attached=false".to_string(),
+                "response_scope=observed_blocker_or_incomplete_result".to_string(),
+                "next_step_policy=only_if_observed_facts_do_not_answer_request".to_string(),
+            ],
+            "brief_failure_with_next_step",
+            &language_hint,
+        )
+    };
     crate::fallback::compose_user_response_from_contract(
         state,
         task,
@@ -429,6 +449,13 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
                 .with_task_journal(journal),
         );
     }
+    let observed_contract_evidence_complete = observed_execution_has_complete_contract_evidence(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        finalizer_summary.as_ref(),
+    );
     let message = missing_delivery_after_observation_message(
         state,
         task,
@@ -436,6 +463,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
         loop_state,
         agent_run_context,
         clarify_reason,
+        observed_contract_evidence_complete,
     )
     .await;
     let mut delivery_messages = Vec::new();
@@ -453,15 +481,31 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     let language_rendered_failed_step_summary =
         language_rendered_failed_step_finalizer_summary(agent_run_context, loop_state, &message);
     let has_language_rendered_failed_step_answer = language_rendered_failed_step_summary.is_some();
-    let finalizer_summary = finalizer_summary
+    let mut finalizer_summary = finalizer_summary
         .or_else(|| {
             deterministic_answer
                 .as_ref()
                 .map(|(_, summary)| summary.clone())
         })
         .or(language_rendered_failed_step_summary);
+    let has_observed_language_answer = observed_delivery_has_complete_contract_evidence(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        finalizer_summary.as_ref(),
+        &message,
+    );
+    if has_observed_language_answer {
+        finalizer_summary = Some(promote_observed_language_delivery_summary(
+            finalizer_summary,
+            loop_state,
+        ));
+    }
     let (final_status, should_fail_task) = observed_execution_without_publishable_delivery_outcome(
-        has_deterministic_answer || has_language_rendered_failed_step_answer,
+        has_deterministic_answer
+            || has_language_rendered_failed_step_answer
+            || has_observed_language_answer,
         finalizer_summary.as_ref(),
     );
     let journal = build_loop_journal(
@@ -545,6 +589,92 @@ pub(super) fn language_rendered_failed_step_finalizer_summary(
     (route_prefers_language_rendered_execution_failed_step(agent_run_context)
         && planned_delivery_identifies_failed_observed_step(message, loop_state))
     .then(|| deterministic_observed_execution_status_summary(loop_state))
+}
+
+pub(super) fn observed_delivery_has_complete_contract_evidence(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+    message: &str,
+) -> bool {
+    !message.trim().is_empty()
+        && observed_execution_has_complete_contract_evidence(
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+            finalizer_summary,
+        )
+}
+
+fn observed_execution_has_complete_contract_evidence(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+    {
+        return false;
+    }
+    if route.needs_clarify
+        || finalizer_summary
+            .and_then(|summary| summary.needs_clarify)
+            .unwrap_or(false)
+    {
+        return false;
+    }
+    if !loop_state.executed_step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer" | "answer_verifier"
+            )
+            && output_text_from_execution_result(step).is_some()
+    }) {
+        return false;
+    }
+    let journal = build_loop_journal(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        finalizer_summary.cloned(),
+        true,
+        "",
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+    let coverage = crate::task_journal::evidence_coverage_for_route(route, &journal);
+    let has_contractual_evidence =
+        !coverage.required_evidence.is_empty() || coverage.evidence_expression.is_some();
+    has_contractual_evidence && coverage.is_complete()
+}
+
+pub(super) fn promote_observed_language_delivery_summary(
+    base: Option<crate::task_journal::TaskJournalFinalizerSummary>,
+    loop_state: &crate::agent_engine::LoopState,
+) -> crate::task_journal::TaskJournalFinalizerSummary {
+    let mut summary = base.unwrap_or_default();
+    summary.stage = Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric);
+    summary.disposition = Some(crate::finalize::FinalizerDisposition::QualifiedCompletion);
+    summary.contract_ok = true;
+    summary.completion_ok = Some(true);
+    summary.grounded_ok = Some(true);
+    summary.format_ok = Some(true);
+    summary.needs_clarify = Some(false);
+    summary.confidence = Some(summary.confidence.unwrap_or(0.0).max(0.8));
+    summary.used_evidence_ids_count = summary
+        .used_evidence_ids_count
+        .max(loop_state.executed_step_results.len());
+    summary
 }
 
 pub(super) fn observed_execution_without_publishable_delivery_outcome(
