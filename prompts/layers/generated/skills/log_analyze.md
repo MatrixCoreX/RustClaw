@@ -12,6 +12,7 @@
 - It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
 - It can narrow results with keyword filters.
 - Even without explicit `keywords`, it returns structured severity evidence (`level_counts`, `recent_notable_lines`) and recovery evidence (`recovery_counts`, `recent_recovery_lines`) so warning/error and retry/recovery lines remain observable.
+- Planner selection: prefer `log_analyze` over generic file reading when the task asks for log health, notable anomalies, errors, warnings, failures, timeouts, retries, or recovery signals in a log file or log directory.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
