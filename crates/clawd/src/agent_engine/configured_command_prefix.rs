@@ -1220,6 +1220,12 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         loop_state,
         actions,
     );
+    let actions = replace_file_delivery_empty_write_with_path_observation(
+        state,
+        route_result,
+        loop_state,
+        actions,
+    );
     let actions = replace_explicit_command_substitute_plan_with_run_cmd(
         state,
         route_result,

@@ -367,7 +367,7 @@ fn quoted_literal_content_presence_uses_deterministic_grep_plan() {
         "Check virtual_tools.rs for the quoted marker NEEDLE_TOKEN_123.".to_string();
     let request = "Check virtual_tools.rs for “NEEDLE_TOKEN_123”.";
 
-    let plan = super::super::content_presence_quoted_literal_deterministic_plan_result(
+    let plan = super::super::content_presence_query_deterministic_plan_result(
         &state,
         request,
         Some(&route),
@@ -391,6 +391,54 @@ fn quoted_literal_content_presence_uses_deterministic_grep_plan() {
         args.get("query").and_then(Value::as_str),
         Some("NEEDLE_TOKEN_123")
     );
+}
+
+#[test]
+fn selector_query_content_presence_uses_deterministic_grep_plan() {
+    let root = TempDirGuard::new("selector_query_content_presence");
+    let target = root.path.join("app.log");
+    fs::write(
+        &target,
+        "INFO boot\nERROR provider timeout\nINFO recovered\n",
+    )
+    .expect("write target");
+    let target_path = target.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = target_path.clone();
+    route.route_reason =
+        "llm_semantic_contract_repair; selector_query=ERROR; locator_kind=path".to_string();
+
+    let plan = super::super::content_presence_query_deterministic_plan_result(
+        &state,
+        "list matching content lines",
+        Some(&route),
+        &LoopState::new(1),
+        "list matching content lines",
+        Some("list matching content lines"),
+        Some(target_path.as_str()),
+    )
+    .expect("selector_query content presence should use grep_text");
+
+    assert_eq!(plan.steps.len(), 1);
+    let first = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be an action");
+    let args = expect_planned_call(&first, "fs_basic", "grep_text");
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(target_path.as_str())
+    );
+    assert_eq!(args.get("query").and_then(Value::as_str), Some("ERROR"));
 }
 
 #[test]

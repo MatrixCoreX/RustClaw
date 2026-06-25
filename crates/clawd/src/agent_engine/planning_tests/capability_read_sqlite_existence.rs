@@ -1113,6 +1113,155 @@ fn file_delivery_respond_only_gets_path_observation_before_file_token() {
 }
 
 #[test]
+fn file_delivery_respond_only_missing_locator_gets_missing_path_observation() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("file_delivery_missing_observation");
+    state.skill_rt.workspace_root = tmp.path.clone();
+    let mut route = base_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "missing_report.md".to_string();
+    let actions = vec![AgentAction::Respond {
+        content: "missing".to_string(),
+    }];
+
+    let rewritten = replace_file_delivery_respond_only_with_path_observation(
+        &state,
+        Some(&route),
+        &LoopState::default(),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 1);
+    let args = expect_planned_call(&rewritten[0], "fs_basic", "stat_paths");
+    assert_eq!(
+        args.get("include_missing").and_then(Value::as_bool),
+        Some(true)
+    );
+    let paths = args
+        .get("paths")
+        .and_then(Value::as_array)
+        .expect("paths array");
+    let expected_path = tmp.path.join("missing_report.md").display().to_string();
+    assert_eq!(
+        paths.first().and_then(Value::as_str),
+        Some(expected_path.as_str())
+    );
+}
+
+#[test]
+fn file_delivery_empty_write_placeholder_gets_missing_path_observation() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("file_delivery_empty_write_missing_observation");
+    state.skill_rt.workspace_root = tmp.path.clone();
+    let mut route = base_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "missing_report.md".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "stat_paths",
+                "paths": ["missing_report.md"],
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "missing_report.md",
+                "content": "",
+            }),
+        },
+        AgentAction::Respond {
+            content: "FILE:{{s2.path}}".to_string(),
+        },
+    ];
+
+    let rewritten = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::default(),
+        "deliver file",
+        None,
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 1);
+    let args = expect_planned_call(&rewritten[0], "fs_basic", "stat_paths");
+    assert_eq!(
+        args.get("include_missing").and_then(Value::as_bool),
+        Some(true)
+    );
+    let paths = args
+        .get("paths")
+        .and_then(Value::as_array)
+        .expect("paths array");
+    let expected_path = tmp.path.join("missing_report.md").display().to_string();
+    assert_eq!(
+        paths.first().and_then(Value::as_str),
+        Some(expected_path.as_str())
+    );
+}
+
+#[test]
+fn file_delivery_empty_write_placeholder_existing_file_gets_file_token() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("file_delivery_empty_write_existing_observation");
+    state.skill_rt.workspace_root = tmp.path.clone();
+    let target = tmp.path.join("report.md");
+    fs::write(&target, "ready\n").expect("write target");
+    let mut route = base_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "report.md".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "report.md",
+                "content": "",
+            }),
+        },
+        AgentAction::Respond {
+            content: "FILE:{{s1.path}}".to_string(),
+        },
+    ];
+
+    let rewritten = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::default(),
+        "deliver file",
+        None,
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 2);
+    let args = expect_planned_call(&rewritten[0], "fs_basic", "stat_paths");
+    assert_eq!(
+        args.get("include_missing").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(matches!(
+        &rewritten[1],
+        AgentAction::Respond { content } if content == &format!("FILE:{}", target.display())
+    ));
+}
+
+#[test]
 fn generated_file_write_delivery_appends_file_token() {
     let mut state = test_state();
     let tmp = TempDirGuard::new("generated_file_delivery_append_token");
