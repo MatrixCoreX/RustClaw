@@ -294,6 +294,38 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
 }
 
 #[test]
+fn structural_config_field_value_repairs_direct_misroute_from_current_request() {
+    let request = "只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::DirectAnswer,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "configs/config.toml");
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+}
+
+#[test]
 fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_contract() {
     let request = "configs/config.toml skills.skill_switches.config_edit_nl_plan = true";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);

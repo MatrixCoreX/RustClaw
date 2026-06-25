@@ -336,8 +336,16 @@ pub(super) fn normalize_evidence_contract_actions(
     );
     let actions = replace_workspace_synthesis_respond_only_plan(route_result, loop_state, actions);
     let actions = rewrite_extract_field_alias_args(actions);
+    let actions = rewrite_action_ref_tool_calls(actions);
     let actions = rewrite_config_change_preview_to_config_edit_plan(
         route_result,
+        user_text,
+        auto_locator_path,
+        actions,
+    );
+    let actions = rewrite_config_mutation_plan_only_to_config_edit_plan(
+        route_result,
+        loop_state,
         user_text,
         auto_locator_path,
         actions,
@@ -440,6 +448,109 @@ pub(super) fn normalize_evidence_contract_actions(
     let actions =
         strip_workspace_synthesis_without_text_evidence(route_result, loop_state, actions);
     actions
+}
+
+pub(super) fn rewrite_action_ref_tool_calls(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallTool { tool, args } => {
+                let (tool, args, changed) = rewrite_action_ref_call(tool, args);
+                if changed {
+                    info!(
+                        "plan_rewrite_action_ref_tool_call tool={}",
+                        crate::truncate_for_log(&tool)
+                    );
+                }
+                AgentAction::CallTool { tool, args }
+            }
+            AgentAction::CallSkill { skill, args } => {
+                let (skill, args, changed) = rewrite_action_ref_call(skill, args);
+                if changed {
+                    info!(
+                        "plan_rewrite_action_ref_skill_call skill={}",
+                        crate::truncate_for_log(&skill)
+                    );
+                }
+                AgentAction::CallSkill { skill, args }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn rewrite_action_ref_call(raw_skill: String, args: Value) -> (String, Value, bool) {
+    let mut skill = raw_skill;
+    let mut args = args;
+    let mut changed = false;
+    if let Some((skill_part, action_part)) =
+        skill.split_once('.').map(|(skill_part, action_part)| {
+            (
+                skill_part.trim().to_string(),
+                action_part.trim().to_string(),
+            )
+        })
+    {
+        if !skill_part.is_empty() && !action_part.is_empty() {
+            skill = skill_part;
+            if let Some(obj) = args.as_object_mut() {
+                obj.entry("action".to_string())
+                    .or_insert_with(|| Value::String(action_part));
+            }
+            changed = true;
+        }
+    }
+    if normalize_config_edit_value_aliases(&skill, &mut args) {
+        changed = true;
+    }
+    (skill, args, changed)
+}
+
+fn normalize_config_edit_value_aliases(skill: &str, args: &mut Value) -> bool {
+    if !skill.eq_ignore_ascii_case("config_edit") {
+        return false;
+    }
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    if obj.contains_key("value") {
+        return false;
+    }
+    let Some(value) = obj.get("new_value").cloned() else {
+        return false;
+    };
+    obj.insert("value".to_string(), value);
+    true
+}
+
+pub(super) fn rewrite_config_mutation_plan_only_to_config_edit_plan(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route_has_unresolved_clarify_or_locator_marker(route)
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
+        || loop_state.execution_recipe.kind
+            == crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+        || actions.iter().any(action_is_obvious_mutation)
+    {
+        return actions;
+    }
+    let Some(parsed) = parse_config_change_preview(user_text, route, auto_locator_path) else {
+        return actions;
+    };
+    info!(
+        "plan_rewrite_config_mutation_plan_only_to_config_edit_plan path={} field={}",
+        crate::truncate_for_log(&parsed.path),
+        crate::truncate_for_log(&parsed.field_path)
+    );
+    vec![config_edit_change_action("plan_config_change", &parsed)]
 }
 
 pub(super) fn rewrite_active_anchor_basename_file_reads_to_bound_target(
