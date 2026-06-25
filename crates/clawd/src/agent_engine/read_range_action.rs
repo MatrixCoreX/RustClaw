@@ -946,14 +946,15 @@ pub(super) fn rewrite_config_mutation_to_config_edit_closed_loop(
     let Some(route) = route_result else {
         return actions;
     };
+    let has_config_change_recipe = loop_state.execution_recipe.kind
+        == crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+        && loop_state.execution_recipe.profile
+            == crate::execution_recipe::ExecutionRecipeProfile::ConfigChange;
+    let has_planned_mutation = actions.iter().any(action_is_obvious_mutation);
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
-        || loop_state.execution_recipe.kind
-            != crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
-        || loop_state.execution_recipe.profile
-            != crate::execution_recipe::ExecutionRecipeProfile::ConfigChange
-        || actions.iter().any(action_is_obvious_mutation)
+        || !(has_config_change_recipe || has_planned_mutation)
     {
         return actions;
     }

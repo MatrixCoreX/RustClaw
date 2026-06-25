@@ -285,6 +285,7 @@ pub(super) fn config_mutation_contract_from_surface(
                 | OutputSemanticKind::ConfigValidation
                 | OutputSemanticKind::ConfigRiskAssessment
                 | OutputSemanticKind::ConfigMutation
+                | OutputSemanticKind::FilesystemMutationResult
                 | OutputSemanticKind::ExecutionFailedStep
         )
     {
