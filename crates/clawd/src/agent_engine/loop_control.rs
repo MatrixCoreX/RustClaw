@@ -52,6 +52,9 @@ fn answer_verifier_output_format_machine_payload_gap(
     {
         return false;
     }
+    if verifier.answer_incomplete_reason == "machine_status_token_visible" {
+        return true;
+    }
     serde_json::from_str::<Value>(reply_text.trim())
         .ok()
         .and_then(|value| value.as_object().cloned())
@@ -61,6 +64,107 @@ fn answer_verifier_output_format_machine_payload_gap(
                 || object.contains_key("candidates")
                 || object.contains_key("risks")
         })
+}
+
+fn visible_answer_is_observed_machine_status_token(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    reply_text: &str,
+) -> bool {
+    if matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    ) {
+        return false;
+    }
+    if !route_requires_direct_candidate_for_observed_stop(route_result) {
+        return false;
+    }
+    let token = reply_text.trim();
+    if !single_machine_token_answer(token) {
+        return false;
+    }
+    journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .filter_map(|output| serde_json::from_str::<Value>(output.trim()).ok())
+        .any(|value| {
+            observed_machine_status_tokens(&value)
+                .iter()
+                .any(|candidate| candidate == token)
+        })
+}
+
+fn single_machine_token_answer(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= 80
+        && !token.starts_with('{')
+        && !token.starts_with('[')
+        && !token.chars().any(char::is_whitespace)
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/'))
+}
+
+fn observed_machine_status_tokens(value: &Value) -> Vec<String> {
+    let mut tokens = Vec::new();
+    collect_observed_machine_status_tokens(value, &mut tokens);
+    tokens
+}
+
+fn collect_observed_machine_status_tokens(value: &Value, tokens: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                if matches!(key.as_str(), "text" | "error_text") {
+                    continue;
+                }
+                if machine_status_field_key(key) {
+                    if let Some(token) = child
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|token| !token.is_empty() && single_machine_token_answer(token))
+                    {
+                        tokens.push(token.to_string());
+                    }
+                }
+                collect_observed_machine_status_tokens(child, tokens);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_observed_machine_status_tokens(item, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn machine_status_field_key(key: &str) -> bool {
+    matches!(
+        key,
+        "status" | "status_code" | "state" | "reason_code" | "message_key"
+    )
+}
+
+fn machine_status_visible_output_format_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    reply_text: &str,
+) -> Option<crate::answer_verifier::AnswerVerifierOut> {
+    visible_answer_is_observed_machine_status_token(route_result, journal, reply_text).then(|| {
+        crate::answer_verifier::AnswerVerifierOut {
+            pass: false,
+            missing_evidence_fields: vec!["output_format".to_string()],
+            answer_incomplete_reason: "machine_status_token_visible".to_string(),
+            should_retry: true,
+            retry_instruction: "render_observed_machine_status_as_user_visible_answer".to_string(),
+            confidence: 0.9,
+        }
+        .normalized()
+    })
 }
 
 fn answer_verifier_summary_to_out(
@@ -1700,6 +1804,12 @@ async fn attach_answer_verifier_if_missing(
                 selected_class,
             ),
         );
+        return;
+    }
+    if let Some(answer_verifier) =
+        machine_status_visible_output_format_gap(route_result, journal, &reply.text)
+    {
+        journal.record_answer_verifier_summary(answer_verifier);
         return;
     }
     if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
