@@ -545,6 +545,48 @@ fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
 }
 
 #[test]
+fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/logs/act_plan.log".to_string();
+    route.route_reason = "existing_observed_context_synthesis".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/logs/act_plan.log",
+                "mode": "tail",
+                "n": 3
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+    assert!(can_fallback_to_initial_plan_after_repair_failure(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn active_anchor_detached_read_only_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(

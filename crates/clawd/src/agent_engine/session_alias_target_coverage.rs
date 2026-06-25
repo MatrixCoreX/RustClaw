@@ -529,6 +529,9 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
     if active_anchor_detached_read_only_plan_can_execute(state, route, actions) {
         return false;
     }
+    if existing_observed_synthesis_read_only_plan_can_execute(state, route, actions) {
+        return false;
+    }
     let executable_actions = actions.iter().filter(|action| {
         matches!(
             action,
@@ -541,6 +544,40 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
             return false;
         }
         saw_read = true;
+    }
+    saw_read
+}
+
+fn existing_observed_synthesis_read_only_plan_can_execute(
+    state: &AppState,
+    route: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !route_reason_has_marker(route, "existing_observed_context_synthesis") {
+        return false;
+    }
+    let has_synthesis = actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }));
+    let has_respond = actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::Respond { .. }));
+    if !has_synthesis || !has_respond {
+        return false;
+    }
+
+    let mut saw_read = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
+                if !action_is_filesystem_text_read_observation(state, action) {
+                    return false;
+                }
+                saw_read = true;
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
+            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
+        }
     }
     saw_read
 }
