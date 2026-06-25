@@ -71,6 +71,31 @@ fn observed_answer_language_compatibility_rejects_clear_request_language_mismatc
 }
 
 #[test]
+fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_machine_output() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"files":4,"total":4},"entries":[{"kind":"file","name":"x_abcd_log.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"kind":"file","name":"zz_abcd_backup.log","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},{"kind":"file","name":"abcd_report.md","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"kind":"file","name":"my_abcd.txt","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"}],"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
+    ));
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+    route.output_contract.self_extension.list_selector.limit = Some(3);
+    let answer = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
+
+    assert!(observed_answer_language_compatible_for_route(
+        Some(&route),
+        &loop_state,
+        None,
+        answer,
+        "zh-CN"
+    ));
+}
+
+#[test]
 fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts() {
     let mut content_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
     content_route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;

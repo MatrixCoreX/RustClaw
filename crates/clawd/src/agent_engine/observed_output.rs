@@ -258,6 +258,28 @@ fn observed_answer_language_compatible(candidate: &str, request_language_hint: &
     !direct_free_text_conflicts_with_request_language(candidate, request_language_hint)
 }
 
+fn observed_answer_language_compatible_for_route(
+    route: Option<&crate::RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    candidate: &str,
+    request_language_hint: &str,
+) -> bool {
+    if let Some(route) = route {
+        if route_requires_matrix_grounded_direct_candidate(route)
+            && matrix_direct_candidate_satisfies_contract(
+                route,
+                loop_state,
+                auto_locator_path,
+                candidate,
+            )
+        {
+            return true;
+        }
+    }
+    observed_answer_language_compatible(candidate, request_language_hint)
+}
+
 fn read_range_candidate_looks_structured_artifact(candidate: &str) -> bool {
     let mut total = 0usize;
     let mut structural = 0usize;
@@ -1411,7 +1433,14 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         );
         answer.clear();
     }
-    let language_compatible = observed_answer_language_compatible(&answer, &request_language_hint);
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let language_compatible = observed_answer_language_compatible_for_route(
+        route_result,
+        loop_state,
+        agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
+        &answer,
+        &request_language_hint,
+    );
     if !answer.is_empty() && !language_compatible {
         tracing::info!(
             "observed_answer_fallback_reject_language_mismatch task_id={} language_hint={} answer={}",
