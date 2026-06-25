@@ -92,20 +92,32 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
     route_result: &mut crate::RouteResult,
     recent_execution_context: &str,
 ) -> bool {
+    let recent_segments = recent_execution_result_segments(recent_execution_context);
+    let file_name_judgment_with_recent_results = route_result.output_contract.semantic_kind
+        == crate::OutputSemanticKind::FileNames
+        && recent_segments.len() >= 2;
+    let existing_observed_synthesis_with_recent_context =
+        route_reason_has_marker(route_result, "existing_observed_context_synthesis")
+            && !recent_segments.is_empty();
     if !route_result.needs_clarify
         || !route_reason_has_marker(route_result, "background_locator_requires_clarify")
         || route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
-        || recent_execution_result_segments(recent_execution_context).len() < 2
+        || (!file_name_judgment_with_recent_results
+            && !existing_observed_synthesis_with_recent_context)
     {
         return false;
     }
     route_result.needs_clarify = false;
     route_result.set_chat_gate();
     route_result.clarify_question.clear();
+    let response_shape = if existing_observed_synthesis_with_recent_context {
+        language_response_shape_or_default(route_result.output_contract.response_shape)
+    } else {
+        crate::OutputResponseShape::Scalar
+    };
     route_result.output_contract = crate::IntentOutputContract {
-        response_shape: crate::OutputResponseShape::Scalar,
+        response_shape,
         ..Default::default()
     };
     append_route_reason(route_result, "active_observed_output_chat_repair");
@@ -114,6 +126,17 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
         "recent_observed_results_background_locator_chat_repair",
     );
     true
+}
+
+fn language_response_shape_or_default(
+    response_shape: crate::OutputResponseShape,
+) -> crate::OutputResponseShape {
+    match response_shape {
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence => {
+            response_shape
+        }
+        _ => crate::OutputResponseShape::OneSentence,
+    }
 }
 
 fn recent_execution_context_has_ordered_entry_target(

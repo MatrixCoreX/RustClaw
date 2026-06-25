@@ -399,3 +399,41 @@ RustClaw test fixture service notes.";
         .route_reason
         .contains("active_observed_output_chat_repair"));
 }
+
+#[test]
+fn background_locator_clarify_downgrades_existing_observed_synthesis_with_recent_result() {
+    let mut route = executable_filename_route();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.clarify_question = "missing target".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/work/act_plan.log".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.route_reason = concat!(
+        "existing_observed_context_synthesis; ",
+        "clarify_reason_code:missing_target; ",
+        "background_locator_requires_clarify"
+    )
+    .to_string();
+    let recent_execution_context = "\
+### RECENT_EXECUTION_EVENTS
+- ts=2 kind=ask request=tail act_plan.log result={\"phase\":\"loop_done\",\"tool_calls\":1}";
+
+    assert!(
+        downgrade_background_locator_clarify_to_recent_observed_chat(
+            &mut route,
+            recent_execution_context,
+        )
+    );
+    assert!(!route.needs_clarify);
+    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Chat);
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::OneSentence
+    );
+    assert!(route
+        .route_reason
+        .contains("active_observed_output_chat_repair"));
+}

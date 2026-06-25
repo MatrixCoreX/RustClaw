@@ -489,6 +489,52 @@ fn explicit_raw_output_file_target_preserves_tail_slice_selector() {
 }
 
 #[test]
+fn explicit_file_target_reads_structured_update_slice_from_goal_context() {
+    let root = TempDirGuard::new("explicit_goal_structured_slice");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    fs::write(logs_dir.join("act_plan.log"), "a\nb\nc\nd\ne\n").expect("write log");
+    let log_path = "logs/act_plan.log";
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.to_string();
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = log_path.to_string();
+    route.route_reason = "raw_command_output contract for direct bounded line slice".to_string();
+    let goal = format!(
+        r#"Current task:
+Structured update: {{"slice_mode":"tail","slice_n":3}}
+Bound target: {log_path}"#
+    );
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        &goal,
+        Some(&route),
+        &LoopState::new(1),
+        log_path,
+        None,
+        Some(root.path.to_string_lossy().as_ref()),
+    )
+    .expect("explicit raw output target should consume structured slice tokens from goal context");
+
+    let read_action = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be a read action");
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(3));
+}
+
+#[test]
 fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     let root = TempDirGuard::new("generic_doc_parse_synthesis");
     let readme = root.path.join("README.md");
