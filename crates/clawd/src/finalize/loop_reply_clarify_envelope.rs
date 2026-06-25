@@ -126,18 +126,10 @@ fn is_clarify_machine_field(raw: &str) -> bool {
 }
 
 fn route_allows_terminal_clarify_envelope(
-    route: &crate::RouteResult,
+    _route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
     loop_state.pending_user_input_required
-        || route_reason_has_machine_token(
-            &route.route_reason,
-            "ordinary_clarify_deferred_to_agent_loop",
-        )
-        || route_reason_has_machine_token(
-            &route.route_reason,
-            "subagent_boundary_clarify_deferred_to_agent_loop",
-        )
 }
 
 fn completed_act_delivery_should_own_terminal_state(
