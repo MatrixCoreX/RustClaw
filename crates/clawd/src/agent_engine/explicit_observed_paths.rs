@@ -740,16 +740,19 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
         return None;
     }
 
+    let slice_spec = route_content_slice_spec(route);
     let mut actions = Vec::new();
     for path in &targets {
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "action".to_string(),
+            Value::String("read_text_range".to_string()),
+        );
+        args.insert("path".to_string(), Value::String(path.clone()));
+        apply_content_slice_spec_to_read_args(&mut args, slice_spec.clone(), "head", 120);
         actions.push(AgentAction::CallTool {
             tool: "fs_basic".to_string(),
-            args: serde_json::json!({
-                "action": "read_text_range",
-                "path": path,
-                "mode": "head",
-                "n": 120,
-            }),
+            args: Value::Object(args),
         });
     }
     let evidence_refs = (1..=actions.len())

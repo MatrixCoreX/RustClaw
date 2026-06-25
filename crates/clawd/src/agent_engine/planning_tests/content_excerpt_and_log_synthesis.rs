@@ -431,6 +431,64 @@ fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
 }
 
 #[test]
+fn explicit_raw_output_file_target_preserves_tail_slice_selector() {
+    let root = TempDirGuard::new("explicit_raw_output_tail_slice");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    fs::write(
+        logs_dir.join("act_plan.log"),
+        "line1\nline2\nline3\nline4\nline5\n",
+    )
+    .expect("write log");
+    let log_path = "logs/act_plan.log";
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.to_string();
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = format!("{log_path} slice_mode=tail slice_n=3");
+    let user_text = format!("read {log_path} tail slice");
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "read the selected raw log tail",
+        Some(&route),
+        &LoopState::new(1),
+        &user_text,
+        None,
+        Some(root.path.to_string_lossy().as_ref()),
+    )
+    .expect("explicit raw output target should produce a bounded read");
+
+    let read_action = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be a read action");
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(root.path.join(log_path).to_string_lossy().as_ref())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(3));
+    assert!(matches!(
+        plan.steps[1].to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["step_1".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps[2].to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
 fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     let root = TempDirGuard::new("generic_doc_parse_synthesis");
     let readme = root.path.join("README.md");

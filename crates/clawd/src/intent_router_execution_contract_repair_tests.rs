@@ -261,7 +261,10 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert!(contract.requires_content_evidence);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
 }
