@@ -67,7 +67,7 @@ def node_modules_dirs() -> list[Path]:
 
 
 def default_targets() -> list[Path]:
-    targets = [ROOT / "target"]
+    targets = [ROOT / "target", ROOT / ".rustclaw"]
     targets.extend(contents(ROOT / "scripts" / "nl_suite_logs"))
     targets.extend(contents(ROOT / "tmp"))
     targets.extend(contents(ROOT / "logs" / "nl_tests"))
