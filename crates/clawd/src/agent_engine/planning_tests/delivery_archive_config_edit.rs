@@ -483,6 +483,90 @@ fn archive_basic_pack_alias_args_normalize_to_contract() {
 }
 
 #[test]
+fn config_edit_action_ref_tool_call_rewrites_to_real_tool_and_value_arg() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_edit.plan_config_change".to_string(),
+        args: json!({
+            "path": "configs/config.toml",
+            "field_path": "skills.skill_switches.config_edit_nl_plan",
+            "new_value": true,
+            "plan_only": true,
+        }),
+    }];
+
+    let rewritten = normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &LoopState::default(),
+        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        Some("configs/config.toml"),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 3);
+    let args = expect_planned_call(&rewritten[0], "config_edit", "plan_config_change");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
+    );
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_plan")
+    );
+    assert_eq!(args.get("value").and_then(Value::as_bool), Some(true));
+    assert!(args.get("new_value").is_none());
+}
+
+#[test]
+fn config_mutation_read_plus_plan_collapses_to_single_config_edit_plan() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "config_basic.read_field".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "skills.skill_switches.config_edit_nl_plan",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "config_edit.plan_config_change".to_string(),
+            args: json!({
+                "path": "configs/config.toml",
+                "field_path": "skills.skill_switches.config_edit_nl_plan",
+                "new_value": true,
+                "mode": "plan_only",
+            }),
+        },
+    ];
+
+    let rewritten = normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &LoopState::default(),
+        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        Some("configs/config.toml"),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 3);
+    let args = expect_planned_call(&rewritten[0], "config_edit", "plan_config_change");
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_plan")
+    );
+    assert_eq!(args.get("value").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
 fn config_change_preview_read_plan_rewrites_to_config_edit_plan() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;

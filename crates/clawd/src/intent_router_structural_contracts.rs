@@ -273,7 +273,7 @@ pub(super) fn config_mutation_contract_from_surface(
 ) -> Option<String> {
     if !matches!(
         legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
+        FirstLayerDecision::PlannerExecute | FirstLayerDecision::DirectAnswer
     ) || output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(
@@ -294,14 +294,8 @@ pub(super) fn config_mutation_contract_from_surface(
     if !structural_config_value_after_field(req, field_path) {
         return None;
     }
-    output_contract_structured_config_path(output_contract).or_else(|| {
-        crate::intent::locator_extractor::extract_explicit_locator_for_fallback(req).and_then(
-            |locator| {
-                path_has_structured_config_extension(&locator.locator_hint)
-                    .then_some(locator.locator_hint)
-            },
-        )
-    })
+    output_contract_structured_config_path(output_contract)
+        .or_else(|| explicit_structured_config_path_from_request(req))
 }
 
 pub(super) fn structured_field_value_contract_from_quantity_comparison(
@@ -467,6 +461,16 @@ fn path_has_structured_config_extension(path: &str) -> bool {
         .and_then(|ext| ext.to_str())
         .map(str::to_ascii_lowercase)
         .is_some_and(|ext| matches!(ext.as_str(), "json" | "toml" | "yaml" | "yml"))
+}
+
+fn explicit_structured_config_path_from_request(req: &str) -> Option<String> {
+    crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(req)
+        .into_iter()
+        .filter(|locator| matches!(locator.locator_kind, OutputLocatorKind::Path))
+        .find_map(|locator| {
+            path_has_structured_config_extension(&locator.locator_hint)
+                .then_some(locator.locator_hint)
+        })
 }
 
 pub(super) fn structural_config_value_after_field(req: &str, field_path: &str) -> bool {

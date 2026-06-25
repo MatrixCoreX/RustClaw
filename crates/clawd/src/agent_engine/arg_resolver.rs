@@ -140,6 +140,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
     }
     match normalized_skill {
         "audio_synthesize" => normalize_audio_synthesize_arg_aliases(args),
+        "config_edit" => normalize_config_edit_arg_aliases(args),
         "fs_search" => normalize_fs_search_arg_aliases(args),
         "image_generate" => normalize_image_generate_arg_aliases(args),
         "image_edit" => normalize_image_edit_arg_aliases(args),
@@ -149,6 +150,13 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         "video_generate" => normalize_video_generate_arg_aliases(args),
         _ => false,
     }
+}
+
+fn normalize_config_edit_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_value_alias_if_missing(obj, "value", &["new_value", "target_value"])
 }
 
 fn move_string_alias_if_missing(
