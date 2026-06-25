@@ -478,7 +478,7 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_structured_keys"
         );
         return_deterministic_plan!(
-            content_presence_quoted_literal_deterministic_plan_result(
+            content_presence_query_deterministic_plan_result(
                 state,
                 goal,
                 route_result,
@@ -487,7 +487,7 @@ pub(super) async fn plan_round_actions(
                 Some(&original_user_text_for_policy),
                 auto_locator_path,
             ),
-            "plan_deterministic_content_presence_quoted_literal"
+            "plan_deterministic_content_presence_query"
         );
         return_deterministic_plan!(
             git_repository_state_deterministic_plan_result(

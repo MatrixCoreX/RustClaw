@@ -684,10 +684,17 @@ pub(super) fn file_delivery_respond_only_observation_plan(
         return None;
     }
     let content = is_plain_respond_only_plan(actions)?;
-    let Some((_kind, raw_path)) = crate::finalize::parse_delivery_file_token(content) else {
-        return None;
-    };
-    let path = raw_path.trim();
+    let parsed_file_token = crate::finalize::parse_delivery_file_token(content);
+    let path = parsed_file_token
+        .as_ref()
+        .map(|(_kind, raw_path)| raw_path.trim())
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| route.output_contract.locator_hint.trim());
+    file_delivery_path_observation_plan(state, path)
+}
+
+fn file_delivery_path_observation_plan(state: &AppState, path: &str) -> Option<Vec<AgentAction>> {
+    let path = path.trim();
     if path.is_empty() || path.contains('\n') {
         return None;
     }
@@ -697,21 +704,19 @@ pub(super) fn file_delivery_respond_only_observation_plan(
     } else {
         state.skill_rt.workspace_root.join(candidate)
     };
-    if !resolved.is_file() {
-        return None;
+    let stat_action = AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "stat_paths",
+            "paths": [resolved.display().to_string()],
+            "include_missing": true,
+        }),
+    };
+    if resolved.is_file() {
+        let token = format!("FILE:{}", resolved.display());
+        return Some(vec![stat_action, AgentAction::Respond { content: token }]);
     }
-    let token = format!("FILE:{}", resolved.display());
-    Some(vec![
-        AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args: serde_json::json!({
-                "action": "stat_paths",
-                "paths": [resolved.display().to_string()],
-                "include_missing": true,
-            }),
-        },
-        AgentAction::Respond { content: token },
-    ])
+    Some(vec![stat_action])
 }
 
 pub(super) fn replace_file_delivery_respond_only_with_path_observation(
@@ -727,6 +732,99 @@ pub(super) fn replace_file_delivery_respond_only_with_path_observation(
         file_delivery_respond_only_observation_plan(state, route_result, &actions)
     {
         info!("plan_replace_file_delivery_respond_only_with_path_observation");
+        observation
+    } else {
+        actions
+    }
+}
+
+fn file_delivery_empty_write_path<'a>(
+    state: &AppState,
+    action: &'a AgentAction,
+) -> Option<&'a str> {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill, args),
+        AgentAction::CallTool { tool, args } => (tool, args),
+        _ => return None,
+    };
+    let canonical = state.resolve_canonical_skill_name(skill);
+    if canonical != "fs_basic" {
+        return None;
+    }
+    let action_name = args.get("action").and_then(Value::as_str)?.trim();
+    if action_name != "write_text" {
+        return None;
+    }
+    let content = args.get("content").and_then(Value::as_str).unwrap_or("");
+    if !content.is_empty() {
+        return None;
+    }
+    args.get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+}
+
+fn file_delivery_empty_write_targets_locator(
+    state: &AppState,
+    route: &RouteResult,
+    action: &AgentAction,
+) -> bool {
+    let Some(path) = file_delivery_empty_write_path(state, action) else {
+        return false;
+    };
+    let locator = route.output_contract.locator_hint.trim();
+    if locator.is_empty() {
+        return false;
+    }
+    let locator_path = resolve_delivery_token_path(state, locator);
+    let action_path = resolve_delivery_token_path(state, path);
+    same_existing_or_display_path(&locator_path, &action_path)
+}
+
+fn file_delivery_empty_write_placeholder_observation_plan(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: &[AgentAction],
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if !file_delivery_contract_requires_file_token(route)
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+        )
+    {
+        return None;
+    }
+    let mut has_empty_locator_write = false;
+    for action in actions {
+        if file_delivery_empty_write_targets_locator(state, route, action) {
+            has_empty_locator_write = true;
+            continue;
+        }
+        if action_is_likely_mutating(state, action) {
+            return None;
+        }
+    }
+    if !has_empty_locator_write {
+        return None;
+    }
+    file_delivery_path_observation_plan(state, route.output_contract.locator_hint.trim())
+}
+
+pub(super) fn replace_file_delivery_empty_write_with_path_observation(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if loop_state.has_tool_or_skill_output {
+        return actions;
+    }
+    if let Some(observation) =
+        file_delivery_empty_write_placeholder_observation_plan(state, route_result, &actions)
+    {
+        info!("plan_replace_file_delivery_empty_write_with_path_observation");
         observation
     } else {
         actions

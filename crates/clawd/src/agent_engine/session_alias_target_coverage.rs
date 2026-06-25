@@ -798,7 +798,7 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
     ])
 }
 
-pub(super) fn content_presence_quoted_literal_deterministic_plan_result(
+pub(super) fn content_presence_query_deterministic_plan_result(
     state: &AppState,
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -817,23 +817,41 @@ pub(super) fn content_presence_quoted_literal_deterministic_plan_result(
     {
         return None;
     }
-    let literal_sources = [
+    let selector_sources = [
+        Some(route.route_reason.as_str()),
+        Some(route.resolved_intent.as_str()),
         original_user_text,
         Some(user_text),
-        Some(route.resolved_intent.as_str()),
     ];
-    let mut literals = Vec::new();
-    for source in literal_sources.into_iter().flatten() {
-        for literal in crate::intent::surface_signals::extract_quoted_literals(source) {
-            if !literals
+    let mut queries = Vec::new();
+    for source in selector_sources.into_iter().flatten() {
+        if let Some(query) = contract_hint_selector_query(source) {
+            if !queries
                 .iter()
-                .any(|existing: &String| existing.eq_ignore_ascii_case(&literal))
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&query))
             {
-                literals.push(literal);
+                queries.push(query);
             }
         }
     }
-    if literals.len() != 1 {
+    if queries.is_empty() {
+        let literal_sources = [
+            original_user_text,
+            Some(user_text),
+            Some(route.resolved_intent.as_str()),
+        ];
+        for source in literal_sources.into_iter().flatten() {
+            for literal in crate::intent::surface_signals::extract_quoted_literals(source) {
+                if !queries
+                    .iter()
+                    .any(|existing: &String| existing.eq_ignore_ascii_case(&literal))
+                {
+                    queries.push(literal);
+                }
+            }
+        }
+    }
+    if queries.len() != 1 {
         return None;
     }
     let target = auto_locator_path
@@ -852,7 +870,7 @@ pub(super) fn content_presence_quoted_literal_deterministic_plan_result(
         args: serde_json::json!({
             "action": "grep_text",
             "root": path,
-            "query": literals.remove(0),
+            "query": queries.remove(0),
             "max_results": 8,
         }),
     }];

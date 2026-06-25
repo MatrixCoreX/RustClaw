@@ -63,6 +63,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Directory inventory: use `list_dir`, not `grep_text`.
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
+- Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
