@@ -157,7 +157,17 @@ fn pure_chat_agent_loop_submode_can_skip_answer_verifier(
         && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
-        && journal.step_results.is_empty()
+        && pure_chat_agent_loop_has_no_tool_observations(journal)
+}
+
+fn pure_chat_agent_loop_has_no_tool_observations(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal.step_results.iter().all(|step| {
+        matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+            && step.status == crate::executor::StepExecutionStatus::Ok
+            && step.error_excerpt.is_none()
+    })
 }
 
 fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
