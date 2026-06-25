@@ -76,6 +76,9 @@ fn visible_answer_machine_payload_detection_is_structural() {
     assert!(visible_answer_is_machine_payload(
         r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
     ));
+    assert!(visible_answer_is_machine_payload(
+        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+    ));
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
     ));

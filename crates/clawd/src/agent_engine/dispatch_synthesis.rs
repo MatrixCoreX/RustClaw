@@ -371,6 +371,10 @@ pub(super) fn kb_filesystem_mutation_structured_answer(
     let mut actions = Vec::new();
     let mut namespaces = Vec::new();
     let mut paths = Vec::new();
+    let mut result_kinds = Vec::new();
+    let mut effective_statuses = Vec::new();
+    let mut idempotent_success = false;
+    let mut effective_success = false;
 
     for step in loop_state
         .executed_step_results
@@ -396,12 +400,30 @@ pub(super) fn kb_filesystem_mutation_structured_answer(
                 push_unique_string(&mut paths, path);
             }
         }
+        if let Some(result_kind) = payload.get("result_kind").and_then(Value::as_str) {
+            push_unique_string(&mut result_kinds, result_kind);
+        }
+        if let Some(effective_status) = payload.get("effective_status").and_then(Value::as_str) {
+            push_unique_string(&mut effective_statuses, effective_status);
+        }
+        idempotent_success |= payload
+            .get("idempotent_success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        effective_success |= payload
+            .get("effective_success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let mut step_value = serde_json::Map::new();
         step_value.insert("step_id".to_string(), Value::String(step.step_id.clone()));
         step_value.insert("skill".to_string(), Value::String(step.skill.clone()));
         step_value.insert("status".to_string(), Value::String("ok".to_string()));
         step_value.insert("action".to_string(), Value::String(action.to_string()));
+        copy_string_field(&payload, &mut step_value, "effective_status");
+        copy_string_field(&payload, &mut step_value, "result_kind");
+        copy_value_field(&payload, &mut step_value, "effective_success");
+        copy_value_field(&payload, &mut step_value, "idempotent_success");
         copy_string_field(&payload, &mut step_value, "namespace");
         copy_string_field(&payload, &mut step_value, "path");
         copy_value_field(&payload, &mut step_value, "paths");
@@ -434,6 +456,10 @@ pub(super) fn kb_filesystem_mutation_structured_answer(
             "semantic_kind": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
             "capability": "kb",
             "status": "ok",
+            "effective_status": if effective_statuses.iter().any(|status| status != "ok") { "needs_attention" } else { "ok" },
+            "effective_success": effective_success || effective_statuses.iter().any(|status| status == "ok"),
+            "idempotent_success": idempotent_success,
+            "result_kinds": result_kinds,
             "observed_actions": actions,
             "observed_action_count": observed.len(),
             "namespaces": namespaces,

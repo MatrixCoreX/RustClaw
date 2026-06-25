@@ -88,7 +88,7 @@ fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback(
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "kb",
-        r#"{"extra":{"action":"ingest","status":"ok","namespace":"nl_basic_skill_coverage","path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","paths":["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],"stats":{"ingested_docs":1,"total_docs":1,"total_chunks":1,"unified_index_synced":true}}}"#,
+        r#"{"extra":{"action":"ingest","status":"ok","effective_status":"ok","result_kind":"already_indexed","effective_success":true,"idempotent_success":true,"namespace":"nl_basic_skill_coverage","path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","paths":["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],"stats":{"ingested_docs":0,"total_docs":1,"total_chunks":1,"unified_index_synced":true,"unified_index_rows":1}}}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_3",
@@ -121,6 +121,36 @@ fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback(
             .and_then(serde_json::Value::as_array)
             .map(Vec::len),
         Some(3)
+    );
+    assert_eq!(
+        value
+            .pointer("/effective_status")
+            .and_then(serde_json::Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(
+        value
+            .pointer("/effective_success")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .pointer("/idempotent_success")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .pointer("/result_kinds/0")
+            .and_then(serde_json::Value::as_str),
+        Some("already_indexed")
+    );
+    assert_eq!(
+        value
+            .pointer("/steps/0/result_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("already_indexed")
     );
     assert_eq!(
         value

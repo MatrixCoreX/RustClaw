@@ -14,6 +14,7 @@ use super::{
     try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
+    try_recover_filesystem_mutation_success_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
     try_recover_http_health_answer_verifier_gap, try_recover_latest_synthesis_answer_verifier_gap,
     try_recover_local_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,

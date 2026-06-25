@@ -15,6 +15,8 @@ mod loop_control_answer_recovery;
 mod loop_control_answer_recovery_parse;
 #[path = "loop_control_answer_recovery_text.rs"]
 mod loop_control_answer_recovery_text;
+#[path = "loop_control_filesystem_mutation_recovery.rs"]
+mod loop_control_filesystem_mutation_recovery;
 #[path = "loop_control_local_health_recovery.rs"]
 mod loop_control_local_health_recovery;
 #[path = "loop_control_recent_artifacts_recovery.rs"]
@@ -23,6 +25,7 @@ mod loop_control_recent_artifacts_recovery;
 use loop_control_answer_recovery::*;
 use loop_control_answer_recovery_parse::*;
 use loop_control_answer_recovery_text::*;
+use loop_control_filesystem_mutation_recovery::*;
 use loop_control_local_health_recovery::*;
 use loop_control_recent_artifacts_recovery::*;
 
@@ -63,6 +66,12 @@ fn answer_verifier_output_format_machine_payload_gap(
                 || object.contains_key("reason_code")
                 || object.contains_key("candidates")
                 || object.contains_key("risks")
+                || object.contains_key("semantic_kind")
+                || object
+                    .get("output_format")
+                    .and_then(Value::as_str)
+                    .is_some_and(|format| format == "machine_json")
+                || (object.contains_key("status") && object.contains_key("steps"))
         })
 }
 
@@ -1761,6 +1770,10 @@ pub(super) async fn run_agent_with_loop_seeded(
                 return Ok(reply);
             }
             if try_recover_content_excerpt_summary_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
+            if try_recover_filesystem_mutation_success_answer_verifier_gap(route_result, &mut reply)
+            {
                 return Ok(reply);
             }
             if try_accept_language_only_output_format_answer_verifier_gap(route_result, &mut reply)

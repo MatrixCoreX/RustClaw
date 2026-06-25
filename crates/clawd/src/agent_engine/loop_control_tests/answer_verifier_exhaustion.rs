@@ -134,6 +134,57 @@ fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
 }
 
 #[test]
+fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_hint = "README.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-filesystem-mutation-success",
+        "ask",
+        "prompt",
+    );
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace::ok(
+        "step_1",
+        "kb",
+        r#"{"request_id":"req-1","status":"ok","text":"already_indexed","error_text":null,"extra":{"action":"ingest","namespace":"demo_docs_nl","path":"README.md","effective_status":"ok","result_kind":"already_indexed","effective_success":true,"idempotent_success":true,"stats":{"total_chunks":59}}}"#,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate did not render the machine success payload"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "render observed success fields".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm(
+        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","effective_status":"ok","effective_success":true,"idempotent_success":true,"result_kinds":["already_indexed"],"paths":["README.md"],"namespaces":["demo_docs_nl"],"steps":[{"status":"ok","action":"ingest","path":"README.md","namespace":"demo_docs_nl","result_kind":"already_indexed","stats":{"total_chunks":59}}]}"#
+            .to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(try_recover_filesystem_mutation_success_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(
+        reply.text,
+        "status=ok effective_status=ok result_kind=already_indexed action=ingest path=README.md namespace=demo_docs_nl total_chunks=59"
+    );
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(journal.final_answer.as_deref(), Some(reply.text.as_str()));
+}
+
+#[test]
 fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
