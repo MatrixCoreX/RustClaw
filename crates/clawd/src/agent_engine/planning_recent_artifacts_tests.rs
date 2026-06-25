@@ -458,6 +458,66 @@ fn recent_artifacts_judgment_rewrites_capability_field_extract_to_selected_file_
 }
 
 #[test]
+fn recent_artifacts_judgment_uses_deterministic_listing_plan_before_open_planner() {
+    let temp = TempDirGuard::new("deterministic_plan");
+    std::fs::write(temp.path.join("clawd.run.log"), b"runtime log").expect("write log");
+    std::fs::write(temp.path.join("nl_suite.log"), b"test log").expect("write log");
+    let temp_path = temp.path.display().to_string();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: temp_path.clone(),
+        ..IntentOutputContract::default()
+    };
+    contract.self_extension.list_selector.limit = Some(2);
+    contract.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
+    contract.self_extension.list_selector.target_kind = OutputScalarCountTargetKind::File;
+    contract.self_extension.list_selector.target_kind_specified = true;
+    let route = route_with_contract(contract);
+
+    let plan = recent_artifacts_judgment_deterministic_plan_result(
+        "list recent artifacts and judge their kind",
+        Some(&route),
+        &LoopState::new(1),
+        Some(temp_path.as_str()),
+    )
+    .expect("recent artifacts should use deterministic listing");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = planned_call(&action, "fs_basic", "list_dir").expect("list_dir action");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(temp_path.as_str())
+    );
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("mtime_desc")
+    );
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+}
+
+#[test]
+fn recent_artifacts_contract_overrides_literal_command_guard_for_deterministic_plan() {
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "logs".to_string(),
+        ..IntentOutputContract::default()
+    });
+
+    assert!(structural_contract_deterministic_plan_overrides_literal_command_guard(Some(&route)));
+}
+
+#[test]
 fn recent_artifacts_workspace_root_does_not_add_unsorted_tree_context_for_ranking() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let route = route_with_contract(IntentOutputContract {

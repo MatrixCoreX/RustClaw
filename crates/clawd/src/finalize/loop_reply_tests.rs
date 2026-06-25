@@ -512,7 +512,7 @@ async fn finalize_loop_reply_does_not_attach_control_envelope_without_structured
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_attaches_control_envelope_from_route_machine_token() {
+async fn finalize_loop_reply_does_not_attach_control_envelope_from_route_machine_token() {
     let state = test_state();
     let task = claimed_task("task-control-envelope-route-token");
     let mut route = scalar_route_result();
@@ -552,26 +552,19 @@ async fn finalize_loop_reply_attaches_control_envelope_from_route_machine_token(
         Some(&agent_run_context),
     )
     .await
-    .expect("finalize should attach control envelope from route machine token");
+    .expect("finalize should not attach control envelope from route machine token");
 
-    let envelope = reply
-        .messages
-        .iter()
-        .find_map(|message| {
-            let payload = serde_json::from_str::<serde_json::Value>(message.trim()).ok()?;
-            (payload
-                .get("owner_layer")
-                .and_then(serde_json::Value::as_str)
-                == Some("agent_loop_control"))
-            .then_some(payload)
-        })
-        .expect("agent_loop_control envelope");
-    assert_eq!(
-        envelope
-            .pointer("/decision_envelope/control_intent")
-            .and_then(serde_json::Value::as_str),
-        Some("act")
-    );
+    assert!(!reply.messages.iter().any(|message| {
+        serde_json::from_str::<serde_json::Value>(message.trim())
+            .ok()
+            .and_then(|payload| {
+                payload
+                    .get("owner_layer")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|owner| owner == "agent_loop_control")
+            })
+            .unwrap_or(false)
+    }));
 }
 
 fn ok_step_result(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {

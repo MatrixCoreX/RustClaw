@@ -854,6 +854,7 @@ pub(super) fn structural_contract_deterministic_plan_overrides_literal_command_g
                     | crate::OutputSemanticKind::ExistenceWithPath
                     | crate::OutputSemanticKind::ExistenceWithPathSummary
                     | crate::OutputSemanticKind::RecentScalarEqualityCheck
+                    | crate::OutputSemanticKind::RecentArtifactsJudgment
             ) || (semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
                 && scalar_path_contract_has_structural_locator(route)))
     })
