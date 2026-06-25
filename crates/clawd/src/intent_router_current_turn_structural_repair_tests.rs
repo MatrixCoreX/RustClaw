@@ -326,6 +326,41 @@ fn structural_config_field_value_repairs_direct_misroute_from_current_request() 
 }
 
 #[test]
+fn structural_config_field_value_repairs_filesystem_mutation_to_config_mutation_contract() {
+    let request = "在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string(),
+        semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "run/nl_eval_tmp/config_edit_smoke/config.toml"
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+}
+
+#[test]
 fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_contract() {
     let request = "configs/config.toml skills.skill_switches.config_edit_nl_plan = true";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);

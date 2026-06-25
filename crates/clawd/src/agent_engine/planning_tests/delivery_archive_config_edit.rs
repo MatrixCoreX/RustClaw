@@ -742,6 +742,60 @@ fn config_mutation_recipe_readback_only_rewrites_to_closed_loop() {
 }
 
 #[test]
+fn config_mutation_planned_fs_write_rewrites_to_config_edit_closed_loop_without_recipe() {
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string();
+    let loop_state = LoopState::new(2);
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_range",
+                "path": "run/nl_eval_tmp/config_edit_smoke/config.toml",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "run/nl_eval_tmp/config_edit_smoke/config.toml",
+                "content": "[skills]\n\n[skills.skill_switches]\nconfig_edit_nl_smoke = true\n",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_range",
+                "path": "run/nl_eval_tmp/config_edit_smoke/config.toml",
+            }),
+        },
+    ];
+
+    let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
+        Some(&route),
+        &loop_state,
+        "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true",
+        Some("run/nl_eval_tmp/config_edit_smoke/config.toml"),
+        actions,
+    );
+
+    assert_eq!(rewritten.len(), 6);
+    let plan_args = expect_planned_call(&rewritten[0], "config_edit", "plan_config_change");
+    assert_eq!(
+        plan_args.get("field_path").and_then(Value::as_str),
+        Some("skills.skill_switches.config_edit_nl_smoke")
+    );
+    assert_eq!(plan_args.get("value").and_then(Value::as_bool), Some(true));
+    expect_planned_call(&rewritten[1], "config_edit", "apply_config_change");
+    expect_planned_call(&rewritten[2], "config_edit", "validate_config");
+    expect_planned_call(&rewritten[3], "config_edit", "read_back");
+}
+
+#[test]
 fn config_mutation_without_recipe_does_not_upgrade_readback_to_apply() {
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
