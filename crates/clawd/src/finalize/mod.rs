@@ -42,5 +42,5 @@ pub(crate) use task::{
 // 从 LoopState 选择 delivery + 构建 journal
 pub(crate) use loop_reply::{
     deterministic_matrix_observed_shape_answer, direct_config_edit_observed_answer,
-    finalize_loop_reply,
+    finalize_loop_reply, selected_tail_read_range_line_from_step_output,
 };

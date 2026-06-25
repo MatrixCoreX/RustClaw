@@ -118,12 +118,14 @@ pub(crate) use output_direct_answer::{
 
 #[path = "observed_output_read_range.rs"]
 mod output_read_range;
-pub(crate) use output_read_range::tail_read_range_direct_answer_candidate;
 use output_read_range::{
     compose_content_excerpt_with_summary_answer, content_excerpt_summary_direct_answer_candidate,
-    doc_parse_content_presence_direct_answer_candidate, normalize_read_range_excerpt,
+    doc_parse_content_presence_direct_answer_candidate,
     normalize_read_range_excerpt_for_direct_answer, read_range_observed_candidate,
     read_range_preserve_blank_lines,
+};
+pub(crate) use output_read_range::{
+    normalize_read_range_excerpt, tail_read_range_direct_answer_candidate,
 };
 
 #[path = "observed_output_structured_scalar.rs"]

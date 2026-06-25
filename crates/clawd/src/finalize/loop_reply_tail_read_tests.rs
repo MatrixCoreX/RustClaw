@@ -70,6 +70,126 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
 }
 
 #[test]
+fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
+    let state = test_state();
+    let task = claimed_task("task-tail-one-sentence");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state
+        .delivery_messages
+        .push("unsupported synthesis".to_string());
+    loop_state.last_user_visible_respond = Some("unsupported synthesis".to_string());
+    loop_state.last_publishable_synthesis_output = Some("unsupported synthesis".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":4,"excerpt":"10|2026-06-25T09:10:01Z INFO task_call: executor_step_start step=1\n11|2026-06-25T09:10:02Z INFO task_call: task_journal_summary goal=### MEMORY_USE_POLICY\n12|2026-06-25T09:10:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=unsupported_claims\n13|2026-06-25T09:10:04Z INFO task_call: verifier_result approved=true issue_count=0"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "unsupported synthesis",
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "挑最值得注意的一行",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    let answer = loop_state
+        .last_user_visible_respond
+        .as_deref()
+        .unwrap_or("");
+    assert_eq!(
+        answer,
+        "2026-06-25T09:10:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=unsupported_claims"
+    );
+    assert!(!answer.contains("MEMORY_USE_POLICY"));
+    assert!(!answer.contains("unsupported synthesis"));
+    assert_eq!(
+        loop_state.delivery_messages.last().map(String::as_str),
+        Some(answer)
+    );
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.disposition),
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
+fn one_sentence_excerpt_kind_tail_read_selects_observed_log_line() {
+    let state = test_state();
+    let task = claimed_task("task-tail-excerpt-kind");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state
+        .delivery_messages
+        .push("unsupported synthesis".to_string());
+    loop_state.last_user_visible_respond = Some("unsupported synthesis".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":3,"excerpt":"20|2026-06-25T09:11:01Z INFO task_call: executor_step_start step=1\n21|2026-06-25T09:11:02Z INFO task_call: verifier_result approved=true issue_count=0\n22|2026-06-25T09:11:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=stale_round"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "unsupported synthesis",
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "select one line",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    let answer = loop_state
+        .last_user_visible_respond
+        .as_deref()
+        .unwrap_or("");
+    assert_eq!(
+        answer,
+        "2026-06-25T09:11:03Z WARN task_call: answer_verifier_observed_gap missing_evidence=stale_round"
+    );
+    assert!(!answer.contains("unsupported synthesis"));
+    assert_eq!(
+        loop_state.delivery_messages.last().map(String::as_str),
+        Some(answer)
+    );
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.disposition),
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn tail_read_range_observed_answer_allows_malformed_none_semantic_fs_basic() {
     let state = test_state();
     let task = claimed_task("task-tail-none");
@@ -382,7 +502,7 @@ async fn content_evidence_failure_defers_when_latest_tail_read_range_available()
 }
 
 #[test]
-fn tail_read_range_observed_answer_defers_one_sentence_summary() {
+fn tail_read_range_observed_answer_selects_line_for_one_sentence_summary() {
     let state = test_state();
     let task = claimed_task("task-tail-summary");
     let mut route = free_route_result();
@@ -401,7 +521,7 @@ fn tail_read_range_observed_answer_defers_one_sentence_summary() {
     ));
     let mut finalizer_summary = None;
 
-    assert!(!replace_delivery_with_latest_tail_read_range_answer(
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
         &state,
         &task,
         "一句话总结最后两行",
@@ -409,6 +529,7 @@ fn tail_read_range_observed_answer_defers_one_sentence_summary() {
         Some(&agent_run_context),
         &mut finalizer_summary,
     ));
+    assert_eq!(loop_state.last_user_visible_respond.as_deref(), Some("b"));
 }
 
 #[test]

@@ -3,10 +3,23 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 const REDACTED: &str = "[REDACTED]";
+const REDACTED_INTERNAL_CONTEXT: &str = "[INTERNAL_CONTEXT_REDACTED]";
 const REDACTED_RUNTIME_TEMPLATE: &str = "[RUNTIME_TEMPLATE]";
 
+const INTERNAL_CONTEXT_MARKERS: &[&str] = &[
+    "### MEMORY_USE_POLICY",
+    "### PLANNER_MEMORY_CONTEXT",
+    "### RECENT_EXECUTION_CONTEXT",
+    "### RECENT_TURNS_FULL",
+    "RECENT_UNFINISHED_GOALS",
+    "ACTIVE_PREFERENCES",
+    "STABLE_FACTS",
+];
+
 pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
-    const MARKERS: &[&str] = &[
+    const SECTION_MARKERS: &[&str] = &[
+        "### MEMORY_USE_POLICY",
+        "### PLANNER_MEMORY_CONTEXT",
         "\n### ACTIVE_EXECUTION_ANCHOR",
         "\n### ACTIVE_TASK",
         "\n### ALIASES",
@@ -20,7 +33,7 @@ pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
         "\n### RECENT_TURNS_FULL",
         "\n### SESSION_ALIAS_BINDINGS",
     ];
-    let stop = MARKERS
+    let stop = SECTION_MARKERS
         .iter()
         .filter_map(|marker| text.find(marker))
         .min()
@@ -31,12 +44,57 @@ pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
 pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = strip_ansi_sequences(text);
     let stripped = compact_internal_json_log_lines(&stripped);
+    let stripped = redact_internal_context_fragments(&stripped);
     let stripped = replace_structured_skill_error_payloads(&stripped);
     let redacted = redact_sensitive_url_params(&stripped);
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
     let redacted = redact_authorization_values(&redacted);
     redact_runtime_template_placeholders(&redacted)
+}
+
+fn first_internal_context_marker_pos(text: &str) -> Option<usize> {
+    INTERNAL_CONTEXT_MARKERS
+        .iter()
+        .filter_map(|marker| text.find(marker))
+        .min()
+}
+
+fn redact_internal_context_fragments(text: &str) -> String {
+    if first_internal_context_marker_pos(text).is_none() {
+        return text.to_string();
+    }
+    let mut out = Vec::new();
+    let mut redacting_section = false;
+    for line in text.lines() {
+        if redacting_section {
+            if line.trim_start().starts_with("### ")
+                && first_internal_context_marker_pos(line).is_none()
+            {
+                redacting_section = false;
+            } else {
+                continue;
+            }
+        }
+
+        if let Some(pos) = first_internal_context_marker_pos(line) {
+            let prefix = &line[..pos];
+            if prefix.trim().is_empty() {
+                out.push(REDACTED_INTERNAL_CONTEXT.to_string());
+                redacting_section = true;
+            } else {
+                let mut redacted = prefix.trim_end().to_string();
+                if !redacted.is_empty() {
+                    redacted.push(' ');
+                }
+                redacted.push_str(REDACTED_INTERNAL_CONTEXT);
+                out.push(redacted);
+            }
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out.join("\n")
 }
 
 fn compact_internal_json_log_lines(text: &str) -> String {

@@ -90,3 +90,32 @@ fn redacts_runtime_template_placeholders_from_visible_text() {
     assert!(!sanitized.contains("}}"));
     assert!(!sanitized.contains("last_output.foo"));
 }
+
+#[test]
+fn redacts_internal_context_marker_inside_log_line() {
+    let raw = r#"2026-06-25 INFO task_journal_summary {"context_bundle_summary":"round=1 goal=### MEMORY_USE_POLICY\nprofile: planner_scoped\n### PLANNER_MEMORY_CONTEXT\nRECENT_UNFINISHED_GOALS -> ACTIVE_PREFERENCES"}"#;
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert!(sanitized.contains("task_journal_summary"));
+    assert!(sanitized.contains("[INTERNAL_CONTEXT_REDACTED]"));
+    assert!(!sanitized.contains("MEMORY_USE_POLICY"));
+    assert!(!sanitized.contains("PLANNER_MEMORY_CONTEXT"));
+    assert!(!sanitized.contains("RECENT_UNFINISHED"));
+    assert!(!sanitized.contains("planner_scoped"));
+}
+
+#[test]
+fn redacts_internal_context_multiline_section() {
+    let raw = "visible prefix\n### MEMORY_USE_POLICY\nprofile: planner_scoped\nreason: internal\n### CURRENT_REQUEST\nvisible request";
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert!(sanitized.contains("visible prefix"));
+    assert!(sanitized.contains("[INTERNAL_CONTEXT_REDACTED]"));
+    assert!(sanitized.contains("### CURRENT_REQUEST"));
+    assert!(sanitized.contains("visible request"));
+    assert!(!sanitized.contains("MEMORY_USE_POLICY"));
+    assert!(!sanitized.contains("planner_scoped"));
+    assert!(!sanitized.contains("reason: internal"));
+}

@@ -49,9 +49,7 @@ pub(super) fn latest_path_batch_facts_has_implicit_metadata_fields(loop_state: &
 pub(super) fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteResult) -> bool {
     if matches!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-            | crate::OutputResponseShape::Scalar
-            | crate::OutputResponseShape::OneSentence
+        crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
     ) {
         return false;
     }
@@ -60,6 +58,7 @@ pub(super) fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteR
         && matches!(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ExcerptKindJudgment
                 | crate::OutputSemanticKind::RawCommandOutput
                 | crate::OutputSemanticKind::None
         )
@@ -79,7 +78,12 @@ pub(super) fn latest_tail_read_range_observed_answer(
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let prefer_english =
         crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    let answer = latest_tail_read_range_answer_from_loop(loop_state, prefer_english)?;
+    let answer = if route_prefers_deterministic_tail_line(Some(route)) {
+        latest_tail_read_range_selected_line_from_loop(loop_state, prefer_english)
+            .or_else(|| latest_tail_read_range_answer_from_loop(loop_state, prefer_english))?
+    } else {
+        latest_tail_read_range_answer_from_loop(loop_state, prefer_english)?
+    };
     if answer.trim().is_empty() {
         return None;
     }
@@ -209,6 +213,114 @@ fn flat_tail_read_range_answer_from_value(
     )
 }
 
+fn normalized_tail_read_range_lines_from_value(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<Vec<String>> {
+    if let Some(lines) = flat_normalized_tail_read_range_lines_from_value(value, prefer_english) {
+        return Some(lines);
+    }
+    value
+        .get("extra")
+        .and_then(|extra| normalized_tail_read_range_lines_from_value(extra, prefer_english))
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(|text| text.as_str())
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .and_then(|inner| {
+                    normalized_tail_read_range_lines_from_value(&inner, prefer_english)
+                })
+        })
+}
+
+fn flat_normalized_tail_read_range_lines_from_value(
+    value: &serde_json::Value,
+    _prefer_english: bool,
+) -> Option<Vec<String>> {
+    if !flat_value_is_tail_read_range(value) {
+        return None;
+    }
+    let excerpt = value.get("excerpt").and_then(|value| value.as_str())?;
+    let lines = crate::agent_engine::observed_output::normalize_read_range_excerpt(excerpt)?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then_some(lines)
+}
+
+pub(crate) fn selected_tail_read_range_line_from_step_output(
+    output: &str,
+    prefer_english: bool,
+) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    let lines = normalized_tail_read_range_lines_from_value(&value, prefer_english)?;
+    select_tail_read_range_line(&lines)
+}
+
+fn tail_line_attention_score(line: &str) -> u8 {
+    let upper = line.to_ascii_uppercase();
+    if upper.contains(" ERROR ") || upper.contains(" ERROR:") || upper.contains("LEVEL=ERROR") {
+        return 100;
+    }
+    if upper.contains(" WARN ") || upper.contains(" WARN:") || upper.contains("LEVEL=WARN") {
+        return 90;
+    }
+    if line.contains("answer_verifier_observed_gap") {
+        return 86;
+    }
+    if line.contains("verifier_result") {
+        return 84;
+    }
+    if line.contains("loop_round_extend") || line.contains("synthesize_answer_failed") {
+        return 78;
+    }
+    if line.contains("task_call:") {
+        return 60;
+    }
+    10
+}
+
+fn line_contains_internal_redaction(line: &str) -> bool {
+    line.contains("[INTERNAL_CONTEXT_REDACTED]")
+}
+
+fn select_tail_read_range_line(lines: &[String]) -> Option<String> {
+    lines
+        .iter()
+        .filter(|line| !line_contains_internal_redaction(line))
+        .enumerate()
+        .max_by_key(|(idx, line)| (tail_line_attention_score(line), *idx))
+        .map(|(_, line)| line.trim().to_string())
+        .or_else(|| {
+            lines
+                .iter()
+                .enumerate()
+                .max_by_key(|(idx, line)| (tail_line_attention_score(line), *idx))
+                .map(|(_, line)| line.trim().to_string())
+        })
+        .filter(|line| !line.is_empty())
+}
+
+pub(super) fn latest_tail_read_range_selected_line_from_loop(
+    loop_state: &LoopState,
+    prefer_english: bool,
+) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+                return None;
+            }
+            let output = step.output.as_deref()?.trim();
+            selected_tail_read_range_line_from_step_output(output, prefer_english)
+        })
+}
+
 pub(super) fn current_user_visible_delivery_text(loop_state: &LoopState) -> Option<&str> {
     loop_state
         .delivery_messages
@@ -304,6 +416,9 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     if route_requires_raw_tail_read_passthrough(route) {
         return false;
     }
+    if route_prefers_deterministic_tail_line(route) {
+        return false;
+    }
     if latest_tail_replacement_was_synthesized_after_tail(loop_state, current_delivery) {
         return true;
     }
@@ -319,6 +434,27 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     route
         .map(|route| {
             route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+        })
+        .unwrap_or(false)
+}
+
+fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind) -> bool {
+    matches!(
+        kind,
+        crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ExcerptKindJudgment
+    )
+}
+
+fn route_prefers_deterministic_tail_line(route: Option<&crate::RouteResult>) -> bool {
+    route
+        .map(|route| {
+            route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+                && semantic_kind_prefers_deterministic_tail_line(
+                    route.output_contract.semantic_kind,
+                )
+                && route.output_contract.requires_content_evidence
+                && !route.output_contract.delivery_required
         })
         .unwrap_or(false)
 }
