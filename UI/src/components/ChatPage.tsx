@@ -162,18 +162,41 @@ export function ChatPage({
             </button>
             <button
               type="button"
-              onClick={() =>
-                void (chatRecording ? onStopVoiceRecording() : onStartVoiceRecording())
-              }
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+                void onStartVoiceRecording();
+              }}
+              onPointerUp={(event) => {
+                event.preventDefault();
+                onStopVoiceRecording();
+              }}
+              onPointerCancel={() => onStopVoiceRecording()}
+              onKeyDown={(event) => {
+                if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
+                event.preventDefault();
+                void onStartVoiceRecording();
+              }}
+              onKeyUp={(event) => {
+                if (event.key !== " " && event.key !== "Enter") return;
+                event.preventDefault();
+                onStopVoiceRecording();
+              }}
+              onContextMenu={(event) => event.preventDefault()}
               disabled={chatSending}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className={
+                chatRecording
+                  ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  : "inline-flex select-none items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              }
             >
               {chatRecording ? (
                 <Square className="h-3.5 w-3.5" />
               ) : (
                 <Mic className="h-3.5 w-3.5" />
               )}
-              {chatRecording ? t("停止录音", "Stop recording") : t("输入语音", "Voice input")}
+              {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
             </button>
             <span className="text-xs text-white/45">
               {t(

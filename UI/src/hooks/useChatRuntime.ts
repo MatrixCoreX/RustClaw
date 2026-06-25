@@ -72,6 +72,17 @@ export function useChatRuntime({
   const chatVoiceInputRef = useRef<HTMLInputElement | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chatAudioChunksRef = useRef<Blob[]>([]);
+  const chatInputValueRef = useRef("");
+  const chatAttachmentsValueRef = useRef<ChatAttachment[]>([]);
+  const chatSendingValueRef = useRef(false);
+  const chatRecordingValueRef = useRef(false);
+  const voiceSendOnStopRef = useRef(false);
+  const voiceStopRequestedRef = useRef(false);
+
+  chatInputValueRef.current = chatInput;
+  chatAttachmentsValueRef.current = chatAttachments;
+  chatSendingValueRef.current = chatSending;
+  chatRecordingValueRef.current = chatRecording;
 
   const clearChatMessages = () => {
     setChatMessages([
@@ -94,12 +105,14 @@ export function useChatRuntime({
       const nextAttachments = await Promise.all(selected.map((file) => fileToChatAttachment(file)));
       setChatAttachments((prev) => {
         const merged = [...prev, ...nextAttachments];
+        const next = merged.slice(0, CHAT_MAX_ATTACHMENTS);
         if (merged.length > CHAT_MAX_ATTACHMENTS) {
           setChatError(t("最多只能一次发送 6 个附件。", "You can send up to 6 attachments at once."));
         } else {
           setChatError(null);
         }
-        return merged.slice(0, CHAT_MAX_ATTACHMENTS);
+        chatAttachmentsValueRef.current = next;
+        return next;
       });
       if (chatAttachmentInputRef.current) {
         chatAttachmentInputRef.current.value = "";
@@ -112,7 +125,11 @@ export function useChatRuntime({
   };
 
   const removeChatAttachment = (index: number) => {
-    setChatAttachments((prev) => prev.filter((_, i) => i !== index));
+    setChatAttachments((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      chatAttachmentsValueRef.current = next;
+      return next;
+    });
   };
 
   const handleChatVoiceFileSelection = async (fileList: FileList | null) => {
@@ -121,11 +138,15 @@ export function useChatRuntime({
       const file = fileList[0];
       if (!file) return;
       const attachment = await fileToChatAttachment(file, "audio");
-      setChatAttachments((prev) => [...prev, attachment].slice(0, CHAT_MAX_ATTACHMENTS));
+      const attached = [...chatAttachmentsValueRef.current, attachment].slice(0, CHAT_MAX_ATTACHMENTS);
       setChatError(null);
       if (chatVoiceInputRef.current) {
         chatVoiceInputRef.current.value = "";
       }
+      void submitChatMessageSnapshot(chatInputValueRef.current, attached, {
+        clearInput: true,
+        clearAttachments: true,
+      });
     } catch (err) {
       setChatError(
         err instanceof Error ? err.message : t("读取语音文件失败。", "Failed to read voice file."),
@@ -144,7 +165,7 @@ export function useChatRuntime({
   };
 
   const startChatVoiceRecording = async () => {
-    if (chatRecording || chatSending) return;
+    if (chatRecordingValueRef.current || chatSendingValueRef.current) return;
     const canRecordDirectly =
       window.isSecureContext &&
       Boolean(navigator.mediaDevices?.getUserMedia) &&
@@ -154,9 +175,19 @@ export function useChatRuntime({
       return;
     }
     try {
+      voiceStopRequestedRef.current = false;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      if (voiceStopRequestedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        voiceSendOnStopRef.current = false;
+        return;
+      }
+      const recorderMimeType = preferredRecorderMimeType();
+      const recorder = recorderMimeType
+        ? new MediaRecorder(stream, { mimeType: recorderMimeType })
+        : new MediaRecorder(stream);
       chatAudioChunksRef.current = [];
+      voiceSendOnStopRef.current = true;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chatAudioChunksRef.current.push(event.data);
@@ -164,11 +195,17 @@ export function useChatRuntime({
       };
       recorder.onerror = () => {
         stream.getTracks().forEach((track) => track.stop());
+        chatRecordingValueRef.current = false;
+        voiceSendOnStopRef.current = false;
         setChatRecording(false);
         setChatError(t("录音失败，请重新尝试。", "Recording failed. Please try again."));
       };
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
+        const shouldSend = voiceSendOnStopRef.current;
+        voiceSendOnStopRef.current = false;
+        chatRecordingValueRef.current = false;
+        chatMediaRecorderRef.current = null;
         setChatRecording(false);
         const mimeType = recorder.mimeType || "audio/webm";
         const blob = new Blob(chatAudioChunksRef.current, { type: mimeType });
@@ -184,8 +221,20 @@ export function useChatRuntime({
             { type: mimeType },
           );
           const attachment = await fileToChatAttachment(file, "audio");
-          setChatAttachments((prev) => [...prev, attachment].slice(0, CHAT_MAX_ATTACHMENTS));
+          const attached = [...chatAttachmentsValueRef.current, attachment].slice(
+            0,
+            CHAT_MAX_ATTACHMENTS,
+          );
           setChatError(null);
+          if (shouldSend) {
+            void submitChatMessageSnapshot(chatInputValueRef.current, attached, {
+              clearInput: true,
+              clearAttachments: true,
+            });
+          } else {
+            chatAttachmentsValueRef.current = attached;
+            setChatAttachments(attached);
+          }
         } catch (err) {
           setChatError(
             err instanceof Error
@@ -196,9 +245,16 @@ export function useChatRuntime({
       };
       chatMediaRecorderRef.current = recorder;
       recorder.start();
-      setChatRecording(true);
+      if (voiceStopRequestedRef.current) {
+        recorder.stop();
+      } else {
+        chatRecordingValueRef.current = true;
+        setChatRecording(true);
+      }
       setChatError(null);
     } catch (err) {
+      chatRecordingValueRef.current = false;
+      voiceSendOnStopRef.current = false;
       setChatRecording(false);
       setChatError(
         err instanceof Error ? err.message : t("无法开始录音。", "Unable to start recording."),
@@ -207,22 +263,28 @@ export function useChatRuntime({
   };
 
   const stopChatVoiceRecording = () => {
+    voiceStopRequestedRef.current = true;
     const recorder = chatMediaRecorderRef.current;
     if (recorder && recorder.state === "recording") {
       recorder.stop();
     }
   };
 
-  const sendChatMessage = async () => {
-    const text = chatInput.trim();
-    const attached = chatAttachments;
-    if ((!text && attached.length === 0) || chatSending || chatRecording) return;
+  const submitChatMessageSnapshot = async (
+    rawText: string,
+    rawAttachments: ChatAttachment[],
+    options: { clearInput: boolean; clearAttachments: boolean },
+  ) => {
+    const text = rawText.trim();
+    const attached = rawAttachments.slice(0, CHAT_MAX_ATTACHMENTS);
+    if ((!text && attached.length === 0) || chatSendingValueRef.current) return;
     const attachedImages = attached.filter(attachmentIsImage);
     const attachedAudios = attached.filter(attachmentIsAudio);
     const attachedFiles = attached.filter(
       (attachment) => !attachmentIsImage(attachment) && !attachmentIsAudio(attachment),
     );
     const audioOnly = attachedAudios.length > 0 && attachedImages.length === 0 && attachedFiles.length === 0;
+    const primaryAudio = attachedAudios[attachedAudios.length - 1];
     const requestText =
       text ||
       (audioOnly
@@ -233,6 +295,7 @@ export function useChatRuntime({
             attachedAudios.length,
             attachedFiles.length,
           ));
+    chatSendingValueRef.current = true;
     setChatSending(true);
     setChatError(null);
     const userMsg: ChatMessage = {
@@ -251,8 +314,14 @@ export function useChatRuntime({
       images: attachedImages,
     };
     setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
-    setChatAttachments([]);
+    if (options.clearInput) {
+      chatInputValueRef.current = "";
+      setChatInput("");
+    }
+    if (options.clearAttachments) {
+      chatAttachmentsValueRef.current = [];
+      setChatAttachments([]);
+    }
     if (chatAttachmentInputRef.current) {
       chatAttachmentInputRef.current.value = "";
     }
@@ -287,13 +356,13 @@ export function useChatRuntime({
                   size: image.size,
                   base64: image.dataUrl,
                 })),
-                ...(attachedAudios.length > 0
+                ...(primaryAudio
                   ? {
                       audio: {
-                        name: attachedAudios[0].name,
-                        mime_type: attachedAudios[0].mimeType,
-                        size: attachedAudios[0].size,
-                        base64: attachedAudios[0].dataUrl,
+                        name: primaryAudio.name,
+                        mime_type: primaryAudio.mimeType,
+                        size: primaryAudio.size,
+                        base64: primaryAudio.dataUrl,
                       },
                     }
                   : {}),
@@ -347,8 +416,17 @@ export function useChatRuntime({
       };
       setChatMessages((prev) => [...prev, systemErrMsg]);
     } finally {
+      chatSendingValueRef.current = false;
       setChatSending(false);
     }
+  };
+
+  const sendChatMessage = async () => {
+    if (chatRecordingValueRef.current) return;
+    await submitChatMessageSnapshot(chatInputValueRef.current, chatAttachmentsValueRef.current, {
+      clearInput: true,
+      clearAttachments: true,
+    });
   };
 
   const handleChatInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -379,6 +457,18 @@ export function useChatRuntime({
     stopChatVoiceRecording,
     sendChatMessage,
   };
+}
+
+function preferredRecorderMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) {
+    return undefined;
+  }
+  return [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 function defaultAttachmentPrompt(
