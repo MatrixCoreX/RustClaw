@@ -235,6 +235,61 @@ pub(super) fn repair_sqlite_path_excerpt_judgment_contract(
     true
 }
 
+pub(super) fn repair_sqlite_structured_version_contract(
+    state: &crate::AppState,
+    prompt: &str,
+    resolved_prompt: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+        )
+        || !sqlite_version_selector(route_result)
+    {
+        return false;
+    }
+    let Some(path) =
+        sqlite_database_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
+    else {
+        return false;
+    };
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = path;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    super::append_route_reason(route_result, "sqlite_structured_version_contract_repaired");
+    true
+}
+
+fn sqlite_version_selector(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .output_contract
+        .self_extension
+        .structured_field_selector
+        .as_deref()
+        .map(normalize_sqlite_version_selector)
+        .is_some_and(|selector| matches!(selector.as_str(), "schema_version" | "user_version"))
+}
+
+fn normalize_sqlite_version_selector(selector: &str) -> String {
+    selector
+        .trim()
+        .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
+        .to_ascii_lowercase()
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
 fn sqlite_database_locator_from_route_or_text(
     state: &crate::AppState,
     prompt: &str,
