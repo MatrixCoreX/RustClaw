@@ -859,6 +859,60 @@ fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
 }
 
 #[test]
+fn log_content_summary_route_forces_repair_from_generic_fs_read() {
+    let state = test_state_with_registry();
+    let loop_state = LoopState::new(2);
+    let temp = TempDirGuard::new("log_content_summary_prefers_log_analyze");
+    let log_path = temp.path.join("app.log");
+    fs::write(&log_path, "INFO ok\nWARN cache miss\n").expect("write fixture log");
+    let log_path = log_path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.clone();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": log_path,
+                "mode": "head",
+                "n": 120,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    assert!(super::super::registry_preferred_skill_matches_route(
+        &state, &route
+    ));
+    assert!(
+        super::super::actions_use_ad_hoc_command_without_route_preferred_skill(
+            &state, &route, &actions
+        )
+    );
+    assert!(should_force_actionable_plan_repair(
+        &state,
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+    assert_eq!(
+        plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
+        "preferred_skill_required_for_semantic_route"
+    );
+}
+
+#[test]
 fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);

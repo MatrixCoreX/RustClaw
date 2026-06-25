@@ -591,6 +591,7 @@ Skill behavior notes (file/path):
 ### log_analyze
 - required: none
 - optional: `path`, `keywords`, `max_matches`
+- Prefer this skill over generic `fs_basic.read_text_range` when the task asks for log health, anomalies, errors, warnings, failures, timeouts, retries, or recovery signals in a log file or log directory.
 
 #### log_analyze JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"log_analyze","args":{...}}`

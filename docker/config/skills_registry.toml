@@ -833,9 +833,12 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
+description = "Analyze log files or log directories for errors, warnings, failures, timeouts, notable anomalies, and recovery signals; prefer this over generic file reading when the user asks for log health or anomaly judgment."
+semantic_tags = ["log_analysis", "log_anomaly", "error_summary", "warning_summary", "failure_diagnosis", "recovery_summary"]
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 planner_capabilities = [
+  { name = "log_analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
   { name = "logs.analyze", action = "analyze", effect = "observe", optional = ["path", "requested_path", "keywords", "max_lines", "max_matches"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, max_lines = { type = "integer" } } }
