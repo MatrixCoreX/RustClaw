@@ -421,6 +421,73 @@ fn locatorless_status_query_clarify_promotes_to_service_status_execution() {
 }
 
 #[test]
+fn system_health_selector_clarify_promotes_to_service_status_execution() {
+    let state = test_state_with_root(make_temp_root("system_health_selector_clarify"));
+    let mut route = executable_filename_route();
+    route.set_clarify_gate();
+    route.needs_clarify = true;
+    route.clarify_question = "missing locator".to_string();
+    route.resolved_intent =
+        "Collect host operating-system fields. structured_field_selector=system_health.*"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("system_health.*".to_string());
+    let analysis = status_query_analysis(Some(serde_json::json!({
+        "structured_field_selector": "system_health.*"
+    })));
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(promote_locatorless_status_query_to_service_status(
+        &state,
+        "status overview",
+        &mut route,
+        Some(&analysis),
+    ));
+
+    assert!(route.is_execute_gate());
+    assert!(!route.needs_clarify);
+    assert!(route.clarify_question.is_empty());
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ServiceStatus
+    );
+    assert_eq!(
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        Some("system_health.*")
+    );
+    assert!(!unbound_model_context_target_route_should_force_clarify(
+        &state,
+        "status overview",
+        &route,
+        Some(&analysis),
+        &snapshot,
+    ));
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "status overview",
+        &route,
+        Some(&analysis),
+        &snapshot,
+    ));
+}
+
+#[test]
 fn generic_service_status_with_model_background_locator_does_not_clarify() {
     let state = test_state_with_root(make_temp_root("generic_health_background_locator"));
     let mut route = executable_filename_route();
