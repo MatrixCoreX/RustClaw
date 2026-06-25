@@ -232,7 +232,7 @@ chat|nl_cases_full_chat_poem_short|client_like,aggregate|写一首两句的打�
 # source: scripts/nl_tests/cases/nl_cases_llm_first_convergence_20260511.txt
 llm_first|nl_cases_llm_first_convergence_20260511_workspace_article_after_wrong_locator_cn|skill:system_basic,client_like,aggregate|帮我写一篇关于 RustClaw 的长文
 llm_first|nl_cases_llm_first_convergence_20260511_missing_then_bounded_fallback_cn|skill:fs_search,client_like,aggregate|读取 plan/definitely_missing_20260511.md；如果不存在，就在 plan 目录里搜索 execution_intent 相关的 md 文件，并只返回找到的路径
-llm_first|nl_cases_llm_first_convergence_20260511_dynamic_scalar_username_en|skill:run_cmd,client_like,aggregate|Output only the current username, no explanation.
+llm_first|nl_cases_llm_first_convergence_20260511_dynamic_scalar_username_en|any_skill:run_cmd+system_basic,client_like,aggregate|Output only the current username, no explanation.
 llm_first|nl_cases_llm_first_convergence_20260511_planner_retry_wrong_target_cn|skill:read_file,client_like,aggregate|把 RustClaw 当成当前项目来介绍，先查证项目 README 和工作区配置，再写三句话
 # source: scripts/nl_tests/cases/nl_cases_llm_first_semantic_contract.txt
 continuous|nl_cases_llm_first_semantic_contract_task_append_split_sentence_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我写个方案
