@@ -237,3 +237,75 @@ fn plan_result_schema_drift() {
             });
     }
 }
+
+#[tokio::test]
+async fn parse_single_plan_accepts_respond_only_step_with_top_level_content() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{
+      "steps": [
+        {
+          "type": "respond",
+          "content": "【面向老板的方案模板】\n\n一、背景与机会\n| 风险 | 概率 |\n|---|---|"
+        }
+      ]
+    }"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("respond-only plan should parse");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::Respond { content }]
+            if content.contains("面向老板") && content.contains("|---|")
+    ));
+}
+
+#[tokio::test]
+async fn parse_single_plan_recovers_malformed_respond_step_with_extra_closer() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{
+      "steps": [
+        {
+          "type": "respond",
+          "content": "【面向老板的方案模板】\n\n一、背景与机会\n| 风险 | 概率 |\n|---|---|"
+        }}
+      ]
+    }"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("malformed respond-only plan should recover");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::Respond { content }]
+            if content.contains("面向老板") && content.contains("|---|")
+    ));
+}
+
+#[tokio::test]
+async fn parse_single_plan_accepts_synthesize_answer_only_step_with_top_level_refs() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{
+      "steps": [
+        {
+          "type": "synthesize_answer",
+          "evidence_refs": ["last_output"]
+        }
+      ]
+    }"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("synthesize-answer-only plan should parse");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::SynthesizeAnswer { evidence_refs }]
+            if evidence_refs.as_slice() == ["last_output".to_string()].as_slice()
+    ));
+}
