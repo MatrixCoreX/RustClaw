@@ -430,6 +430,7 @@ fn apply_ask_post_route(
         &session_snapshot,
         &mut route_result,
     );
+    promote_locatorless_scalar_status_query_to_runtime_info(&mut route_result, turn_analysis);
     promote_locatorless_status_query_to_service_status(
         state,
         prompt,
