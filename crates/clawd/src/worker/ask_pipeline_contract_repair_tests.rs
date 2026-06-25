@@ -1,5 +1,6 @@
 use super::{
     repair_compound_file_names_plus_content_summary_contract,
+    repair_config_validation_findings_contract,
     repair_generic_path_content_grounded_summary_contract,
     repair_session_alias_listing_plus_content_summary_contract,
     repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_version_contract,
@@ -494,6 +495,71 @@ fn sqlite_structured_version_contract_repair_uses_schema_version_contract() {
     .expect("db_basic policy");
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.contract_match, "sqlite_schema_version");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn config_validation_findings_selector_repairs_to_config_risk_contract() {
+    let root = make_temp_root("config_validation_findings_repair");
+    std::fs::create_dir_all(root.join("configs")).expect("configs directory");
+    std::fs::write(
+        root.join("configs/config.toml"),
+        "[llm]\nselected_vendor = \"minimax\"\n",
+    )
+    .expect("config file");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("config_validation_findings".to_string());
+
+    assert!(repair_config_validation_findings_contract(
+        &state,
+        "inspect configs/config.toml",
+        "",
+        &mut route,
+    ));
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ConfigRiskAssessment
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+    );
+    assert!(route
+        .output_contract
+        .self_extension
+        .structured_field_selector
+        .is_none());
+    assert!(route
+        .output_contract
+        .locator_hint
+        .ends_with("configs/config.toml"));
+    assert!(route_reason_has_marker(
+        &route,
+        "config_validation_findings_contract_repaired"
+    ));
+    let policy = crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        "config_basic",
+        &serde_json::json!({
+            "action": "guard_rustclaw_config",
+            "path": route.output_contract.locator_hint,
+        }),
+    )
+    .expect("config guard policy");
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.contract_match, "config_risk_assessment");
 
     let _ = std::fs::remove_dir_all(root);
 }

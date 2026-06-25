@@ -269,17 +269,65 @@ pub(super) fn repair_sqlite_structured_version_contract(
     true
 }
 
+pub(super) fn repair_config_validation_findings_contract(
+    state: &crate::AppState,
+    prompt: &str,
+    resolved_prompt: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ConfigValidation
+        )
+        || !config_validation_findings_selector(route_result)
+    {
+        return false;
+    }
+    let Some(path) =
+        structured_config_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
+    else {
+        return false;
+    };
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = path;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route_result
+        .output_contract
+        .self_extension
+        .structured_field_selector = None;
+    super::append_route_reason(route_result, "config_validation_findings_contract_repaired");
+    true
+}
+
+fn config_validation_findings_selector(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .output_contract
+        .self_extension
+        .structured_field_selector
+        .as_deref()
+        .map(normalize_machine_selector_tail)
+        .is_some_and(|selector| selector == "config_validation_findings")
+}
+
 fn sqlite_version_selector(route_result: &crate::RouteResult) -> bool {
     route_result
         .output_contract
         .self_extension
         .structured_field_selector
         .as_deref()
-        .map(normalize_sqlite_version_selector)
+        .map(normalize_machine_selector_tail)
         .is_some_and(|selector| matches!(selector.as_str(), "schema_version" | "user_version"))
 }
 
-fn normalize_sqlite_version_selector(selector: &str) -> String {
+fn normalize_machine_selector_tail(selector: &str) -> String {
     selector
         .trim()
         .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
@@ -288,6 +336,48 @@ fn normalize_sqlite_version_selector(selector: &str) -> String {
         .next()
         .unwrap_or_default()
         .to_string()
+}
+
+fn structured_config_locator_from_route_or_text(
+    state: &crate::AppState,
+    prompt: &str,
+    resolved_prompt: &str,
+    route_result: &crate::RouteResult,
+) -> Option<String> {
+    let mut candidates = Vec::new();
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if !locator_hint.is_empty() {
+        candidates.push(locator_hint.to_string());
+    }
+    for text in [
+        prompt,
+        resolved_prompt,
+        route_result.resolved_intent.as_str(),
+    ] {
+        candidates.extend(
+            crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(
+                text,
+            )
+            .into_iter()
+            .filter(|locator| matches!(locator.locator_kind, crate::OutputLocatorKind::Path))
+            .map(|locator| locator.locator_hint),
+        );
+    }
+    candidates.into_iter().find_map(|candidate| {
+        let path = super::resolve_existing_workspace_locator_hint(state, &candidate)?;
+        structured_config_path(&path).then_some(path)
+    })
+}
+
+fn structured_config_path(path: &str) -> bool {
+    matches!(
+        std::path::Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("json" | "toml" | "yaml" | "yml")
+    )
 }
 
 fn sqlite_database_locator_from_route_or_text(
