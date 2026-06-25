@@ -210,7 +210,7 @@ export function NniPage({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <section className="theme-panel p-5 sm:p-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
@@ -509,7 +509,7 @@ export function NniPage({
         </div>
       </section>
 
-      <section className="theme-panel-soft p-5">
+      <section className="order-last theme-panel-soft p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
@@ -619,7 +619,7 @@ export function NniPage({
         </div>
       </section>
 
-      <section className="theme-panel-soft p-5">
+      <section className="order-last theme-panel-soft p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
