@@ -1,5 +1,6 @@
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::ClaimedTask;
+use serde_json::Value;
 
 use super::log_deterministic_delivery_record;
 use super::route_helpers::route_clarify_reason_code;
@@ -49,6 +50,10 @@ pub(super) fn attach_route_clarify_machine_envelope(
     if let Some(field_path) = field_path.as_deref() {
         ensure_output_var(loop_state, "agent_loop.field_path", field_path);
     }
+    mark_terminal_clarify(loop_state, finalizer_summary);
+    if !clarify_machine_delivery_requested(agent_run_context) {
+        return false;
+    }
 
     let envelope = serde_json::json!({
         "output_format": "machine_json",
@@ -76,7 +81,6 @@ pub(super) fn attach_route_clarify_machine_envelope(
     })
     .to_string();
     delivery_messages.push(envelope);
-    mark_terminal_clarify(loop_state, finalizer_summary);
     log_deterministic_delivery_record(
         &task.task_id,
         "agent_loop_clarify_machine_envelope",
@@ -85,6 +89,40 @@ pub(super) fn attach_route_clarify_machine_envelope(
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn clarify_machine_delivery_requested(agent_run_context: Option<&AgentRunContext>) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.turn_analysis.as_ref())
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .and_then(|state_patch| state_patch.get("required_machine_fields"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(is_clarify_machine_field)
+}
+
+fn is_clarify_machine_field(raw: &str) -> bool {
+    let field = raw
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | ';' | ':' | ')' | '('));
+    matches!(
+        field,
+        "clarify"
+            | "agent_loop_clarify"
+            | "agent_loop.clarify"
+            | "clarify_reason_code"
+            | "agent_loop.clarify_reason_code"
+            | "missing_slot"
+            | "agent_loop.missing_slot"
+            | "field_path"
+            | "agent_loop.field_path"
+            | "locator_kind"
+            | "agent_loop.locator_kind"
+            | "message_key"
+            | "agent_loop.message_key"
+    )
 }
 
 fn route_allows_terminal_clarify_envelope(
