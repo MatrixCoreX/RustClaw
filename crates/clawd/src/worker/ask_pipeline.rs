@@ -430,6 +430,12 @@ fn apply_ask_post_route(
         &session_snapshot,
         &mut route_result,
     );
+    promote_locatorless_status_query_to_service_status(
+        state,
+        prompt,
+        &mut route_result,
+        turn_analysis,
+    );
     if deictic_memory_only_route_should_force_clarify(
         prompt,
         &route_result,

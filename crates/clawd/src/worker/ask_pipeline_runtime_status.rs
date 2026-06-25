@@ -115,6 +115,8 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
     let Some(turn_analysis) = turn_analysis else {
         return false;
     };
+    let system_health_selector =
+        route_or_turn_has_system_health_selector(route_result, Some(turn_analysis));
     if turn_analysis.turn_type != Some(crate::intent_router::TurnType::StatusQuery)
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -132,7 +134,8 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
         return false;
     }
     let promotable_gate = route_result.is_execute_gate()
-        || (route_result.needs_clarify && route_result.clarify_question.trim().is_empty());
+        || (route_result.needs_clarify
+            && (route_result.clarify_question.trim().is_empty() || system_health_selector));
     if !promotable_gate {
         return false;
     }
@@ -149,6 +152,7 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
     }
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
         && turn_analysis_has_runtime_status_query(turn_analysis)
+        && !system_health_selector
     {
         return false;
     }
@@ -157,6 +161,7 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
             route_result,
             "execution_recipe_scalar_runtime_tool_observation",
         )
+        && !system_health_selector
     {
         return false;
     }
@@ -168,9 +173,25 @@ pub(super) fn promote_locatorless_status_query_to_service_status(
     route_result.clarify_question.clear();
     route_result.set_execute_gate();
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    if system_health_selector
+        && route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .is_none()
+    {
+        route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector = Some("system_health.*".to_string());
+    }
     super::append_route_reason(
         route_result,
-        "locatorless_status_query_promoted_to_service_status",
+        if system_health_selector {
+            "system_health_selector_promoted_to_service_status"
+        } else {
+            "locatorless_status_query_promoted_to_service_status"
+        },
     );
     true
 }
@@ -228,6 +249,65 @@ pub(super) fn turn_analysis_has_runtime_status_query(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .is_some_and(|kind| !kind.is_empty())
+}
+
+pub(super) fn route_or_turn_has_system_health_selector(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    route_result
+        .output_contract
+        .self_extension
+        .structured_field_selector
+        .as_deref()
+        .is_some_and(system_health_selector)
+        || turn_analysis.is_some_and(turn_analysis_has_system_health_selector)
+}
+
+pub(super) fn turn_analysis_has_system_health_selector(
+    turn_analysis: &crate::intent_router::TurnAnalysis,
+) -> bool {
+    turn_analysis
+        .state_patch
+        .as_ref()
+        .and_then(structured_field_selector_from_state_patch)
+        .is_some_and(|selector| system_health_selector(&selector))
+}
+
+fn structured_field_selector_from_state_patch(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if key == "structured_field_selector"
+                    || key == "field_selector"
+                    || key == "field_path"
+                    || key == "key_path"
+                {
+                    if let Some(selector) = value.as_str().map(str::trim).filter(|s| !s.is_empty())
+                    {
+                        return Some(selector.to_string());
+                    }
+                }
+                if let Some(selector) = structured_field_selector_from_state_patch(value) {
+                    return Some(selector);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(structured_field_selector_from_state_patch),
+        _ => None,
+    }
+}
+
+fn system_health_selector(selector: &str) -> bool {
+    let selector = selector.trim();
+    selector == "system_health"
+        || selector == "system_health.*"
+        || selector
+            .strip_prefix("system_health.")
+            .is_some_and(|suffix| !suffix.trim().is_empty())
 }
 
 #[cfg(test)]
