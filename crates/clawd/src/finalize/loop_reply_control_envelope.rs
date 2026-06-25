@@ -71,8 +71,7 @@ pub(super) fn attach_requested_control_machine_envelope(
 }
 
 fn requested_machine_fields(ctx: &AgentRunContext) -> Vec<String> {
-    let mut fields = ctx
-        .turn_analysis
+    ctx.turn_analysis
         .as_ref()
         .and_then(|analysis| analysis.state_patch.as_ref())
         .and_then(|state_patch| state_patch.get("required_machine_fields"))
@@ -81,15 +80,7 @@ fn requested_machine_fields(ctx: &AgentRunContext) -> Vec<String> {
         .flatten()
         .filter_map(Value::as_str)
         .filter_map(normalize_required_machine_field)
-        .fold(Vec::<String>::new(), push_unique);
-    if fields.is_empty() {
-        fields = ctx
-            .route_result
-            .as_ref()
-            .map(route_metadata_required_machine_fields)
-            .unwrap_or_default();
-    }
-    fields
+        .fold(Vec::<String>::new(), push_unique)
 }
 
 fn normalize_required_machine_field(raw: &str) -> Option<String> {
@@ -131,46 +122,6 @@ fn normalize_required_machine_field(raw: &str) -> Option<String> {
         _ => return None,
     };
     Some(normalized.to_string())
-}
-
-fn route_metadata_required_machine_fields(route: &crate::RouteResult) -> Vec<String> {
-    route_machine_tokens(&route.resolved_intent)
-        .chain(route_machine_tokens(&route.route_reason))
-        .filter_map(|token| normalize_required_machine_field(&token))
-        .fold(Vec::<String>::new(), push_unique)
-}
-
-fn route_machine_tokens(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split(|ch: char| {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                ',' | ';' | '|' | '[' | ']' | '{' | '}' | '(' | ')' | '"' | '\'' | '`'
-            )
-    })
-    .map(str::trim)
-    .filter(|token| !token.is_empty())
-    .filter_map(route_machine_token)
-}
-
-fn route_machine_token(token: &str) -> Option<String> {
-    let token = token.trim_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | ')' | '('));
-    if token == "decision_envelope" || token.starts_with("decision_envelope.") {
-        return Some(token.to_string());
-    }
-    let key = token.split_once('=').map(|(key, _)| key).unwrap_or(token);
-    match key {
-        "control_intent"
-        | "terminal_intent"
-        | "decision"
-        | "capability_ref"
-        | "control_reason_code"
-        | "reason_code"
-        | "validation_status"
-        | "validation_reason_code"
-        | "semantic_authority" => Some(key.to_string()),
-        _ => None,
-    }
 }
 
 fn push_unique(mut fields: Vec<String>, field: String) -> Vec<String> {

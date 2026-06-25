@@ -113,6 +113,7 @@ mod structured_multi_field_read_rewrite;
 mod system_basic_action_path;
 #[path = "value_string_list.rs"]
 mod value_string_list;
+use super::planning_recent_artifacts::recent_artifacts_judgment_deterministic_plan_result;
 use action_route_locator_artifact::*;
 use archive_database_aggregate_plan::*;
 use concrete_respond_structural_observation::*;
@@ -447,6 +448,15 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_kb_chain"
     );
     if allow_structural_deterministic_plans {
+        return_deterministic_plan!(
+            recent_artifacts_judgment_deterministic_plan_result(
+                goal,
+                route_result,
+                loop_state,
+                auto_locator_path,
+            ),
+            "plan_deterministic_recent_artifacts_judgment"
+        );
         return_deterministic_plan!(
             directory_purpose_representative_reads_after_find_result(
                 goal,
