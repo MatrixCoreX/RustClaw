@@ -1,6 +1,6 @@
 use super::{
-    answer_verifier_retry_summary, ok_step, route_result,
-    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
+    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary, ok_step,
+    route_result, suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
 };
@@ -9,6 +9,27 @@ use crate::{
     OutputSemanticKind,
 };
 use serde_json::json;
+
+#[test]
+fn output_format_machine_payload_gap_detects_structured_reply_only() {
+    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "visible answer shape mismatch".to_string(),
+        should_retry: true,
+        retry_instruction: "render observed machine evidence".to_string(),
+        confidence: 0.9,
+    };
+
+    assert!(answer_verifier_output_format_machine_payload_gap(
+        &verifier,
+        r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
+    ));
+    assert!(!answer_verifier_output_format_machine_payload_gap(
+        &verifier,
+        "configs/config.toml has one observed risk."
+    ));
+}
 
 #[test]
 fn answer_verifier_retry_summary_requires_retryable_high_confidence_gap() {

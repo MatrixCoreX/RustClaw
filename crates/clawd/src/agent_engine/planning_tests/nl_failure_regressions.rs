@@ -90,6 +90,44 @@ fn config_risk_preview_uses_git_plan_change_and_guard_observations() {
 }
 
 #[test]
+fn main_config_content_excerpt_deterministic_fast_path_uses_guard_observation() {
+    let state = test_state_with_enabled_skills(&["fs_basic", "config_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "summarize main config",
+        Some(&route),
+        &loop_state,
+        "configs/config.toml",
+        None,
+        Some("/home/guagua/rustclaw/configs/config.toml"),
+    )
+    .expect("main config broad content summary should prefer config guard");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].skill, "config_basic");
+    assert_eq!(
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("guard_rustclaw_config")
+    );
+    assert_eq!(
+        plan.steps[0].args.get("path").and_then(Value::as_str),
+        Some("/home/guagua/rustclaw/configs/config.toml")
+    );
+    let synth = plan.steps[1].to_agent_action().expect("synthesis action");
+    let AgentAction::SynthesizeAnswer { evidence_refs } = synth else {
+        panic!("unexpected synthesis action: {synth:?}");
+    };
+    assert_eq!(evidence_refs, vec!["step_1"]);
+}
+
+#[test]
 fn browser_http_summary_uses_both_observations_and_explicit_evidence_refs() {
     let state = test_state_with_enabled_skills(&["browser_web", "http_basic"]);
     let mut route = base_route_result();

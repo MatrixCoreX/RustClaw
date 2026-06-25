@@ -1,6 +1,7 @@
 use super::{
-    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
-    boundary_context_snapshot_json, evaluate_round_outcome, initial_execution_recipe_spec,
+    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
+    apply_structured_respond_clarify_to_loop_state, boundary_context_snapshot_json,
+    evaluate_round_outcome, initial_execution_recipe_spec,
     mark_reply_failed_after_answer_verifier_exhausted,
     maybe_record_agent_decides_shadow_attribution,
     maybe_record_agent_decides_shadow_first_action_attribution, parse_log_analyze_finding,

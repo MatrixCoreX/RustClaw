@@ -5,9 +5,12 @@ use tracing::{error, info, warn};
 
 use crate::{repo, AppState};
 
+#[path = "task_config_guard_recovery.rs"]
+mod task_config_guard_recovery;
 #[path = "task_resume.rs"]
 mod task_resume;
 
+use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
@@ -15,6 +18,25 @@ use task_resume::{
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
     text_looks_like_missing_file_target,
 };
+
+pub(crate) async fn retry_loop_answer_after_verifier(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    user_request: &str,
+    journal: &crate::task_journal::TaskJournal,
+    rejected_answer: &str,
+    verifier: &crate::answer_verifier::AnswerVerifierOut,
+) -> Option<String> {
+    retry_answer_after_verifier(
+        state,
+        task,
+        user_request,
+        journal,
+        rejected_answer,
+        verifier,
+    )
+    .await
+}
 
 #[cfg(test)]
 use task_resume::{
@@ -1463,6 +1485,23 @@ pub(crate) async fn finalize_ask_result(
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+            }
+            if let Some(recovered_answer) =
+                deterministic_config_guard_candidates_recovery(route_result, &journal)
+            {
+                failure_reply = false;
+                semantic_clarify = false;
+                answer_text = recovered_answer;
+                answer_messages
+                    .retain(|message| crate::finalize::is_execution_summary_message(message));
+                answer_messages.push(answer_text.clone());
+                journal.record_final_answer(&answer_text);
+                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+                info!(
+                    "finalize_config_guard_candidates_recovered task_id={} answer={}",
+                    task.task_id,
+                    crate::truncate_for_log(&answer_text)
+                );
             }
             if let Some(recovered_answer) = deterministic_content_tail_read_failure_recovery(
                 state,

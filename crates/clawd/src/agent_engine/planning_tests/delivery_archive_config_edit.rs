@@ -1053,6 +1053,51 @@ fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_g
 }
 
 #[test]
+fn main_config_content_summary_read_rewrites_to_guard() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/configs/config.toml",
+                "mode": "head",
+                "n": 120,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "check main config for obvious configuration issues",
+        Some("/home/guagua/rustclaw/configs/config.toml"),
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "config_basic", "guard_rustclaw_config");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
+    );
+}
+
+#[test]
 fn guard_config_with_invalid_product_locator_uses_main_config_default() {
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),

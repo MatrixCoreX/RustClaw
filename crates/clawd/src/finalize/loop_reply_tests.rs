@@ -60,6 +60,7 @@ use super::{
     should_attach_execution_summary, should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
     successful_delivery_final_status, verify_summary_requires_resume_confirmation,
+    visible_answer_is_machine_payload,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
@@ -69,6 +70,16 @@ use crate::{
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
+
+#[test]
+fn visible_answer_machine_payload_detection_is_structural() {
+    assert!(visible_answer_is_machine_payload(
+        r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
+    ));
+    assert!(!visible_answer_is_machine_payload(
+        "configs/config.toml has one observed risk."
+    ));
+}
 
 #[path = "loop_reply_execution_summary_tests.rs"]
 mod execution_summary_tests;

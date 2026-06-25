@@ -755,6 +755,11 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
             args: Value::Object(args),
         });
     }
+    let mut actions = rewrite_rustclaw_main_config_excerpt_read_to_guard(
+        route_result,
+        auto_locator_path,
+        actions,
+    );
     let evidence_refs = (1..=actions.len())
         .map(|idx| format!("step_{idx}"))
         .collect::<Vec<_>>();

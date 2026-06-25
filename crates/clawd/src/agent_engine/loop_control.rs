@@ -40,6 +40,43 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
+fn answer_verifier_output_format_machine_payload_gap(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+    reply_text: &str,
+) -> bool {
+    if !verifier.high_confidence_retry_gap()
+        || !verifier
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field == "output_format")
+    {
+        return false;
+    }
+    serde_json::from_str::<Value>(reply_text.trim())
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+        .is_some_and(|object| {
+            object.contains_key("message_key")
+                || object.contains_key("reason_code")
+                || object.contains_key("candidates")
+                || object.contains_key("risks")
+        })
+}
+
+fn answer_verifier_summary_to_out(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> crate::answer_verifier::AnswerVerifierOut {
+    crate::answer_verifier::AnswerVerifierOut {
+        pass: verifier.pass,
+        missing_evidence_fields: verifier.missing_evidence_fields.clone(),
+        answer_incomplete_reason: verifier.answer_incomplete_reason.clone(),
+        should_retry: verifier.should_retry,
+        retry_instruction: verifier.retry_instruction.clone(),
+        confidence: verifier.confidence,
+    }
+    .normalized()
+}
+
 fn record_session_start_hooks(task: &ClaimedTask, user_text: &str, loop_state: &mut LoopState) {
     let mut session_start =
         crate::agent_hooks::session_start_outcome().to_machine_json("agent_loop");
@@ -1473,6 +1510,62 @@ pub(super) async fn run_agent_with_loop_seeded(
             return Ok(reply);
         }
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
+            if answer_verifier_output_format_machine_payload_gap(&verifier, &reply.text) {
+                if let (Some(route), Some(journal_snapshot)) =
+                    (route_result, reply.task_journal.clone())
+                {
+                    let verifier_out = answer_verifier_summary_to_out(&verifier);
+                    if let Some(retried_answer) = crate::finalize::retry_loop_answer_after_verifier(
+                        state,
+                        task,
+                        user_text,
+                        &journal_snapshot,
+                        &reply.text,
+                        &verifier_out,
+                    )
+                    .await
+                    {
+                        let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
+                            state,
+                            task,
+                            user_text,
+                            route,
+                            &journal_snapshot,
+                            &retried_answer,
+                        )
+                        .await;
+                        if let Some(retry_verifier) = retry_verifier {
+                            if let Some(journal) = reply.task_journal.as_mut() {
+                                journal.record_answer_verifier_summary(retry_verifier);
+                            }
+                        } else {
+                            let mut messages = reply
+                                .messages
+                                .iter()
+                                .filter(|message| {
+                                    crate::finalize::is_execution_summary_message(message)
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            messages.push(retried_answer.clone());
+                            if let Some(journal) = reply.task_journal.as_mut() {
+                                journal.answer_verifier_summary = None;
+                                journal.record_final_answer(&retried_answer);
+                                journal.record_final_status(
+                                    crate::task_journal::TaskJournalFinalStatus::Success,
+                                );
+                            }
+                            reply.text = retried_answer;
+                            reply.messages = messages;
+                            reply.should_fail_task = false;
+                            reply.error_text = None;
+                            reply.is_llm_reply = true;
+                            info!("answer_verifier_machine_payload_rewritten_to_visible_answer");
+                            return Ok(reply);
+                        }
+                    }
+                }
+            }
             if answer_verifier_retry_count < policy.answer_verifier_retry_limit
                 && policy.multi_round_enabled
             {
