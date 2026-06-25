@@ -2,7 +2,7 @@ use super::{
     repair_compound_file_names_plus_content_summary_contract,
     repair_generic_path_content_grounded_summary_contract,
     repair_session_alias_listing_plus_content_summary_contract,
-    repair_sqlite_path_excerpt_judgment_contract,
+    repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_version_contract,
     repair_summary_only_content_excerpt_with_summary_contract,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
@@ -438,6 +438,62 @@ fn sqlite_path_excerpt_judgment_contract_repair_uses_db_kind() {
     .expect("db_basic policy");
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.contract_match, "sqlite_database_kind_judgment");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sqlite_structured_version_contract_repair_uses_schema_version_contract() {
+    let root = make_temp_root("sqlite_structured_version_repair");
+    std::fs::create_dir_all(root.join("data")).expect("data directory");
+    std::fs::write(root.join("data/skill-calls-smoke.sqlite"), "").expect("sqlite file");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "data/skill-calls-smoke.sqlite".to_string();
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("sqlite.user_version".to_string());
+
+    assert!(repair_sqlite_structured_version_contract(
+        &state,
+        "inspect data/skill-calls-smoke.sqlite",
+        "",
+        &mut route,
+    ));
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::SqliteSchemaVersion
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    );
+    assert!(route
+        .output_contract
+        .locator_hint
+        .ends_with("data/skill-calls-smoke.sqlite"));
+    assert!(route_reason_has_marker(
+        &route,
+        "sqlite_structured_version_contract_repaired"
+    ));
+    let policy = crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        "db_basic",
+        &serde_json::json!({
+            "action": "schema_version",
+            "db_path": route.output_contract.locator_hint,
+        }),
+    )
+    .expect("db_basic policy");
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.contract_match, "sqlite_schema_version");
 
     let _ = std::fs::remove_dir_all(root);
 }
