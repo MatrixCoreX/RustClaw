@@ -34,6 +34,27 @@ fn config_edit_observable_action(action: &str) -> bool {
     )
 }
 
+fn config_edit_observed_value_from_output(output: &str) -> Option<serde_json::Value> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    config_edit_observed_value_candidate(&value)
+}
+
+fn config_edit_observed_value_candidate(value: &serde_json::Value) -> Option<serde_json::Value> {
+    if config_edit_output_action(value).is_some_and(config_edit_observable_action) {
+        return Some(value.clone());
+    }
+    value
+        .get("extra")
+        .and_then(config_edit_observed_value_candidate)
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
+                .and_then(|text_value| config_edit_observed_value_candidate(&text_value))
+        })
+}
+
 fn step_may_contain_config_edit_observation(step: &crate::executor::StepExecutionResult) -> bool {
     matches!(
         step.skill.as_str(),
@@ -59,11 +80,7 @@ fn config_edit_observed_outputs(
             if !step.is_ok() || !step_may_contain_config_edit_observation(step) {
                 return None;
             }
-            let value =
-                serde_json::from_str::<serde_json::Value>(step.output.as_deref()?.trim()).ok()?;
-            if !config_edit_output_action(&value).is_some_and(config_edit_observable_action) {
-                return None;
-            }
+            let value = config_edit_observed_value_from_output(step.output.as_deref()?)?;
             Some(ConfigEditObservedOutput { index, value })
         })
         .collect()
@@ -255,6 +272,23 @@ fn config_edit_risk_labels(value: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn config_edit_candidate_labels(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("candidates")
+        .or_else(|| value.get("risks"))
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn direct_config_edit_guard_answer(
     outputs: &[ConfigEditObservedOutput],
     _prefer_english: bool,
@@ -270,12 +304,15 @@ fn direct_config_edit_guard_answer(
         .and_then(|value| value.as_u64())
         .unwrap_or_else(|| config_edit_risk_labels(&guard.value).len() as u64);
     let risks = config_edit_risk_labels(&guard.value);
+    let candidates = config_edit_candidate_labels(&guard.value);
     Some(
         serde_json::json!({
             "message_key": "clawd.msg.config_edit.guard",
             "reason_code": if risk_count == 0 { "config_edit_guard_no_risk" } else { "config_edit_guard_risk_found" },
             "path": path,
             "risk_count": risk_count,
+            "count": risk_count,
+            "candidates": candidates,
             "risks": risks,
         })
         .to_string(),
