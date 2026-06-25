@@ -6,6 +6,9 @@ use crate::{ActFinalizeStyle, AppState, AskReply, ClaimedTask};
 
 const DIRECT_ANSWER_GATE_PROMPT_LOGICAL_PATH: &str = "prompts/direct_answer_gate_prompt.md";
 const RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH: &str = "configs/config.toml";
+const VOICE_CHAT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_chat_prompt.md";
+const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/layers/overlays/voice_chat_prompt.md");
 
 #[derive(Debug, Clone, Deserialize)]
 struct DirectAnswerGateOut {
@@ -1080,6 +1083,58 @@ pub(crate) async fn analyze_attached_images_for_ask(
         .await
         .map_err(anyhow::Error::msg)
         .map(Some)
+}
+
+pub(crate) async fn transcribe_attached_audio_for_ask(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    typed_prompt: &str,
+) -> anyhow::Result<Option<String>> {
+    let Some(audio) = payload.get("audio") else {
+        return Ok(None);
+    };
+    let Some(audio_arg) = audio_arg_from_payload(audio) else {
+        return Ok(None);
+    };
+    let outcome = crate::skills::run_skill_with_runner_outcome(
+        state,
+        task,
+        "audio_transcribe",
+        json!({ "audio": audio_arg }),
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+    let transcript = outcome.text.trim();
+    if transcript.is_empty() {
+        return Err(anyhow::anyhow!("audio_transcript_empty"));
+    }
+    let template = crate::load_prompt_template_for_state(
+        state,
+        VOICE_CHAT_PROMPT_LOGICAL_PATH,
+        DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
+    )
+    .0;
+    let mut prompt = template.replace("__TRANSCRIPT__", transcript);
+    let typed_prompt = typed_prompt.trim();
+    if !typed_prompt.is_empty() {
+        prompt.push_str("\n\n[RUSTCLAW_TYPED_TEXT]\n");
+        prompt.push_str(typed_prompt);
+        prompt.push_str("\n[/RUSTCLAW_TYPED_TEXT]");
+    }
+    Ok(Some(prompt))
+}
+
+fn audio_arg_from_payload(audio: &Value) -> Option<Value> {
+    if audio.get("path").and_then(Value::as_str).is_some()
+        || audio.get("url").and_then(Value::as_str).is_some()
+    {
+        return Some(audio.clone());
+    }
+    if let Some(path) = audio.as_str().map(str::trim).filter(|v| !v.is_empty()) {
+        return Some(json!({ "path": path }));
+    }
+    None
 }
 
 #[cfg(test)]

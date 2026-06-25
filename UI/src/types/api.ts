@@ -597,17 +597,26 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   text: string;
   ts: number;
-  images?: Array<{ name: string; dataUrl: string }>;
+  attachments?: ChatAttachment[];
+  images?: ChatAttachment[];
 }
 
 export type BrowserFileWithPath = File & {
   webkitRelativePath?: string;
 };
 
-export interface ChatImageAttachment {
+export type ChatAttachmentKind = "image" | "audio" | "file";
+
+export interface ChatAttachment {
   name: string;
   dataUrl: string;
+  mimeType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+  durationMs?: number;
 }
+
+export type ChatImageAttachment = ChatAttachment;
 
 export interface AdapterHealthRow {
   key: string;
