@@ -278,6 +278,56 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
 }
 
 #[test]
+fn package_manager_capability_recipe_wins_over_scalar_runtime_shape() {
+    let raw = r#"{
+          "resolved_user_intent":"observe host package manager",
+          "answer_candidate":"",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"scalar",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"none",
+            "locator_hint":""
+          },
+          "execution_recipe":{
+            "kind":"tool",
+            "tool_name":"system_basic",
+            "capability":"package.detect_manager"
+          },
+          "turn_type":"status_query"
+        }"#;
+
+    let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+        raw,
+        "observe host package manager",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|value| value.as_str()),
+        Some("package_manager_detection")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/locator_kind")
+            .and_then(|value| value.as_str()),
+        Some("none")
+    );
+    assert!(report
+        .detail_csv()
+        .contains("execution_recipe_package_manager_detection"));
+    assert!(!report
+        .detail_csv()
+        .contains("execution_recipe_scalar_runtime_tool_observation"));
+}
+
+#[test]
 fn port_probe_tool_recipe_repairs_to_service_status_contract() {
     let raw = r#"{
           "resolved_user_intent":"inspect local listening ports",
