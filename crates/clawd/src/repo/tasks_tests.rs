@@ -195,6 +195,38 @@ fn claim_next_task_records_worker_lease_fields() {
 }
 
 #[test]
+fn claim_next_task_atomic_claim_prevents_duplicate_execution() {
+    let state = state_with_tasks_table();
+    let mut second_worker = state.clone();
+    second_worker.worker.worker_id = "worker:test-second".to_string();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "queued", None, crate::now_ts_u64() as i64);
+
+    let first = claim_next_task(&state)
+        .expect("first claim")
+        .expect("first worker should claim queued task");
+    let second = claim_next_task(&second_worker).expect("second claim");
+
+    assert_eq!(first.task_id, task_id);
+    assert!(second.is_none());
+
+    let db = state.core.db.get().expect("get db");
+    let (status, lease_owner, claim_attempt): (String, String, i64) = db
+        .query_row(
+            "SELECT status, lease_owner, claim_attempt
+             FROM tasks
+             WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("select claimed task");
+
+    assert_eq!(status, "running");
+    assert_eq!(lease_owner, state.worker.worker_id);
+    assert_eq!(claim_attempt, 1);
+}
+
+#[test]
 fn touch_running_task_renews_worker_lease_fields() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();
