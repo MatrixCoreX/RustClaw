@@ -779,6 +779,68 @@ async fn finalize_ask_success(
     Ok(())
 }
 
+fn journal_has_checkpointed_nonterminal_lifecycle(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(lifecycle) = journal.task_lifecycle.as_ref() else {
+        return false;
+    };
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(state, "waiting" | "background" | "needs_user") {
+        return false;
+    }
+    let lifecycle_checkpoint_id = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let checkpoint_checkpoint_id = journal
+        .task_checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.get("checkpoint_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    matches!(
+        (lifecycle_checkpoint_id, checkpoint_checkpoint_id),
+        (Some(lifecycle_id), Some(checkpoint_id)) if lifecycle_id == checkpoint_id
+    )
+}
+
+async fn finalize_ask_checkpointed(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    answer_text: &str,
+    answer_messages: &[String],
+    journal: &crate::task_journal::TaskJournal,
+) -> Result<()> {
+    let result = ask_result_payload(answer_text, answer_messages, Some(journal));
+    repo::update_task_progress_result(state, &task.task_id, &result.to_string())?;
+    info!("{}", crate::LOG_CALL_WRAP);
+    info!(
+        "task_call_checkpointed task_id={} kind=ask lifecycle_state={} checkpoint_id={}",
+        task.task_id,
+        journal
+            .task_lifecycle
+            .as_ref()
+            .and_then(|lifecycle| lifecycle.get("state"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown"),
+        journal
+            .task_lifecycle
+            .as_ref()
+            .and_then(|lifecycle| lifecycle.get("checkpoint_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown")
+    );
+    info!("{}", crate::LOG_CALL_WRAP);
+    Ok(())
+}
+
 async fn finalize_ask_resume_failure(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1537,6 +1599,14 @@ pub(crate) async fn finalize_ask_result(
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
+            if !failure_reply
+                && !semantic_clarify
+                && journal_has_checkpointed_nonterminal_lifecycle(&journal)
+            {
+                finalize_ask_checkpointed(state, task, &answer_text, &answer_messages, &journal)
+                    .await?;
+                return Ok(());
+            }
             if failure_reply {
                 let err_text = answer.error_text.unwrap_or_else(|| answer_text.clone());
                 if let Some(resume_payload) = answer.resume_context {
