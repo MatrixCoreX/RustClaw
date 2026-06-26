@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskLifecycleView } from "./task-lifecycle.ts";
+import { buildTaskLifecycleView, buildTaskStatusSummary } from "./task-lifecycle.ts";
 
 test("builds a pollable running lifecycle view", () => {
   const view = buildTaskLifecycleView(
@@ -103,4 +103,28 @@ test("falls back to database status when lifecycle is absent", () => {
   assert.equal(view.stateLabel, "Cancelled");
   assert.equal(view.tone, "failed");
   assert.equal(view.detail, "The task will not continue.");
+});
+
+test("summarizes task states for dashboard cards", () => {
+  const summary = buildTaskStatusSummary(
+    [
+      { status: "queued" },
+      { status: "running", lifecycle: { state: "background" } },
+      { status: "running", lifecycle: { state: "waiting" } },
+      { status: "running", lifecycle: { state: "needs_user" } },
+      { status: "failed" },
+      { status: "running", lifecycle: { state: "canceled" } },
+    ],
+    "en",
+  );
+
+  assert.deepEqual(
+    summary.map((item) => [item.kind, item.count]),
+    [
+      ["active", 2],
+      ["waiting", 1],
+      ["needs_user", 1],
+      ["failed", 2],
+    ],
+  );
 });
