@@ -5,7 +5,7 @@
 
 ## Capability Summary
 - `video_generate` creates provider-backed video generation tasks and can optionally wait, retrieve, and save the generated video file.
-- It supports async provider jobs: `generate` with `wait_for_completion=false` returns `extra.pending_async_job`, and `poll` returns `extra.async_poll_adapter_result` for clawd checkpoint resume.
+- It supports async provider jobs: `generate` returns `extra.pending_async_job` by default, and `poll` returns `extra.async_poll_adapter_result` for clawd checkpoint resume. Set `wait_for_completion=true` only when a blocking wait is explicitly needed.
 - The first live adapter is MiniMax-compatible; other provider slots are available for dry-run, planning, compatible gateways, and future native adapters.
 - It supports text-to-video, image-to-video, and first/last-frame video through structured input fields.
 - It returns machine-readable task/file metadata in `extra`; success `text` is a file/task marker, not a sentence template.
@@ -31,7 +31,7 @@
 | generate | `duration` | no | integer | `6` | Video duration in seconds; current implementation accepts `6` or `10`. |
 | generate | `resolution` | no | string | config default | One of `512P`, `720P`, `768P`, `1080P`; exact support depends on the selected adapter/model. |
 | generate | `output_path` | no | string(path) | auto | Workspace output path for downloaded video. |
-| generate | `wait_for_completion` | no | boolean | `true` | If false, return the provider task id without polling. |
+| generate | `wait_for_completion` | no | boolean | `false` | If true, wait for provider completion and optionally download; otherwise return the provider task id without polling. |
 | generate | `download` | no | boolean | config default | If false, return the completed task/file id without downloading. |
 | generate | `dry_run` | no | boolean | `false` | Build request metadata without calling the provider. |
 | generate | `vendor` | no | string | config default | Provider key such as `minimax`, `mimo`, `custom`, or another configured vendor. |
@@ -59,8 +59,8 @@
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"video_file\",\"path\":\"...\"}]` when downloaded.
 - `planned_outputs`: planned file outputs for dry-run validation responses.
 - `dry_run`: present and true only for dry runs.
-- `pending_async_job`: present when `generate.wait_for_completion=false`; contains `job_id`, `status`, `poll_after_seconds`, `expires_at`, `cancel_ref`, `message_key`, and `poll_adapter`.
-- `async_poll_adapter_result`: present for `poll`; contains `job_id`, `status=accepted|running|succeeded|failed|expired`, `poll_after_seconds`, `expires_at`, and `final_result_json` or `failure_result_json` when terminal.
+- `pending_async_job`: present when `generate.wait_for_completion` is omitted or false; contains `job_id`, `status`, `poll_after_seconds`, `expires_at`, `cancel_ref`, `message_key`, and `poll_adapter`.
+- `async_poll_adapter_result`: present for `poll`; contains `job_id`, `status=accepted|running|succeeded|failed|expired|cancelled`, `poll_after_seconds`, `expires_at`, and `final_result_json`, `failure_result_json`, or `cancellation_result_json` when terminal.
 
 ## Error Contract
 - Missing/empty `prompt`.
@@ -73,7 +73,7 @@
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{"prompt":"A calm product demo shot [Static shot]","duration":6,"resolution":"768P","output_path":"video/demo.mp4"}}
+{"request_id":"demo-1","args":{"prompt":"A calm product demo shot [Static shot]","duration":6,"resolution":"768P","output_path":"video/demo.mp4","wait_for_completion":true}}
 ```
 Response:
 ```json
