@@ -155,7 +155,17 @@ export interface SkillListItem {
   optional_bins?: string[] | null;
   platform_notes?: string[] | null;
   planner_capabilities?: string[] | null;
+  planner_capability_policies?: PlannerCapabilityPolicyItem[] | null;
   capabilities?: string[] | null;
+}
+
+export interface PlannerCapabilityPolicyItem {
+  capability: string;
+  isolation_profile?: string | null;
+  network_access?: boolean | null;
+  filesystem_write?: boolean | null;
+  external_publish?: boolean | null;
+  credential_access?: boolean | null;
 }
 
 export interface SkillsResponse {

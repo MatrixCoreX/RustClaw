@@ -394,6 +394,14 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
         optional_bins: None,
         platform_notes: None,
         planner_capabilities: Some(vec!["video.generate".to_string()]),
+        planner_capability_policies: Some(vec![PlannerCapabilityPolicyItem {
+            capability: "video.generate".to_string(),
+            isolation_profile: Some("remote_executor".to_string()),
+            network_access: Some(true),
+            filesystem_write: Some(false),
+            external_publish: Some(true),
+            credential_access: Some(true),
+        }]),
         capabilities: Some(vec!["media.video".to_string()]),
     };
 
@@ -409,6 +417,11 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
             && item.enabled == Some(true)
             && item.risk_level.as_deref() == Some("high")
             && item.runtime_available == Some(true)
+            && item.isolation_profile.as_deref() == Some("remote_executor")
+            && item.network_access == Some(true)
+            && item.filesystem_write == Some(false)
+            && item.external_publish == Some(true)
+            && item.credential_access == Some(true)
     }));
     assert!(items.iter().any(|item| {
         item.skill_name == "video_generate"
@@ -446,6 +459,7 @@ fn capability_items_include_disabled_machine_reason() {
         optional_bins: None,
         platform_notes: None,
         planner_capabilities: Some(vec!["filesystem.list_entries".to_string()]),
+        planner_capability_policies: None,
         capabilities: None,
     };
 
