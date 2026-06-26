@@ -525,7 +525,7 @@ fn video_pending_task_response(
                 "cancel_ref": job_id,
                 "message_key": "clawd.task.async_job_pending",
                 "poll_adapter": {
-                    "kind": "skill_poll",
+                    "kind": "media_job_poll",
                     "skill_name": "video_generate",
                     "args": {
                         "action": "poll",
