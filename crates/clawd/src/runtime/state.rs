@@ -275,6 +275,7 @@ impl PolicyConfig {
 /// 行为参数都要改 12 个 fixture。集中后 fixtures 只调一次 `test_default()`。
 #[derive(Clone)]
 pub(crate) struct WorkerConfig {
+    pub(crate) worker_id: String,
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
     pub(crate) worker_task_timeout_seconds: u64,
@@ -292,6 +293,7 @@ impl WorkerConfig {
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         Self {
+            worker_id: "worker:test-default".to_string(),
             started_at: Instant::now(),
             queue_limit: 1,
             worker_task_timeout_seconds: 300,

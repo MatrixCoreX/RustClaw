@@ -654,6 +654,7 @@ async fn main() -> anyhow::Result<()> {
             schedule,
         },
         worker: crate::WorkerConfig {
+            worker_id: format!("worker:{}", Uuid::new_v4()),
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
             worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),

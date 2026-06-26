@@ -93,15 +93,15 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
 
     if changed == 0 {
         debug!(
-            "claim_next_task: race lost for task_id={}, another worker took it",
-            task.task_id
+            "claim_next_task: worker_id={} race lost for task_id={}, another worker took it",
+            state.worker.worker_id, task.task_id
         );
         return Ok(None);
     }
 
     debug!(
-        "claim_next_task: claimed task_id={} user_id={} chat_id={} kind={}",
-        task.task_id, task.user_id, task.chat_id, task.kind
+        "claim_next_task: worker_id={} claimed task_id={} user_id={} chat_id={} kind={}",
+        state.worker.worker_id, task.task_id, task.user_id, task.chat_id, task.kind
     );
     Ok(Some(task))
 }
