@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,6 +9,8 @@ use crate::{now_ts, AppState};
 
 const TASK_CANCELLED_SOURCE: &str = "task_admin_cancel";
 const TASK_CANCELLED_MESSAGE_KEY: &str = "clawd.task.cancelled";
+const CHILD_TASK_PARENT_CANCELLED_REASON: &str = "parent_cancelled";
+const CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY: &str = "clawd.task.parent_cancelled";
 const TASK_CONTROL_SOURCE: &str = "task_admin_control";
 const TASK_PAUSED_MESSAGE_KEY: &str = "clawd.task.pause_requested";
 const TASK_RESUMED_MESSAGE_KEY: &str = "clawd.task.resume_requested";
@@ -183,10 +186,34 @@ fn cancel_task_records(
     records: Vec<CancelTaskRecord>,
     now: &str,
 ) -> anyhow::Result<i64> {
+    let mut visited = HashSet::new();
     let reason = crate::task_lifecycle::TerminalFailureReason::UserCancelled.status_code();
+    cancel_task_records_with_reason(
+        db,
+        records,
+        now,
+        reason,
+        TASK_CANCELLED_MESSAGE_KEY,
+        &mut visited,
+    )
+}
+
+fn cancel_task_records_with_reason(
+    db: &Connection,
+    records: Vec<CancelTaskRecord>,
+    now: &str,
+    reason: &str,
+    message_key: &str,
+    visited: &mut HashSet<String>,
+) -> anyhow::Result<i64> {
     let now_ts = now.parse::<i64>().unwrap_or_default();
     let mut affected = 0_i64;
+    let mut child_task_ids = Vec::new();
     for record in records {
+        if !visited.insert(record.task_id.clone()) {
+            continue;
+        }
+        append_child_task_ids_from_result(record.result_json.as_deref(), &mut child_task_ids);
         let cancel_adapter_result =
             cancel_adapter_result_from_task_result(record.result_json.as_deref(), now_ts);
         let result_json = cancelled_task_result_json(
@@ -194,6 +221,7 @@ fn cancel_task_records(
             reason,
             now_ts,
             cancel_adapter_result.as_ref(),
+            message_key,
         );
         let count = db.execute(
             "UPDATE tasks
@@ -207,7 +235,104 @@ fn cancel_task_records(
         )?;
         affected += count as i64;
     }
+    let child_records = cancellable_child_task_records(db, &child_task_ids, visited)?;
+    if !child_records.is_empty() {
+        affected += cancel_task_records_with_reason(
+            db,
+            child_records,
+            now,
+            CHILD_TASK_PARENT_CANCELLED_REASON,
+            CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY,
+            visited,
+        )?;
+    }
     Ok(affected)
+}
+
+fn cancellable_child_task_records(
+    db: &Connection,
+    child_task_ids: &[String],
+    visited: &HashSet<String>,
+) -> anyhow::Result<Vec<CancelTaskRecord>> {
+    let mut records = Vec::new();
+    let mut seen = HashSet::new();
+    let mut stmt = db.prepare(
+        "SELECT task_id, result_json
+         FROM tasks
+         WHERE task_id = ?1
+           AND status IN ('queued', 'running')",
+    )?;
+    for child_task_id in child_task_ids {
+        if visited.contains(child_task_id) || !seen.insert(child_task_id.clone()) {
+            continue;
+        }
+        let record = stmt
+            .query_row(params![child_task_id], |row| {
+                Ok(CancelTaskRecord {
+                    task_id: row.get(0)?,
+                    result_json: row.get(1)?,
+                })
+            })
+            .optional()?;
+        if let Some(record) = record {
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+fn append_child_task_ids_from_result(raw_result_json: Option<&str>, output: &mut Vec<String>) {
+    let Some(value) = raw_result_json.and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+    else {
+        return;
+    };
+    append_child_task_ids_from_value(&value, output, 0);
+}
+
+fn append_child_task_ids_from_value(value: &Value, output: &mut Vec<String>, depth: usize) {
+    if depth > 8 || output.len() >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(child_task_id) = map
+                .get("child_task_id")
+                .and_then(Value::as_str)
+                .and_then(machine_child_task_id)
+            {
+                output.push(child_task_id);
+            }
+            if let Some(items) = map.get("child_task_ids").and_then(Value::as_array) {
+                for item in items.iter().take(128usize.saturating_sub(output.len())) {
+                    if let Some(child_task_id) = item.as_str().and_then(machine_child_task_id) {
+                        output.push(child_task_id);
+                    }
+                }
+            }
+            for value in map.values() {
+                append_child_task_ids_from_value(value, output, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                append_child_task_ids_from_value(item, output, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn machine_child_task_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 160
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | '.'))
+    {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn cancelled_task_result_json(
@@ -215,6 +340,7 @@ fn cancelled_task_result_json(
     reason: &str,
     now_ts: i64,
     cancel_adapter_result: Option<&Value>,
+    message_key: &str,
 ) -> Value {
     let mut result = raw_result_json
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
@@ -224,7 +350,7 @@ fn cancelled_task_result_json(
         obj.insert("status_code".to_string(), json!(reason));
         obj.insert("error_code".to_string(), json!(reason));
         obj.insert("terminal_reason".to_string(), json!(reason));
-        obj.insert("message_key".to_string(), json!(TASK_CANCELLED_MESSAGE_KEY));
+        obj.insert("message_key".to_string(), json!(message_key));
         obj.insert(
             "task_lifecycle".to_string(),
             json!({
@@ -232,7 +358,7 @@ fn cancelled_task_result_json(
                 "state": "cancelled",
                 "source": TASK_CANCELLED_SOURCE,
                 "terminal_reason": reason,
-                "message_key": TASK_CANCELLED_MESSAGE_KEY,
+                "message_key": message_key,
                 "cancel_adapter_kind": cancel_adapter_result
                     .and_then(|value| value.get("adapter_kind"))
                     .and_then(Value::as_str),
