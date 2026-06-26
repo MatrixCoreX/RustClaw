@@ -159,7 +159,7 @@ pub(crate) use repo::{
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
-    list_active_tasks, pause_task_by_id, resume_task_by_id,
+    list_active_tasks, list_automation_runs, pause_task_by_id, resume_task_by_id,
 };
 pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
@@ -784,6 +784,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/memory/settings", post(update_memory_settings_handler))
         .route("/tasks/:task_id", get(get_task))
         .route("/tasks/active", post(list_active_tasks))
+        .route("/tasks/automation-runs", post(list_automation_runs))
         .route("/tasks/cancel", post(cancel_tasks))
         .route("/tasks/cancel-one", post(cancel_one_task))
         .route("/tasks/cancel-by-task-id", post(cancel_task_by_id_handler))

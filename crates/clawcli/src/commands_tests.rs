@@ -1,6 +1,6 @@
 use super::{
-    exec_exit_class, exec_failure_class_from_machine_tokens, exec_summary_json, run_exec,
-    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    automation_runs_request_payload, exec_exit_class, exec_failure_class_from_machine_tokens,
+    exec_summary_json, run_exec, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -211,6 +211,20 @@ fn exec_offline_smoke_writes_machine_artifact_without_server() {
     assert_eq!(summary["error_code"], "exec_background_policy_conflict");
 
     std::fs::remove_dir_all(artifact_dir).ok();
+}
+
+#[test]
+fn automation_runs_payload_clamps_limit_and_trims_job_id() {
+    let payload = automation_runs_request_payload(7, 11, Some(" job_abc123 ".to_string()), 250);
+
+    assert_eq!(payload["user_id"], 7);
+    assert_eq!(payload["chat_id"], 11);
+    assert_eq!(payload["job_id"], "job_abc123");
+    assert_eq!(payload["limit"], 100);
+
+    let without_job = automation_runs_request_payload(7, 11, Some("  ".to_string()), 0);
+    assert!(without_job["job_id"].is_null());
+    assert_eq!(without_job["limit"], 1);
 }
 
 fn unique_suffix() -> u128 {
