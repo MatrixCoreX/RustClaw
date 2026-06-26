@@ -91,6 +91,7 @@ fn dispatch_result_has_known_projection(
             | ("poll_async_job", "async_poll_completed")
             | ("poll_async_job", "async_poll_rescheduled")
             | ("poll_async_job", "async_poll_failed")
+            | ("poll_async_job", "async_poll_cancelled")
             | ("verify_and_finalize", "finalize_completed")
             | ("verify_and_finalize", "finalize_failed")
     )

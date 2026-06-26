@@ -138,6 +138,35 @@ fn async_poll_local_process_job_dir_becomes_terminal_result() {
 }
 
 #[test]
+fn async_poll_local_process_cancel_marker_becomes_cancelled_result() {
+    let dir = TempDirGuard::new("async_poll_local_process_cancelled");
+    std::fs::write(dir.path.join("cancel_requested_at"), "1000\n").expect("write cancel marker");
+
+    let mut claimed = async_poll_claimed_dispatch(None);
+    let job_id = "local_process:cancelled-job";
+    claimed.execution_plan["job_id"] = json!(job_id);
+    claimed.dispatch_payload["job_id"] = json!(job_id);
+    if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
+        job.job_id = job_id.to_string();
+        job.cancel_ref = format!("local_process:{}", dir.path.display());
+    }
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("local process poll cancelled payload");
+
+    assert_eq!(payload["executor_result_status"], "async_poll_cancelled");
+    assert_eq!(payload["adapter_status"], "cancelled");
+    assert_eq!(payload["reason_code"], "async_poll_cancelled");
+    assert_eq!(payload["message_key"], "clawd.task.cancelled");
+    assert_eq!(
+        payload["cancellation_result_json"]["source"],
+        "local_process_async_job"
+    );
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
 fn async_poll_adapter_success_becomes_machine_terminal_result() {
     let claimed = async_poll_claimed_dispatch(Some(json!({
         "job_id": "job-async-poll-adapter",

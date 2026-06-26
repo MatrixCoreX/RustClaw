@@ -1384,6 +1384,16 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
         "async_poll_failed",
         now,
     );
+    let cancelled_seed = terminal_projection_seed(
+        "terminal-cancelled",
+        "ckpt-terminal-cancelled",
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_cancelled",
+        now,
+    );
     insert_task(
         &state,
         "terminal-completed",
@@ -1396,6 +1406,13 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
         "terminal-failed",
         "running",
         Some(&failed_seed),
+        now,
+    );
+    insert_task(
+        &state,
+        "terminal-cancelled",
+        "running",
+        Some(&cancelled_seed),
         now,
     );
 
@@ -1551,6 +1568,65 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
         failed_result["task_lifecycle"]["resume_executor_result_projection"]
             ["projection_result_status"],
         "terminal_failed"
+    );
+
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        "terminal-cancelled",
+        "ckpt-terminal-cancelled",
+        "executing_async_poll",
+        "poll_async_job",
+        "async_poll_adapter_pending",
+        "ready_to_poll_async_job",
+        "async_poll_cancelled",
+        now + 6,
+        10,
+    )
+    .expect("claim cancelled projection")
+    .expect("cancelled projection claimed");
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            "terminal-cancelled",
+            "ckpt-terminal-cancelled",
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_cancelled",
+            &json!({
+                "schema_version": 1,
+                "task_id": "terminal-cancelled",
+                "checkpoint_id": "ckpt-terminal-cancelled",
+                "executor_state": "executing_async_poll",
+                "executor_action": "poll_async_job",
+                "executor_status": "async_poll_adapter_pending",
+                "dispatch_state": "ready_to_poll_async_job",
+                "executor_result_status": "async_poll_cancelled",
+                "result_projection_state": "project_async_poll_cancelled",
+                "message_key": "clawd.task.cancelled",
+                "cancellation_result_json": {
+                    "schema_version": 1,
+                    "adapter_kind": "local_process_poll",
+                    "status": "accepted",
+                    "cancel_ref": "local_process:/tmp/cancelled-job"
+                }
+            }),
+            now + 7,
+        )
+        .expect("record cancelled projection")
+    );
+    let (cancelled_status, cancelled_error, cancelled_result) =
+        stored_task_status_error_result(&state, "terminal-cancelled");
+    assert_eq!(cancelled_status, "canceled");
+    assert_eq!(cancelled_error.as_deref(), Some("user_cancelled"));
+    assert_eq!(cancelled_result["status"], "cancelled");
+    assert_eq!(cancelled_result["message_key"], "clawd.task.cancelled");
+    assert_eq!(cancelled_result["task_lifecycle"]["state"], "cancelled");
+    assert_eq!(
+        cancelled_result["task_lifecycle"]["resume_executor_result_projection"]
+            ["projection_result_status"],
+        "terminal_cancelled"
     );
 }
 

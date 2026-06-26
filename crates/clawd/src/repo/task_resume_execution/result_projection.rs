@@ -1181,6 +1181,7 @@ fn dispatch_result_projection_state(
         ("poll_async_job", "async_poll_completed") => Some("project_async_poll_completed"),
         ("poll_async_job", "async_poll_rescheduled") => Some("project_async_poll_rescheduled"),
         ("poll_async_job", "async_poll_failed") => Some("project_async_poll_failed"),
+        ("poll_async_job", "async_poll_cancelled") => Some("project_async_poll_cancelled"),
         ("verify_and_finalize", "finalize_completed") => Some("project_finalize_completed"),
         ("verify_and_finalize", "finalize_failed") => Some("project_finalize_failed"),
         _ => None,
@@ -1205,6 +1206,7 @@ fn terminal_dispatch_result_status(executor_action: &str, executor_result_status
             | ("run_seeded_agent_loop", "seeded_loop_failed")
             | ("poll_async_job", "async_poll_completed")
             | ("poll_async_job", "async_poll_failed")
+            | ("poll_async_job", "async_poll_cancelled")
             | ("verify_and_finalize", "finalize_completed")
             | ("verify_and_finalize", "finalize_failed")
     )
@@ -1219,6 +1221,9 @@ fn projection_pending_reason(executor_action: &str, executor_result_status: &str
 }
 
 fn terminal_projection_result_status(executor_result_status: &str) -> &'static str {
+    if terminal_projection_is_cancelled(executor_result_status) {
+        return "terminal_cancelled";
+    }
     if terminal_projection_is_failure(executor_result_status) {
         "terminal_failed"
     } else {
@@ -1227,6 +1232,9 @@ fn terminal_projection_result_status(executor_result_status: &str) -> &'static s
 }
 
 fn terminal_lifecycle_state(executor_result_status: &str) -> &'static str {
+    if terminal_projection_is_cancelled(executor_result_status) {
+        return "cancelled";
+    }
     if terminal_projection_is_failure(executor_result_status) {
         "failed"
     } else {
@@ -1241,10 +1249,37 @@ fn terminal_projection_is_failure(executor_result_status: &str) -> bool {
     )
 }
 
+fn terminal_projection_is_cancelled(executor_result_status: &str) -> bool {
+    executor_result_status == "async_poll_cancelled"
+}
+
 fn terminal_task_projection_result(
     executor_result_status: &str,
     projection_payload: &Value,
 ) -> anyhow::Result<(&'static str, Option<String>, Value)> {
+    if terminal_projection_is_cancelled(executor_result_status) {
+        let mut result = projection_payload
+            .get("cancellation_result_json")
+            .cloned()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "status": "cancelled",
+                    "message_key": "clawd.task.cancelled",
+                })
+            });
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("status".to_string(), serde_json::json!("cancelled"));
+            obj.entry("message_key".to_string())
+                .or_insert_with(|| serde_json::json!("clawd.task.cancelled"));
+            obj.insert(
+                "terminal_reason".to_string(),
+                serde_json::json!("user_cancelled"),
+            );
+        }
+        return Ok(("canceled", Some("user_cancelled".to_string()), result));
+    }
+
     if terminal_projection_is_failure(executor_result_status) {
         let error_text = projection_payload
             .get("error_code")

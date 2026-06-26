@@ -115,6 +115,22 @@ fn local_process_async_poll_adapter_result(
     let job_dir = std::path::Path::new(job_dir);
     let expires_at = job.expires_at;
     let exit_code_path = job_dir.join("exit_code");
+    let cancel_requested_path = job_dir.join("cancel_requested_at");
+    if !exit_code_path.exists() && cancel_requested_path.exists() {
+        return Some(json!({
+            "job_id": job_id,
+            "status": "cancelled",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": expires_at,
+            "message_key": "clawd.task.cancelled",
+            "cancellation_result_json": {
+                "schema_version": 1,
+                "source": "local_process_async_job",
+                "job_id": job_id,
+                "cancel_ref": job.cancel_ref,
+            }
+        }));
+    }
     if !exit_code_path.exists() {
         return Some(json!({
             "job_id": job_id,
@@ -416,6 +432,26 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
             "clawd.task.async_poll_expired",
             adapter_result.get("failure_result_json").cloned(),
         ),
+        "cancelled" => {
+            let obj = payload.as_object_mut()?;
+            obj.insert(
+                "executor_result_status".to_string(),
+                json!("async_poll_cancelled"),
+            );
+            obj.insert("reason_code".to_string(), json!("async_poll_cancelled"));
+            obj.insert("message_key".to_string(), json!("clawd.task.cancelled"));
+            if let Some(cancellation_result_json) = adapter_result
+                .get("cancellation_result_json")
+                .cloned()
+                .filter(Value::is_object)
+            {
+                obj.insert(
+                    "cancellation_result_json".to_string(),
+                    cancellation_result_json,
+                );
+            }
+            Some(payload)
+        }
         _ => None,
     }
 }
