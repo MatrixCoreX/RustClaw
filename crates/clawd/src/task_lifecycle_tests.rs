@@ -293,6 +293,79 @@ fn checkpoint_resume_directive_is_closed_machine_instruction() {
         checkpoint_resume_directive(
             &json!({
                 "task_lifecycle": {
+                    "state": "background",
+                    "next_check_after": 90,
+                    "checkpoint_id": "ckpt-job-policy",
+                    "async_timeout_policy": {
+                        "schema_version": 1,
+                        "policy_source": "async_job_contract",
+                        "adapter_kind": "media_job_poll",
+                        "deadline_ts": 2_000,
+                        "effective_deadline_ts": 150
+                    }
+                },
+                "task_checkpoint": checkpoint_value_with_entrypoint(
+                    "ckpt-job-policy",
+                    "poll_async_job",
+                    Some(json!({
+                        "job_id": "job-policy",
+                        "status": "running",
+                        "poll_after_seconds": 5,
+                        "expires_at": 2_000,
+                        "cancel_ref": "cancel:job-policy",
+                        "message_key": "tool.msg.job.running"
+                    }))
+                )
+            }),
+            100,
+        ),
+        CheckpointResumeDirective::PollAsyncJob {
+            checkpoint_id: "ckpt-job-policy".to_string(),
+            job_id: "job-policy".to_string(),
+            poll_after_seconds: 5,
+            expires_at: 150,
+            cancel_ref: "cancel:job-policy".to_string(),
+            message_key: "tool.msg.job.running".to_string(),
+        }
+    );
+    assert_eq!(
+        checkpoint_resume_directive(
+            &json!({
+                "task_lifecycle": {
+                    "state": "background",
+                    "next_check_after": 90,
+                    "checkpoint_id": "ckpt-job-policy-expired",
+                    "async_timeout_policy": {
+                        "schema_version": 1,
+                        "policy_source": "async_job_contract",
+                        "adapter_kind": "http_job_poll",
+                        "deadline_ts": 2_000,
+                        "effective_deadline_ts": 100
+                    }
+                },
+                "task_checkpoint": checkpoint_value_with_entrypoint(
+                    "ckpt-job-policy-expired",
+                    "poll_async_job",
+                    Some(json!({
+                        "job_id": "job-policy-expired",
+                        "status": "running",
+                        "poll_after_seconds": 5,
+                        "expires_at": 2_000,
+                        "cancel_ref": "cancel:job-policy-expired",
+                        "message_key": "tool.msg.job.running"
+                    }))
+                )
+            }),
+            100,
+        ),
+        CheckpointResumeDirective::NotReady {
+            status_code: "async_job_expired",
+        }
+    );
+    assert_eq!(
+        checkpoint_resume_directive(
+            &json!({
+                "task_lifecycle": {
                     "state": "waiting",
                     "next_check_after": 90,
                     "checkpoint_id": "ckpt-verify"
