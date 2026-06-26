@@ -1,4 +1,4 @@
-import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, RefreshCw, X } from "lucide-react";
+import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, X } from "lucide-react";
 
 import { formatDuration } from "../lib/display-format";
 import { buildTaskLifecycleView, buildTaskStatusSummary, type TaskStatusSummaryKind } from "../lib/task-lifecycle";
@@ -19,6 +19,9 @@ export interface ActiveTasksPanelProps {
   cancelTaskError: string | null;
   cancelTaskMessage: string | null;
   cancelingTaskIndex: number | null;
+  taskControlSubmittingId: string | null;
+  taskControlMessage: string | null;
+  taskControlError: string | null;
   canUseInteractionContext: boolean;
   resumeDrafts: Record<string, string>;
   resumeSubmittingTaskId: string | null;
@@ -26,6 +29,7 @@ export interface ActiveTasksPanelProps {
   onFetchActiveTasks: () => unknown | Promise<unknown>;
   onViewTask: (taskId: string) => unknown | Promise<unknown>;
   onCancelTask: (task: ActiveTaskItem) => unknown | Promise<unknown>;
+  onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
 }
@@ -42,6 +46,9 @@ export function ActiveTasksPanel({
   cancelTaskError,
   cancelTaskMessage,
   cancelingTaskIndex,
+  taskControlSubmittingId,
+  taskControlMessage,
+  taskControlError,
   canUseInteractionContext,
   resumeDrafts,
   resumeSubmittingTaskId,
@@ -49,6 +56,7 @@ export function ActiveTasksPanel({
   onFetchActiveTasks,
   onViewTask,
   onCancelTask,
+  onControlTask,
   onResumeDraftChange,
   onSubmitResume,
 }: ActiveTasksPanelProps) {
@@ -105,6 +113,16 @@ export function ActiveTasksPanel({
           {cancelTaskMessage}
         </p>
       ) : null}
+      {taskControlError ? (
+        <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {t("任务控制失败", "Task control failed")}: {taskControlError}
+        </p>
+      ) : null}
+      {taskControlMessage ? (
+        <p className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          {taskControlMessage}
+        </p>
+      ) : null}
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {summaryItems.map((item) => {
           const Icon = taskSummaryIcon(item.kind);
@@ -129,6 +147,10 @@ export function ActiveTasksPanel({
         ) : (
           activeTasks.map((item) => {
             const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
+            const canPause = canPauseTask(item);
+            const canResume = canResumeTask(item);
+            const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
+            const resumeSubmitting = taskControlSubmittingId === `resume:${item.task_id}`;
             return (
               <div key={item.task_id} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -157,6 +179,28 @@ export function ActiveTasksPanel({
                     >
                       {t("查看详情", "View details")}
                     </button>
+                    {canPause ? (
+                      <button
+                        type="button"
+                        onClick={() => void onControlTask("pause", item.task_id)}
+                        disabled={pauseSubmitting || !canUseInteractionContext}
+                        className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {pauseSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+                        {t("暂停", "Pause")}
+                      </button>
+                    ) : null}
+                    {canResume ? (
+                      <button
+                        type="button"
+                        onClick={() => void onControlTask("resume", item.task_id)}
+                        disabled={resumeSubmitting || !canUseInteractionContext}
+                        className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {resumeSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                        {t("恢复", "Resume")}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void onCancelTask(item)}
@@ -213,6 +257,16 @@ export function ActiveTasksPanel({
       </div>
     </section>
   );
+}
+
+function canPauseTask(item: ActiveTaskItem): boolean {
+  const state = (item.lifecycle?.state || item.status || "").toLowerCase();
+  return !["succeeded", "failed", "cancelled", "canceled", "timeout", "needs_user"].includes(state);
+}
+
+function canResumeTask(item: ActiveTaskItem): boolean {
+  const state = (item.lifecycle?.state || item.status || "").toLowerCase();
+  return state === "waiting" || state === "background";
 }
 
 function taskSummaryIcon(kind: TaskStatusSummaryKind) {

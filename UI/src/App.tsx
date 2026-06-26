@@ -517,6 +517,9 @@ export default function App() {
     cancelingTaskIndex,
     cancelTaskMessage,
     cancelTaskError,
+    taskControlSubmittingId,
+    taskControlMessage,
+    taskControlError,
     interactionKind,
     setInteractionKind,
     interactionChannel,
@@ -545,6 +548,7 @@ export default function App() {
     setResumeDraftValue,
     submitResumeForTask,
     cancelActiveTask,
+    controlTaskById,
     submitInteractionTask,
     markTaskSubmitted,
     recordTaskResult,
@@ -1632,6 +1636,9 @@ export default function App() {
               cancelTaskError={cancelTaskError}
               cancelTaskMessage={cancelTaskMessage}
               cancelingTaskIndex={cancelingTaskIndex}
+              taskControlSubmittingId={taskControlSubmittingId}
+              taskControlMessage={taskControlMessage}
+              taskControlError={taskControlError}
               canUseInteractionContext={interactionUserId != null && interactionChatId != null}
               resumeDrafts={resumeDrafts}
               resumeSubmittingTaskId={resumeSubmittingTaskId}
@@ -1639,6 +1646,7 @@ export default function App() {
               onFetchActiveTasks={fetchActiveTasks}
               onViewTask={viewTask}
               onCancelTask={cancelActiveTask}
+              onControlTask={controlTaskById}
               onResumeDraftChange={setResumeDraftValue}
               onSubmitResume={submitResumeForTask}
               interactionKind={interactionKind}
