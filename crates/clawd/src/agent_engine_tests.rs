@@ -1,7 +1,7 @@
 use super::*;
 use claw_core::skill_registry::{
-    Capability, OutputKind, PlannerCapabilityEffect, PlannerCapabilityKind,
-    PlannerCapabilityMapping, SkillKind, SkillManifest,
+    Capability, CapabilityExecutionMode, OutputKind, PlannerCapabilityEffect,
+    PlannerCapabilityKind, PlannerCapabilityMapping, SkillKind, SkillManifest,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -58,6 +58,8 @@ fn quick_index_includes_planner_capability_metadata() {
         once_per_task: None,
         dedup_scope: None,
         idempotent: None,
+        execution_mode: Some(CapabilityExecutionMode::AsyncPreferred),
+        async_adapter_kind: Some("local_process_poll".to_string()),
     }]);
 
     let text = quick_index_planner_capabilities(&manifest);
@@ -66,6 +68,8 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("action=list_dir"));
     assert!(text.contains("effect=observe"));
     assert!(text.contains("required=path"));
+    assert!(text.contains("execution_mode=async_preferred"));
+    assert!(text.contains("async_adapter_kind=local_process_poll"));
 }
 
 #[test]

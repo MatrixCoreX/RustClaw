@@ -1,7 +1,7 @@
 use super::*;
 use claw_core::skill_registry::{
-    PlannerCapabilityEffect, PlannerCapabilityMapping, RegistryDedupScope, SkillRiskLevel,
-    SkillsRegistry,
+    CapabilityExecutionMode, PlannerCapabilityEffect, PlannerCapabilityMapping, RegistryDedupScope,
+    SkillRiskLevel, SkillsRegistry,
 };
 
 fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
@@ -113,10 +113,12 @@ fn planner_capability_hint_includes_structured_contract() {
         once_per_task: Some(false),
         dedup_scope: Some(RegistryDedupScope::Args),
         idempotent: Some(true),
+        execution_mode: Some(CapabilityExecutionMode::AsyncRequired),
+        async_adapter_kind: Some("media_job_poll".to_string()),
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true)"
+        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll)"
     );
 }
 

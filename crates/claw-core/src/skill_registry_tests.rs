@@ -307,7 +307,7 @@ fn registry_manifest_exposes_planner_metadata() {
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
 	planner_capabilities = [
-	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true },
+	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true, execution_mode = "async_preferred", async_adapter_kind = "HTTP-Job-Poll" },
 	  { name = "database::list-tables", action = "duplicate-ignored" }
 	]
 	matrix_admission = { eligible = true, declared_actions = ["List-Tables"], evidence_sources = ["structured-json"], required_extra_fields = ["extra.tables", "extra.count", "extra.tables"], extractor_kind = "Structured-Json", admission_version = "external-v1" }
@@ -376,6 +376,14 @@ fn registry_manifest_exposes_planner_metadata() {
     assert_eq!(capability.once_per_task, Some(false));
     assert_eq!(capability.dedup_scope, Some(RegistryDedupScope::Args));
     assert_eq!(capability.idempotent, Some(true));
+    assert_eq!(
+        capability.execution_mode,
+        Some(CapabilityExecutionMode::AsyncPreferred)
+    );
+    assert_eq!(
+        capability.async_adapter_kind.as_deref(),
+        Some("http_job_poll")
+    );
     assert_eq!(manifest.once_per_task, Some(true));
     assert_eq!(manifest.dedup_scope, Some(RegistryDedupScope::Action));
     assert_eq!(manifest.idempotent, Some(false));

@@ -218,6 +218,12 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(idempotent) = mapping.idempotent {
         parts.push(format!("idempotent={idempotent}"));
     }
+    if let Some(execution_mode) = mapping.execution_mode {
+        parts.push(format!("execution_mode={}", execution_mode.as_token()));
+    }
+    if let Some(async_adapter_kind) = mapping.async_adapter_kind.as_deref() {
+        parts.push(format!("async_adapter_kind={async_adapter_kind}"));
+    }
     if parts.is_empty() {
         mapping.name.clone()
     } else {
