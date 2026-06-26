@@ -1,7 +1,7 @@
 use super::*;
 use claw_core::skill_registry::{
-    CapabilityExecutionMode, PlannerCapabilityEffect, PlannerCapabilityMapping, RegistryDedupScope,
-    SkillRiskLevel, SkillsRegistry,
+    CapabilityExecutionMode, CapabilityIsolationProfile, PlannerCapabilityEffect,
+    PlannerCapabilityMapping, RegistryDedupScope, SkillRiskLevel, SkillsRegistry,
 };
 
 fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
@@ -115,10 +115,15 @@ fn planner_capability_hint_includes_structured_contract() {
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncRequired),
         async_adapter_kind: Some("media_job_poll".to_string()),
+        isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
+        network_access: Some(false),
+        filesystem_write: Some(false),
+        external_publish: Some(false),
+        credential_access: Some(false),
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll)"
+        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false)"
     );
 }
 
