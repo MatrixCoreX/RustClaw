@@ -119,6 +119,7 @@ fn exec_summary_json(
     task: &task::TaskStatusView,
     outcome: ExecWaitOutcome,
     exit_class: ExecExitClass,
+    resume_task_id: Option<&str>,
 ) -> serde_json::Value {
     let artifact_refs = exec_artifact_refs(&task.raw_data);
     json!({
@@ -130,6 +131,7 @@ fn exec_summary_json(
         "outcome": outcome.as_str(),
         "exit_class": exit_class.as_str(),
         "exit_code": exit_class.code(),
+        "resume": exec_resume_summary(resume_task_id),
         "result_text": task.result_text,
         "error_text": task.error_text,
         "events": exec_event_summary(task),
@@ -137,6 +139,22 @@ fn exec_summary_json(
             "ref_count": artifact_refs.len(),
             "refs": artifact_refs,
         },
+    })
+}
+
+fn exec_resume_summary(resume_task_id: Option<&str>) -> Value {
+    let Some(source_task_id) = resume_task_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return json!({
+            "mode": "new_task",
+        });
+    };
+    json!({
+        "mode": "resume_task",
+        "source_task_id": source_task_id,
+        "resume_trigger": "user_followup",
     })
 }
 
@@ -253,6 +271,7 @@ pub(crate) fn run_exec(
             "exit_class": exit_class.as_str(),
             "exit_code": exit_class.code(),
             "error_code": "exec_background_policy_conflict",
+            "resume": exec_resume_summary(resume_task_id),
         });
         if json_output || jsonl_output {
             output::print_json_pretty(&summary);
@@ -276,6 +295,7 @@ pub(crate) fn run_exec(
             "detached": true,
             "exit_class": exit_class.as_str(),
             "exit_code": exit_class.code(),
+            "resume": exec_resume_summary(resume_task_id),
         });
         if json_output || jsonl_output {
             output::print_json_pretty(&summary);
@@ -301,7 +321,7 @@ pub(crate) fn run_exec(
         },
     )?;
     let exit_class = exec_exit_class(&task, outcome, fail_on_background);
-    let summary = exec_summary_json(&task, outcome, exit_class);
+    let summary = exec_summary_json(&task, outcome, exit_class, resume_task_id);
     if let Some(artifact_dir) = artifact_dir {
         write_exec_artifacts(artifact_dir, &task, &summary)?;
     }

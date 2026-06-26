@@ -41,7 +41,12 @@ fn exec_summary_json_exposes_stable_machine_fields() {
         }],
     };
 
-    let summary = exec_summary_json(&task, ExecWaitOutcome::Background, ExecExitClass::Success);
+    let summary = exec_summary_json(
+        &task,
+        ExecWaitOutcome::Background,
+        ExecExitClass::Success,
+        None,
+    );
 
     assert_eq!(summary["task_id"], "task-exec");
     assert_eq!(summary["status"], "running");
@@ -49,6 +54,7 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["outcome"], "background");
     assert_eq!(summary["exit_class"], "success");
     assert_eq!(summary["exit_code"], 0);
+    assert_eq!(summary["resume"]["mode"], "new_task");
     assert_eq!(summary["terminal"], false);
     assert_eq!(summary["lifecycle"]["checkpoint_id"], "ckpt-exec");
     assert_eq!(summary["events"][0]["event_type"], "checkpoint_created");
@@ -119,7 +125,12 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
             fields: std::collections::BTreeMap::new(),
         }],
     };
-    let summary = exec_summary_json(&task, ExecWaitOutcome::Terminal, ExecExitClass::Success);
+    let summary = exec_summary_json(
+        &task,
+        ExecWaitOutcome::Terminal,
+        ExecExitClass::Success,
+        None,
+    );
 
     write_exec_artifacts(&artifact_dir, &task, &summary).expect("write exec artifacts");
 
@@ -135,6 +146,34 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     assert!(events_file.contains("type=task_completed"));
 
     std::fs::remove_dir_all(artifact_dir).ok();
+}
+
+#[test]
+fn exec_summary_json_records_resume_source_task_id() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-resume-child".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "task_lifecycle": {
+                "state": "background",
+                "checkpoint_id": "ckpt-resume"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let summary = exec_summary_json(
+        &task,
+        ExecWaitOutcome::Background,
+        ExecExitClass::Success,
+        Some("task-resume-source"),
+    );
+
+    assert_eq!(summary["resume"]["mode"], "resume_task");
+    assert_eq!(summary["resume"]["source_task_id"], "task-resume-source");
+    assert_eq!(summary["resume"]["resume_trigger"], "user_followup");
 }
 
 #[test]
