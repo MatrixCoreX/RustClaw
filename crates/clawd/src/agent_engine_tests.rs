@@ -1,7 +1,8 @@
 use super::*;
 use claw_core::skill_registry::{
-    Capability, CapabilityExecutionMode, OutputKind, PlannerCapabilityEffect,
-    PlannerCapabilityKind, PlannerCapabilityMapping, SkillKind, SkillManifest,
+    Capability, CapabilityExecutionMode, CapabilityIsolationProfile, OutputKind,
+    PlannerCapabilityEffect, PlannerCapabilityKind, PlannerCapabilityMapping, SkillKind,
+    SkillManifest,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -60,6 +61,11 @@ fn quick_index_includes_planner_capability_metadata() {
         idempotent: None,
         execution_mode: Some(CapabilityExecutionMode::AsyncPreferred),
         async_adapter_kind: Some("local_process_poll".to_string()),
+        isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
+        network_access: Some(false),
+        filesystem_write: Some(false),
+        external_publish: Some(false),
+        credential_access: Some(false),
     }]);
 
     let text = quick_index_planner_capabilities(&manifest);
@@ -70,6 +76,11 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("required=path"));
     assert!(text.contains("execution_mode=async_preferred"));
     assert!(text.contains("async_adapter_kind=local_process_poll"));
+    assert!(text.contains("isolation_profile=read_only"));
+    assert!(text.contains("network_access=false"));
+    assert!(text.contains("filesystem_write=false"));
+    assert!(text.contains("external_publish=false"));
+    assert!(text.contains("credential_access=false"));
 }
 
 #[test]

@@ -224,6 +224,24 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(async_adapter_kind) = mapping.async_adapter_kind.as_deref() {
         parts.push(format!("async_adapter_kind={async_adapter_kind}"));
     }
+    if let Some(isolation_profile) = mapping.isolation_profile {
+        parts.push(format!(
+            "isolation_profile={}",
+            isolation_profile.as_token()
+        ));
+    }
+    if let Some(network_access) = mapping.network_access {
+        parts.push(format!("network_access={network_access}"));
+    }
+    if let Some(filesystem_write) = mapping.filesystem_write {
+        parts.push(format!("filesystem_write={filesystem_write}"));
+    }
+    if let Some(external_publish) = mapping.external_publish {
+        parts.push(format!("external_publish={external_publish}"));
+    }
+    if let Some(credential_access) = mapping.credential_access {
+        parts.push(format!("credential_access={credential_access}"));
+    }
     if parts.is_empty() {
         mapping.name.clone()
     } else {

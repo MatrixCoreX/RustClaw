@@ -409,6 +409,24 @@ fn quick_index_planner_capabilities(manifest: &claw_core::skill_registry::SkillM
                     attrs.push(format!("async_adapter_kind={}", async_adapter_kind.trim()));
                 }
             }
+            if let Some(isolation_profile) = capability.isolation_profile {
+                attrs.push(format!(
+                    "isolation_profile={}",
+                    isolation_profile.as_token()
+                ));
+            }
+            if let Some(network_access) = capability.network_access {
+                attrs.push(format!("network_access={network_access}"));
+            }
+            if let Some(filesystem_write) = capability.filesystem_write {
+                attrs.push(format!("filesystem_write={filesystem_write}"));
+            }
+            if let Some(external_publish) = capability.external_publish {
+                attrs.push(format!("external_publish={external_publish}"));
+            }
+            if let Some(credential_access) = capability.credential_access {
+                attrs.push(format!("credential_access={credential_access}"));
+            }
             if attrs.is_empty() {
                 name.to_string()
             } else {

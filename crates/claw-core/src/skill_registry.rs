@@ -104,6 +104,28 @@ impl CapabilityExecutionMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityIsolationProfile {
+    LocalCurrentWorkspace,
+    LocalWorktree,
+    LocalTempWorkspace,
+    RemoteExecutor,
+    ReadOnly,
+}
+
+impl CapabilityIsolationProfile {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::LocalCurrentWorkspace => "local_current_workspace",
+            Self::LocalWorktree => "local_worktree",
+            Self::LocalTempWorkspace => "local_temp_workspace",
+            Self::RemoteExecutor => "remote_executor",
+            Self::ReadOnly => "read_only",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PlannerCapabilityMapping {
     pub name: String,
@@ -129,6 +151,16 @@ pub struct PlannerCapabilityMapping {
     pub execution_mode: Option<CapabilityExecutionMode>,
     #[serde(default)]
     pub async_adapter_kind: Option<String>,
+    #[serde(default)]
+    pub isolation_profile: Option<CapabilityIsolationProfile>,
+    #[serde(default)]
+    pub network_access: Option<bool>,
+    #[serde(default)]
+    pub filesystem_write: Option<bool>,
+    #[serde(default)]
+    pub external_publish: Option<bool>,
+    #[serde(default)]
+    pub credential_access: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -612,6 +644,11 @@ fn normalize_planner_capabilities(
             execution_mode: mapping.execution_mode,
             async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
                 .map(|value| normalize_schema_token(&value)),
+            isolation_profile: mapping.isolation_profile,
+            network_access: mapping.network_access,
+            filesystem_write: mapping.filesystem_write,
+            external_publish: mapping.external_publish,
+            credential_access: mapping.credential_access,
         });
     }
     out
