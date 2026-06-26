@@ -33,7 +33,7 @@ flowchart TD
     D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
     E0 --> E1[Claim next queued task]
     E1 --> E{Task kind}
-    E -->|run_skill| RS[Direct run_skill path]
+    E -->|run_skill| RS[Direct run_skill path<br/>explicit skill_name only]
     E -->|ask| F[Resolve identity + session + active task]
     F --> G[Intent normalizer<br/>structured hint only]
     G --> H[Ask context bundle<br/>memory + attachments + recent execution]
@@ -54,7 +54,8 @@ flowchart TD
     AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after]
     QP -->|call_tool| T[Tool execution]
     QP -->|call_skill| U[Shared skill dispatch]
-    RS --> U
+    RS --> RSG[No normalizer / planner / resolver choice<br/>no PlanVerifier semantic selection]
+    RSG --> U
     T --> V[Observed result]
     U --> V
     S --> V
@@ -77,6 +78,27 @@ flowchart TD
 - `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - `Task kind`: `kind=ask` enters the agent-capable natural-language path; `kind=run_skill` bypasses the intent normalizer, planner loop, capability resolver, and plan verifier, then calls the requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
+
+### Ask And Run Skill Boundary
+
+This boundary is intentionally explicit because `run_skill` is an API-level task kind, not a natural-language routing shortcut.
+
+Quick facts for direct skill tasks:
+
+- `kind=run_skill` does not run the intent normalizer or planner / agent loop. The caller already supplied `payload.skill_name` and args.
+- `kind=run_skill` still uses the shared skill dispatcher and skill protocol after the explicit skill name is accepted.
+- `kind=run_skill` still creates and updates a normal task row, so the final state and result remain queryable by `task_id`.
+
+| Question | `kind=ask` | `kind=run_skill` |
+| --- | --- | --- |
+| Does it run the intent normalizer? | Yes, as structured hint and compatibility input. | No. The caller already supplied the target skill. |
+| Does it enter the planner / agent loop? | Yes for eligible ordinary work, with `call_capability` preferred. | No. It does not ask the planner to choose a skill or action. |
+| Does it use `CapabilityResolver` / `PlanVerifier` for semantic selection? | Yes, planner steps are resolved and verified before execution. | No semantic selection. It still uses dispatch/protocol validation for the explicit skill call. |
+| Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
+| Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
+
+Operationally: use `kind=ask` when the user gave a natural-language request and RustClaw should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants RustClaw to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
+
 - `Intent normalizer`: produces structured hints and compatibility trace fields. It is not the final semantic owner for ordinary eligible work.
 - `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
 - `Agent-loop semantic authority`: ordinary eligible work enters the loop, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
