@@ -107,7 +107,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
     let mut candidates = Vec::new();
     {
         let mut stmt = db.prepare(
-            "SELECT task_id, result_json,
+            "SELECT task_id, result_json, lease_owner,
                     CASE
                         WHEN lease_expires_at > 0 AND lease_expires_at <= ?2 THEN 'worker_lease_expired'
                         ELSE 'worker_heartbeat_stale'
@@ -124,11 +124,12 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
-                parse_recovery_reason(row.get::<_, String>(2)?.as_str()),
+                row.get::<_, Option<String>>(2)?,
+                parse_recovery_reason(row.get::<_, String>(3)?.as_str()),
             ))
         })?;
         for row in rows {
-            let (task_id, result_json, reason) = row?;
+            let (task_id, result_json, _lease_owner, reason) = row?;
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
@@ -192,7 +193,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
     let mut candidates = Vec::new();
     {
         let mut stmt = db.prepare(
-            "SELECT task_id, result_json,
+            "SELECT task_id, result_json, lease_owner,
                     CASE
                         WHEN lease_expires_at > 0 AND lease_expires_at <= ?2 THEN 'worker_lease_expired'
                         ELSE 'worker_heartbeat_stale'
@@ -209,12 +210,18 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
-                parse_recovery_reason(row.get::<_, String>(2)?.as_str()),
+                row.get::<_, Option<String>>(2)?,
+                parse_recovery_reason(row.get::<_, String>(3)?.as_str()),
             ))
         })?;
         for row in rows {
-            let (task_id, result_json, reason) = row?;
+            let (task_id, result_json, lease_owner, reason) = row?;
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
+                continue;
+            }
+            if reason == StaleRunningRecoveryReason::WorkerLeaseExpired
+                && lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
+            {
                 continue;
             }
             candidates.push(StaleRunningTaskCandidate { task_id, reason });
