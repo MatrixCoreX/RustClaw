@@ -15,7 +15,7 @@ fn async_job_protocol_hint_exposes_machine_contract() {
     assert!(hint.contains("phases:start|checkpoint|poll|observation|verify_finalize"));
     assert!(hint.contains("resume_entrypoint:poll_async_job"));
     assert!(hint.contains("checkpoint_states:waiting|background"));
-    assert!(hint.contains("adapter_statuses:accepted|running|succeeded|failed|expired"));
+    assert!(hint.contains("adapter_statuses:accepted|running|succeeded|failed|expired|cancelled"));
     assert!(hint.contains(
         "required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
     ));
@@ -38,6 +38,7 @@ fn async_job_contract_json_uses_only_machine_fields() {
     );
     assert_eq!(contract["phases"][0], "start");
     assert_eq!(contract["adapter_statuses"][2], "succeeded");
+    assert_eq!(contract["adapter_statuses"][5], "cancelled");
     assert_eq!(contract["poll_adapter_kinds"][1], "local_process_poll");
     assert_eq!(contract["poll_adapter_kinds"][4], "media_job_poll");
     assert_eq!(contract["forbidden_user_text_fields"][0], "text");

@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::process::Command;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -184,7 +187,14 @@ fn cancel_task_records(
     let now_ts = now.parse::<i64>().unwrap_or_default();
     let mut affected = 0_i64;
     for record in records {
-        let result_json = cancelled_task_result_json(record.result_json.as_deref(), reason, now_ts);
+        let cancel_adapter_result =
+            cancel_adapter_result_from_task_result(record.result_json.as_deref(), now_ts);
+        let result_json = cancelled_task_result_json(
+            record.result_json.as_deref(),
+            reason,
+            now_ts,
+            cancel_adapter_result.as_ref(),
+        );
         let count = db.execute(
             "UPDATE tasks
              SET status = 'canceled',
@@ -200,7 +210,12 @@ fn cancel_task_records(
     Ok(affected)
 }
 
-fn cancelled_task_result_json(raw_result_json: Option<&str>, reason: &str, now_ts: i64) -> Value {
+fn cancelled_task_result_json(
+    raw_result_json: Option<&str>,
+    reason: &str,
+    now_ts: i64,
+    cancel_adapter_result: Option<&Value>,
+) -> Value {
     let mut result = raw_result_json
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .filter(Value::is_object)
@@ -218,12 +233,166 @@ fn cancelled_task_result_json(raw_result_json: Option<&str>, reason: &str, now_t
                 "source": TASK_CANCELLED_SOURCE,
                 "terminal_reason": reason,
                 "message_key": TASK_CANCELLED_MESSAGE_KEY,
+                "cancel_adapter_kind": cancel_adapter_result
+                    .and_then(|value| value.get("adapter_kind"))
+                    .and_then(Value::as_str),
                 "can_cancel": false,
                 "cancelled_at": now_ts,
             }),
         );
+        if let Some(cancel_adapter_result) = cancel_adapter_result.cloned() {
+            obj.insert(
+                "cancel_adapter_result".to_string(),
+                cancel_adapter_result.clone(),
+            );
+            if let Some(lifecycle) = obj.get_mut("task_lifecycle").and_then(Value::as_object_mut) {
+                lifecycle.insert("cancel_adapter_result".to_string(), cancel_adapter_result);
+            }
+        }
     }
     result
+}
+
+fn cancel_adapter_result_from_task_result(
+    raw_result_json: Option<&str>,
+    now_ts: i64,
+) -> Option<Value> {
+    let result = raw_result_json
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)?;
+    let cancel_ref = task_cancel_ref(&result)?;
+    if cancel_ref.starts_with("local_process:") {
+        return Some(cancel_local_process_job(cancel_ref, now_ts));
+    }
+    None
+}
+
+fn task_cancel_ref(result: &Value) -> Option<&str> {
+    [
+        "/task_checkpoint/pending_async_job/cancel_ref",
+        "/task_lifecycle/cancel_ref",
+        "/cancel_ref",
+    ]
+    .into_iter()
+    .filter_map(|pointer| result.pointer(pointer))
+    .filter_map(Value::as_str)
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+}
+
+fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
+    let Some(job_dir_raw) = cancel_ref.strip_prefix("local_process:").map(str::trim) else {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "failed",
+            Some("local_process_cancel_ref_invalid"),
+            None,
+        );
+    };
+    if job_dir_raw.is_empty() {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "failed",
+            Some("local_process_cancel_ref_invalid"),
+            None,
+        );
+    }
+    let job_dir = Path::new(job_dir_raw);
+    if !job_dir.is_dir() {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "failed",
+            Some("local_process_cancel_job_dir_missing"),
+            Some(job_dir),
+        );
+    }
+    let _ = std::fs::write(job_dir.join("cancel_requested_at"), now_ts.to_string());
+    let _ = std::fs::write(job_dir.join("cancel_signal"), "TERM");
+    if job_dir.join("exit_code").exists() {
+        return local_process_cancel_result(
+            cancel_ref,
+            now_ts,
+            "already_terminal",
+            None,
+            Some(job_dir),
+        );
+    }
+    let pid = match std::fs::read_to_string(job_dir.join("pid"))
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|pid| *pid > 0)
+    {
+        Some(pid) => pid,
+        None => {
+            return local_process_cancel_result(
+                cancel_ref,
+                now_ts,
+                "failed",
+                Some("local_process_cancel_pid_invalid"),
+                Some(job_dir),
+            );
+        }
+    };
+    let status = terminate_local_process(pid);
+    let mut result = local_process_cancel_result(
+        cancel_ref,
+        now_ts,
+        if status { "accepted" } else { "failed" },
+        (!status).then_some("local_process_cancel_signal_failed"),
+        Some(job_dir),
+    );
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("pid".to_string(), json!(pid));
+        obj.insert("signal".to_string(), json!("TERM"));
+    }
+    result
+}
+
+fn local_process_cancel_result(
+    cancel_ref: &str,
+    now_ts: i64,
+    status: &str,
+    error_code: Option<&str>,
+    job_dir: Option<&Path>,
+) -> Value {
+    let mut result = json!({
+        "schema_version": 1,
+        "adapter_kind": "local_process_poll",
+        "status": status,
+        "cancel_ref": cancel_ref,
+        "cancelled_at": now_ts,
+        "message_key": TASK_CANCELLED_MESSAGE_KEY,
+    });
+    if let Some(obj) = result.as_object_mut() {
+        if let Some(error_code) = error_code {
+            obj.insert("error_code".to_string(), json!(error_code));
+        }
+        if let Some(job_dir) = job_dir {
+            obj.insert(
+                "job_dir".to_string(),
+                json!(job_dir.to_string_lossy().to_string()),
+            );
+        }
+    }
+    result
+}
+
+#[cfg(unix)]
+fn terminate_local_process(pid: u32) -> bool {
+    Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn terminate_local_process(_pid: u32) -> bool {
+    false
 }
 
 fn update_paused_checkpoint_schedule(

@@ -15,6 +15,25 @@ use crate::repo::{
     get_task_admin_target, pause_task_by_id, resume_task_by_id,
 };
 
+struct TempDirGuard {
+    path: std::path::PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(prefix: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("rustclaw_{prefix}_{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 fn state_with_tasks_table() -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("get db");
@@ -427,6 +446,59 @@ fn cancel_task_by_id_does_not_touch_terminal_tasks() {
     let (status, error_text) = stored_task_status_and_error(&state, &task_id);
     assert_eq!(status, "succeeded");
     assert_eq!(error_text, None);
+}
+
+#[test]
+fn cancel_task_by_id_runs_local_process_cancel_adapter() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let dir = TempDirGuard::new("task_admin_local_process_cancel");
+    std::fs::write(dir.path.join("pid"), "not-a-pid\n").expect("write pid");
+    let cancel_ref = format!("local_process:{}", dir.path.display());
+    let result_json = json!({
+        "task_checkpoint": {
+            "pending_async_job": {
+                "job_id": "local_process:test-cancel",
+                "status": "running",
+                "poll_after_seconds": 10,
+                "expires_at": 9999,
+                "cancel_ref": cancel_ref,
+                "message_key": "clawd.task.async_job_pending"
+            }
+        }
+    });
+    insert_task(&state, &task_id, "running", Some(&result_json), 1234);
+
+    let canceled = cancel_task_by_id(&state, &task_id).expect("cancel task");
+
+    assert_eq!(canceled, 1);
+    assert!(dir.path.join("cancel_requested_at").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.path.join("cancel_signal"))
+            .expect("read cancel signal")
+            .trim(),
+        "TERM"
+    );
+    let result = stored_result_json(&state, &task_id);
+    assert_eq!(
+        result["cancel_adapter_result"]["adapter_kind"],
+        "local_process_poll"
+    );
+    assert_eq!(result["cancel_adapter_result"]["status"], "failed");
+    assert_eq!(
+        result["cancel_adapter_result"]["error_code"],
+        "local_process_cancel_pid_invalid"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["cancel_adapter_kind"],
+        "local_process_poll"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["cancel_adapter_result"]["adapter_kind"],
+        "local_process_poll"
+    );
+    assert!(result["cancel_adapter_result"].get("text").is_none());
+    assert!(result["cancel_adapter_result"].get("error_text").is_none());
 }
 
 #[test]

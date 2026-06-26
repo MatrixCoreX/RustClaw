@@ -237,6 +237,7 @@ pub(crate) fn paused_checkpoint_resume_terminal_projection_payload(
         | ("run_seeded_agent_loop", "seeded_loop_failed")
         | ("poll_async_job", "async_poll_completed")
         | ("poll_async_job", "async_poll_failed")
+        | ("poll_async_job", "async_poll_cancelled")
         | ("verify_and_finalize", "finalize_completed")
         | ("verify_and_finalize", "finalize_failed") => {}
         _ => return None,
@@ -259,7 +260,7 @@ pub(crate) fn paused_checkpoint_resume_terminal_projection_payload(
     }
     if matches!(
         claimed.executor_result_status.as_str(),
-        "seeded_loop_failed" | "async_poll_failed" | "finalize_failed"
+        "seeded_loop_failed" | "async_poll_failed" | "async_poll_cancelled" | "finalize_failed"
     ) && claimed
         .execution_result_payload
         .get("error_code")
