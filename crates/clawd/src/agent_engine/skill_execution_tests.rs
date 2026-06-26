@@ -591,6 +591,36 @@ planner_capabilities = [
             .and_then(serde_json::Value::as_bool),
         Some(false)
     );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/isolation_profile")
+            .and_then(serde_json::Value::as_str),
+        Some("remote_executor")
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/network_access")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/filesystem_write")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/external_publish")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        permission
+            .pointer("/capability_policy/credential_access")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]
