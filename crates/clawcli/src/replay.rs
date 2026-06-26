@@ -7,6 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{output, task};
 
+#[path = "replay_fingerprint.rs"]
+mod replay_fingerprint;
+
+use replay_fingerprint::{
+    replay_action_sequence, replay_route_fingerprint, replay_tool_result_summary,
+    replay_verifier_summary,
+};
+
 const REPLAY_SCHEMA_VERSION: u64 = 1;
 const REPLAY_BUNDLE_KIND: &str = "rustclaw_task_replay";
 
@@ -145,6 +153,18 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
     let left_artifact_count = replay_artifact_ref_count(left);
     let right_artifact_count = replay_artifact_ref_count(right);
     let artifact_count_changed = left_artifact_count != right_artifact_count;
+    let left_route_fingerprint = replay_route_fingerprint(left);
+    let right_route_fingerprint = replay_route_fingerprint(right);
+    let route_changed = left_route_fingerprint != right_route_fingerprint;
+    let left_action_sequence = replay_action_sequence(left);
+    let right_action_sequence = replay_action_sequence(right);
+    let action_sequence_changed = left_action_sequence != right_action_sequence;
+    let left_tool_result_summary = replay_tool_result_summary(left);
+    let right_tool_result_summary = replay_tool_result_summary(right);
+    let tool_result_changed = left_tool_result_summary != right_tool_result_summary;
+    let left_verifier_summary = replay_verifier_summary(left);
+    let right_verifier_summary = replay_verifier_summary(right);
+    let verifier_changed = left_verifier_summary != right_verifier_summary;
     json!({
         "bundle_kind": "rustclaw_task_replay_diff",
         "schema_version": REPLAY_SCHEMA_VERSION,
@@ -153,13 +173,21 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
         "changed": status_changed
             || lifecycle_changed
             || event_count_changed
-            || artifact_count_changed,
+            || artifact_count_changed
+            || route_changed
+            || action_sequence_changed
+            || tool_result_changed
+            || verifier_changed,
         "left": {
             "task_id": left_summary.get("task_id").cloned().unwrap_or(Value::Null),
             "status": left_summary.get("status").cloned().unwrap_or(Value::Null),
             "lifecycle_state": left_summary.get("lifecycle_state").cloned().unwrap_or(Value::Null),
             "event_count": left_summary.get("event_count").cloned().unwrap_or(Value::Null),
             "artifact_ref_count": left_artifact_count,
+            "route_fingerprint": left_route_fingerprint,
+            "action_sequence": left_action_sequence,
+            "tool_result_summary": left_tool_result_summary,
+            "verifier_summary": left_verifier_summary,
         },
         "right": {
             "task_id": right_summary.get("task_id").cloned().unwrap_or(Value::Null),
@@ -167,12 +195,20 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
             "lifecycle_state": right_summary.get("lifecycle_state").cloned().unwrap_or(Value::Null),
             "event_count": right_summary.get("event_count").cloned().unwrap_or(Value::Null),
             "artifact_ref_count": right_artifact_count,
+            "route_fingerprint": right_route_fingerprint,
+            "action_sequence": right_action_sequence,
+            "tool_result_summary": right_tool_result_summary,
+            "verifier_summary": right_verifier_summary,
         },
         "diff": {
             "status_changed": status_changed,
             "lifecycle_changed": lifecycle_changed,
             "event_count_changed": event_count_changed,
             "artifact_count_changed": artifact_count_changed,
+            "route_changed": route_changed,
+            "action_sequence_changed": action_sequence_changed,
+            "tool_result_changed": tool_result_changed,
+            "verifier_changed": verifier_changed,
         }
     })
 }
@@ -198,6 +234,10 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
         "result_source": "recorded_bundle",
         "coverage": replay_recording_coverage(bundle),
+        "route_fingerprint": replay_route_fingerprint(bundle),
+        "action_sequence": replay_action_sequence(bundle),
+        "tool_result_summary": replay_tool_result_summary(bundle),
+        "verifier_summary": replay_verifier_summary(bundle),
     })
 }
 
