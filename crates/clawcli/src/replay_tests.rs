@@ -1,4 +1,7 @@
-use super::{replay_bundle_json, replay_diff_summary, replay_run_summary, validate_replay_bundle};
+use super::{
+    replay_bundle_json, replay_diff_summary, replay_run_summary, run_diff, run_run,
+    validate_replay_bundle,
+};
 
 #[test]
 fn replay_bundle_redacts_secret_and_private_payload_fields() {
@@ -242,6 +245,53 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(diff["right"]["artifact_ref_count"], 0);
 }
 
+#[test]
+fn replay_offline_smoke_runs_bundle_and_diff_without_providers() {
+    let base_dir = std::env::temp_dir().join(format!(
+        "clawcli_replay_offline_smoke_{}_{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&base_dir).expect("create replay smoke dir");
+    let left_path = base_dir.join("left.json");
+    let right_path = base_dir.join("right.json");
+    let left = replay_fixture_bundle(
+        "task-replay-left",
+        serde_json::json!({
+            "status": "succeeded",
+            "task_lifecycle": {
+                "state": "succeeded"
+            }
+        }),
+        "task_completed",
+    );
+    let right = replay_fixture_bundle(
+        "task-replay-right",
+        serde_json::json!({
+            "status": "failed",
+            "task_lifecycle": {
+                "state": "failed"
+            }
+        }),
+        "task_failed",
+    );
+    std::fs::write(
+        &left_path,
+        serde_json::to_vec_pretty(&left).expect("serialize left bundle"),
+    )
+    .expect("write left bundle");
+    std::fs::write(
+        &right_path,
+        serde_json::to_vec_pretty(&right).expect("serialize right bundle"),
+    )
+    .expect("write right bundle");
+
+    run_run(&left_path, true).expect("run replay bundle");
+    run_diff(&left_path, &right_path, true).expect("diff replay bundles");
+
+    std::fs::remove_dir_all(base_dir).ok();
+}
+
 fn replay_fixture_bundle(
     task_id: &str,
     task: serde_json::Value,
@@ -267,4 +317,11 @@ fn replay_fixture_bundle(
             }
         ]
     })
+}
+
+fn unique_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos()
 }
