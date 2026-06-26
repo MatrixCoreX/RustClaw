@@ -116,8 +116,8 @@ pub(crate) fn print_skill_table(body: &serde_json::Value) {
 pub(crate) fn print_capability_table(body: &serde_json::Value) {
     let items = skill_items(body);
     println!(
-        "{:<30} {:<40} {:<30} {:<8} {:<8} reason",
-        "skill", "planner_capabilities", "capabilities", "risk", "available"
+        "{:<30} {:<40} {:<30} {:<22} {:<8} {:<8} reason",
+        "skill", "planner_capabilities", "capabilities", "isolation", "risk", "available"
     );
     for item in items {
         let planner_capabilities = join_string_array(item.get("planner_capabilities"));
@@ -126,19 +126,41 @@ pub(crate) fn print_capability_table(body: &serde_json::Value) {
             continue;
         }
         let name = value_token(item.get("name"));
+        let isolation_profile = capability_isolation_summary(item);
         let risk = value_token(item.get("risk_level"));
         let available = value_token(item.get("runtime_available"));
         let unavailable_reason = value_token(item.get("unavailable_reason"));
         println!(
-            "{:<30} {:<40} {:<30} {:<8} {:<8} {}",
+            "{:<30} {:<40} {:<30} {:<22} {:<8} {:<8} {}",
             name,
             truncate_display_token(&planner_capabilities, 40),
             truncate_display_token(&capabilities, 30),
+            truncate_display_token(&isolation_profile, 22),
             risk,
             available,
             unavailable_reason
         );
     }
+}
+
+fn capability_isolation_summary(item: &serde_json::Value) -> String {
+    let Some(policies) = item
+        .get("planner_capability_policies")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return value_token(item.get("isolation_profile"));
+    };
+    let mut profiles = policies
+        .iter()
+        .filter_map(|policy| policy.get("isolation_profile"))
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    profiles.sort();
+    profiles.dedup();
+    profiles.join(",")
 }
 
 fn skill_items(body: &serde_json::Value) -> &[serde_json::Value] {

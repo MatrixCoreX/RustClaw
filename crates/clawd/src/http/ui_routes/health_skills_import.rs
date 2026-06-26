@@ -499,6 +499,9 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
                     .collect::<Vec<_>>()
             })
             .filter(|items| !items.is_empty()),
+        planner_capability_policies: registry_entry
+            .as_ref()
+            .and_then(planner_capability_policy_items),
         capabilities: registry_entry
             .as_ref()
             .map(|entry| {
@@ -510,6 +513,26 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
             })
             .filter(|items| !items.is_empty()),
     }
+}
+
+fn planner_capability_policy_items(
+    entry: &claw_core::skill_registry::SkillRegistryEntry,
+) -> Option<Vec<PlannerCapabilityPolicyItem>> {
+    let items = entry
+        .planner_capabilities
+        .iter()
+        .map(|capability| PlannerCapabilityPolicyItem {
+            capability: capability.name.clone(),
+            isolation_profile: capability
+                .isolation_profile
+                .map(|value| value.as_token().to_string()),
+            network_access: capability.network_access,
+            filesystem_write: capability.filesystem_write,
+            external_publish: capability.external_publish,
+            credential_access: capability.credential_access,
+        })
+        .collect::<Vec<_>>();
+    (!items.is_empty()).then_some(items)
 }
 
 fn skill_enabled_for_state(state: &AppState, skill_name: &str) -> bool {
@@ -555,6 +578,16 @@ struct CapabilityListItem {
     unavailable_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    isolation_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_access: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filesystem_write: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_publish: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_access: Option<bool>,
 }
 
 fn capability_items_from_skill_items(skill_items: &[SkillListItem]) -> Vec<CapabilityListItem> {
@@ -562,12 +595,22 @@ fn capability_items_from_skill_items(skill_items: &[SkillListItem]) -> Vec<Capab
     for skill in skill_items {
         if let Some(capabilities) = skill.planner_capabilities.as_ref() {
             for capability in capabilities {
-                items.push(capability_list_item(skill, capability, "planner_capability"));
+                items.push(capability_list_item(
+                    skill,
+                    capability,
+                    "planner_capability",
+                    planner_capability_policy(skill, capability),
+                ));
             }
         }
         if let Some(capabilities) = skill.capabilities.as_ref() {
             for capability in capabilities {
-                items.push(capability_list_item(skill, capability, "runtime_capability"));
+                items.push(capability_list_item(
+                    skill,
+                    capability,
+                    "runtime_capability",
+                    None,
+                ));
             }
         }
     }
@@ -584,6 +627,7 @@ fn capability_list_item(
     skill: &SkillListItem,
     capability: &str,
     capability_kind: &str,
+    policy: Option<&PlannerCapabilityPolicyItem>,
 ) -> CapabilityListItem {
     CapabilityListItem {
         skill_name: skill.name.clone(),
@@ -597,7 +641,23 @@ fn capability_list_item(
         runtime_available: skill.runtime_available,
         unavailable_reason: skill.unavailable_reason.clone(),
         output_kind: skill.output_kind.clone(),
+        isolation_profile: policy.and_then(|item| item.isolation_profile.clone()),
+        network_access: policy.and_then(|item| item.network_access),
+        filesystem_write: policy.and_then(|item| item.filesystem_write),
+        external_publish: policy.and_then(|item| item.external_publish),
+        credential_access: policy.and_then(|item| item.credential_access),
     }
+}
+
+fn planner_capability_policy<'a>(
+    skill: &'a SkillListItem,
+    capability: &str,
+) -> Option<&'a PlannerCapabilityPolicyItem> {
+    skill
+        .planner_capability_policies
+        .as_ref()?
+        .iter()
+        .find(|item| item.capability == capability)
 }
 
 fn skill_kind_token(kind: SkillKind) -> &'static str {

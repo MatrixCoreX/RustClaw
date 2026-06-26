@@ -1082,6 +1082,21 @@ struct UsageHistoryPage {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct PlannerCapabilityPolicyItem {
+    capability: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    isolation_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_access: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filesystem_write: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_publish: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_access: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct SkillListItem {
     name: String,
     description: Option<String>,
@@ -1131,6 +1146,8 @@ struct SkillListItem {
     platform_notes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     planner_capabilities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    planner_capability_policies: Option<Vec<PlannerCapabilityPolicyItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capabilities: Option<Vec<String>>,
 }
