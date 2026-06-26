@@ -740,6 +740,13 @@ fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {
     refs
 }
 
+fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
+    match resume_reason {
+        "budget_near_exhaustion" => Some("clawd.task.budget_near_exhaustion"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,
@@ -779,15 +786,20 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         .filter(|step| step.is_ok())
         .map(|step| step.step_id.clone())
         .collect::<Vec<_>>();
+    let message_key = checkpoint_resume_message_key(resume_reason);
+    let mut boundary_context = json!({
+        "schema_version": 1,
+        "source": "agent_loop_soft_budget",
+        "task_id": task.task_id,
+        "resume_reason": resume_reason,
+    });
+    if let (Some(obj), Some(message_key)) = (boundary_context.as_object_mut(), message_key) {
+        obj.insert("message_key".to_string(), json!(message_key));
+    }
     let checkpoint = TaskCheckpoint {
         schema_version: 1,
         checkpoint_id: checkpoint_id.clone(),
-        boundary_context: json!({
-            "schema_version": 1,
-            "source": "agent_loop_soft_budget",
-            "task_id": task.task_id,
-            "resume_reason": resume_reason,
-        }),
+        boundary_context,
         last_successful_round: (loop_state.round_no > 0)
             .then_some(saturating_u32(loop_state.round_no)),
         last_successful_step,
@@ -816,20 +828,25 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         resume_entrypoint: ResumeEntrypoint::NextPlannerRound,
     };
 
+    let mut lifecycle = json!({
+        "schema_version": 1,
+        "state": TaskLifecycleState::Waiting,
+        "source": "agent_loop_soft_budget",
+        "resume_reason": resume_reason,
+        "next_check_after": next_check_after.max(now_ts + 1),
+        "checkpoint_id": checkpoint_id,
+        "can_poll": true,
+        "can_cancel": true,
+        "last_heartbeat_ts": now_ts,
+        "budget": budget,
+    });
+    if let (Some(obj), Some(message_key)) = (lifecycle.as_object_mut(), message_key) {
+        obj.insert("message_key".to_string(), json!(message_key));
+    }
+
     json!({
         "progress_messages": loop_state.progress_messages,
-        "task_lifecycle": {
-            "schema_version": 1,
-            "state": TaskLifecycleState::Waiting,
-            "source": "agent_loop_soft_budget",
-            "resume_reason": resume_reason,
-            "next_check_after": next_check_after.max(now_ts + 1),
-            "checkpoint_id": checkpoint_id,
-            "can_poll": true,
-            "can_cancel": true,
-            "last_heartbeat_ts": now_ts,
-            "budget": budget,
-        },
+        "task_lifecycle": lifecycle,
         "task_checkpoint": checkpoint.to_machine_json(),
     })
 }

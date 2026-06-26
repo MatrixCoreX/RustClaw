@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
@@ -828,6 +830,34 @@ fn soft_budget_checkpoint_resume_reason(
     None
 }
 
+fn worker_soft_checkpoint_after_seconds(worker_timeout_secs: u64) -> Option<u64> {
+    let timeout = worker_timeout_secs.max(1);
+    if timeout <= 2 {
+        return None;
+    }
+    let reserve = (timeout / 10).clamp(1, 30);
+    let soft_after = timeout.saturating_sub(reserve);
+    (soft_after > 0 && soft_after < timeout).then_some(soft_after)
+}
+
+fn worker_soft_checkpoint_after(worker_timeout_secs: u64) -> Option<Duration> {
+    worker_soft_checkpoint_after_seconds(worker_timeout_secs).map(Duration::from_secs)
+}
+
+fn worker_budget_near_exhaustion(
+    started_at: Instant,
+    soft_checkpoint_after: Option<Duration>,
+) -> bool {
+    soft_checkpoint_after.is_some_and(|duration| started_at.elapsed() >= duration)
+}
+
+fn loop_state_has_recoverable_checkpoint_state(loop_state: &LoopState) -> bool {
+    loop_state.task_checkpoint.is_some()
+        || !loop_state.executed_step_results.is_empty()
+        || !loop_state.successful_action_fingerprints.is_empty()
+        || loop_state.has_tool_or_skill_output
+}
+
 async fn run_agent_round(
     state: &AppState,
     task: &ClaimedTask,
@@ -1563,10 +1593,25 @@ pub(super) async fn run_agent_with_loop_seeded(
     );
     let mut round = 1usize;
     let mut answer_verifier_retry_count = 0usize;
+    let loop_started_at = Instant::now();
+    let worker_soft_checkpoint_after =
+        worker_soft_checkpoint_after(state.worker.worker_task_timeout_seconds);
     loop {
         while round <= loop_state.max_rounds {
             ensure_task_running(state, task)?;
             loop_state.round_no = round;
+            if worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after)
+                && loop_state_has_recoverable_checkpoint_state(&loop_state)
+            {
+                loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
+                publish_agent_loop_checkpoint_progress(
+                    state,
+                    task,
+                    &mut loop_state,
+                    "budget_near_exhaustion",
+                );
+                break;
+            }
             super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
             let outcome = run_agent_round(
                 state,
@@ -1579,6 +1624,20 @@ pub(super) async fn run_agent_with_loop_seeded(
             )
             .await?;
             loop_state.last_stop_signal = outcome.stop_signal.clone();
+            if worker_budget_near_exhaustion(loop_started_at, worker_soft_checkpoint_after)
+                && !outcome.had_error
+                && outcome.executed_actions > 0
+                && loop_state_has_recoverable_checkpoint_state(&loop_state)
+            {
+                loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
+                publish_agent_loop_checkpoint_progress(
+                    state,
+                    task,
+                    &mut loop_state,
+                    "budget_near_exhaustion",
+                );
+                break;
+            }
             if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
                 if let Some(resume_reason) =
                     soft_budget_checkpoint_resume_reason(&loop_state, &policy, &outcome)

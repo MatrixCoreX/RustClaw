@@ -380,6 +380,36 @@ fn no_progress_checkpoint_payload_records_repair_budget_state() {
 }
 
 #[test]
+fn budget_near_exhaustion_checkpoint_payload_records_message_key() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 2;
+    loop_state.total_steps_executed = 3;
+    loop_state.last_stop_signal = Some("budget_near_exhaustion".to_string());
+
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "budget_near_exhaustion",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    assert_eq!(
+        payload["task_lifecycle"]["resume_reason"],
+        "budget_near_exhaustion"
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["message_key"],
+        "clawd.task.budget_near_exhaustion"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["message_key"],
+        "clawd.task.budget_near_exhaustion"
+    );
+}
+
+#[test]
 fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
