@@ -1,5 +1,6 @@
 pub(crate) mod audit;
 pub(crate) mod auth;
+pub(crate) mod child_tasks;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_resume_execution;
