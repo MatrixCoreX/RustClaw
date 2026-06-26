@@ -3,8 +3,8 @@ use serde_json::json;
 use super::{
     async_job_contract_json, async_job_protocol_hint_line, async_poll_adapter_kind_supported,
     async_poll_adapter_result_matches_job, async_poll_adapter_status,
-    parse_pending_async_job_poll_adapter_from_extra, skill_runner_poll_adapter_kind_supported,
-    ASYNC_POLL_ADAPTER_RESULT_KEY,
+    parse_pending_async_job_poll_adapter_from_extra, pending_async_job_timeout_policy,
+    skill_runner_poll_adapter_kind_supported, ASYNC_POLL_ADAPTER_RESULT_KEY,
 };
 
 #[test]
@@ -41,7 +41,49 @@ fn async_job_contract_json_uses_only_machine_fields() {
     assert_eq!(contract["adapter_statuses"][5], "cancelled");
     assert_eq!(contract["poll_adapter_kinds"][1], "local_process_poll");
     assert_eq!(contract["poll_adapter_kinds"][4], "media_job_poll");
+    assert_eq!(contract["timeout_policy_fields"][0], "adapter_kind");
     assert_eq!(contract["forbidden_user_text_fields"][0], "text");
+}
+
+#[test]
+fn pending_async_job_timeout_policy_uses_adapter_family() {
+    let job = crate::task_lifecycle::AsyncJobRef {
+        job_id: "provider:video_generate:minimax:task-1".to_string(),
+        status: crate::task_lifecycle::AsyncJobStatus::Accepted,
+        poll_after_seconds: 5,
+        expires_at: 1_900,
+        cancel_ref: "provider:video_generate:minimax:task-1".to_string(),
+        message_key: "clawd.task.async_job_pending".to_string(),
+    };
+    let adapter = json!({"kind": "media_job_poll"});
+
+    let policy = pending_async_job_timeout_policy(Some(&adapter), &job, 1_000);
+
+    assert_eq!(policy["policy_source"], "async_job_contract");
+    assert_eq!(policy["adapter_kind"], "media_job_poll");
+    assert_eq!(policy["max_runtime_seconds"], 900);
+    assert_eq!(policy["deadline_ts"], 1_900);
+    assert_eq!(policy["remaining_seconds"], 900);
+    assert!(policy.get("text").is_none());
+    assert!(policy.get("error_text").is_none());
+}
+
+#[test]
+fn pending_async_job_timeout_policy_infers_local_process_without_adapter() {
+    let job = crate::task_lifecycle::AsyncJobRef {
+        job_id: "local_process:job-1".to_string(),
+        status: crate::task_lifecycle::AsyncJobStatus::Running,
+        poll_after_seconds: 5,
+        expires_at: 900,
+        cancel_ref: "local_process:/tmp/job-1".to_string(),
+        message_key: "clawd.task.async_job_pending".to_string(),
+    };
+
+    let policy = pending_async_job_timeout_policy(None, &job, 1_000);
+
+    assert_eq!(policy["adapter_kind"], "local_process_poll");
+    assert_eq!(policy["max_runtime_seconds"], 3600);
+    assert_eq!(policy["remaining_seconds"], 0);
 }
 
 #[test]

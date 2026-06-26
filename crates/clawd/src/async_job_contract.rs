@@ -1,6 +1,4 @@
-#[cfg(test)]
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::task_lifecycle::{AsyncJobRef, AsyncJobStatus};
 
@@ -216,6 +214,48 @@ pub(crate) fn skill_runner_poll_adapter_kind_supported(adapter_kind: &str) -> bo
     )
 }
 
+pub(crate) fn pending_async_job_timeout_policy(
+    poll_adapter: Option<&Value>,
+    job: &AsyncJobRef,
+    now_ts: i64,
+) -> Value {
+    let adapter_kind = poll_adapter
+        .and_then(poll_adapter_kind)
+        .or_else(|| {
+            (job.job_id.starts_with("local_process:")
+                || job.cancel_ref.starts_with("local_process:"))
+            .then_some("local_process_poll")
+        })
+        .unwrap_or("unspecified_poll");
+    json!({
+        "schema_version": 1,
+        "policy_source": "async_job_contract",
+        "adapter_kind": adapter_kind,
+        "max_runtime_seconds": async_adapter_max_runtime_seconds(adapter_kind),
+        "deadline_ts": job.expires_at,
+        "remaining_seconds": job.expires_at.saturating_sub(now_ts).max(0),
+    })
+}
+
+fn poll_adapter_kind(adapter: &Value) -> Option<&str> {
+    adapter
+        .get("adapter_kind")
+        .or_else(|| adapter.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn async_adapter_max_runtime_seconds(adapter_kind: &str) -> u64 {
+    match adapter_kind {
+        "http_job_poll" => 300,
+        "browser_job_poll" => 600,
+        "mcp_job_poll" | "media_job_poll" | "skill_poll" => 900,
+        "local_process_poll" | "remote_job_poll" => 3_600,
+        _ => 300,
+    }
+}
+
 fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {
     let extra = extra?;
     extra
@@ -289,6 +329,13 @@ pub(crate) fn async_job_contract_json() -> Value {
             "cancellation_result_json",
             "error_code",
             "message_key"
+        ],
+        "timeout_policy_fields": [
+            "adapter_kind",
+            "max_runtime_seconds",
+            "deadline_ts",
+            "remaining_seconds",
+            "policy_source"
         ],
         "forbidden_user_text_fields": ["text", "error_text"]
     })
