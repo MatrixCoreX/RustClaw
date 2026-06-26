@@ -154,9 +154,6 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         let mut payload =
             serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
         if let Value::Object(map) = &mut payload {
-            for (k, v) in schedule_service::schedule_invocation_metadata(&job.job_id) {
-                map.insert(k, v);
-            }
             map.insert("channel".to_string(), Value::String(job.channel.clone()));
             if let Some(v) = job.external_user_id.as_ref() {
                 map.insert("external_user_id".to_string(), Value::String(v.clone()));
@@ -167,7 +164,14 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         }
 
         let task_id = Uuid::new_v4().to_string();
+        let run_id = format!("run_{}", Uuid::new_v4().simple());
+        let thread_ref = crate::scheduled_run_contract::scheduled_run_thread_ref(&job.job_id);
         let now_text = now_ts();
+        if let Value::Object(map) = &mut payload {
+            for (k, v) in schedule_service::schedule_invocation_metadata(&job.job_id, &run_id) {
+                map.insert(k, v);
+            }
+        }
         db.execute(
             "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued', NULL, NULL, ?10, ?10)",
@@ -183,6 +187,16 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 payload.to_string(),
                 now_text
             ],
+        )?;
+        crate::scheduled_run_contract::insert_scheduled_run_enqueued(
+            &db,
+            &crate::scheduled_run_contract::ScheduledRunEnqueued {
+                run_id: &run_id,
+                job_id: &job.job_id,
+                task_id: &task_id,
+                thread_ref: &thread_ref,
+                started_at: &now_text,
+            },
         )?;
 
         match next_run {

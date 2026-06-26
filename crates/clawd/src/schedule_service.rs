@@ -685,9 +685,9 @@ fn sanitize_schedule_ask_payload_text(payload: &mut Value, fallback_prompt: &str
 
 /// Key-value pairs to inject into task payload when schedule triggers execution.
 /// Skills can read these machine tokens to know they were invoked by schedule.
-pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)> {
+pub(crate) fn schedule_invocation_metadata(job_id: &str, run_id: &str) -> Vec<(String, Value)> {
     let resume_trigger = crate::task_lifecycle::ResumeTrigger::ScheduledWakeup.status_code();
-    vec![
+    let mut metadata = vec![
         ("schedule_triggered".to_string(), Value::Bool(true)),
         (
             "schedule_job_id".to_string(),
@@ -723,7 +723,9 @@ pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)>
             Value::Bool(true),
         ),
         ("scheduled".to_string(), Value::Bool(true)),
-    ]
+    ];
+    metadata.extend(crate::scheduled_run_contract::scheduled_run_payload_metadata(job_id, run_id));
+    metadata
 }
 
 fn inherit_schedule_delivery_context(task: &ClaimedTask, payload: Value) -> Value {

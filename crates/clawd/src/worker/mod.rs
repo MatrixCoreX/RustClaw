@@ -275,6 +275,17 @@ pub(crate) async fn maybe_notify_schedule_result(
                 "schedule notify success: task_id={} channel={} runtime_channel={:?}",
                 task.task_id, channel_str, runtime_ch
             );
+            record_schedule_run_history(
+                state,
+                task,
+                payload,
+                job_id,
+                success,
+                &json!({
+                    "delivered": true,
+                    "runtime_channel": runtime_channel.clone(),
+                }),
+            );
             Some(ScheduleNotifyOutcome {
                 job_id: job_id.to_string(),
                 channel: channel_str.to_string(),
@@ -289,6 +300,18 @@ pub(crate) async fn maybe_notify_schedule_result(
                 "schedule notify failed: task_id={} channel={} runtime_channel={:?} err={}",
                 task.task_id, channel_str, runtime_ch, err
             );
+            record_schedule_run_history(
+                state,
+                task,
+                payload,
+                job_id,
+                success,
+                &json!({
+                    "delivered": false,
+                    "runtime_channel": runtime_channel.clone(),
+                    "error_code": "channel_send_failed",
+                }),
+            );
             Some(ScheduleNotifyOutcome {
                 job_id: job_id.to_string(),
                 channel: channel_str.to_string(),
@@ -297,6 +320,37 @@ pub(crate) async fn maybe_notify_schedule_result(
                 delivered: false,
                 error_text: Some(err),
             })
+        }
+    }
+}
+
+fn record_schedule_run_history(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    payload: &Value,
+    job_id: &str,
+    success: bool,
+    notification: &Value,
+) {
+    let terminal_status = if success { "succeeded" } else { "failed" };
+    let terminal_result = crate::scheduled_run_contract::scheduled_run_terminal_result(
+        success,
+        payload,
+        Some(notification),
+    );
+    if let Ok(db) = state.core.db.get() {
+        if let Err(err) = crate::scheduled_run_contract::update_scheduled_run_terminal(
+            &db,
+            job_id,
+            &task.task_id,
+            terminal_status,
+            &crate::now_ts(),
+            &terminal_result,
+        ) {
+            warn!(
+                "schedule run history update failed: task_id={} job_id={} err={}",
+                task.task_id, job_id, err
+            );
         }
     }
 }

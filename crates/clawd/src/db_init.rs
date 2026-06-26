@@ -252,7 +252,25 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
             updated_at        TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(enabled, next_run_at);
-        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_user_chat ON scheduled_jobs(user_id, chat_id);",
+        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_user_chat ON scheduled_jobs(user_id, chat_id);
+
+        CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id         TEXT NOT NULL UNIQUE,
+            job_id         TEXT NOT NULL,
+            task_id        TEXT NOT NULL,
+            thread_ref     TEXT NOT NULL,
+            task_status    TEXT NOT NULL CHECK (task_status IN ('queued', 'running', 'waiting', 'background', 'needs_user', 'succeeded', 'failed', 'canceled', 'cancelled', 'timeout')),
+            triage_status  TEXT CHECK (triage_status IS NULL OR triage_status IN ('no_findings', 'findings', 'needs_user', 'failed', 'cancelled')),
+            result_json    TEXT NOT NULL DEFAULT '{}',
+            started_at     TEXT NOT NULL,
+            finished_at    TEXT,
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_updated ON scheduled_job_runs(job_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_task ON scheduled_job_runs(task_id);
+        CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_triage ON scheduled_job_runs(triage_status, updated_at);",
     )?;
     Ok(())
 }

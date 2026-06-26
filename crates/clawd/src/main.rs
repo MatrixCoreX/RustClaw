@@ -71,6 +71,7 @@ mod repo;
 mod routing_context;
 mod runtime;
 mod schedule_service;
+mod scheduled_run_contract;
 mod self_extension;
 mod semantic_judge;
 mod skill_availability;

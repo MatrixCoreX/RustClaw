@@ -721,7 +721,7 @@ fn schedule_intent_schema_drift() {
 
 #[test]
 fn schedule_invocation_metadata_contains_required_keys() {
-    let meta = schedule_invocation_metadata("job_abc123");
+    let meta = schedule_invocation_metadata("job_abc123", "run_001");
     let keys: std::collections::HashSet<_> = meta.iter().map(|(k, _)| k.as_str()).collect();
     assert!(keys.contains("schedule_triggered"));
     assert!(keys.contains("schedule_job_id"));
@@ -733,6 +733,10 @@ fn schedule_invocation_metadata_contains_required_keys() {
     assert!(keys.contains("thread_resume"));
     assert!(keys.contains("thread_resume_source"));
     assert!(keys.contains("automation_checkpoint_required"));
+    assert!(keys.contains("automation_run_id"));
+    assert!(keys.contains("automation_thread_ref"));
+    assert!(keys.contains("thread_ref"));
+    assert!(keys.contains("scheduled_run_schema_version"));
     assert!(keys.contains("scheduled"));
     let job_id = meta
         .iter()
@@ -770,6 +774,19 @@ fn schedule_invocation_metadata_contains_required_keys() {
         .find(|(k, _)| *k == "thread_resume")
         .map(|(_, v)| v);
     assert_eq!(thread_resume.and_then(|v| v.as_bool()), Some(true));
+    let run_id = meta
+        .iter()
+        .find(|(k, _)| *k == "automation_run_id")
+        .map(|(_, v)| v);
+    assert_eq!(run_id.and_then(|v| v.as_str()), Some("run_001"));
+    let thread_ref = meta
+        .iter()
+        .find(|(k, _)| *k == "thread_ref")
+        .map(|(_, v)| v);
+    assert_eq!(
+        thread_ref.and_then(|v| v.as_str()),
+        Some("scheduled_job:job_abc123")
+    );
 }
 
 // ---------- §7.5: TEST_FREEZE_NOW_ENV 解析与冻结行为 ----------
