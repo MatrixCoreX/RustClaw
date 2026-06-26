@@ -227,13 +227,19 @@ pub(crate) fn pending_async_job_timeout_policy(
             .then_some("local_process_poll")
         })
         .unwrap_or("unspecified_poll");
+    let max_runtime_seconds = async_adapter_max_runtime_seconds(adapter_kind);
+    let max_runtime_deadline_ts =
+        now_ts.saturating_add(max_runtime_seconds.min(i64::MAX as u64) as i64);
+    let effective_deadline_ts = job.expires_at.min(max_runtime_deadline_ts);
     json!({
         "schema_version": 1,
         "policy_source": "async_job_contract",
         "adapter_kind": adapter_kind,
-        "max_runtime_seconds": async_adapter_max_runtime_seconds(adapter_kind),
+        "max_runtime_seconds": max_runtime_seconds,
+        "max_runtime_deadline_ts": max_runtime_deadline_ts,
         "deadline_ts": job.expires_at,
-        "remaining_seconds": job.expires_at.saturating_sub(now_ts).max(0),
+        "effective_deadline_ts": effective_deadline_ts,
+        "remaining_seconds": effective_deadline_ts.saturating_sub(now_ts).max(0),
     })
 }
 
@@ -333,7 +339,9 @@ pub(crate) fn async_job_contract_json() -> Value {
         "timeout_policy_fields": [
             "adapter_kind",
             "max_runtime_seconds",
+            "max_runtime_deadline_ts",
             "deadline_ts",
+            "effective_deadline_ts",
             "remaining_seconds",
             "policy_source"
         ],

@@ -437,14 +437,18 @@ pub(crate) fn checkpoint_resume_directive(
                                 status_code: "async_job_observation_required",
                             };
                         }
-                        if let Some(status_code) = pending_async_job_resume_blocker(&job, now_ts) {
+                        let effective_expires_at =
+                            async_job_effective_expires_at(result_json, job.expires_at);
+                        if let Some(status_code) =
+                            pending_async_job_resume_blocker(&job, effective_expires_at, now_ts)
+                        {
                             CheckpointResumeDirective::NotReady { status_code }
                         } else {
                             CheckpointResumeDirective::PollAsyncJob {
                                 checkpoint_id,
                                 job_id: job.job_id.clone(),
                                 poll_after_seconds: job.poll_after_seconds,
-                                expires_at: job.expires_at,
+                                expires_at: effective_expires_at,
                                 cancel_ref: job.cancel_ref.clone(),
                                 message_key: job.message_key.clone(),
                             }
@@ -551,12 +555,16 @@ fn non_empty_string_at(value: &Value, path: &[&str]) -> bool {
         .is_some_and(|item| !item.is_empty())
 }
 
-fn pending_async_job_resume_blocker(job: &AsyncJobRef, now_ts: i64) -> Option<&'static str> {
+fn pending_async_job_resume_blocker(
+    job: &AsyncJobRef,
+    effective_expires_at: i64,
+    now_ts: i64,
+) -> Option<&'static str> {
     if !job.missing_required_fields().is_empty() {
         return Some("invalid_pending_async_job");
     }
     match job.status {
-        AsyncJobStatus::Accepted | AsyncJobStatus::Running if job.expires_at <= now_ts => {
+        AsyncJobStatus::Accepted | AsyncJobStatus::Running if effective_expires_at <= now_ts => {
             Some("async_job_expired")
         }
         AsyncJobStatus::Accepted | AsyncJobStatus::Running => None,
@@ -564,6 +572,16 @@ fn pending_async_job_resume_blocker(job: &AsyncJobRef, now_ts: i64) -> Option<&'
         AsyncJobStatus::Failed => Some("async_job_failed"),
         AsyncJobStatus::Expired => Some("async_job_expired"),
     }
+}
+
+fn async_job_effective_expires_at(result_json: &Value, job_expires_at: i64) -> i64 {
+    let policy_deadline = result_json
+        .pointer("/task_lifecycle/async_timeout_policy/effective_deadline_ts")
+        .and_then(Value::as_i64)
+        .filter(|deadline| *deadline > 0);
+    policy_deadline
+        .map(|deadline| deadline.min(job_expires_at))
+        .unwrap_or(job_expires_at)
 }
 
 fn active_resume_lease_expires_at(

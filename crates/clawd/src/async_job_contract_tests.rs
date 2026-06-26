@@ -62,7 +62,9 @@ fn pending_async_job_timeout_policy_uses_adapter_family() {
     assert_eq!(policy["policy_source"], "async_job_contract");
     assert_eq!(policy["adapter_kind"], "media_job_poll");
     assert_eq!(policy["max_runtime_seconds"], 900);
+    assert_eq!(policy["max_runtime_deadline_ts"], 1_900);
     assert_eq!(policy["deadline_ts"], 1_900);
+    assert_eq!(policy["effective_deadline_ts"], 1_900);
     assert_eq!(policy["remaining_seconds"], 900);
     assert!(policy.get("text").is_none());
     assert!(policy.get("error_text").is_none());
@@ -83,6 +85,7 @@ fn pending_async_job_timeout_policy_infers_local_process_without_adapter() {
 
     assert_eq!(policy["adapter_kind"], "local_process_poll");
     assert_eq!(policy["max_runtime_seconds"], 3600);
+    assert_eq!(policy["effective_deadline_ts"], 900);
     assert_eq!(policy["remaining_seconds"], 0);
 }
 
