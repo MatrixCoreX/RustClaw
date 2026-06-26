@@ -225,6 +225,13 @@ enum ReplayCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Compare two replay bundles using stable machine fields.
+    Diff {
+        left: PathBuf,
+        right: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -467,6 +474,7 @@ fn main() -> Result<()> {
                 replay::run_export(base_url, k, task_id, output_path, *json)
             }
             ReplayCommand::Run { bundle, json } => replay::run_run(bundle, *json),
+            ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
     }
 }
