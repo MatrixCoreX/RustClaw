@@ -194,6 +194,38 @@ export function skillPlannerCapabilityLabel(capability: string, lang: UiLanguage
   return domainLabel ? `${domainLabel}: ${readable}` : formatCapabilityToken(capability);
 }
 
+export function skillIsolationLabels(item: SkillListItem | undefined, lang: UiLanguage): string[] {
+  const policies = item?.planner_capability_policies ?? [];
+  const labels: string[] = [];
+  const push = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  for (const policy of policies) {
+    switch (policy.isolation_profile) {
+      case "read_only":
+        push(copy(lang, "只读", "Read-only"));
+        break;
+      case "local_current_workspace":
+        push(copy(lang, "当前工作区", "Current workspace"));
+        break;
+      case "local_worktree":
+        push(copy(lang, "独立工作树", "Separate worktree"));
+        break;
+      case "local_temp_workspace":
+        push(copy(lang, "临时工作区", "Temp workspace"));
+        break;
+      case "remote_executor":
+        push(copy(lang, "外部执行", "External execution"));
+        break;
+    }
+    if (policy.network_access) push(copy(lang, "访问网络", "Network"));
+    if (policy.filesystem_write) push(copy(lang, "可改文件", "Can edit files"));
+    if (policy.external_publish) push(copy(lang, "可对外发布", "Can publish"));
+    if (policy.credential_access) push(copy(lang, "使用密钥", "Uses keys"));
+  }
+  return labels;
+}
+
 export function skillRuntimeIssue(item: SkillListItem | undefined, lang: UiLanguage): string | null {
   if (!item || item.runtime_available !== false) return null;
   if (item.unavailable_reason === "skill_disabled" || item.enabled === false) {

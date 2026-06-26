@@ -3,6 +3,7 @@ import { AlertCircle, Database, Loader2, RefreshCw, Trash2, Wrench } from "lucid
 import {
   skillCapabilityLabel,
   skillDescription,
+  skillIsolationLabels,
   skillPlannerCapabilityLabel,
   skillRiskLabel,
   skillRuntimeIssue,
@@ -87,6 +88,7 @@ export function SkillSwitchPanel({
     const runtimeIssue = skillRuntimeIssue(skillItem, lang);
     const visiblePlannerCapabilities = (skillItem?.planner_capabilities ?? []).slice(0, 3);
     const visibleCapabilities = (skillItem?.capabilities ?? []).slice(0, 3);
+    const visibleIsolationLabels = skillIsolationLabels(skillItem, lang).slice(0, 2);
     const configuredEnabled = configuredEnabledSkills.has(name);
     const persistedSwitchValue = skillsConfigData?.skill_switches?.[name];
     const draftSwitchValue = skillSwitchDraft[name];
@@ -136,6 +138,14 @@ export function SkillSwitchPanel({
                 {t("会改变状态", "Changes state")}
               </span>
             ) : null}
+            {visibleIsolationLabels.map((label) => (
+              <span
+                key={`isolation-${label}`}
+                className="rounded border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-100"
+              >
+                {label}
+              </span>
+            ))}
             {visiblePlannerCapabilities.map((capability) => (
               <span
                 key={`planner-${capability}`}
