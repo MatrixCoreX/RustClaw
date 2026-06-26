@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskLifecycleView, buildTaskStatusSummary } from "./task-lifecycle.ts";
+import { buildTaskLifecycleView, buildTaskPollingView, buildTaskStatusSummary } from "./task-lifecycle.ts";
 
 test("builds a pollable running lifecycle view", () => {
   const view = buildTaskLifecycleView(
@@ -127,4 +127,30 @@ test("summarizes task states for dashboard cards", () => {
       ["failed", 2],
     ],
   );
+});
+
+test("builds async polling hints from machine lifecycle fields", () => {
+  const view = buildTaskPollingView(
+    {
+      state: "background",
+      can_poll: true,
+      can_cancel: true,
+      pending_job_ref: "job-123",
+      poll_ref: "poll-123",
+      next_poll_after: 1_800_000_000,
+      cancel_ref: "cancel-123",
+    },
+    "en",
+  );
+
+  assert.ok(view);
+  assert.equal(
+    view.detail,
+    "This task can wait in the background and continue polling through machine fields.",
+  );
+  assert.ok(view.meta.includes("Background job: job-123"));
+  assert.ok(view.meta.includes("Poll ref: poll-123"));
+  assert.ok(view.meta.includes("Pollable: Yes"));
+  assert.ok(view.meta.includes("Cancelable: Yes"));
+  assert.ok(view.meta.includes("Cancel ref: cancel-123"));
 });
