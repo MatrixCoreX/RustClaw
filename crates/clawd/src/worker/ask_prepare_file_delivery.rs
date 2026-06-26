@@ -25,6 +25,22 @@ pub(super) fn route_reason_has_structural_marker(
         })
 }
 
+fn remove_route_reason_structural_marker(route_result: &mut crate::RouteResult, marker: &str) {
+    route_result.route_reason = route_result
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .filter(|part| {
+            !part.is_empty()
+                && *part != marker
+                && !part
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+}
+
 fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
     !route_result.output_contract.locator_hint.trim().is_empty()
 }
@@ -54,6 +70,32 @@ fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) 
     ]
     .iter()
     .any(|marker| route_reason_has_structural_marker(route_result, marker))
+}
+
+fn preserve_filename_locator_as_existing_file_delivery(
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    let contract = &mut route_result.output_contract;
+    if contract.semantic_kind != crate::OutputSemanticKind::GeneratedFileDelivery
+        || contract.locator_kind != crate::OutputLocatorKind::Filename
+        || contract.locator_hint.trim().is_empty()
+        || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+        || contract.response_shape != crate::OutputResponseShape::FileToken
+        || !contract.delivery_required
+    {
+        return false;
+    }
+    contract.semantic_kind = crate::OutputSemanticKind::None;
+    contract.requires_content_evidence = true;
+    route_result.wants_file_delivery = true;
+    remove_route_reason_structural_marker(
+        route_result,
+        "generated_file_delivery_allows_runtime_target",
+    );
+    route_result
+        .route_reason
+        .push_str("; filename_locator_preserved_as_existing_file_delivery");
+    true
 }
 
 fn normalize_output_shape_text(value: &str) -> String {
@@ -373,6 +415,9 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
 ) -> bool {
     if !route_requests_file_delivery(route_result) {
         return false;
+    }
+    if preserve_filename_locator_as_existing_file_delivery(route_result) {
+        return true;
     }
     if generated_file_delivery_can_choose_target(route_result) {
         allow_generated_file_delivery_without_locator(route_result);

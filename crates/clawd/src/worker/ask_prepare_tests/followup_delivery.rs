@@ -177,6 +177,70 @@ fn generated_file_delivery_without_locator_can_choose_runtime_target() {
 }
 
 #[test]
+fn generated_file_delivery_with_filename_locator_stays_existing_file_delivery() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "deliver a filename-scoped file target".to_string(),
+        needs_clarify: false,
+        route_reason:
+            "semantic_contract_requires_evidence; generated_file_delivery_allows_runtime_target"
+                .to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::High,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::Filename,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            semantic_kind: crate::OutputSemanticKind::GeneratedFileDelivery,
+            locator_hint: "definitely_missing_named_file_route_cleanup_001.txt".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Filename
+    );
+    assert_eq!(
+        route.output_contract.locator_hint,
+        "definitely_missing_named_file_route_cleanup_001.txt"
+    );
+    assert!(route
+        .route_reason
+        .contains("filename_locator_preserved_as_existing_file_delivery"));
+    assert!(!route
+        .route_reason
+        .contains("generated_file_delivery_allows_runtime_target"));
+}
+
+#[test]
 fn generated_file_delivery_current_workspace_without_locator_can_choose_runtime_target() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
