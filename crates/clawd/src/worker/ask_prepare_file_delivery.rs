@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::Path;
 
 pub(super) fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
@@ -43,6 +44,26 @@ fn remove_route_reason_structural_marker(route_result: &mut crate::RouteResult, 
 
 fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
     !route_result.output_contract.locator_hint.trim().is_empty()
+}
+
+fn file_delivery_locator_hint_points_to_existing_directory(
+    route_result: &crate::RouteResult,
+) -> bool {
+    if !route_requests_file_delivery(route_result)
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+    {
+        return false;
+    }
+    if !matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::CurrentWorkspace
+    ) {
+        return false;
+    }
+    let hint = route_result.output_contract.locator_hint.trim();
+    !hint.is_empty() && Path::new(hint).is_dir()
 }
 
 fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) -> bool {
@@ -415,6 +436,13 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
 ) -> bool {
     if !route_requests_file_delivery(route_result) {
         return false;
+    }
+    if file_delivery_locator_hint_points_to_existing_directory(route_result) {
+        route_result
+            .route_reason
+            .push_str("; directory_file_delivery_requires_structured_selection");
+        force_unresolved_file_delivery_clarify(route_result);
+        return true;
     }
     if preserve_filename_locator_as_existing_file_delivery(route_result) {
         return true;

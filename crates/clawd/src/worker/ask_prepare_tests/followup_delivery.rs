@@ -349,6 +349,68 @@ fn generated_file_delivery_path_kind_without_locator_requires_clarify() {
 }
 
 #[test]
+fn generated_file_delivery_existing_directory_locator_requires_clarify() {
+    let root = make_temp_root("generated_delivery_dir_locator");
+    std::fs::write(root.join("service_notes.md"), "service notes").expect("fixture");
+    std::fs::write(root.join("release_checklist.md"), "release").expect("fixture");
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "deliver one selected file from a directory".to_string(),
+        needs_clarify: false,
+        route_reason: "semantic_contract_requires_evidence".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            semantic_kind: crate::OutputSemanticKind::GeneratedFileDelivery,
+            locator_hint: root.display().to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+    assert!(route.needs_clarify);
+    assert!(route.is_clarify_gate());
+    assert!(!route.wants_file_delivery);
+    assert!(!route.output_contract.delivery_required);
+    assert_eq!(
+        route.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::None
+    );
+    assert_eq!(route.output_contract.locator_hint, "");
+    assert!(route
+        .route_reason
+        .contains("directory_file_delivery_requires_structured_selection"));
+    assert!(route
+        .route_reason
+        .contains("unresolved_file_delivery_requires_clarify"));
+    assert!(!route
+        .route_reason
+        .contains("generated_file_delivery_allows_runtime_target"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn structurally_resolved_file_delivery_binds_recent_read_target_without_text_match() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
