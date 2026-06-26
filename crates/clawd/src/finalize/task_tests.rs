@@ -413,6 +413,27 @@ fn failed_task_lifecycle_payload_marks_verifier_terminal_reason() {
 }
 
 #[test]
+fn failed_task_lifecycle_payload_marks_tool_timeout_terminal_reason() {
+    let err = crate::skills::structured_skill_error_from_parts(
+        "run_cmd",
+        "timeout",
+        "timeout",
+        None,
+        Some(json!({
+            "error_code": "timeout",
+            "message_key": "clawd.run_cmd.timeout"
+        })),
+    );
+    let payload = failed_task_lifecycle_payload(&err);
+
+    assert_eq!(payload["state"], "failed");
+    assert_eq!(
+        payload["terminal_reason"],
+        "tool_timeout_without_async_resume"
+    );
+}
+
+#[test]
 fn checkpointed_nonterminal_lifecycle_requires_matching_checkpoint() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-checkpointed", "ask", "prompt");
