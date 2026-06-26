@@ -186,8 +186,8 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
             status: crate::executor::StepExecutionStatus::Ok,
             output: Some("{\"status\":\"ok\"}".to_string()),
             error: None,
-            started_at: 0,
-            finished_at: 0,
+            started_at: 100,
+            finished_at: 102,
         });
     loop_state.last_stop_signal = Some("max_rounds".to_string());
 
@@ -212,6 +212,11 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(payload["task_checkpoint"]["budget"]["round"], 2);
     assert_eq!(payload["task_checkpoint"]["budget"]["step"], 3);
     assert_eq!(payload["task_checkpoint"]["budget"]["tool_calls"], 2);
+    assert_eq!(
+        payload["task_checkpoint"]["budget"]["tool_elapsed_ms"],
+        2000
+    );
+    assert_eq!(payload["task_lifecycle"]["budget"]["tool_elapsed_ms"], 2000);
     assert_eq!(
         payload["task_checkpoint"]["completed_side_effect_refs"][0],
         "skill:config_edit:action:apply_config_change"
@@ -399,6 +404,8 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             llm_calls: 5,
             tool_calls: 2,
             elapsed_ms: 900,
+            llm_elapsed_ms: 900,
+            tool_elapsed_ms: 0,
         },
         attempt_ledger: Some(serde_json::json!([{
             "attempt_id": "a1",

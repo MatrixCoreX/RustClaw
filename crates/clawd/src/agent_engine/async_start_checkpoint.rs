@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
+use super::support::checkpoint_budget_counters;
 use super::LoopState;
 use crate::task_lifecycle::{
     AsyncJobRef, CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint, TaskLifecycleState,
@@ -34,6 +35,11 @@ pub(super) fn publish_pending_async_job_start_checkpoint(
         &job,
         poll_adapter.as_ref(),
         now_ts,
+        checkpoint_budget_counters(
+            loop_state,
+            state.task_llm_call_count(&task.task_id),
+            state.task_llm_elapsed_ms(&task.task_id),
+        ),
     );
     loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
     loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
@@ -104,9 +110,13 @@ fn build_pending_async_job_checkpoint_progress_payload(
     job: &AsyncJobRef,
     poll_adapter: Option<&Value>,
     now_ts: i64,
+    budget: CheckpointBudgetCounters,
 ) -> Value {
     let timeout_policy =
         crate::async_job_contract::pending_async_job_timeout_policy(poll_adapter, job, now_ts);
+    let mut checkpoint_budget = budget.clone();
+    checkpoint_budget.step = saturating_u32(global_step);
+    let budget_json = serde_json::to_value(&checkpoint_budget).unwrap_or_else(|_| json!({}));
     let checkpoint_id = format!(
         "agent-loop:{}:round-{}:step-{}:async-job:{}",
         task.task_id, loop_state.round_no, global_step, job.job_id
@@ -150,13 +160,7 @@ fn build_pending_async_job_checkpoint_progress_payload(
         evidence_refs,
         artifact_refs: Vec::new(),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
-        budget: CheckpointBudgetCounters {
-            round: saturating_u32(loop_state.round_no),
-            step: saturating_u32(global_step),
-            llm_calls: 0,
-            tool_calls: saturating_u32(loop_state.tool_calls_total),
-            elapsed_ms: 0,
-        },
+        budget: checkpoint_budget,
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
         pending_async_job: Some(job.clone()),
         repair_signal: None,
@@ -178,6 +182,7 @@ fn build_pending_async_job_checkpoint_progress_payload(
             "async_job_expires_at": job.expires_at,
             "async_job_message_key": job.message_key,
             "async_timeout_policy": timeout_policy,
+            "budget": budget_json,
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,

@@ -598,6 +598,8 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
             llm_calls: 5,
             tool_calls: 2,
             elapsed_ms: 1234,
+            llm_elapsed_ms: 1234,
+            tool_elapsed_ms: 0,
         },
         attempt_ledger: None,
         pending_async_job: None,
@@ -610,6 +612,8 @@ fn checkpoint_schema_records_resume_entrypoint_and_budget() {
     assert_eq!(json["checkpoint_id"], "ckpt-1");
     assert_eq!(json["resume_entrypoint"], "next_planner_round");
     assert_eq!(json["budget"]["llm_calls"], 5);
+    assert_eq!(json["budget"]["llm_elapsed_ms"], 1234);
+    assert_eq!(json["budget"]["tool_elapsed_ms"], 0);
 }
 
 #[test]

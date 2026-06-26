@@ -21,6 +21,10 @@ pub(crate) struct CheckpointBudgetCounters {
     pub(crate) llm_calls: u32,
     pub(crate) tool_calls: u32,
     pub(crate) elapsed_ms: u64,
+    #[serde(default)]
+    pub(crate) llm_elapsed_ms: u64,
+    #[serde(default)]
+    pub(crate) tool_elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

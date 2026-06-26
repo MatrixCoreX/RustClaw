@@ -376,6 +376,7 @@ fn direct_run_skill_async_checkpoint_payload(
     job: &AsyncJobRef,
     poll_adapter: Option<&Value>,
     now_ts: i64,
+    budget: CheckpointBudgetCounters,
 ) -> Value {
     let timeout_policy =
         crate::async_job_contract::pending_async_job_timeout_policy(poll_adapter, job, now_ts);
@@ -393,6 +394,7 @@ fn direct_run_skill_async_checkpoint_payload(
     ) {
         obj.insert("async_poll_adapter".to_string(), adapter.clone());
     }
+    let budget_json = serde_json::to_value(&budget).unwrap_or_else(|_| json!({}));
     let checkpoint = TaskCheckpoint {
         schema_version: 1,
         checkpoint_id: checkpoint_id.clone(),
@@ -414,13 +416,7 @@ fn direct_run_skill_async_checkpoint_payload(
             "run_skill:{skill_name}:async_job:{}",
             job.job_id
         )],
-        budget: CheckpointBudgetCounters {
-            round: 0,
-            step: 1,
-            llm_calls: 0,
-            tool_calls: 1,
-            elapsed_ms: 0,
-        },
+        budget,
         attempt_ledger: None,
         pending_async_job: Some(job.clone()),
         repair_signal: None,
@@ -446,6 +442,7 @@ fn direct_run_skill_async_checkpoint_payload(
             "async_job_expires_at": job.expires_at,
             "async_job_message_key": job.message_key,
             "async_timeout_policy": timeout_policy,
+            "budget": budget_json,
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,
@@ -460,6 +457,7 @@ fn direct_run_skill_pending_async_checkpoint_result(
     clean_text: &str,
     journal: &mut crate::task_journal::TaskJournal,
     extra: Option<&Value>,
+    budget: CheckpointBudgetCounters,
 ) -> Result<Option<Value>, String> {
     let Some(job) = pending_async_job_ref_from_extra(extra)? else {
         return Ok(None);
@@ -472,6 +470,7 @@ fn direct_run_skill_pending_async_checkpoint_result(
         &job,
         poll_adapter.as_ref(),
         crate::now_ts_u64() as i64,
+        budget,
     );
     if let Some(lifecycle) = payload.get("task_lifecycle").cloned() {
         journal.record_task_lifecycle(lifecycle);
@@ -542,6 +541,15 @@ async fn finalize_run_skill_success(
         &clean_text,
         &mut journal,
         outcome.extra.as_ref(),
+        CheckpointBudgetCounters {
+            round: 0,
+            step: 1,
+            llm_calls: u32::try_from(state.task_llm_call_count(&task.task_id)).unwrap_or(u32::MAX),
+            tool_calls: 1,
+            elapsed_ms: state.task_llm_elapsed_ms(&task.task_id),
+            llm_elapsed_ms: state.task_llm_elapsed_ms(&task.task_id),
+            tool_elapsed_ms: 0,
+        },
     ) {
         Ok(result) => result,
         Err(err) => {

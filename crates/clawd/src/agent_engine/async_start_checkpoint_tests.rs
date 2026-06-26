@@ -6,7 +6,7 @@ use super::{
 };
 use crate::agent_engine::LoopState;
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
-use crate::task_lifecycle::ResumeEntrypoint;
+use crate::task_lifecycle::{CheckpointBudgetCounters, ResumeEntrypoint};
 
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
@@ -19,6 +19,18 @@ fn test_task() -> crate::ClaimedTask {
         external_chat_id: None,
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
+    }
+}
+
+fn test_budget(loop_state: &LoopState, step: u32) -> CheckpointBudgetCounters {
+    CheckpointBudgetCounters {
+        round: u32::try_from(loop_state.round_no).unwrap_or(u32::MAX),
+        step,
+        llm_calls: 0,
+        tool_calls: u32::try_from(loop_state.tool_calls_total).unwrap_or(u32::MAX),
+        elapsed_ms: 0,
+        llm_elapsed_ms: 0,
+        tool_elapsed_ms: 0,
     }
 }
 
@@ -103,6 +115,7 @@ fn pending_async_job_checkpoint_uses_poll_resume_entrypoint() {
         &job,
         None,
         1000,
+        test_budget(&loop_state, 3),
     );
 
     assert_eq!(payload["task_lifecycle"]["state"], "waiting");
@@ -150,6 +163,7 @@ fn pending_async_job_visible_reply_carries_checkpoint_markers() {
         &job,
         None,
         1000,
+        test_budget(&loop_state, 1),
     );
 
     let reply = pending_async_job_visible_reply_from_progress_payload(&payload)
@@ -203,6 +217,7 @@ fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
         &job,
         Some(&poll_adapter),
         1000,
+        test_budget(&loop_state, 1),
     );
 
     assert_eq!(

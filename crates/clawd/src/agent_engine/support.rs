@@ -666,6 +666,39 @@ fn saturating_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
+fn saturating_u32_from_u64(value: u64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn loop_tool_elapsed_ms(loop_state: &super::LoopState) -> u64 {
+    loop_state
+        .executed_step_results
+        .iter()
+        .map(|step| {
+            step.finished_at
+                .saturating_sub(step.started_at)
+                .saturating_mul(1000)
+        })
+        .fold(0u64, u64::saturating_add)
+}
+
+pub(super) fn checkpoint_budget_counters(
+    loop_state: &super::LoopState,
+    llm_calls: u64,
+    llm_elapsed_ms: u64,
+) -> CheckpointBudgetCounters {
+    let tool_elapsed_ms = loop_tool_elapsed_ms(loop_state);
+    CheckpointBudgetCounters {
+        round: saturating_u32(loop_state.round_no),
+        step: saturating_u32(loop_state.total_steps_executed),
+        llm_calls: saturating_u32_from_u64(llm_calls),
+        tool_calls: saturating_u32(loop_state.tool_calls_total),
+        elapsed_ms: llm_elapsed_ms.saturating_add(tool_elapsed_ms),
+        llm_elapsed_ms,
+        tool_elapsed_ms,
+    }
+}
+
 fn agent_loop_checkpoint_id(
     task: &ClaimedTask,
     loop_state: &super::LoopState,
@@ -707,12 +740,31 @@ fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {
     refs
 }
 
+#[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,
     loop_state: &super::LoopState,
     resume_reason: &str,
     now_ts: i64,
     next_check_after: i64,
+) -> Value {
+    build_agent_loop_checkpoint_progress_payload_with_budget(
+        task,
+        loop_state,
+        resume_reason,
+        now_ts,
+        next_check_after,
+        checkpoint_budget_counters(loop_state, 0, 0),
+    )
+}
+
+fn build_agent_loop_checkpoint_progress_payload_with_budget(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    resume_reason: &str,
+    now_ts: i64,
+    next_check_after: i64,
+    budget: CheckpointBudgetCounters,
 ) -> Value {
     let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
     let last_successful_step = loop_state
@@ -744,13 +796,7 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
         evidence_refs,
         artifact_refs: Vec::new(),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
-        budget: CheckpointBudgetCounters {
-            round: saturating_u32(loop_state.round_no),
-            step: saturating_u32(loop_state.total_steps_executed),
-            llm_calls: 0,
-            tool_calls: saturating_u32(loop_state.tool_calls_total),
-            elapsed_ms: 0,
-        },
+        budget: budget.clone(),
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
         pending_async_job: None,
         repair_signal: loop_state.last_stop_signal.as_ref().map(|signal| {
@@ -782,6 +828,7 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,
+            "budget": budget,
         },
         "task_checkpoint": checkpoint.to_machine_json(),
     })
@@ -796,6 +843,7 @@ fn action_args_keys(args: &Value) -> Vec<String> {
     keys
 }
 
+#[cfg(test)]
 pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
     task: &ClaimedTask,
     loop_state: &super::LoopState,
@@ -804,6 +852,28 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
     tool_or_skill: &str,
     action_ref: &str,
     args: &Value,
+) -> Value {
+    build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
+        task,
+        loop_state,
+        resume_reason,
+        now_ts,
+        tool_or_skill,
+        action_ref,
+        args,
+        checkpoint_budget_counters(loop_state, 0, 0),
+    )
+}
+
+fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    resume_reason: &str,
+    now_ts: i64,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+    budget: CheckpointBudgetCounters,
 ) -> Value {
     let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
     let policy_decision = crate::policy_decision::PolicyDecision::RequireConfirmation.as_token();
@@ -847,13 +917,7 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
             .collect::<Vec<_>>(),
         artifact_refs: Vec::new(),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
-        budget: CheckpointBudgetCounters {
-            round: saturating_u32(loop_state.round_no),
-            step: saturating_u32(loop_state.total_steps_executed),
-            llm_calls: 0,
-            tool_calls: saturating_u32(loop_state.tool_calls_total),
-            elapsed_ms: 0,
-        },
+        budget: budget.clone(),
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
         pending_async_job: None,
         repair_signal: None,
@@ -876,6 +940,7 @@ pub(super) fn build_agent_loop_user_input_checkpoint_progress_payload(
             "decision": policy_decision,
             "tool_or_skill": tool_or_skill,
             "action_ref": action_ref,
+            "budget": budget,
         },
         "task_checkpoint": checkpoint.to_machine_json(),
     })
@@ -888,12 +953,18 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
     resume_reason: &str,
 ) {
     let now_ts = crate::now_ts_u64() as i64;
-    let payload = build_agent_loop_checkpoint_progress_payload(
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let payload = build_agent_loop_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
         resume_reason,
         now_ts,
         now_ts + 60,
+        budget,
     );
     if let Some(checkpoint_id) = payload
         .pointer("/task_lifecycle/checkpoint_id")
@@ -934,7 +1005,12 @@ pub(super) fn publish_agent_loop_user_input_checkpoint_progress(
     args: &Value,
 ) {
     let now_ts = crate::now_ts_u64() as i64;
-    let payload = build_agent_loop_user_input_checkpoint_progress_payload(
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let payload = build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
         resume_reason,
@@ -942,6 +1018,7 @@ pub(super) fn publish_agent_loop_user_input_checkpoint_progress(
         tool_or_skill,
         action_ref,
         args,
+        budget,
     );
     if let Some(checkpoint_id) = payload
         .pointer("/task_lifecycle/checkpoint_id")
