@@ -25,6 +25,11 @@ export interface TaskLifecycleProjection {
   last_safe_step_id?: string;
   state_source?: string;
   terminal_reason?: string;
+  parent_task_id?: string;
+  child_task_id?: string;
+  role?: string;
+  required?: boolean;
+  permission_profile?: string;
 }
 
 export interface TaskLifecycleView {

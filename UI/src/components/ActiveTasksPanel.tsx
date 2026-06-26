@@ -153,21 +153,41 @@ export function ActiveTasksPanel({
           activeTasks.map((item) => {
             const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
             const pollingView = buildTaskPollingView(item.lifecycle, lang);
+            const childView = buildChildTaskView(item);
             const canPause = canPauseTask(item);
             const canResume = canResumeTask(item);
             const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
             const resumeSubmitting = taskControlSubmittingId === `resume:${item.task_id}`;
             return (
-              <div key={item.task_id} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <div
+                key={item.task_id}
+                className={`rounded-xl border bg-black/20 px-4 py-3 ${
+                  childView ? "border-sky-300/25 border-l-4 border-l-sky-300/60" : "border-white/10"
+                }`}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">#{item.index}</span>
                       <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{lifecycleView.stateLabel}</span>
                       <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">{item.kind}</span>
+                      {childView ? (
+                        <span className="rounded-md border border-sky-300/20 bg-sky-400/10 px-2 py-1 text-xs font-medium text-sky-100">
+                          {t("子任务", "Child task")}
+                        </span>
+                      ) : null}
                       <span className="text-xs text-white/45">{formatDuration(item.age_seconds)}</span>
                     </div>
                     <p className="mt-2 break-words text-sm text-white/85">{item.summary || item.task_id}</p>
+                    {childView ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-sky-50/75">
+                        {childView.meta.map((meta) => (
+                          <span key={`${item.task_id}-${meta}`} className="rounded-md border border-sky-300/20 bg-sky-400/10 px-2 py-1">
+                            {meta}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     <p className="mt-1 text-xs text-white/55">{lifecycleView.detail}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-white/40">{item.task_id}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-white/55">
@@ -287,6 +307,22 @@ function canPauseTask(item: ActiveTaskItem): boolean {
 function canResumeTask(item: ActiveTaskItem): boolean {
   const state = (item.lifecycle?.state || item.status || "").toLowerCase();
   return state === "waiting" || state === "background";
+}
+
+function buildChildTaskView(item: ActiveTaskItem): { meta: string[] } | null {
+  const parentTaskId = item.lifecycle?.parent_task_id?.trim();
+  if (!parentTaskId) return null;
+  const meta = [`parent=${parentTaskId}`];
+  const childTaskId = item.lifecycle?.child_task_id?.trim();
+  if (childTaskId) meta.push(`child=${childTaskId}`);
+  const role = item.lifecycle?.role?.trim();
+  if (role) meta.push(`role=${role}`);
+  const permissionProfile = item.lifecycle?.permission_profile?.trim();
+  if (permissionProfile) meta.push(`profile=${permissionProfile}`);
+  if (typeof item.lifecycle?.required === "boolean") {
+    meta.push(`required=${item.lifecycle.required}`);
+  }
+  return { meta };
 }
 
 function taskSummaryIcon(kind: TaskStatusSummaryKind) {
