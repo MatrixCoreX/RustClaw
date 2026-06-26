@@ -143,6 +143,19 @@ bundle, compares stable machine fields, and does not replay live model/tool
 calls. Deep deterministic step replay can be added later using the same bundle
 format.
 
+## Shell Completion
+
+Generate completion scripts from the current CLI shape:
+
+```bash
+clawcli completions bash > ~/.local/share/bash-completion/completions/clawcli
+clawcli completions zsh > ~/.zfunc/_clawcli
+clawcli completions fish > ~/.config/fish/completions/clawcli.fish
+```
+
+The `completions` command is local-only and does not require a `clawd` server or
+admin key.
+
 ## Boundary Rules
 
 - `clawcli exec` and `clawcli replay` must consume machine fields such as

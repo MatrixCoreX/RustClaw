@@ -10,7 +10,8 @@ mod replay;
 mod task;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use std::path::PathBuf;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8787";
@@ -206,6 +207,12 @@ enum Command {
     Replay {
         #[command(subcommand)]
         command: ReplayCommand,
+    },
+
+    /// Generate shell completion script.
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
 
@@ -476,5 +483,11 @@ fn main() -> Result<()> {
             ReplayCommand::Run { bundle, json } => replay::run_run(bundle, *json),
             ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
+        Command::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());
+            Ok(())
+        }
     }
 }
