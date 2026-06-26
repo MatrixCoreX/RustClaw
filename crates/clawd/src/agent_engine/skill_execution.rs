@@ -1729,5 +1729,8 @@ pub(super) async fn execute_prepared_skill_action(
 }
 
 #[cfg(test)]
+#[path = "skill_execution_isolation_tests.rs"]
+mod isolation_tests;
+#[cfg(test)]
 #[path = "skill_execution_tests.rs"]
-mod tests;
+pub(super) mod tests;

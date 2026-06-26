@@ -4,14 +4,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    admitted_extra_field_exists, build_auto_sudo_retry_args, capability_isolation_artifact_refs,
-    capability_isolation_policy_error, contains_unresolved_runtime_template_arg,
-    contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
-    handle_skill_step_failure, handle_skill_step_success, merge_isolation_artifact_refs,
-    preflight_failure_metadata, record_subagent_step_execution, skill_extra_requests_user_input,
-    structured_extra_evidence_output, structured_observation_path_argument_error,
-    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
+    admitted_extra_field_exists, build_auto_sudo_retry_args,
+    contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
+    contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
+    merge_isolation_artifact_refs, preflight_failure_metadata, record_subagent_step_execution,
+    skill_extra_requests_user_input, structured_extra_evidence_output,
+    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
+    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
@@ -23,7 +23,7 @@ use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 use rusqlite::params;
 
-fn test_state() -> AppState {
+pub(super) fn test_state() -> AppState {
     let db_pool = crate::db_init::test_pool();
     {
         let db = db_pool.get().expect("get db conn");
@@ -113,11 +113,12 @@ fn enable_test_skills(state: &AppState, skills: &[&str]) {
     });
 }
 
-fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
+pub(super) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
     let path = std::env::temp_dir().join(format!(
-        "rustclaw-skill-execution-test-{}-{}.toml",
+        "rustclaw-skill-execution-test-{}-{}-{}.toml",
         std::process::id(),
-        skills.join("-")
+        skills.join("-"),
+        unique_suffix()
     ));
     fs::write(&path, raw).expect("write registry fixture");
     let registry = Arc::new(SkillsRegistry::load_from_path(&path).expect("load registry fixture"));
@@ -622,107 +623,6 @@ planner_capabilities = [
             .and_then(serde_json::Value::as_bool),
         Some(false)
     );
-}
-
-#[test]
-fn capability_isolation_preflight_rejects_read_only_write_policy() {
-    let state = test_state();
-    install_test_registry(
-        &state,
-        r#"
-[[skills]]
-name = "write_file"
-enabled = true
-kind = "builtin"
-planner_kind = "tool"
-risk_level = "high"
-requires_confirmation = true
-side_effect = true
-planner_capabilities = [
-  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "read_only", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
-]
-"#,
-        &["write_file"],
-    );
-    let args = serde_json::json!({
-        "action": "write_text",
-        "path": "out.txt",
-        "content": "value"
-    });
-
-    let err = capability_isolation_policy_error(&state, "write_file", &args)
-        .expect("read_only profile must reject filesystem_write");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("isolation preflight error should be structured");
-    let extra = parsed.extra.as_ref().expect("extra");
-
-    assert_eq!(parsed.error_kind, "isolation_policy_violation");
-    assert_eq!(
-        extra.pointer("/violations/0"),
-        Some(&serde_json::json!("filesystem_write"))
-    );
-    assert_eq!(
-        extra.pointer("/permission_decision/reason_code"),
-        Some(&serde_json::json!("isolation_policy_violation"))
-    );
-    assert_eq!(
-        extra.pointer("/permission_decision/owner_layer"),
-        Some(&serde_json::json!("capability_isolation_preflight"))
-    );
-    assert_eq!(
-        extra.pointer("/permission_decision/capability_policy/isolation_profile"),
-        Some(&serde_json::json!("read_only"))
-    );
-    assert_eq!(
-        preflight_failure_metadata(&err).reason,
-        "isolation_policy_violation"
-    );
-}
-
-#[test]
-fn capability_isolation_artifact_refs_report_cleanup_workspace() {
-    let mut state = test_state();
-    state.skill_rt.workspace_root = std::env::temp_dir().join(format!(
-        "rustclaw_isolation_artifact_refs_{}_{}",
-        std::process::id(),
-        unique_suffix()
-    ));
-    fs::create_dir_all(&state.skill_rt.workspace_root).expect("create workspace");
-    install_test_registry(
-        &state,
-        r#"
-[[skills]]
-name = "write_file"
-enabled = true
-kind = "builtin"
-planner_kind = "tool"
-risk_level = "high"
-requires_confirmation = true
-side_effect = true
-planner_capabilities = [
-  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_temp_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
-]
-"#,
-        &["write_file"],
-    );
-    let args = serde_json::json!({
-        "action": "write_text",
-        "path": "out.txt",
-        "content": "value"
-    });
-
-    let refs = capability_isolation_artifact_refs(&state, "task-skill-exec", "write_file", &args);
-
-    assert_eq!(refs.len(), 1);
-    assert_eq!(refs[0]["kind"], "execution_isolation_workspace");
-    assert_eq!(refs[0]["profile"], "local_temp_workspace");
-    assert_eq!(refs[0]["cleanup_ref"], "isolation:temp:task-skill-exec");
-    assert!(refs[0]["artifact_path"]
-        .as_str()
-        .expect("artifact path")
-        .contains("task-skill-exec"));
-
-    let _ = fs::remove_dir_all(&state.skill_rt.workspace_root);
 }
 
 #[test]
@@ -1384,7 +1284,7 @@ fn failed_step(step_id: &str, skill: &str, error: &str) -> crate::executor::Step
     }
 }
 
-fn unique_suffix() -> u128 {
+pub(super) fn unique_suffix() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock")
