@@ -276,6 +276,65 @@ fn async_poll_adapter_failure_keeps_machine_error_contract() {
     assert!(payload.get("error_text").is_none());
 }
 
+#[test]
+fn async_poll_adapter_terminal_projection_keeps_adapter_family_token() {
+    for adapter_kind in [
+        "http_job_poll",
+        "mcp_job_poll",
+        "media_job_poll",
+        "browser_job_poll",
+        "remote_job_poll",
+    ] {
+        for (status, expected_executor_status) in [
+            ("succeeded", "async_poll_completed"),
+            ("failed", "async_poll_failed"),
+            ("expired", "async_poll_failed"),
+            ("cancelled", "async_poll_cancelled"),
+        ] {
+            let mut adapter_result = json!({
+                "job_id": "job-async-poll-adapter",
+                "adapter_kind": adapter_kind,
+                "status": status,
+                "poll_after_seconds": 7,
+                "expires_at": 2_000,
+                "message_key": "provider.job.status"
+            });
+            match status {
+                "succeeded" => {
+                    adapter_result["final_result_json"] = json!({
+                        "status": "ok",
+                        "result_ref": format!("artifact:{adapter_kind}")
+                    });
+                }
+                "failed" | "expired" => {
+                    adapter_result["error_code"] = json!("provider_job_failed");
+                    adapter_result["failure_result_json"] = json!({
+                        "status": "error",
+                        "adapter_kind": adapter_kind
+                    });
+                }
+                "cancelled" => {
+                    adapter_result["cancellation_result_json"] = json!({
+                        "status": "cancelled",
+                        "adapter_kind": adapter_kind
+                    });
+                }
+                _ => {}
+            }
+            let claimed = async_poll_claimed_dispatch(Some(adapter_result));
+
+            let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+                .expect("terminal projection payload");
+
+            assert_eq!(payload["adapter_kind"], adapter_kind);
+            assert_eq!(payload["adapter_status"], status);
+            assert_eq!(payload["executor_result_status"], expected_executor_status);
+            assert!(payload.get("text").is_none());
+            assert!(payload.get("error_text").is_none());
+        }
+    }
+}
+
 #[tokio::test]
 async fn skill_poll_adapter_accepts_registry_async_adapter_kinds() {
     let state = crate::AppState::test_default_with_fixture_provider();
