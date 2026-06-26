@@ -193,6 +193,7 @@ pub(crate) fn prepare_paused_checkpoint_resume_execution(
         },
         crate::task_lifecycle::CheckpointResumeDirective::PollAsyncJob {
             job_id,
+            adapter_kind,
             poll_after_seconds,
             expires_at,
             cancel_ref,
@@ -209,6 +210,7 @@ pub(crate) fn prepare_paused_checkpoint_resume_execution(
                     "resume_directive": directive.status_code(),
                     "resume_trigger": work_item.resume_trigger,
                     "job_id": job_id,
+                    "adapter_kind": adapter_kind,
                     "poll_after_seconds": poll_after_seconds,
                     "expires_at": expires_at,
                     "cancel_ref": cancel_ref,

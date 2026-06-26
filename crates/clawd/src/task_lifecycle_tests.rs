@@ -322,6 +322,7 @@ fn checkpoint_resume_directive_is_closed_machine_instruction() {
         CheckpointResumeDirective::PollAsyncJob {
             checkpoint_id: "ckpt-job-policy".to_string(),
             job_id: "job-policy".to_string(),
+            adapter_kind: "media_job_poll".to_string(),
             poll_after_seconds: 5,
             expires_at: 150,
             cancel_ref: "cancel:job-policy".to_string(),
@@ -429,6 +430,7 @@ fn checkpoint_resume_directive_is_closed_machine_instruction() {
         CheckpointResumeDirective::PollAsyncJob {
             checkpoint_id: "ckpt-job".to_string(),
             job_id: "job-1".to_string(),
+            adapter_kind: "unspecified_poll".to_string(),
             poll_after_seconds: 5,
             expires_at: 200,
             cancel_ref: "cancel:job-1".to_string(),
