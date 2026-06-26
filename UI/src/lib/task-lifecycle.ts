@@ -34,6 +34,20 @@ export interface TaskLifecycleView {
   meta: string[];
 }
 
+export type TaskStatusSummaryKind = "active" | "waiting" | "needs_user" | "failed";
+
+export interface TaskStatusSummaryInput {
+  status: string;
+  lifecycle?: TaskLifecycleProjection | null;
+}
+
+export interface TaskStatusSummaryItem {
+  kind: TaskStatusSummaryKind;
+  label: string;
+  count: number;
+  tone: TaskLifecycleView["tone"];
+}
+
 const STATE_LABELS: Record<string, { zh: string; en: string; tone: TaskLifecycleView["tone"] }> = {
   queued: { zh: "排队中", en: "Queued", tone: "running" },
   running: { zh: "执行中", en: "Running", tone: "running" },
@@ -137,4 +151,54 @@ export function buildTaskLifecycleView(
     tone: stateCopy.tone,
     meta,
   };
+}
+
+export function buildTaskStatusSummary(
+  tasks: TaskStatusSummaryInput[],
+  lang: TaskLifecycleLang,
+): TaskStatusSummaryItem[] {
+  const counts: Record<TaskStatusSummaryKind, number> = {
+    active: 0,
+    waiting: 0,
+    needs_user: 0,
+    failed: 0,
+  };
+  for (const task of tasks) {
+    const state = stateToken(task.lifecycle, task.status);
+    if (state === "needs_user") {
+      counts.needs_user += 1;
+    } else if (state === "waiting") {
+      counts.waiting += 1;
+    } else if (state === "failed" || state === "cancelled" || state === "canceled" || state === "timeout") {
+      counts.failed += 1;
+    } else if (state === "queued" || state === "running" || state === "background") {
+      counts.active += 1;
+    }
+  }
+  return [
+    {
+      kind: "active",
+      label: t(lang, "运行中", "Active"),
+      count: counts.active,
+      tone: "running",
+    },
+    {
+      kind: "waiting",
+      label: t(lang, "可恢复", "Resumable"),
+      count: counts.waiting,
+      tone: "attention",
+    },
+    {
+      kind: "needs_user",
+      label: t(lang, "待确认", "Needs input"),
+      count: counts.needs_user,
+      tone: "attention",
+    },
+    {
+      kind: "failed",
+      label: t(lang, "已停止", "Stopped"),
+      count: counts.failed,
+      tone: "failed",
+    },
+  ];
 }

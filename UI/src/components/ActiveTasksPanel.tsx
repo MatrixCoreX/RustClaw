@@ -1,7 +1,7 @@
-import { Loader2, MessageCircle, RefreshCw, X } from "lucide-react";
+import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, RefreshCw, X } from "lucide-react";
 
 import { formatDuration } from "../lib/display-format";
-import { buildTaskLifecycleView } from "../lib/task-lifecycle";
+import { buildTaskLifecycleView, buildTaskStatusSummary, type TaskStatusSummaryKind } from "../lib/task-lifecycle";
 import type { ActiveTaskItem } from "../types/api";
 
 type UiLanguage = "zh" | "en";
@@ -52,6 +52,7 @@ export function ActiveTasksPanel({
   onResumeDraftChange,
   onSubmitResume,
 }: ActiveTasksPanelProps) {
+  const summaryItems = buildTaskStatusSummary(activeTasks, lang);
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -104,6 +105,22 @@ export function ActiveTasksPanel({
           {cancelTaskMessage}
         </p>
       ) : null}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {summaryItems.map((item) => {
+          const Icon = taskSummaryIcon(item.kind);
+          return (
+            <div key={item.kind} className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-white/60">{item.label}</span>
+                <span className={taskSummaryIconClass(item.kind)}>
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold leading-none text-white">{item.count}</p>
+            </div>
+          );
+        })}
+      </div>
       <div className="mt-4 space-y-3">
         {activeTasks.length === 0 ? (
           <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/55">
@@ -196,4 +213,16 @@ export function ActiveTasksPanel({
       </div>
     </section>
   );
+}
+
+function taskSummaryIcon(kind: TaskStatusSummaryKind) {
+  if (kind === "active") return Activity;
+  if (kind === "failed") return CircleAlert;
+  return Clock3;
+}
+
+function taskSummaryIconClass(kind: TaskStatusSummaryKind): string {
+  if (kind === "active") return "rounded-md border border-cyan-300/20 bg-cyan-400/10 p-1.5 text-cyan-100";
+  if (kind === "failed") return "rounded-md border border-red-300/20 bg-red-400/10 p-1.5 text-red-100";
+  return "rounded-md border border-amber-300/20 bg-amber-400/10 p-1.5 text-amber-100";
 }
