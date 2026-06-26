@@ -151,6 +151,10 @@ safe aggregate.
   covers agent-loop runtime boundaries in 8 cases: observed execution,
   checkpoint/background surfaces, task lifecycle, hooks, subagents, and CLI
   resume affordances.
+- Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
+  covers representative async start, local-process poll, cancel contract,
+  timeout expiry, terminal projection, and media async dry-run handoff without
+  live provider generation or publishing-channel side effects.
 - Multimodal focused smoke: `scripts/nl_tests/cases/nl_cases_multimodal_focused_20260621.txt`
   covers image and audio planner selection in 4 optional cases. Treat live media
   generation as quota-gated; prefer dry-run media capability cases when provider
@@ -182,6 +186,11 @@ bash scripts/nl_tests/run_client_like_continuous_suite.sh \
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \
   --skip-smoke \
   --case-file scripts/nl_tests/cases/nl_cases_codex_parity_runtime_smoke_20260623.txt \
+  --prompt-reply-only --quality-guard
+
+bash scripts/nl_tests/run_client_like_continuous_suite.sh \
+  --skip-smoke \
+  --case-file scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt \
   --prompt-reply-only --quality-guard
 
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \

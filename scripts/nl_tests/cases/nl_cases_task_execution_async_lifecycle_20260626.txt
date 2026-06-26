@@ -1,0 +1,25 @@
+# Task-execution async lifecycle NL coverage.
+# Created: 2026-06-26
+#
+# Purpose:
+# - Cover the smallest representative NL set for the task execution plan's
+#   async start, checkpoint, poll, timeout, cancellation, and terminal
+#   projection surfaces.
+# - Keep these cases safe for normal development: local process cases use
+#   harmless commands, media cases are dry-run only, and no publishing-channel
+#   or X/Twitter API flows belong here.
+# - These prompts assert machine fields and lifecycle states, not a fixed
+#   natural-language reply.
+#
+# Format:
+#   suite|name|tags|prompt|expect=<substring>
+
+task_execution_async_lifecycle|local_process_async_start_zh|covers:async_start,poll_async_job,checkpoint,run_cmd,local_process_poll,cancel_ref,async_timeout_policy,effective_deadline;requires_tool_call=true;local_side_effect|以后台长任务模式启动一个安全本地命令：sleep 2 后输出 RUSTCLAW_ASYNC_LIFECYCLE；如果进入 waiting 或 background，返回 checkpoint_id、poll_ref、cancel_ref、async_timeout_policy.effective_deadline_ts 和 next_check_after；不要重复启动同一个副作用。|expect=async_timeout_policy
+
+task_execution_async_lifecycle|local_process_poll_terminal_en|covers:poll_async_job,local_process_poll,terminal_projection,succeeded,checkpoint;requires_tool_call=true;local_readonly|Poll or inspect the existing local-process async job lifecycle if one is available; report only machine fields for adapter_kind, status, terminal_projection, checkpoint_id, and result_ref. Do not start a new external provider job.|expect=terminal_projection
+
+task_execution_async_lifecycle|local_process_cancel_contract_zh|covers:poll_async_job,local_process_poll,cancel_ref,cancelled,terminal_projection,task_lifecycle;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry-run：检查本地进程异步任务取消协议需要哪些机器字段，必须包含 cancel_ref、adapter_kind=local_process_poll、cancelled 终态和 terminal_projection；不要取消真实任务。|expect=cancel_ref
+
+task_execution_async_lifecycle|async_expiry_policy_en|covers:poll_async_job,expired,async_timeout_policy,effective_deadline,terminal_projection;requires_tool_call=false;dry_run,no_external_side_effect|Dry run only: describe the structured async timeout policy fields used to decide whether a pending async job is expired before polling. Include effective_deadline_ts, expires_at, remaining_seconds, and the expired terminal status as machine tokens.|expect=effective_deadline_ts
+
+task_execution_async_lifecycle|media_async_default_dry_run_zh|covers:video_generate,media_job_poll,async_start,poll_async_job,checkpoint,dry_run,media,video,no_external_side_effect;requires_tool_call=true;dry_run|只做 dry_run，不要真实生成视频：用 video.generate 规划一个 6 秒状态面板视频，并返回 provider/model、dry_run=true、planned_outputs、adapter_kind=media_job_poll，以及真实生成时应进入 pending_async_job 的机器字段。|expect=media_job_poll
