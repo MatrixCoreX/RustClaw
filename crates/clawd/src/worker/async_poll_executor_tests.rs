@@ -245,6 +245,53 @@ fn async_poll_adapter_failure_keeps_machine_error_contract() {
     assert!(payload.get("error_text").is_none());
 }
 
+#[tokio::test]
+async fn skill_poll_adapter_accepts_registry_async_adapter_kinds() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    for adapter_kind in [
+        "skill_poll",
+        "http_job_poll",
+        "mcp_job_poll",
+        "media_job_poll",
+        "browser_job_poll",
+        "remote_job_poll",
+    ] {
+        let mut claimed = async_poll_claimed_dispatch(None);
+        claimed.task_checkpoint.boundary_context["async_poll_adapter"] = json!({
+            "kind": adapter_kind
+        });
+
+        let result =
+            super::skill_poll_async_adapter_result(&state, &claimed, "job-async-poll-adapter")
+                .await
+                .expect("adapter result");
+
+        assert_eq!(
+            result["error_code"], "skill_poll_adapter_missing_skill_name",
+            "adapter_kind={adapter_kind} should pass kind validation"
+        );
+        assert!(result.get("text").is_none());
+        assert!(result.get("error_text").is_none());
+    }
+}
+
+#[tokio::test]
+async fn skill_poll_adapter_rejects_unknown_adapter_kind() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut claimed = async_poll_claimed_dispatch(None);
+    claimed.task_checkpoint.boundary_context["async_poll_adapter"] = json!({
+        "kind": "unknown_job_poll"
+    });
+
+    let result = super::skill_poll_async_adapter_result(&state, &claimed, "job-async-poll-adapter")
+        .await
+        .expect("adapter result");
+
+    assert_eq!(result["error_code"], "skill_poll_adapter_kind_unsupported");
+    assert!(result.get("text").is_none());
+    assert!(result.get("error_text").is_none());
+}
+
 #[test]
 fn async_poll_adapter_result_rejects_text_leak_and_job_mismatch() {
     let text_leak = async_poll_claimed_dispatch(Some(json!({
