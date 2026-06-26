@@ -129,6 +129,16 @@ fn stored_result_json(state: &crate::AppState, task_id: &str) -> serde_json::Val
     serde_json::from_str(&raw).expect("parse result_json")
 }
 
+fn stored_status(state: &crate::AppState, task_id: &str) -> String {
+    let db = state.core.db.get().expect("get db");
+    db.query_row(
+        "SELECT status FROM tasks WHERE task_id = ?1",
+        rusqlite::params![task_id],
+        |row| row.get(0),
+    )
+    .expect("select task status")
+}
+
 #[test]
 fn update_task_success_can_replace_async_poll_projection_without_visible_reply() {
     let state = state_with_tasks_table();
@@ -211,6 +221,54 @@ fn claim_next_task_records_worker_lease_fields() {
     assert_eq!(claim_attempt, 1);
     assert!(claimed_at > 0);
     assert!(lease_expires_at > claimed_at);
+}
+
+#[test]
+fn cancel_parent_task_cancels_structured_child_tasks_only() {
+    let state = state_with_tasks_table();
+    insert_task(
+        &state,
+        "task-parent",
+        "running",
+        Some(&json!({
+            "child_task_ids": ["task-child-running", "task-child-done"],
+            "child_results": [
+                {
+                    "child_task_id": "task-child-queued",
+                    "status": "queued"
+                },
+                {
+                    "child_task_id": "invalid child prose",
+                    "status": "queued"
+                }
+            ],
+            "text": "task-child-prose-only"
+        })),
+        1,
+    );
+    insert_task(&state, "task-child-running", "running", Some(&json!({})), 1);
+    insert_task(&state, "task-child-queued", "queued", None, 1);
+    insert_task(&state, "task-child-done", "succeeded", Some(&json!({})), 1);
+    insert_task(&state, "task-child-prose-only", "queued", None, 1);
+
+    let affected = cancel_task_by_id(&state, "task-parent").expect("cancel parent");
+
+    assert_eq!(affected, 3);
+    assert_eq!(stored_status(&state, "task-parent"), "canceled");
+    assert_eq!(stored_status(&state, "task-child-running"), "canceled");
+    assert_eq!(stored_status(&state, "task-child-queued"), "canceled");
+    assert_eq!(stored_status(&state, "task-child-done"), "succeeded");
+    assert_eq!(stored_status(&state, "task-child-prose-only"), "queued");
+
+    let parent = stored_result_json(&state, "task-parent");
+    let child = stored_result_json(&state, "task-child-running");
+    assert_eq!(parent["terminal_reason"], "user_cancelled");
+    assert_eq!(child["terminal_reason"], "parent_cancelled");
+    assert_eq!(child["message_key"], "clawd.task.parent_cancelled");
+    assert_eq!(
+        child["task_lifecycle"]["terminal_reason"],
+        "parent_cancelled"
+    );
 }
 
 #[test]
