@@ -429,6 +429,71 @@ async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
 }
 
 #[tokio::test]
+async fn runtime_recovery_skips_current_worker_expired_lease() {
+    let state = state_with_runtime_tasks_table();
+    let now = crate::now_ts_u64() as i64;
+    let worker_id = state.worker.worker_id.clone();
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at,
+                lease_owner, lease_expires_at, claim_attempt, claimed_at
+            )
+            VALUES ('runtime-current-worker-expired', 42, 7, 'test-key', 'ui', 'ask', ?1,
+                    'running', NULL, NULL, ?2, ?2, ?3, ?4, 1, ?2)",
+            rusqlite::params![
+                json!({"text": "current worker long task"}).to_string(),
+                now.to_string(),
+                worker_id,
+                now.saturating_sub(1),
+            ],
+        )
+        .expect("insert current worker expired lease task");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at,
+                lease_owner, lease_expires_at, claim_attempt, claimed_at
+            )
+            VALUES ('runtime-old-worker-expired', 42, 7, 'test-key', 'ui', 'ask', ?1,
+                    'running', NULL, NULL, ?2, ?2, 'worker:old', ?3, 1, ?2)",
+            rusqlite::params![
+                json!({"text": "old worker task"}).to_string(),
+                now.to_string(),
+                now.saturating_sub(1),
+            ],
+        )
+        .expect("insert old worker expired lease task");
+    }
+
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&state)
+        .await
+        .expect("runtime recovery tick");
+
+    let db = state.core.db.get().expect("get db");
+    let current_status: String = db
+        .query_row(
+            "SELECT status FROM tasks WHERE task_id = 'runtime-current-worker-expired'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query current worker task");
+    let (old_status, old_error): (String, Option<String>) = db
+        .query_row(
+            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-old-worker-expired'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query old worker task");
+
+    assert_eq!(current_status, "running");
+    assert_eq!(old_status, "timeout");
+    assert_eq!(old_error.as_deref(), Some("worker_lease_expired"));
+}
+
+#[tokio::test]
 async fn runtime_recovery_survives_file_backed_restart_without_duplicate_claim() {
     let temp = TempDirGuard::new("runtime_restart_checkpoint");
     let db_path = temp.path.join("tasks.sqlite");
