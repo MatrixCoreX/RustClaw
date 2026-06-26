@@ -26,13 +26,74 @@ struct StaleRunningTaskCandidate {
     reason: StaleRunningRecoveryReason,
 }
 
-fn recovery_should_preserve_paused_checkpoint(result_json: Option<&str>, now: i64) -> bool {
+fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i64) -> bool {
     let Some(result_json) = result_json.and_then(|raw| serde_json::from_str::<Value>(raw).ok())
     else {
         return false;
     };
     crate::task_lifecycle::paused_checkpoint_recovery_status(&result_json, now)
         .preserve_running_status_for_recovery()
+        || result_projection_pending_recovery_state(&result_json)
+}
+
+fn result_projection_pending_recovery_state(result_json: &Value) -> bool {
+    let lifecycle =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(result_json), None);
+    let Some(obj) = lifecycle.as_object() else {
+        return false;
+    };
+    if obj
+        .get("resume_executor_result_projection")
+        .is_some_and(Value::is_object)
+    {
+        return false;
+    }
+    let Some(dispatch_result) = obj
+        .get("resume_executor_dispatch_result")
+        .filter(|value| value.is_object())
+    else {
+        return false;
+    };
+    if dispatch_result.get("text").is_some() || dispatch_result.get("error_text").is_some() {
+        return false;
+    }
+    if matches!(
+        dispatch_result
+            .get("projection_pending_reason")
+            .and_then(Value::as_str)
+            .map(str::trim),
+        Some("terminal_projection_pending" | "result_projection_pending")
+    ) {
+        return true;
+    }
+    let executor_action = dispatch_result
+        .get("executor_action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let executor_result_status = dispatch_result
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    dispatch_result_has_known_projection(executor_action, executor_result_status)
+}
+
+fn dispatch_result_has_known_projection(
+    executor_action: &str,
+    executor_result_status: &str,
+) -> bool {
+    matches!(
+        (executor_action, executor_result_status),
+        ("run_seeded_agent_loop", "seeded_loop_completed")
+            | ("run_seeded_agent_loop", "seeded_loop_deferred")
+            | ("run_seeded_agent_loop", "seeded_loop_failed")
+            | ("poll_async_job", "async_poll_completed")
+            | ("poll_async_job", "async_poll_rescheduled")
+            | ("poll_async_job", "async_poll_failed")
+            | ("verify_and_finalize", "finalize_completed")
+            | ("verify_and_finalize", "finalize_failed")
+    )
 }
 
 pub(crate) fn recover_stale_running_tasks_on_startup(
@@ -67,7 +128,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
         })?;
         for row in rows {
             let (task_id, result_json, reason) = row?;
-            if recovery_should_preserve_paused_checkpoint(result_json.as_deref(), now) {
+            if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
             candidates.push(StaleRunningTaskCandidate { task_id, reason });
@@ -152,7 +213,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
         })?;
         for row in rows {
             let (task_id, result_json, reason) = row?;
-            if recovery_should_preserve_paused_checkpoint(result_json.as_deref(), now) {
+            if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
             candidates.push(StaleRunningTaskCandidate { task_id, reason });

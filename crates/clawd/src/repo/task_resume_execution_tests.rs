@@ -782,6 +782,10 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
         "seeded_loop_deferred"
     );
     assert_eq!(
+        result_recorded_lifecycle["resume_executor_dispatch_result"]["projection_pending_reason"],
+        "result_projection_pending"
+    );
+    assert_eq!(
         result_recorded_lifecycle["resume_executor_dispatch_result"]["recorded_at"],
         now + 8
     );
@@ -892,6 +896,16 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
         result_projection_claimed_lifecycle["resume_executor_dispatch_result"]
             ["result_projection_state"],
         "project_seeded_loop_deferred"
+    );
+    assert_eq!(
+        result_projection_claimed_lifecycle["resume_executor_dispatch_result"]
+            ["projection_pending_reason"],
+        "result_projection_pending"
+    );
+    assert_eq!(
+        result_projection_claimed_lifecycle["resume_executor_result_projection_claim"]
+            ["projection_pending_reason"],
+        "result_projection_pending"
     );
     assert!(
         list_recorded_paused_checkpoint_resume_dispatch_results_internal(&state, now + 10, 10)
@@ -1399,6 +1413,21 @@ fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload(
     )
     .expect("claim completed projection")
     .expect("completed projection claimed");
+    let completed_claimed = stored_result_json(&state, "terminal-completed");
+    let completed_claimed_lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
+        "running",
+        Some(&completed_claimed),
+        None,
+    );
+    assert_eq!(
+        completed_claimed_lifecycle["resume_executor_dispatch_result"]["projection_pending_reason"],
+        "terminal_projection_pending"
+    );
+    assert_eq!(
+        completed_claimed_lifecycle["resume_executor_result_projection_claim"]
+            ["projection_pending_reason"],
+        "terminal_projection_pending"
+    );
     assert!(
         !record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
             &state,

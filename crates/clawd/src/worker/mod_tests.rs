@@ -224,6 +224,52 @@ fn startup_recovery_times_out_expired_worker_lease() {
     assert_eq!(error_text.as_deref(), Some("worker_lease_expired"));
 }
 
+#[test]
+fn startup_recovery_preserves_terminal_projection_pending_state() {
+    let db = memory_tasks_db();
+    let old_ts = 1_i64;
+    let pending_projection = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "running",
+            "checkpoint_id": "ckpt-terminal-pending",
+            "resume_executor_dispatch_result": {
+                "schema_version": 1,
+                "checkpoint_id": "ckpt-terminal-pending",
+                "executor_state": "executing_finalize",
+                "executor_action": "verify_and_finalize",
+                "executor_status": "finalize_ready",
+                "dispatch_state": "ready_to_verify_and_finalize",
+                "executor_result_status": "finalize_completed",
+                "result_projection_state": "project_finalize_completed",
+                "projection_pending_reason": "terminal_projection_pending",
+                "recorded_at": old_ts
+            }
+        },
+        "task_checkpoint": valid_checkpoint_json("ckpt-terminal-pending", "verify_and_finalize")
+    });
+    db.execute(
+        "INSERT INTO tasks (task_id, status, result_json, error_text, created_at, updated_at)
+         VALUES ('terminal-projection-pending', 'running', ?1, NULL, ?2, ?2)",
+        rusqlite::params![pending_projection.to_string(), old_ts.to_string()],
+    )
+    .expect("insert pending projection task");
+
+    let recovered =
+        super::recover_stale_running_tasks_on_startup(&db, 60).expect("recover stale running");
+
+    assert!(recovered.is_empty());
+    let (status, error_text): (String, Option<String>) = db
+        .query_row(
+            "SELECT status, error_text FROM tasks WHERE task_id = 'terminal-projection-pending'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query pending projection task");
+    assert_eq!(status, "running");
+    assert!(error_text.is_none());
+}
+
 fn paused_checkpoint_result(state: &str, next_check_after: i64, checkpoint_id: &str) -> String {
     json!({
         "task_lifecycle": {
