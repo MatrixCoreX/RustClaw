@@ -319,7 +319,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--target-cases", type=int, default=240)
+    parser.add_argument("--target-cases", type=int, default=285)
     parser.add_argument("--check", action="store_true", help="fail if generated outputs differ")
     args = parser.parse_args(argv)
 

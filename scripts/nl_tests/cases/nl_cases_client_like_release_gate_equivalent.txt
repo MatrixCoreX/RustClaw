@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=285 coverage_categories=318 missing_categories=0
+# selected_rows=285 coverage_categories=320 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag image --exclude-case-tag audio --exclude-case-tag voice --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet
 # Format: suite|name|tags|prompt|expect=optional substring
