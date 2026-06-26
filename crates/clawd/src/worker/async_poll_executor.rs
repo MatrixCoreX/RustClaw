@@ -119,6 +119,7 @@ fn local_process_async_poll_adapter_result(
     if !exit_code_path.exists() && cancel_requested_path.exists() {
         return Some(json!({
             "job_id": job_id,
+            "adapter_kind": "local_process_poll",
             "status": "cancelled",
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
@@ -134,6 +135,7 @@ fn local_process_async_poll_adapter_result(
     if !exit_code_path.exists() {
         return Some(json!({
             "job_id": job_id,
+            "adapter_kind": "local_process_poll",
             "status": if now_ts >= expires_at { "expired" } else { "running" },
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
@@ -148,6 +150,7 @@ fn local_process_async_poll_adapter_result(
     if exit_code == 0 {
         Some(json!({
             "job_id": job_id,
+            "adapter_kind": "local_process_poll",
             "status": "succeeded",
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
@@ -165,6 +168,7 @@ fn local_process_async_poll_adapter_result(
     } else {
         Some(json!({
             "job_id": job_id,
+            "adapter_kind": "local_process_poll",
             "status": "failed",
             "poll_after_seconds": job.poll_after_seconds,
             "expires_at": expires_at,
@@ -354,7 +358,8 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
     default_retry_after_seconds: i64,
 ) -> Option<Value> {
     let adapter_status = crate::async_job_contract::async_poll_adapter_status(adapter_result)?;
-    let mut payload = base_async_poll_result_payload(claimed, job_id, adapter_status);
+    let mut payload =
+        base_async_poll_result_payload(claimed, adapter_result, job_id, adapter_status);
     match adapter_status {
         "accepted" | "running" => {
             let expires_at = poll_expires_at(claimed, adapter_result)?;
@@ -458,6 +463,7 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
 
 fn base_async_poll_result_payload(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    adapter_result: &Value,
     job_id: &str,
     adapter_status: &str,
 ) -> Value {
@@ -491,6 +497,15 @@ fn base_async_poll_result_payload(
             {
                 obj.insert(key.to_string(), json!(value));
             }
+        }
+        if let Some(adapter_kind) = adapter_result
+            .get("adapter_kind")
+            .or_else(|| adapter_result.get("kind"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| crate::async_job_contract::async_poll_adapter_kind_supported(value))
+        {
+            obj.insert("adapter_kind".to_string(), json!(adapter_kind));
         }
     }
     payload
