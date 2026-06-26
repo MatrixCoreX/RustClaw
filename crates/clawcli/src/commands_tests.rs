@@ -1,5 +1,5 @@
 use super::{
-    exec_exit_class, exec_failure_class_from_machine_tokens, exec_summary_json,
+    exec_exit_class, exec_failure_class_from_machine_tokens, exec_summary_json, run_exec,
     write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
@@ -133,6 +133,43 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     assert!(summary_file.contains("\"exit_class\": \"success\""));
     assert!(task_file.contains("\"task-exec-artifact\""));
     assert!(events_file.contains("type=task_completed"));
+
+    std::fs::remove_dir_all(artifact_dir).ok();
+}
+
+#[test]
+fn exec_offline_smoke_writes_machine_artifact_without_server() {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "clawcli_exec_offline_smoke_{}_{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+
+    let exit_code = run_exec(
+        "http://127.0.0.1:9",
+        "unused-key",
+        "unused prompt",
+        None,
+        false,
+        false,
+        false,
+        None,
+        1000,
+        true,
+        true,
+        Some(&artifact_dir),
+    )
+    .expect("offline exec smoke");
+
+    let summary_file =
+        std::fs::read_to_string(artifact_dir.join("summary.json")).expect("read summary artifact");
+    let summary: serde_json::Value =
+        serde_json::from_str(&summary_file).expect("parse summary artifact");
+
+    assert_eq!(exit_code, ExecExitClass::InvalidRequest.code());
+    assert_eq!(summary["exit_class"], "invalid_request");
+    assert_eq!(summary["exit_code"], ExecExitClass::InvalidRequest.code());
+    assert_eq!(summary["error_code"], "exec_background_policy_conflict");
 
     std::fs::remove_dir_all(artifact_dir).ok();
 }
