@@ -4,7 +4,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    now_ts, parse_task_status, truncate_for_log, ActiveTaskItem, AppState, ClaimedTask,
+    now_ts, now_ts_u64, parse_task_status, truncate_for_log, ActiveTaskItem, AppState, ClaimedTask,
     TaskQueryResponse,
 };
 
@@ -86,9 +86,26 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
         return Ok(None);
     };
 
+    let now_text = now_ts();
+    let claimed_at = now_ts_u64() as i64;
+    let lease_expires_at = task_worker_lease_expires_at(state, claimed_at);
     let changed = db.execute(
-        "UPDATE tasks SET status = 'running', updated_at = ?2 WHERE task_id = ?1 AND status = 'queued'",
-        params![task.task_id, now_ts()],
+        "UPDATE tasks
+         SET status = 'running',
+             updated_at = ?2,
+             lease_owner = ?3,
+             claimed_at = ?4,
+             lease_expires_at = ?5,
+             claim_attempt = COALESCE(claim_attempt, 0) + 1
+         WHERE task_id = ?1
+           AND status = 'queued'",
+        params![
+            task.task_id,
+            now_text,
+            state.worker.worker_id,
+            claimed_at,
+            lease_expires_at
+        ],
     )?;
 
     if changed == 0 {
@@ -159,11 +176,31 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let heartbeat_at = now_ts_u64() as i64;
     let changed = db.execute(
-        "UPDATE tasks SET updated_at = ?2 WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, now_ts()],
+        "UPDATE tasks
+         SET updated_at = ?2,
+             lease_owner = ?3,
+             lease_expires_at = ?4
+         WHERE task_id = ?1
+           AND status = 'running'",
+        params![
+            task_id,
+            heartbeat_at.to_string(),
+            state.worker.worker_id,
+            task_worker_lease_expires_at(state, heartbeat_at)
+        ],
     )?;
     Ok(changed > 0)
+}
+
+fn task_worker_lease_expires_at(state: &AppState, now_ts: i64) -> i64 {
+    let lease_seconds = state
+        .worker
+        .worker_task_heartbeat_seconds
+        .saturating_mul(4)
+        .max(60);
+    now_ts.saturating_add(lease_seconds as i64)
 }
 
 pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {

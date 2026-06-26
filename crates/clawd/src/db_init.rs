@@ -464,3 +464,35 @@ pub(crate) fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
     )?;
     Ok(())
 }
+
+pub(crate) fn ensure_task_lease_schema(db: &Connection) -> anyhow::Result<()> {
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "lease_owner",
+        "ALTER TABLE tasks ADD COLUMN lease_owner TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "lease_expires_at",
+        "ALTER TABLE tasks ADD COLUMN lease_expires_at INTEGER NOT NULL DEFAULT 0",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "claim_attempt",
+        "ALTER TABLE tasks ADD COLUMN claim_attempt INTEGER NOT NULL DEFAULT 0",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "tasks",
+        "claimed_at",
+        "ALTER TABLE tasks ADD COLUMN claimed_at INTEGER NOT NULL DEFAULT 0",
+    )?;
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_lease_owner_expires_at
+         ON tasks(lease_owner, lease_expires_at);",
+    )?;
+    Ok(())
+}

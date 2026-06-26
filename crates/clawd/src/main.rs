@@ -103,7 +103,8 @@ use bootstrap::{
     resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
 };
 use db_init::{
-    ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, init_db, seed_users,
+    ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, ensure_task_lease_schema,
+    init_db, seed_users,
 };
 pub(crate) use delivery_utils::{
     collect_recent_image_candidates, extract_delivery_file_tokens,
@@ -329,6 +330,7 @@ async fn main() -> anyhow::Result<()> {
         ensure_schedule_schema(&db)?;
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
+        ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
         if config.memory.hybrid_recall_enabled

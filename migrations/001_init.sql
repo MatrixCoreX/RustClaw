@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     result_json   TEXT,
     error_text    TEXT,
     created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
+    updated_at    TEXT NOT NULL,
+    lease_owner   TEXT,
+    lease_expires_at INTEGER NOT NULL DEFAULT 0,
+    claim_attempt INTEGER NOT NULL DEFAULT 0,
+    claimed_at    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
