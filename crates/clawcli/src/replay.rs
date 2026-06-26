@@ -73,6 +73,43 @@ pub(crate) fn run_run(bundle_path: &Path, json_output: bool) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn run_diff(left_path: &Path, right_path: &Path, json_output: bool) -> Result<()> {
+    let left = read_replay_bundle(left_path)?;
+    let right = read_replay_bundle(right_path)?;
+    let diff = replay_diff_summary(&left, &right);
+    if json_output {
+        output::print_json_pretty(&diff);
+    } else {
+        println!(
+            "left_task_id: {}",
+            diff.pointer("/left/task_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+        );
+        println!(
+            "right_task_id: {}",
+            diff.pointer("/right/task_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+        );
+        println!(
+            "changed: {}",
+            diff.get("changed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        );
+    }
+    Ok(())
+}
+
+fn read_replay_bundle(path: &Path) -> Result<Value> {
+    let body = fs::read_to_string(path)
+        .with_context(|| format!("read replay bundle {}", path.display()))?;
+    let bundle: Value = serde_json::from_str(&body).context("parse replay bundle")?;
+    validate_replay_bundle(&bundle)?;
+    Ok(bundle)
+}
+
 fn replay_bundle_json(task: &task::TaskStatusView) -> Value {
     json!({
         "schema_version": REPLAY_SCHEMA_VERSION,
@@ -97,6 +134,48 @@ fn replay_bundle_json(task: &task::TaskStatusView) -> Value {
     })
 }
 
+fn replay_diff_summary(left: &Value, right: &Value) -> Value {
+    let left_summary = replay_run_summary(left);
+    let right_summary = replay_run_summary(right);
+    let status_changed = left_summary.get("status") != right_summary.get("status");
+    let lifecycle_changed =
+        left_summary.get("lifecycle_state") != right_summary.get("lifecycle_state");
+    let event_count_changed = left_summary.get("event_count") != right_summary.get("event_count");
+    let left_artifact_count = replay_artifact_ref_count(left);
+    let right_artifact_count = replay_artifact_ref_count(right);
+    let artifact_count_changed = left_artifact_count != right_artifact_count;
+    json!({
+        "bundle_kind": "rustclaw_task_replay_diff",
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "replay_mode": "recorded_only",
+        "live_provider": false,
+        "changed": status_changed
+            || lifecycle_changed
+            || event_count_changed
+            || artifact_count_changed,
+        "left": {
+            "task_id": left_summary.get("task_id").cloned().unwrap_or(Value::Null),
+            "status": left_summary.get("status").cloned().unwrap_or(Value::Null),
+            "lifecycle_state": left_summary.get("lifecycle_state").cloned().unwrap_or(Value::Null),
+            "event_count": left_summary.get("event_count").cloned().unwrap_or(Value::Null),
+            "artifact_ref_count": left_artifact_count,
+        },
+        "right": {
+            "task_id": right_summary.get("task_id").cloned().unwrap_or(Value::Null),
+            "status": right_summary.get("status").cloned().unwrap_or(Value::Null),
+            "lifecycle_state": right_summary.get("lifecycle_state").cloned().unwrap_or(Value::Null),
+            "event_count": right_summary.get("event_count").cloned().unwrap_or(Value::Null),
+            "artifact_ref_count": right_artifact_count,
+        },
+        "diff": {
+            "status_changed": status_changed,
+            "lifecycle_changed": lifecycle_changed,
+            "event_count_changed": event_count_changed,
+            "artifact_count_changed": artifact_count_changed,
+        }
+    })
+}
+
 fn replay_run_summary(bundle: &Value) -> Value {
     let task = bundle.get("task").unwrap_or(&Value::Null);
     let events = bundle
@@ -118,6 +197,34 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
         "result_source": "recorded_bundle",
     })
+}
+
+fn replay_artifact_ref_count(bundle: &Value) -> usize {
+    let mut count = 0usize;
+    collect_replay_artifact_ref_count(bundle, &mut count, 0);
+    count
+}
+
+fn collect_replay_artifact_ref_count(value: &Value, count: &mut usize, depth: usize) {
+    if depth > 8 || *count >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(items)) = map.get("artifact_refs") {
+                *count += items.len();
+            }
+            for value in map.values() {
+                collect_replay_artifact_ref_count(value, count, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_replay_artifact_ref_count(item, count, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 fn validate_replay_bundle(bundle: &Value) -> Result<()> {

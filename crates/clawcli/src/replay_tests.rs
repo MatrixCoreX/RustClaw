@@ -1,4 +1,4 @@
-use super::{replay_bundle_json, replay_run_summary, validate_replay_bundle};
+use super::{replay_bundle_json, replay_diff_summary, replay_run_summary, validate_replay_bundle};
 
 #[test]
 fn replay_bundle_redacts_secret_and_private_payload_fields() {
@@ -83,4 +83,53 @@ fn replay_run_summary_is_recorded_only_machine_result() {
     assert_eq!(summary["task_id"], "task-replay-summary");
     assert_eq!(summary["status"], "succeeded");
     assert_eq!(summary["event_count"], 1);
+}
+
+#[test]
+fn replay_diff_summary_reports_machine_field_changes() {
+    let left = serde_json::json!({
+        "schema_version": 1,
+        "bundle_kind": "rustclaw_task_replay",
+        "task_id": "task-left",
+        "status": "succeeded",
+        "lifecycle_state": "succeeded",
+        "task": {
+            "result_json": {
+                "artifact_refs": [
+                    {
+                        "ref": "artifact:left"
+                    }
+                ]
+            }
+        },
+        "events": [
+            {
+                "event_type": "task_completed"
+            }
+        ]
+    });
+    let right = serde_json::json!({
+        "schema_version": 1,
+        "bundle_kind": "rustclaw_task_replay",
+        "task_id": "task-right",
+        "status": "failed",
+        "lifecycle_state": "failed",
+        "task": {
+            "result_json": {
+                "artifact_refs": []
+            }
+        },
+        "events": []
+    });
+
+    let diff = replay_diff_summary(&left, &right);
+
+    assert_eq!(diff["bundle_kind"], "rustclaw_task_replay_diff");
+    assert_eq!(diff["changed"], true);
+    assert_eq!(diff["diff"]["status_changed"], true);
+    assert_eq!(diff["diff"]["lifecycle_changed"], true);
+    assert_eq!(diff["diff"]["event_count_changed"], true);
+    assert_eq!(diff["diff"]["artifact_count_changed"], true);
+    assert_eq!(diff["left"]["artifact_ref_count"], 1);
+    assert_eq!(diff["right"]["artifact_ref_count"], 0);
 }
