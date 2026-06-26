@@ -374,7 +374,7 @@ fn execute_generate(
         .unwrap_or(true);
     let output_path_string = output_path.to_string_lossy().to_string();
     let task_id = create_video_task(&client, provider, &payload)?;
-    let wait_for_completion = optional_bool(obj, "wait_for_completion").unwrap_or(true);
+    let wait_for_completion = wait_for_completion_arg(obj);
     if !wait_for_completion {
         return Ok(video_pending_task_response(
             &task_id,
@@ -458,6 +458,10 @@ fn execute_generate(
 
 fn cfg_poll_interval_ms(cfg: &VideoGenerationConfig) -> u64 {
     cfg.poll_interval_ms.unwrap_or(5_000).clamp(500, 60_000)
+}
+
+fn wait_for_completion_arg(obj: &Map<String, Value>) -> bool {
+    optional_bool(obj, "wait_for_completion").unwrap_or(false)
 }
 
 fn poll_after_seconds_from_interval_ms(poll_interval_ms: u64) -> u64 {

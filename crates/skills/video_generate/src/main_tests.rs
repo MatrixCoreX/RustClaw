@@ -129,6 +129,22 @@ fn pending_video_task_response_exposes_media_job_poll_adapter() {
 }
 
 #[test]
+fn wait_for_completion_defaults_to_async_accepted_path() {
+    let args = json!({});
+    let obj = args.as_object().expect("object");
+
+    assert!(!wait_for_completion_arg(obj));
+}
+
+#[test]
+fn wait_for_completion_can_be_explicitly_enabled() {
+    let args = json!({"wait_for_completion": true});
+    let obj = args.as_object().expect("object");
+
+    assert!(wait_for_completion_arg(obj));
+}
+
+#[test]
 fn poll_dry_run_running_returns_adapter_reschedule_result() {
     let root = unique_temp_root("video-poll-running");
     let (_, extra) = execute(
