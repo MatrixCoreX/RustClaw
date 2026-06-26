@@ -609,6 +609,9 @@ pub(super) fn normalize_execution_recipe_for_schema(
         let locator_hint = execution_recipe_value_locator_hint(execution_recipe);
         normalize_output_contract_for_command_payload(obj, locator_hint.as_deref());
         mark_decision_planner_execute_from_execution_recipe(obj);
+    } else if execution_recipe_value_declares_package_manager_detection(execution_recipe) {
+        normalize_output_contract_for_package_manager_detection(obj);
+        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if execution_recipe_value_declares_scalar_runtime_tool_observation(
         execution_recipe,
         obj.get("output_contract"),
@@ -632,9 +635,6 @@ pub(super) fn normalize_execution_recipe_for_schema(
             scalar_extraction,
             request_uses_filename_only_schema_token(req),
         );
-        mark_decision_planner_execute_from_execution_recipe(obj);
-    } else if execution_recipe_value_declares_package_manager_detection(execution_recipe) {
-        normalize_output_contract_for_package_manager_detection(obj);
         mark_decision_planner_execute_from_execution_recipe(obj);
     } else if execution_recipe_value_declares_service_status_observation(execution_recipe) {
         normalize_output_contract_for_service_status_recipe(obj);

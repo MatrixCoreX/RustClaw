@@ -104,6 +104,11 @@ pub(super) fn contract_repair_report_from_before_after(
     let before_recipe = before_obj.and_then(|obj| obj.get("execution_recipe"));
     if execution_recipe_value_declares_command_payload(before_recipe) {
         report.add("command_payload", "execution_recipe_command_payload");
+    } else if execution_recipe_value_declares_package_manager_detection(before_recipe) {
+        report.add(
+            "structured_recipe",
+            "execution_recipe_package_manager_detection",
+        );
     } else if execution_recipe_value_declares_scalar_runtime_tool_observation(
         before_recipe,
         before_obj.and_then(|obj| obj.get("output_contract")),
@@ -116,11 +121,6 @@ pub(super) fn contract_repair_report_from_before_after(
         report.add(
             "structured_recipe",
             "execution_recipe_structured_read_observation",
-        );
-    } else if execution_recipe_value_declares_package_manager_detection(before_recipe) {
-        report.add(
-            "structured_recipe",
-            "execution_recipe_package_manager_detection",
         );
     } else if execution_recipe_value_declares_service_status_observation(before_recipe) {
         report.add(
