@@ -26,7 +26,7 @@
 
 codex_task_resume_release_smoke|ask_readonly_repo_orientation_zh|covers:ask,doc_parse,fs_basic;requires_tool_call=true;local_readonly|阅读 README.md 和 docs/task_lifecycle_lease_model.md，只总结当前任务执行架构里前台 task_id、后台 worker、checkpoint/resume 三个关键词各自代表什么；不要修改文件。|expect=task_id
 
-codex_task_resume_release_smoke|direct_run_skill_boundary_zh|covers:run_skill,task_boundary;requires_tool_call=true;local_readonly|根据 README 说明 kind=ask 和 kind=run_skill 的执行边界：run_skill 是否经过 normalizer/planner、是否走共享 skill dispatcher、结果是否仍进入 task 查询；只回答这些结构化差异，不要提交新任务。|expect=run_skill
+codex_task_resume_release_smoke|direct_run_skill_boundary_zh|covers:run_skill,task_boundary;requires_tool_call=true;local_readonly|读取 README.md 第 82 到 100 行的 Ask And Run Skill Boundary 内容，只回答 kind=run_skill 是否经过 normalizer/planner、是否走共享 skill dispatcher、结果是否仍进入 task 查询；不要提交新任务。|expect=run_skill
 
 codex_task_resume_release_smoke|task_query_lifecycle_fields_zh|covers:task_control,task_query,lifecycle;requires_tool_call=true;local_readonly|查询最近任务列表和其中一个任务详情，只回答机器字段里是否能看到 state、can_poll、can_cancel、db_status、last_heartbeat_ts 或 checkpoint_id；不要取消任务。|expect=can_poll
 
