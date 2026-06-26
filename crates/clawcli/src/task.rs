@@ -73,6 +73,19 @@ impl TaskStatusView {
         ] {
             push_value_token(&mut tokens, key, lifecycle.get(key));
         }
+        if let Some(budget) = lifecycle.get("budget") {
+            for key in [
+                "round",
+                "step",
+                "llm_calls",
+                "tool_calls",
+                "elapsed_ms",
+                "llm_elapsed_ms",
+                "tool_elapsed_ms",
+            ] {
+                push_value_token(&mut tokens, &format!("budget.{key}"), budget.get(key));
+            }
+        }
         tokens
     }
 }
@@ -314,3 +327,7 @@ fn task_control_by_id(
     }
     Ok(body)
 }
+
+#[cfg(test)]
+#[path = "task_tests.rs"]
+mod tests;

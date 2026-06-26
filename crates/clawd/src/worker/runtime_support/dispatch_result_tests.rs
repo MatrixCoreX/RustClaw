@@ -29,6 +29,8 @@ fn seeded_claimed_dispatch() -> crate::repo::ClaimedDispatchedPausedCheckpointRe
             llm_calls: 2,
             tool_calls: 1,
             elapsed_ms: 100,
+            llm_elapsed_ms: 100,
+            tool_elapsed_ms: 0,
         },
         attempt_ledger: None,
         pending_async_job: None,
@@ -96,6 +98,8 @@ fn async_poll_claimed_dispatch(
             llm_calls: 2,
             tool_calls: 1,
             elapsed_ms: 100,
+            llm_elapsed_ms: 100,
+            tool_elapsed_ms: 0,
         },
         attempt_ledger: None,
         pending_async_job: Some(crate::task_lifecycle::AsyncJobRef {
