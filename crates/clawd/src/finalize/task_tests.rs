@@ -7,9 +7,9 @@ use super::{
     deterministic_config_guard_candidates_recovery,
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
-    failed_task_lifecycle_payload, journal_has_missing_file_search_evidence,
-    machine_payload_observed_facts, non_failure_final_status,
-    normalize_existing_file_delivery_token_answer,
+    failed_task_lifecycle_payload, journal_has_checkpointed_nonterminal_lifecycle,
+    journal_has_missing_file_search_evidence, machine_payload_observed_facts,
+    non_failure_final_status, normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
@@ -410,6 +410,35 @@ fn failed_task_lifecycle_payload_marks_verifier_terminal_reason() {
     assert_eq!(payload["state"], "failed");
     assert_eq!(payload["failure_attribution"], "contract_gap");
     assert_eq!(payload["terminal_reason"], "verifier_unrecoverable");
+}
+
+#[test]
+fn checkpointed_nonterminal_lifecycle_requires_matching_checkpoint() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-checkpointed", "ask", "prompt");
+    journal.record_task_lifecycle(json!({
+        "state": "waiting",
+        "checkpoint_id": "ckpt-1",
+        "resume_reason": "budget_near_exhaustion"
+    }));
+    journal.record_task_checkpoint(json!({
+        "checkpoint_id": "ckpt-1",
+        "resume_entrypoint": "next_planner_round"
+    }));
+
+    assert!(journal_has_checkpointed_nonterminal_lifecycle(&journal));
+
+    journal.record_task_lifecycle(json!({
+        "state": "succeeded",
+        "checkpoint_id": "ckpt-1"
+    }));
+    assert!(!journal_has_checkpointed_nonterminal_lifecycle(&journal));
+
+    journal.record_task_lifecycle(json!({
+        "state": "waiting",
+        "checkpoint_id": "ckpt-other"
+    }));
+    assert!(!journal_has_checkpointed_nonterminal_lifecycle(&journal));
 }
 
 #[test]
