@@ -447,6 +447,13 @@ pub(crate) fn record_claimed_dispatched_paused_checkpoint_resume_execution_resul
     let mut result = execution_result_payload.clone();
     if let Some(result_obj) = result.as_object_mut() {
         result_obj.insert("recorded_at".to_string(), serde_json::json!(now_ts));
+        result_obj.insert(
+            "projection_pending_reason".to_string(),
+            serde_json::json!(projection_pending_reason(
+                executor_action,
+                executor_result_status
+            )),
+        );
     }
     obj.insert("resume_executor_dispatch_result".to_string(), result);
     for key in [
@@ -772,6 +779,29 @@ pub(super) fn allowed_dispatch_execution_result_status(
             | ("run_seeded_agent_loop", "seeded_loop_failed")
             | ("poll_async_job", "async_poll_completed")
             | ("poll_async_job", "async_poll_rescheduled")
+            | ("poll_async_job", "async_poll_failed")
+            | ("verify_and_finalize", "finalize_completed")
+            | ("verify_and_finalize", "finalize_failed")
+    )
+}
+
+fn projection_pending_reason(executor_action: &str, executor_result_status: &str) -> &'static str {
+    if terminal_dispatch_execution_result_status(executor_action, executor_result_status) {
+        "terminal_projection_pending"
+    } else {
+        "result_projection_pending"
+    }
+}
+
+fn terminal_dispatch_execution_result_status(
+    executor_action: &str,
+    executor_result_status: &str,
+) -> bool {
+    matches!(
+        (executor_action, executor_result_status),
+        ("run_seeded_agent_loop", "seeded_loop_completed")
+            | ("run_seeded_agent_loop", "seeded_loop_failed")
+            | ("poll_async_job", "async_poll_completed")
             | ("poll_async_job", "async_poll_failed")
             | ("verify_and_finalize", "finalize_completed")
             | ("verify_and_finalize", "finalize_failed")

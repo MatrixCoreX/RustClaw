@@ -187,6 +187,8 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
     }
 
     let result_projection_claim_expires_at = now_ts.saturating_add(lease_seconds.max(1));
+    let projection_pending_reason =
+        projection_pending_reason(executor_action, executor_result_status);
     let mut lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result_json), None);
     let Some(obj) = lifecycle.as_object_mut() else {
@@ -202,6 +204,7 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         "dispatch_state": dispatch_state,
         "executor_result_status": executor_result_status,
         "result_projection_state": recorded.result_projection_state.as_str(),
+        "projection_pending_reason": projection_pending_reason,
         "claimed_at": now_ts,
         "expires_at": result_projection_claim_expires_at
     });
@@ -232,6 +235,10 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         result_obj.insert(
             "result_projection_state".to_string(),
             serde_json::json!(recorded.result_projection_state.as_str()),
+        );
+        result_obj.insert(
+            "projection_pending_reason".to_string(),
+            serde_json::json!(projection_pending_reason),
         );
     }
     for key in [
@@ -1201,6 +1208,14 @@ fn terminal_dispatch_result_status(executor_action: &str, executor_result_status
             | ("verify_and_finalize", "finalize_completed")
             | ("verify_and_finalize", "finalize_failed")
     )
+}
+
+fn projection_pending_reason(executor_action: &str, executor_result_status: &str) -> &'static str {
+    if terminal_dispatch_result_status(executor_action, executor_result_status) {
+        "terminal_projection_pending"
+    } else {
+        "result_projection_pending"
+    }
 }
 
 fn terminal_projection_result_status(executor_result_status: &str) -> &'static str {
