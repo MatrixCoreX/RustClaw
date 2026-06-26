@@ -402,28 +402,6 @@ pub(crate) async fn execute_ask_routed(
             "session_alias_target_direct_answer",
         ));
     }
-    if normalizer_compat_direct_answer_fast_path_allowed(state) {
-        if let Some(candidate) = normalizer_runtime_fact_direct_answer_candidate(
-            state,
-            resolved_prompt,
-            agent_run_context.as_ref(),
-        ) {
-            tracing::info!(
-                "{} worker_once: ask normalizer_runtime_fact_direct_answer task_id={} len={}",
-                crate::highlight_tag("routing"),
-                task.task_id,
-                candidate.len()
-            );
-            return Ok(with_pre_planner_exit_snapshot(
-                state,
-                task,
-                &current_turn_user_request_for_process,
-                ask_reply_with_chat_process(candidate, &process_language_hint),
-                agent_run_context.as_ref(),
-                "normalizer_runtime_fact_direct_answer",
-            ));
-        }
-    }
     if let Some(candidate) = active_file_basename_direct_answer(state, agent_run_context.as_ref()) {
         tracing::info!(
             "{} worker_once: ask active_file_basename_direct_answer task_id={} answer={}",
@@ -476,58 +454,10 @@ pub(crate) async fn execute_ask_routed(
                 crate::ChatEntryStrategy::NormalizerThenChat
                 | crate::ChatEntryStrategy::ResumeFollowupDiscussion,
         } => {
-            if normalizer_compat_direct_answer_fast_path_allowed(state) {
-                if let Some(candidate) = normalizer_chat_direct_answer_candidate(
-                    state,
-                    resolved_prompt,
-                    agent_run_context.as_ref(),
-                ) {
-                    tracing::info!(
-                        "{} worker_once: ask normalizer_verified_runtime_candidate task_id={} len={}",
-                        crate::highlight_tag("routing"),
-                        task.task_id,
-                        candidate.len()
-                    );
-                    return Ok(with_pre_planner_exit_snapshot(
-                        state,
-                        task,
-                        &current_turn_user_request,
-                        ask_reply_with_chat_process(candidate, &process_language_hint),
-                        agent_run_context.as_ref(),
-                        "normalizer_chat_direct_answer_candidate",
-                    ));
-                }
-            }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
             );
-            if normalizer_compat_direct_answer_fast_path_allowed(state) {
-                if let Some(candidate) =
-                    normalizer_chat_direct_answer_candidate_with_context_summary(
-                        state,
-                        resolved_prompt,
-                        agent_run_context.as_ref(),
-                        Some(&chat_prompt_context),
-                        Some(&current_turn_user_request),
-                    )
-                {
-                    tracing::info!(
-                        "{} worker_once: ask normalizer_verified_context_candidate task_id={} len={}",
-                        crate::highlight_tag("routing"),
-                        task.task_id,
-                        candidate.len()
-                    );
-                    return Ok(with_pre_planner_exit_snapshot(
-                        state,
-                        task,
-                        &current_turn_user_request,
-                        ask_reply_with_chat_process(candidate, &process_language_hint),
-                        agent_run_context.as_ref(),
-                        "normalizer_chat_direct_answer_candidate_with_context_summary",
-                    ));
-                }
-            }
             let resolved_chat_prompt =
                 crate::bootstrap::load_required_prompt_template_for_state_with_meta(
                     state,

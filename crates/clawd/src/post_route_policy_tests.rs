@@ -469,15 +469,15 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_upstream_clarify_required"
+        "post_route_boundary_clarify_required"
     );
-    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
+    assert_eq!(result.gate_record.owner_layer, "boundary_clarify_gate");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn background_marker_clarifies_when_legacy_semantic_repair_allowed() {
+fn ordinary_semantic_clarify_defers_to_agent_loop() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
     route.route_reason = "background_locator_requires_clarify".to_string();
@@ -489,43 +489,14 @@ fn background_marker_clarifies_when_legacy_semantic_repair_allowed() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
-    );
-    assert!(result.execution_route_result.needs_clarify);
-    assert_eq!(
-        result.gate_record.reason_code,
-        "post_route_upstream_clarify_required"
-    );
-    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
-}
-
-#[test]
-fn selected_agent_loop_route_defers_legacy_semantic_repair_to_loop() {
-    let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
-    route.route_reason = "background_locator_requires_clarify".to_string();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-
-    let result = apply_post_route_policy_with_options(
-        route,
-        LocatorResolution::None,
-        PostRoutePolicyOptions {
-            allow_legacy_semantic_repair: false,
-        },
-    );
-
-    assert_eq!(
-        result.execution_route_result.ask_mode,
         crate::AskMode::planner_execute_chat_wrapped()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_legacy_semantic_repair_deferred_to_agent_loop"
+        "post_route_semantic_clarify_deferred_to_agent_loop"
     );
-    assert_eq!(result.gate_record.owner_layer, "legacy_semantic_repair");
+    assert_eq!(result.gate_record.owner_layer, "agent_loop_semantic_defer");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::NoChange);
 }
 
@@ -592,7 +563,7 @@ fn missing_read_target_content_excerpt_is_not_satisfied_by_default_auto_locator(
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_upstream_clarify_required"
+        "post_route_boundary_clarify_required"
     );
 }
 
@@ -655,7 +626,7 @@ fn document_heading_missing_read_target_without_locator_hint_stays_clarify() {
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_upstream_clarify_required"
+        "post_route_boundary_clarify_required"
     );
 }
 
@@ -682,7 +653,7 @@ fn deictic_bare_locator_clarify_is_not_satisfied_by_direct_auto_locator() {
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_upstream_clarify_required"
+        "post_route_boundary_clarify_required"
     );
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
 }
@@ -754,7 +725,7 @@ fn current_workspace_auto_locator_rescues_clarify() {
 }
 
 #[test]
-fn inherited_operation_with_direct_locator_no_longer_rescues_from_second_clarify() {
+fn inherited_operation_without_boundary_contract_defers_to_agent_loop_even_with_direct_locator() {
     let mut route = route_result();
     route.needs_clarify = true;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -765,10 +736,14 @@ fn inherited_operation_with_direct_locator_no_longer_rescues_from_second_clarify
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
-    assert!(result.execution_route_result.needs_clarify);
+    assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_semantic_clarify_deferred_to_agent_loop"
+    );
 }
 
 #[test]
@@ -801,7 +776,7 @@ fn explicit_relative_path_followup_without_locator_hint_stays_clarify() {
 }
 
 #[test]
-fn inherited_operation_without_prior_clarify_stays_in_clarify() {
+fn inherited_operation_without_boundary_contract_defers_to_agent_loop_without_prior_clarify() {
     let mut route = route_result();
     route.needs_clarify = true;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -810,10 +785,14 @@ fn inherited_operation_without_prior_clarify_stays_in_clarify() {
         route,
         LocatorResolution::Direct("/tmp/restart_clawd_latest.sh".to_string()),
     );
-    assert!(result.execution_route_result.needs_clarify);
+    assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
+    );
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_semantic_clarify_deferred_to_agent_loop"
     );
 }
 

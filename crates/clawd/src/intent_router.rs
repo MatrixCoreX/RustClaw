@@ -167,8 +167,7 @@ use execution_recipe_contract::{
 mod state_patch_tokens;
 use state_patch_tokens::{
     request_uses_filename_only_schema_token, state_patch_deictic_reference_is_resolved,
-    state_patch_deictic_reference_requires_clarify, state_patch_deictic_reference_target,
-    state_patch_requests_filename_only_output,
+    state_patch_deictic_reference_requires_clarify, state_patch_requests_filename_only_output,
 };
 
 #[path = "intent_router_state_patch_fields.rs"]
@@ -241,7 +240,9 @@ use inline_transform::{
 #[path = "intent_router_observation_repair.rs"]
 mod observation_repair;
 use observation_repair::{
-    apply_answer_candidate_path_evidence_repair, apply_locatorless_observation_clarify_repair,
+    apply_answer_candidate_path_evidence_repair,
+    apply_deictic_missing_locator_state_patch_clarify_repair,
+    apply_locatorless_observation_clarify_repair,
     apply_spurious_structured_observation_clarify_repair,
     apply_workspace_default_observation_clarify_repair,
     semantic_kind_can_use_existing_observed_context,
@@ -250,12 +251,9 @@ use observation_repair::{
 
 #[path = "intent_router_directory_observation.rs"]
 mod directory_observation;
+use directory_observation::apply_resolved_directory_observation_clarify_repair;
 #[cfg(test)]
 use directory_observation::directory_pair_fallback_decision;
-use directory_observation::{
-    apply_resolved_directory_observation_clarify_repair,
-    resolved_directory_pair_from_current_request, resolved_existing_directory_from_current_request,
-};
 
 #[path = "intent_router_execution_contract.rs"]
 mod execution_contract;
@@ -303,7 +301,6 @@ use active_observation::{
     apply_active_bound_path_answer_candidate_direct_repair,
     apply_active_file_basename_answer_candidate_direct_repair,
     apply_active_observed_output_chat_repair, apply_active_ordered_scalar_path_chat_repair,
-    chat_only_active_text_missing_locator_followup,
 };
 
 #[path = "intent_router_active_task_repair.rs"]
@@ -314,8 +311,7 @@ use active_task_repair::{
     active_context_has_structured_observation_anchor, active_primary_text_context,
     answer_candidate_can_conflict_with_active_text_followup,
     apply_active_task_scope_refinement_repair, apply_active_task_structured_patch_repair,
-    apply_active_text_followup_route_repair, apply_missing_active_task_reuse_clarify,
-    clear_output_contract_for_active_text_followup,
+    apply_missing_active_task_reuse_clarify, clear_output_contract_for_active_text_followup,
     repair_state_patch_replacement_literal_conflicts,
     should_resolve_task_append_clarify_with_active_task,
     should_resolve_task_replace_clarify_with_active_task,

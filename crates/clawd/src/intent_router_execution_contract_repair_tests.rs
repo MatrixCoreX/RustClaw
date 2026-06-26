@@ -1016,7 +1016,6 @@ fn declared_publishing_preview_contract_restores_after_generic_drift() {
     let repair = super::restore_declared_publishing_preview_contract(
         OutputSemanticKind::PublishingPreview,
         None,
-        None,
         super::ScheduleKind::None,
         &mut contract,
         &mut needs_clarify,
@@ -1065,7 +1064,6 @@ fn declared_publishing_preview_restore_respects_media_generation_path_report_rep
 
     let repair = super::restore_declared_publishing_preview_contract(
         OutputSemanticKind::PublishingPreview,
-        None,
         Some("media_generation_path_report_contract_repair"),
         super::ScheduleKind::None,
         &mut contract,
@@ -1084,43 +1082,6 @@ fn declared_publishing_preview_restore_respects_media_generation_path_report_rep
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
     assert!(contract.requires_content_evidence);
     assert!(!contract.delivery_required);
-}
-
-#[test]
-fn declared_publishing_preview_restore_respects_active_text_followup_repair() {
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-    let mut needs_clarify = false;
-    let mut clarify_question = String::new();
-    let mut wants_file_delivery = false;
-    let mut contract = IntentOutputContract {
-        response_shape: OutputResponseShape::Free,
-        requires_content_evidence: false,
-        delivery_required: false,
-        delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: OutputSemanticKind::None,
-        locator_kind: OutputLocatorKind::None,
-        locator_hint: String::new(),
-        ..IntentOutputContract::default()
-    };
-
-    let repair = super::restore_declared_publishing_preview_contract(
-        OutputSemanticKind::PublishingPreview,
-        Some("active_text_followup_route_repair"),
-        None,
-        super::ScheduleKind::None,
-        &mut contract,
-        &mut needs_clarify,
-        &mut clarify_question,
-        &mut wants_file_delivery,
-        &mut decision,
-        &mut finalize_style,
-    );
-
-    assert_eq!(repair, None);
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert!(!contract.requires_content_evidence);
 }
 
 #[test]

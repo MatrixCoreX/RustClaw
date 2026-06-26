@@ -104,6 +104,29 @@ pub(super) fn semantic_kind_can_use_existing_observed_context(kind: OutputSemant
     )
 }
 
+pub(super) fn apply_deictic_missing_locator_state_patch_clarify_repair(
+    output_contract: &mut IntentOutputContract,
+    state_patch: Option<&Value>,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    legacy_normalizer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if !state_patch_deictic_reference_requires_clarify(state_patch) {
+        return None;
+    }
+    output_contract.requires_content_evidence = true;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    *needs_clarify = true;
+    if clarify_question.trim().is_empty() {
+        clarify_question.clear();
+    }
+    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    Some("state_patch_deictic_missing_locator_clarify")
+}
+
 pub(super) fn should_preserve_existing_observed_context_synthesis_contract(
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,

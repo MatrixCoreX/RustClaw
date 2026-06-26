@@ -671,28 +671,6 @@ fn non_tool_discovery_semantic_route_still_uses_answer_verifier() {
 }
 
 #[test]
-fn active_text_rewrite_direct_answer_uses_answer_verifier() {
-    let mut route = route_with_mode(crate::AskMode::direct_answer());
-    route.route_reason = "active_text_followup_route_repair".to_string();
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "shorter");
-    journal.record_context_bundle_summary(
-        "Current task:\nwrite note\n\nMost recent generated output:\nobserved result",
-    );
-
-    assert!(should_verify_answer(&route, &journal, "rewritten result"));
-}
-
-#[test]
-fn active_text_rewrite_without_recent_output_still_skips_answer_verifier() {
-    let mut route = route_with_mode(crate::AskMode::direct_answer());
-    route.route_reason = "active_text_followup_route_repair".to_string();
-    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "shorter");
-    journal.record_context_bundle_summary("Current task:\nwrite note");
-
-    assert!(!should_verify_answer(&route, &journal, "rewritten result"));
-}
-
-#[test]
 fn clarify_final_status_skips_answer_verifier() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
     route.output_contract.requires_content_evidence = true;

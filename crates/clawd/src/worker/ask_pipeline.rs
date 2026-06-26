@@ -336,15 +336,10 @@ fn resume_discussion_uses_direct_chat_renderer(route_result: &crate::RouteResult
 }
 
 fn ordinary_clarify_should_enter_agent_loop(
-    state: &crate::AppState,
+    _state: &crate::AppState,
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
 ) -> bool {
     !clarify_reason_kind.is_boundary_clarify()
-        && crate::agent_engine::agent_loop_semantic_authority_enabled(state)
-}
-
-fn post_route_allows_legacy_semantic_repair(state: &crate::AppState) -> bool {
-    !crate::agent_engine::agent_loop_semantic_authority_enabled(state)
 }
 
 fn subagent_boundary_clarify_should_enter_agent_loop(
@@ -970,14 +965,8 @@ fn apply_ask_post_route(
         } else {
             crate::post_route_policy::LocatorResolution::None
         };
-    let post_route_options = crate::post_route_policy::PostRoutePolicyOptions {
-        allow_legacy_semantic_repair: post_route_allows_legacy_semantic_repair(state),
-    };
-    let mut post_route = crate::post_route_policy::apply_post_route_policy_with_options(
-        route_result.clone(),
-        locator_resolution,
-        post_route_options,
-    );
+    let mut post_route =
+        crate::post_route_policy::apply_post_route_policy(route_result.clone(), locator_resolution);
     if promote_unresolved_file_delivery_with_current_request_locator(prompt, &mut post_route) {
         info!(
             "{} worker_once: ask file_delivery_current_request_locator_to_planner task_id={}",

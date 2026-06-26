@@ -19,8 +19,6 @@ fn repair_inventory_covers_required_boundary_buckets() {
         "normalizer_schema_contract_repair",
         "contract_repair_judge_schema_boundary",
         "current_turn_missing_locator_boundary_repair",
-        "active_text_followup_route_repair",
-        "post_route_legacy_semantic_repair_deferral",
         "plan_repair_loop_recovery",
         "answer_verifier_missing_evidence_repair",
         "plan_verifier_issue_repair",
@@ -90,37 +88,19 @@ fn repair_inventory_items_are_machine_field_bounded() {
 }
 
 #[test]
-fn ordinary_semantic_repair_is_marked_for_loop_migration() {
-    let ordinary: Vec<_> = REPAIR_BOUNDARY_INVENTORY
-        .iter()
-        .filter(|item| item.repair_class == RepairBoundaryClass::OrdinarySemanticRepair)
-        .collect();
-
-    assert!(
-        !ordinary.is_empty(),
-        "inventory should expose ordinary semantic repair debt instead of hiding it"
-    );
-
-    for item in ordinary {
-        assert!(
-            item.migration_target.starts_with("migrate_to_agent_loop"),
-            "{} must have explicit agent-loop migration target",
-            item.reason_code
-        );
-        assert_eq!(
-            item.next_recovery_kind, "replan",
-            "{} should recover through planner replan, not pre-route execution",
+fn inventory_has_no_ordinary_semantic_repair_debt() {
+    for item in REPAIR_BOUNDARY_INVENTORY {
+        assert_ne!(
+            item.repair_class.as_token(),
+            "ordinary_semantic_repair",
+            "{} must stay in the agent loop instead of pre-route repair",
             item.reason_code
         );
         assert!(
-            item.forbidden_input_fields
-                .contains(&"language_phrase_array"),
-            "{} must forbid language phrase arrays",
-            item.reason_code
-        );
-        assert!(
-            item.deletion_gate.starts_with("delete_after_"),
-            "{} must have an explicit deletion gate",
+            !item
+                .migration_target
+                .starts_with("migrate_to_agent_loop_semantic"),
+            "{} must not reintroduce ordinary semantic migration debt",
             item.reason_code
         );
     }

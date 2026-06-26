@@ -2,11 +2,10 @@ use serde_json::Value;
 use std::path::Path;
 
 use super::{
-    active_primary_text_context, parse_output_contract,
-    state_patch_deictic_reference_requires_clarify, state_patch_deictic_reference_target,
-    ActFinalizeStyle, AppState, FirstLayerDecision, IntentNormalizerOut, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind,
-    TargetTaskPolicy, TurnType,
+    parse_output_contract, state_patch_deictic_reference_requires_clarify, ActFinalizeStyle,
+    AppState, FirstLayerDecision, IntentNormalizerOut, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy,
+    TurnType,
 };
 
 pub(super) fn active_primary_task_prompt<'a>(
@@ -72,46 +71,6 @@ pub(super) fn active_text_followup_surface_is_chat_only(
     !prompt_has_concrete_fileish_cue(surface)
         && !surface.is_structural_locator_only_reply()
         && surface.inline_json_shape.is_none()
-}
-
-pub(super) fn chat_only_active_text_missing_locator_followup(
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    turn_type: Option<TurnType>,
-    target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
-    output_contract: &IntentOutputContract,
-    state_patch: Option<&Value>,
-) -> bool {
-    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
-        && active_primary_text_context(session_snapshot).is_some()
-        && !active_session_has_structured_execution_target(session_snapshot)
-        && state_patch_deictic_reference_target(state_patch) == Some("missing_locator")
-        && matches!(
-            turn_type,
-            Some(
-                TurnType::TaskAppend
-                    | TurnType::TaskCorrect
-                    | TurnType::TaskReplace
-                    | TurnType::TaskScopeUpdate
-            )
-        )
-        && matches!(
-            target_task_policy,
-            Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
-        )
-        && !output_contract.requires_content_evidence
-        && !output_contract.delivery_required
-        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
-        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
-        && matches!(
-            output_contract.response_shape,
-            OutputResponseShape::Free
-                | OutputResponseShape::OneSentence
-                | OutputResponseShape::Strict
-        )
-        && active_text_followup_surface_is_chat_only(surface)
 }
 
 fn active_prompt_surface_has_structured_execution_target(

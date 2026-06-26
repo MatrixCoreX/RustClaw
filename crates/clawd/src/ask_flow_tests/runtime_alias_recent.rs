@@ -1,35 +1,4 @@
 #[test]
-fn normalizer_runtime_fact_direct_answer_skips_execute_gate() {
-    let Some(runtime_user) = ["USER", "LOGNAME", "USERNAME"]
-        .into_iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .map(|value| value.trim().to_string())
-        .find(|value| !value.is_empty())
-    else {
-        return;
-    };
-    let state = crate::AppState::test_default_with_fixture_provider();
-    let mut route = chat_route_for_gate();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
-    route.resolved_intent = format!("runtime_scalar\nanswer_candidate: {runtime_user}");
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-
-    assert!(normalizer_runtime_fact_direct_answer_candidate(
-        &state,
-        &format!("runtime_scalar\nanswer_candidate: {runtime_user}"),
-        Some(&ctx),
-    )
-    .is_none());
-}
-
-#[test]
 fn runtime_scalar_path_direct_answer_uses_verified_contract_locator() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
