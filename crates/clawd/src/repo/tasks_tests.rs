@@ -2,13 +2,13 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    claim_due_paused_checkpoint_task_internal,
+    claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
     list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,
-    record_paused_checkpoint_resume_work_item_internal,
+    record_paused_checkpoint_resume_work_item_internal, touch_running_task,
 };
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
@@ -34,7 +34,11 @@ fn state_with_tasks_table() -> crate::AppState {
             result_json TEXT,
             error_text TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            lease_owner TEXT,
+            lease_expires_at INTEGER NOT NULL DEFAULT 0,
+            claim_attempt INTEGER NOT NULL DEFAULT 0,
+            claimed_at INTEGER NOT NULL DEFAULT 0
         );",
     )
     .expect("create tasks table");
@@ -120,6 +124,74 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
     let result = stored_result_json(&state, "async-visible-replace");
     assert_eq!(result["messages"][0], "checkpoint_id=ckpt");
     assert_eq!(result.get("output"), None);
+}
+
+#[test]
+fn claim_next_task_records_worker_lease_fields() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "queued", None, crate::now_ts_u64() as i64);
+
+    let claimed = claim_next_task(&state).expect("claim task").expect("task");
+    assert_eq!(claimed.task_id, task_id);
+
+    let db = state.core.db.get().expect("get db");
+    let (status, lease_owner, lease_expires_at, claim_attempt, claimed_at): (
+        String,
+        String,
+        i64,
+        i64,
+        i64,
+    ) = db
+        .query_row(
+            "SELECT status, lease_owner, lease_expires_at, claim_attempt, claimed_at
+             FROM tasks
+             WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("select lease fields");
+
+    assert_eq!(status, "running");
+    assert_eq!(lease_owner, state.worker.worker_id);
+    assert_eq!(claim_attempt, 1);
+    assert!(claimed_at > 0);
+    assert!(lease_expires_at > claimed_at);
+}
+
+#[test]
+fn touch_running_task_renews_worker_lease_fields() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(
+        &state,
+        &task_id,
+        "running",
+        None,
+        crate::now_ts_u64() as i64,
+    );
+
+    assert!(touch_running_task(&state, &task_id).expect("touch running task"));
+
+    let db = state.core.db.get().expect("get db");
+    let (lease_owner, lease_expires_at): (String, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select lease fields");
+
+    assert_eq!(lease_owner, state.worker.worker_id);
+    assert!(lease_expires_at > crate::now_ts_u64() as i64);
 }
 
 fn stored_task_status_and_error(
