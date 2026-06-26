@@ -20,6 +20,17 @@ MEDIA_SKILLS = {
     "music_generate": "generate",
 }
 
+EXECUTION_MODES = {"sync_short", "async_preferred", "async_required"}
+ASYNC_EXECUTION_MODES = {"async_preferred", "async_required"}
+ASYNC_ADAPTER_KINDS = {
+    "local_process_poll",
+    "http_job_poll",
+    "mcp_job_poll",
+    "media_job_poll",
+    "browser_job_poll",
+    "remote_job_poll",
+}
+
 
 def load_registry(path: Path) -> list[dict[str, Any]]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -74,6 +85,31 @@ def check_timeouts(skills: list[dict[str, Any]]) -> list[str]:
         timeout = skill.get("timeout_seconds")
         if not isinstance(timeout, int) or timeout <= 0:
             findings.append(f"{name}: timeout_seconds must be a positive integer")
+    return findings
+
+
+def check_capability_execution_modes(skills: list[dict[str, Any]]) -> list[str]:
+    findings: list[str] = []
+    for skill in skills:
+        skill_name = skill.get("name", "<unknown>")
+        for index, capability in enumerate(skill.get("planner_capabilities") or []):
+            cap_name = capability.get("name") or f"planner_capabilities[{index}]"
+            execution_mode = capability.get("execution_mode")
+            if execution_mode not in EXECUTION_MODES:
+                findings.append(
+                    f"{skill_name}.{cap_name}: execution_mode must be one of {sorted(EXECUTION_MODES)}"
+                )
+                continue
+            adapter_kind = capability.get("async_adapter_kind")
+            if execution_mode in ASYNC_EXECUTION_MODES:
+                if adapter_kind not in ASYNC_ADAPTER_KINDS:
+                    findings.append(
+                        f"{skill_name}.{cap_name}: async_adapter_kind must be one of {sorted(ASYNC_ADAPTER_KINDS)}"
+                    )
+            elif adapter_kind:
+                findings.append(
+                    f"{skill_name}.{cap_name}: sync_short must not declare async_adapter_kind"
+                )
     return findings
 
 
@@ -167,6 +203,7 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
     }
     findings = (
         check_timeouts(skills)
+        + check_capability_execution_modes(skills)
         + check_run_cmd_async_contract(skills_by_name)
         + check_media_dry_run_contract(skills_by_name)
         + check_video_poll_contract(skills_by_name)

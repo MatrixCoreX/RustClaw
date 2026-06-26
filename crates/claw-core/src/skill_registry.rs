@@ -86,6 +86,24 @@ impl RegistryDedupScope {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityExecutionMode {
+    SyncShort,
+    AsyncPreferred,
+    AsyncRequired,
+}
+
+impl CapabilityExecutionMode {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::SyncShort => "sync_short",
+            Self::AsyncPreferred => "async_preferred",
+            Self::AsyncRequired => "async_required",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PlannerCapabilityMapping {
     pub name: String,
@@ -107,6 +125,10 @@ pub struct PlannerCapabilityMapping {
     pub dedup_scope: Option<RegistryDedupScope>,
     #[serde(default)]
     pub idempotent: Option<bool>,
+    #[serde(default)]
+    pub execution_mode: Option<CapabilityExecutionMode>,
+    #[serde(default)]
+    pub async_adapter_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -587,6 +609,9 @@ fn normalize_planner_capabilities(
             once_per_task: mapping.once_per_task,
             dedup_scope: mapping.dedup_scope,
             idempotent: mapping.idempotent,
+            execution_mode: mapping.execution_mode,
+            async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
+                .map(|value| normalize_schema_token(&value)),
         });
     }
     out

@@ -401,6 +401,14 @@ fn quick_index_planner_capabilities(manifest: &claw_core::skill_registry::SkillM
             if !capability.required.is_empty() {
                 attrs.push(format!("required={}", capability.required.join("|")));
             }
+            if let Some(execution_mode) = capability.execution_mode {
+                attrs.push(format!("execution_mode={}", execution_mode.as_token()));
+            }
+            if let Some(async_adapter_kind) = capability.async_adapter_kind.as_deref() {
+                if !async_adapter_kind.trim().is_empty() {
+                    attrs.push(format!("async_adapter_kind={}", async_adapter_kind.trim()));
+                }
+            }
             if attrs.is_empty() {
                 name.to_string()
             } else {
