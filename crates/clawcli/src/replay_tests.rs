@@ -205,7 +205,29 @@ fn replay_diff_summary_reports_machine_field_changes() {
         "status": "succeeded",
         "lifecycle_state": "succeeded",
         "task": {
+            "boundary_context": {
+                "route_gate_kind": "execute",
+                "semantic_route_authority": "agent_loop_default"
+            },
             "result_json": {
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "action_type": "call_capability",
+                                "capability": "fs.read",
+                                "action": "read_text_range",
+                                "status": "ok"
+                            }
+                        ]
+                    },
+                    "summary": {
+                        "answer_verifier": {
+                            "verdict": "pass",
+                            "status_code": "verified"
+                        }
+                    }
+                },
                 "artifact_refs": [
                     {
                         "ref": "artifact:left"
@@ -226,7 +248,30 @@ fn replay_diff_summary_reports_machine_field_changes() {
         "status": "failed",
         "lifecycle_state": "failed",
         "task": {
+            "boundary_context": {
+                "route_gate_kind": "execute",
+                "semantic_route_authority": "boundary_fallback"
+            },
             "result_json": {
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "action_type": "call_capability",
+                                "capability": "fs.read",
+                                "action": "read_text_range",
+                                "status": "error",
+                                "error_code": "missing_required_argument"
+                            }
+                        ]
+                    },
+                    "summary": {
+                        "answer_verifier": {
+                            "verdict": "fail",
+                            "status_code": "missing_required_evidence"
+                        }
+                    }
+                },
                 "artifact_refs": []
             }
         },
@@ -241,8 +286,24 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(diff["diff"]["lifecycle_changed"], true);
     assert_eq!(diff["diff"]["event_count_changed"], true);
     assert_eq!(diff["diff"]["artifact_count_changed"], true);
+    assert_eq!(diff["diff"]["route_changed"], true);
+    assert_eq!(diff["diff"]["action_sequence_changed"], true);
+    assert_eq!(diff["diff"]["tool_result_changed"], true);
+    assert_eq!(diff["diff"]["verifier_changed"], true);
     assert_eq!(diff["left"]["artifact_ref_count"], 1);
     assert_eq!(diff["right"]["artifact_ref_count"], 0);
+    assert_eq!(
+        diff["left"]["route_fingerprint"][0]["semantic_route_authority"],
+        "agent_loop_default"
+    );
+    assert_eq!(
+        diff["right"]["action_sequence"][0]["error_code"],
+        "missing_required_argument"
+    );
+    assert_eq!(
+        diff["right"]["verifier_summary"][0]["answer_verifier"]["status_code"],
+        "missing_required_evidence"
+    );
 }
 
 #[test]
