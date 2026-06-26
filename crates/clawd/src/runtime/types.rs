@@ -297,4 +297,6 @@ pub(crate) struct ScheduledJobDue {
     pub(crate) timezone: String,
     pub(crate) isolation_profile: String,
     pub(crate) permission_policy_json: String,
+    pub(crate) thread_resume_enabled: bool,
+    pub(crate) last_thread_task_id: Option<String>,
 }

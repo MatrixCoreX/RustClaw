@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     next_run_at       INTEGER,
     isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace',
     permission_policy_json TEXT NOT NULL DEFAULT '{}',
+    thread_resume_enabled INTEGER NOT NULL DEFAULT 1,
+    last_thread_task_id TEXT,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );

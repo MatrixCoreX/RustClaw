@@ -250,6 +250,8 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
             next_run_at       INTEGER,
             isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace',
             permission_policy_json TEXT NOT NULL DEFAULT '{}',
+            thread_resume_enabled INTEGER NOT NULL DEFAULT 1,
+            last_thread_task_id TEXT,
             created_at        TEXT NOT NULL,
             updated_at        TEXT NOT NULL
         );
@@ -285,6 +287,18 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
         "scheduled_jobs",
         "permission_policy_json",
         "ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "thread_resume_enabled",
+        "ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "last_thread_task_id",
+        "ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT",
     )?;
     Ok(())
 }

@@ -109,6 +109,36 @@ pub(crate) fn scheduled_run_default_isolation_profile() -> &'static str {
     "local_current_workspace"
 }
 
+pub(crate) fn scheduled_run_thread_resume_metadata(
+    enabled: bool,
+    previous_task_id: Option<&str>,
+) -> Vec<(String, Value)> {
+    let previous_task_id = previous_task_id
+        .map(stable_machine_ref)
+        .filter(|value| !value.is_empty());
+    let mut metadata = vec![
+        ("thread_resume".to_string(), Value::Bool(enabled)),
+        (
+            "thread_resume_mode".to_string(),
+            Value::String(if enabled && previous_task_id.is_some() {
+                "prior_scheduled_task".to_string()
+            } else {
+                "new_scheduled_task".to_string()
+            }),
+        ),
+    ];
+    if enabled {
+        if let Some(task_id) = previous_task_id {
+            metadata.push((
+                "thread_resume_task_id".to_string(),
+                Value::String(task_id.clone()),
+            ));
+            metadata.push(("source_task_id".to_string(), Value::String(task_id)));
+        }
+    }
+    metadata
+}
+
 pub(crate) fn insert_scheduled_run_enqueued(
     db: &Connection,
     record: &ScheduledRunEnqueued<'_>,

@@ -4,8 +4,8 @@ use serde_json::json;
 use super::{
     insert_scheduled_run_enqueued, list_scheduled_run_history, scheduled_run_payload_metadata,
     scheduled_run_policy_metadata, scheduled_run_terminal_result, scheduled_run_thread_ref,
-    scheduled_run_triage_from_machine, update_scheduled_run_terminal, ScheduledRunEnqueued,
-    ScheduledRunTriage,
+    scheduled_run_thread_resume_metadata, scheduled_run_triage_from_machine,
+    update_scheduled_run_terminal, ScheduledRunEnqueued, ScheduledRunTriage,
 };
 
 #[test]
@@ -65,6 +65,43 @@ fn scheduled_run_policy_metadata_sanitizes_profile_and_policy_fields() {
             .map(|value| value.len()),
         Some(0)
     );
+}
+
+#[test]
+fn scheduled_run_thread_resume_metadata_binds_prior_task_when_enabled() {
+    let metadata = scheduled_run_thread_resume_metadata(true, Some(" task-prev "));
+    let map: serde_json::Map<String, serde_json::Value> = metadata.into_iter().collect();
+
+    assert_eq!(
+        map.get("thread_resume")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        map.get("thread_resume_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("prior_scheduled_task")
+    );
+    assert_eq!(
+        map.get("thread_resume_task_id")
+            .and_then(serde_json::Value::as_str),
+        Some("task-prev")
+    );
+    assert_eq!(
+        map.get("source_task_id")
+            .and_then(serde_json::Value::as_str),
+        Some("task-prev")
+    );
+
+    let disabled = scheduled_run_thread_resume_metadata(false, Some("task-prev"));
+    let disabled_map: serde_json::Map<String, serde_json::Value> = disabled.into_iter().collect();
+    assert_eq!(
+        disabled_map
+            .get("thread_resume")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert!(disabled_map.get("thread_resume_task_id").is_none());
 }
 
 #[test]

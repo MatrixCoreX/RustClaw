@@ -100,6 +100,14 @@ fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
         scheduled_sql.contains("permission_policy_json"),
         "scheduled_jobs schema should preserve automation permission policy: {scheduled_sql}"
     );
+    assert!(
+        scheduled_sql.contains("thread_resume_enabled"),
+        "scheduled_jobs schema should preserve automation thread resume flag: {scheduled_sql}"
+    );
+    assert!(
+        scheduled_sql.contains("last_thread_task_id"),
+        "scheduled_jobs schema should preserve automation thread task id: {scheduled_sql}"
+    );
 
     db.execute(
         "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at)
