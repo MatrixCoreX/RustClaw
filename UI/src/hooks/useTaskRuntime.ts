@@ -59,6 +59,9 @@ export function useTaskRuntime({
   const [cancelingTaskIndex, setCancelingTaskIndex] = useState<number | null>(null);
   const [cancelTaskMessage, setCancelTaskMessage] = useState<string | null>(null);
   const [cancelTaskError, setCancelTaskError] = useState<string | null>(null);
+  const [taskControlSubmittingId, setTaskControlSubmittingId] = useState<string | null>(null);
+  const [taskControlMessage, setTaskControlMessage] = useState<string | null>(null);
+  const [taskControlError, setTaskControlError] = useState<string | null>(null);
 
   const [interactionKind, setInteractionKind] = useState<TaskSubmitKind>("ask");
   const [interactionChannel, setInteractionChannel] = useState<ChannelName>("ui");
@@ -270,6 +273,44 @@ export function useTaskRuntime({
     }
   };
 
+  const controlTaskById = async (control: "pause" | "resume", controlTaskId: string) => {
+    const normalizedTaskId = controlTaskId.trim();
+    if (!normalizedTaskId) return;
+    setTaskControlSubmittingId(`${control}:${normalizedTaskId}`);
+    setTaskControlMessage(null);
+    setTaskControlError(null);
+    try {
+      const path = control === "pause" ? "/v1/tasks/pause-by-task-id" : "/v1/tasks/resume-by-task-id";
+      const payload =
+        control === "pause"
+          ? { task_id: normalizedTaskId, pause_seconds: 3600 }
+          : { task_id: normalizedTaskId };
+      const res = await apiFetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `task control failed (${res.status})`);
+      }
+      setTaskControlMessage(
+        control === "pause"
+          ? t("任务已暂停，会在稍后再继续。", "Task paused and will continue later.")
+          : t("任务恢复请求已提交。", "Task resume request submitted."),
+      );
+      await fetchActiveTasks(true);
+      if (taskResult?.task_id === normalizedTaskId) {
+        void queryTaskById(normalizedTaskId, false);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setTaskControlError(message);
+    } finally {
+      setTaskControlSubmittingId(null);
+    }
+  };
+
   const submitInteractionTask = async () => {
     setInteractionLoading(true);
     setInteractionError(null);
@@ -384,6 +425,9 @@ export function useTaskRuntime({
     cancelingTaskIndex,
     cancelTaskMessage,
     cancelTaskError,
+    taskControlSubmittingId,
+    taskControlMessage,
+    taskControlError,
     interactionKind,
     setInteractionKind,
     interactionChannel,
@@ -413,6 +457,7 @@ export function useTaskRuntime({
     setResumeDraftValue,
     submitResumeForTask,
     cancelActiveTask,
+    controlTaskById,
     submitInteractionTask,
     markTaskSubmitted,
     recordTaskResult,
