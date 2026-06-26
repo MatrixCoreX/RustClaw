@@ -266,6 +266,66 @@ fn scheduled_run_history_listing_filters_owner_and_job() {
     assert_eq!(filtered[0]["finding_refs"][0], "finding:1");
 }
 
+#[test]
+fn scheduled_run_history_listing_exposes_policy_provider_machine_summary() {
+    let db = Connection::open_in_memory().expect("open test db");
+    crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
+    insert_test_scheduled_job(&db, "job_abc123", 7, 11);
+    insert_scheduled_run_enqueued(
+        &db,
+        &ScheduledRunEnqueued {
+            run_id: "run_policy",
+            job_id: "job_abc123",
+            task_id: "task_policy",
+            thread_ref: "scheduled_job:job_abc123",
+            started_at: "1000",
+        },
+    )
+    .expect("insert run");
+    let result = json!({
+        "schema_version": 1,
+        "task_success": false,
+        "error_code": "provider_rate_limited",
+        "policy_decision": {
+            "decision": "denied",
+            "reason_code": "credential_access_blocked",
+            "explanation": "visible policy prose"
+        },
+        "provider_status": {
+            "provider": "minimax",
+            "status": "failed",
+            "error_text": "visible provider prose"
+        },
+        "notification": {
+            "delivered": false,
+            "runtime_channel": "ui",
+            "error_code": "channel_send_failed"
+        },
+        "text": "visible result prose"
+    });
+    update_scheduled_run_terminal(&db, "job_abc123", "task_policy", "failed", "1010", &result)
+        .expect("terminal update");
+
+    let rows = list_scheduled_run_history(&db, 7, 11, Some("job_abc123"), 10).expect("list runs");
+    let summary = &rows[0]["result_summary"];
+
+    assert_eq!(rows[0]["triage_status"], "failed");
+    assert_eq!(summary["error_code"], "provider_rate_limited");
+    assert_eq!(summary["policy_decision"]["decision"], "denied");
+    assert_eq!(
+        summary["policy_decision"]["reason_code"],
+        "credential_access_blocked"
+    );
+    assert_eq!(summary["provider_status"]["provider"], "minimax");
+    assert_eq!(summary["provider_status"]["status"], "failed");
+    assert_eq!(summary["notification"]["delivered"], false);
+    assert_eq!(summary["notification"]["error_code"], "channel_send_failed");
+    assert!(summary["policy_decision"].get("explanation").is_none());
+    assert!(summary["provider_status"].get("error_text").is_none());
+    assert!(summary.get("text").is_none());
+    assert!(rows[0].get("result").is_none());
+}
+
 fn insert_test_scheduled_job(db: &Connection, job_id: &str, user_id: i64, chat_id: i64) {
     db.execute(
         "INSERT INTO scheduled_jobs (
