@@ -26,6 +26,11 @@ impl TaskStatusView {
         )
     }
 
+    pub(crate) fn is_background_waiting(&self) -> bool {
+        self.lifecycle_state()
+            .is_some_and(|state| matches!(state, "waiting" | "background" | "needs_user"))
+    }
+
     pub(crate) fn lifecycle(&self) -> Option<&Value> {
         self.raw_data.get("task_lifecycle")
     }

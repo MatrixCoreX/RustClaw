@@ -52,6 +52,28 @@ enum Command {
         interval_ms: u64,
     },
 
+    /// Submit or resume an ask task and wait by default, suitable for scripts.
+    Exec {
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+        prompt: Vec<String>,
+        #[arg(long)]
+        resume_task_id: Option<String>,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        poll_interval_ms: u64,
+        #[arg(long)]
+        continue_on_background: bool,
+        #[arg(long)]
+        fail_on_background: bool,
+    },
+
     /// POST /v1/tasks with kind=run_skill.
     RunSkill {
         skill_name: String,
@@ -218,6 +240,33 @@ fn main() -> Result<()> {
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_submit(base_url, k, text, *wait, *detach, *json, *interval_ms)
+        }
+        Command::Exec {
+            prompt,
+            resume_task_id,
+            detach,
+            json,
+            jsonl,
+            timeout_seconds,
+            poll_interval_ms,
+            continue_on_background,
+            fail_on_background,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            let prompt = prompt.join(" ");
+            commands::run_exec(
+                base_url,
+                k,
+                &prompt,
+                resume_task_id.as_deref(),
+                *detach,
+                *json,
+                *jsonl,
+                *timeout_seconds,
+                *poll_interval_ms,
+                *continue_on_background,
+                *fail_on_background,
+            )
         }
         Command::RunSkill {
             skill_name,
