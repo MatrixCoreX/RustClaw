@@ -604,7 +604,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
         Err(_) => return Ok(None),
     };
     let crate::task_lifecycle::PausedCheckpointResumeReadiness::Ready {
-        state,
+        state: lifecycle_state,
         checkpoint_id: ready_checkpoint_id,
         resume_entrypoint,
         completed_side_effect_count,
@@ -632,7 +632,8 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
             "resume_claim".to_string(),
             serde_json::json!({
                 "schema_version": 1,
-                "owner": "worker_recovery",
+                "owner": state.worker.worker_id.clone(),
+                "owner_layer": "worker_recovery",
                 "checkpoint_id": ready_checkpoint_id,
                 "claimed_at": now_ts,
                 "expires_at": now_ts.saturating_add(lease_seconds),
@@ -648,7 +649,9 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
     let changed = db.execute(
         "UPDATE tasks
          SET result_json = ?2,
-             updated_at = ?3
+             updated_at = ?3,
+             lease_owner = ?5,
+             lease_expires_at = ?6
          WHERE task_id = ?1
            AND status = 'running'
            AND result_json = ?4",
@@ -656,7 +659,9 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
             task_id,
             updated_result_json,
             now_ts.to_string(),
-            raw_result_json
+            raw_result_json,
+            state.worker.worker_id,
+            now_ts.saturating_add(lease_seconds)
         ],
     )?;
     if changed == 0 {
@@ -664,7 +669,7 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
     }
     Ok(Some(DuePausedCheckpointTask {
         task_id: task_id.to_string(),
-        lifecycle_state: state,
+        lifecycle_state,
         checkpoint_id: ready_checkpoint_id,
         task_checkpoint,
         resume_entrypoint: resume_entrypoint_token(resume_entrypoint).to_string(),

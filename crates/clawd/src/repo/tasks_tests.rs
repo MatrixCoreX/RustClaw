@@ -756,7 +756,8 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
         .expect("task exists");
     let lifecycle = response.lifecycle.expect("lifecycle");
     assert_eq!(lifecycle["resume_claim"]["checkpoint_id"], "ckpt-claim");
-    assert_eq!(lifecycle["resume_claim"]["owner"], "worker_recovery");
+    assert_eq!(lifecycle["resume_claim"]["owner"], state.worker.worker_id);
+    assert_eq!(lifecycle["resume_claim"]["owner_layer"], "worker_recovery");
     assert_eq!(
         lifecycle["resume_claim"]["executor_state"],
         "ready_for_planner_resume"
@@ -781,6 +782,17 @@ fn claim_due_paused_checkpoint_task_sets_machine_resume_lease() {
         "run_next_planner_round"
     );
     assert_eq!(lifecycle["next_check_after"], now + 5);
+
+    let db = state.core.db.get().expect("get db");
+    let (lease_owner, lease_expires_at): (String, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select task lease fields");
+    assert_eq!(lease_owner, state.worker.worker_id);
+    assert_eq!(lease_expires_at, now + 30);
 }
 
 #[test]
