@@ -23,6 +23,14 @@ pub(super) struct ActiveTasksRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct AutomationRunsRequest {
+    user_id: i64,
+    chat_id: i64,
+    job_id: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct CancelOneTaskRequest {
     user_id: i64,
     chat_id: i64,
@@ -193,6 +201,46 @@ pub(super) async fn list_active_tasks(
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "List active tasks failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn list_automation_runs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AutomationRunsRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
+        Ok(user_id) => user_id,
+        Err(resp) => return resp,
+    };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("automation_runs_db_pool_failed err={}", err);
+            return super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "automation_runs_db_pool_failed",
+            );
+        }
+    };
+    match crate::scheduled_run_contract::list_scheduled_run_history(
+        &db,
+        effective_user_id,
+        req.chat_id,
+        req.job_id.as_deref(),
+        req.limit.unwrap_or(20),
+    ) {
+        Ok(runs) => super::api_ok(json!({
+            "count": runs.len(),
+            "runs": runs,
+        })),
+        Err(err) => {
+            error!("automation_runs_query_failed err={}", err);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "automation_runs_query_failed",
             )
         }
     }

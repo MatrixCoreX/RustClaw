@@ -753,6 +753,57 @@ pub(crate) fn run_active(
     Ok(())
 }
 
+pub(crate) fn run_automation_runs(
+    base_url: &str,
+    key: &str,
+    user_id: i64,
+    chat_id: i64,
+    job_id: Option<String>,
+    limit: usize,
+    json_output: bool,
+) -> Result<()> {
+    let url = format!("{}/tasks/automation-runs", client::base_v1(base_url));
+    let payload = automation_runs_request_payload(user_id, chat_id, job_id, limit);
+    let resp = client::make_client()?
+        .post(&url)
+        .header("x-rustclaw-key", key)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+        .context("list automation runs failed")?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().context("parse automation runs response")?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "automation-runs returned {}: {:?}",
+            status,
+            body.get("error")
+        );
+    }
+    if json_output {
+        output::print_json_pretty(&body);
+    } else {
+        output::print_automation_run_table(&body);
+    }
+    Ok(())
+}
+
+fn automation_runs_request_payload(
+    user_id: i64,
+    chat_id: i64,
+    job_id: Option<String>,
+    limit: usize,
+) -> Value {
+    json!({
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "job_id": job_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        "limit": limit.clamp(1, 100),
+    })
+}
+
 pub(crate) fn run_cancel(
     base_url: &str,
     key: &str,

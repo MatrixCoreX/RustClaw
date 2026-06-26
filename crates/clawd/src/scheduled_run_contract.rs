@@ -112,6 +112,52 @@ pub(crate) fn update_scheduled_run_terminal(
     Ok(affected)
 }
 
+pub(crate) fn list_scheduled_run_history(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    job_id: Option<&str>,
+    limit: usize,
+) -> anyhow::Result<Vec<Value>> {
+    let limit = limit.clamp(1, 100) as i64;
+    let job_id = job_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(stable_machine_ref);
+    let mut rows = Vec::new();
+    if let Some(job_id) = job_id {
+        let mut stmt = db.prepare(
+            "SELECT r.run_id, r.job_id, r.task_id, r.thread_ref, r.task_status,
+                    r.triage_status, r.result_json, r.started_at, r.finished_at, r.updated_at
+             FROM scheduled_job_runs r
+             JOIN scheduled_jobs j ON j.job_id = r.job_id
+             WHERE j.user_id = ?1 AND j.chat_id = ?2 AND r.job_id = ?3
+             ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC
+             LIMIT ?4",
+        )?;
+        let mapped = stmt.query_map(params![user_id, chat_id, job_id, limit], scheduled_run_row)?;
+        for row in mapped {
+            rows.push(row?);
+        }
+        return Ok(rows);
+    }
+
+    let mut stmt = db.prepare(
+        "SELECT r.run_id, r.job_id, r.task_id, r.thread_ref, r.task_status,
+                r.triage_status, r.result_json, r.started_at, r.finished_at, r.updated_at
+         FROM scheduled_job_runs r
+         JOIN scheduled_jobs j ON j.job_id = r.job_id
+         WHERE j.user_id = ?1 AND j.chat_id = ?2
+         ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC
+         LIMIT ?3",
+    )?;
+    let mapped = stmt.query_map(params![user_id, chat_id, limit], scheduled_run_row)?;
+    for row in mapped {
+        rows.push(row?);
+    }
+    Ok(rows)
+}
+
 pub(crate) fn scheduled_run_terminal_result(
     task_success: bool,
     payload: &Value,
@@ -136,6 +182,45 @@ pub(crate) fn scheduled_run_terminal_result(
         "finding_refs": machine_array(payload.get("finding_refs")),
         "evidence_refs": machine_array(payload.get("evidence_refs")),
         "notification": notification.cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn scheduled_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let result_text: String = row.get(6)?;
+    let result = serde_json::from_str::<Value>(&result_text).unwrap_or_else(|_| json!({}));
+    Ok(json!({
+        "run_id": row.get::<_, String>(0)?,
+        "job_id": row.get::<_, String>(1)?,
+        "task_id": row.get::<_, String>(2)?,
+        "thread_ref": row.get::<_, String>(3)?,
+        "task_status": row.get::<_, String>(4)?,
+        "triage_status": row.get::<_, Option<String>>(5)?,
+        "result_summary": scheduled_run_result_summary(&result),
+        "finding_refs": machine_array(result.get("finding_refs")),
+        "evidence_refs": machine_array(result.get("evidence_refs")),
+        "started_at": row.get::<_, String>(7)?,
+        "finished_at": row.get::<_, Option<String>>(8)?,
+        "updated_at": row.get::<_, String>(9)?,
+    }))
+}
+
+fn scheduled_run_result_summary(result: &Value) -> Value {
+    json!({
+        "schema_version": result.get("schema_version").cloned().unwrap_or(Value::Null),
+        "task_success": result.get("task_success").and_then(Value::as_bool),
+        "error_code": first_machine_string(result, &["error_code", "reason_code"]),
+        "policy_decision": machine_object(
+            result.get("policy_decision"),
+            &["decision", "reason_code", "policy_id", "risk_level", "message_key"],
+        ),
+        "provider_status": machine_object(
+            result.get("provider_status"),
+            &["provider", "status", "status_code", "error_code", "message_key"],
+        ),
+        "notification": machine_object(
+            result.get("notification"),
+            &["delivered", "runtime_channel", "error_code", "message_key"],
+        ),
     })
 }
 

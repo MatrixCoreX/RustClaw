@@ -151,6 +151,20 @@ enum Command {
         json: bool,
     },
 
+    /// POST /v1/tasks/automation-runs
+    AutomationRuns {
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long)]
+        chat_id: i64,
+        #[arg(long)]
+        job_id: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// POST /v1/tasks/cancel
     Cancel {
         #[arg(long)]
@@ -417,6 +431,24 @@ fn main() -> Result<()> {
                 *user_id,
                 *chat_id,
                 exclude_task_id.clone(),
+                *json,
+            )
+        }
+        Command::AutomationRuns {
+            user_id,
+            chat_id,
+            job_id,
+            limit,
+            json,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_automation_runs(
+                base_url,
+                k,
+                *user_id,
+                *chat_id,
+                job_id.clone(),
+                *limit,
                 *json,
             )
         }

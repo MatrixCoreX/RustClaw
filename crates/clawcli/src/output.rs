@@ -82,6 +82,30 @@ pub(crate) fn print_active_task_table(body: &serde_json::Value) {
     }
 }
 
+pub(crate) fn print_automation_run_table(body: &serde_json::Value) {
+    let runs = body
+        .pointer("/data/runs")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    println!(
+        "{:<34} {:<16} {:<36} {:<10} {:<12} findings",
+        "run_id", "job_id", "task_id", "status", "triage"
+    );
+    for run in runs {
+        let run_id = truncate_display_token(&value_token(run.get("run_id")), 34);
+        let job_id = truncate_display_token(&value_token(run.get("job_id")), 16);
+        let task_id = value_token(run.get("task_id"));
+        let status = value_token(run.get("task_status"));
+        let triage = value_token(run.get("triage_status"));
+        let findings = truncate_display_token(&join_string_array(run.get("finding_refs")), 60);
+        println!(
+            "{:<34} {:<16} {:<36} {:<10} {:<12} {}",
+            run_id, job_id, task_id, status, triage, findings
+        );
+    }
+}
+
 pub(crate) fn print_skill_table(body: &serde_json::Value) {
     let items = skill_items(body);
     println!(

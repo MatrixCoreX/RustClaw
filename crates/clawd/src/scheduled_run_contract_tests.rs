@@ -2,9 +2,9 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use super::{
-    insert_scheduled_run_enqueued, scheduled_run_payload_metadata, scheduled_run_terminal_result,
-    scheduled_run_thread_ref, scheduled_run_triage_from_machine, update_scheduled_run_terminal,
-    ScheduledRunEnqueued, ScheduledRunTriage,
+    insert_scheduled_run_enqueued, list_scheduled_run_history, scheduled_run_payload_metadata,
+    scheduled_run_terminal_result, scheduled_run_thread_ref, scheduled_run_triage_from_machine,
+    update_scheduled_run_terminal, ScheduledRunEnqueued, ScheduledRunTriage,
 };
 
 #[test]
@@ -102,6 +102,7 @@ fn scheduled_run_terminal_result_excludes_visible_text_fields() {
 fn scheduled_run_history_insert_and_terminal_update_are_machine_rows() {
     let db = Connection::open_in_memory().expect("open test db");
     crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
+    insert_test_scheduled_job(&db, "job_abc123", 7, 11);
 
     insert_scheduled_run_enqueued(
         &db,
@@ -139,4 +140,59 @@ fn scheduled_run_history_insert_and_terminal_update_are_machine_rows() {
         .expect("updated row");
     assert_eq!(status, "succeeded");
     assert_eq!(triage, "findings");
+}
+
+#[test]
+fn scheduled_run_history_listing_filters_owner_and_job() {
+    let db = Connection::open_in_memory().expect("open test db");
+    crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
+    insert_test_scheduled_job(&db, "job_abc123", 7, 11);
+    insert_test_scheduled_job(&db, "job_other", 7, 11);
+    insert_test_scheduled_job(&db, "job_foreign", 8, 11);
+
+    for (run_id, job_id, task_id, finding) in [
+        ("run_001", "job_abc123", "task_001", "finding:1"),
+        ("run_002", "job_other", "task_002", "finding:2"),
+        ("run_003", "job_foreign", "task_003", "finding:3"),
+    ] {
+        insert_scheduled_run_enqueued(
+            &db,
+            &ScheduledRunEnqueued {
+                run_id,
+                job_id,
+                task_id,
+                thread_ref: &format!("scheduled_job:{job_id}"),
+                started_at: "1000",
+            },
+        )
+        .expect("insert run");
+        let result = json!({"finding_refs": [finding], "text": "ignored visible text"});
+        update_scheduled_run_terminal(&db, job_id, task_id, "succeeded", "1010", &result)
+            .expect("terminal update");
+    }
+
+    let all = list_scheduled_run_history(&db, 7, 11, None, 10).expect("list all owner runs");
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0]["task_status"], "succeeded");
+    assert!(all[0].get("result").is_none());
+    assert!(all[0]["result_summary"].get("text").is_none());
+    assert_eq!(all[0]["finding_refs"][0], "finding:2");
+
+    let filtered =
+        list_scheduled_run_history(&db, 7, 11, Some("job_abc123"), 10).expect("list job runs");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0]["run_id"], "run_001");
+    assert_eq!(filtered[0]["finding_refs"][0], "finding:1");
+}
+
+fn insert_test_scheduled_job(db: &Connection, job_id: &str, user_id: i64, chat_id: i64) {
+    db.execute(
+        "INSERT INTO scheduled_jobs (
+            job_id, user_id, chat_id, channel, schedule_type, timezone,
+            task_kind, task_payload_json, enabled, notify_on_success,
+            notify_on_failure, next_run_at, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, 'ui', 'once', 'UTC', 'ask', '{}', 1, 1, 1, 1000, '1000', '1000')",
+        rusqlite::params![job_id, user_id, chat_id],
+    )
+    .expect("insert scheduled job");
 }
