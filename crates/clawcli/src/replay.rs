@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -196,7 +197,81 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "event_count": events,
         "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
         "result_source": "recorded_bundle",
+        "coverage": replay_recording_coverage(bundle),
     })
+}
+
+fn replay_recording_coverage(bundle: &Value) -> Value {
+    let event_types = replay_event_types(bundle);
+    json!({
+        "has_task_checkpoint": value_contains_key(bundle, "task_checkpoint", 0),
+        "has_pending_async_job": value_contains_key(bundle, "pending_async_job", 0),
+        "has_repair_signal": value_contains_any_key(bundle, &["repair_signal", "repair_signals"], 0),
+        "has_resume_claim": value_contains_any_key(
+            bundle,
+            &[
+                "resume_claim",
+                "resume_executor_claim",
+                "resume_executor_handoff_claim",
+                "resume_executor_dispatch_claim",
+                "resume_executor_result_projection_claim",
+            ],
+            0,
+        ),
+        "has_subagent_results": value_contains_any_key(
+            bundle,
+            &["child_results", "subagent_results", "finding_refs"],
+            0,
+        ),
+        "has_policy_decision": value_contains_any_key(
+            bundle,
+            &["permission_decision", "policy_decision", "command_policy"],
+            0,
+        ),
+        "event_types": event_types,
+    })
+}
+
+fn replay_event_types(bundle: &Value) -> Vec<String> {
+    let mut event_types = BTreeSet::new();
+    if let Some(events) = bundle.get("events").and_then(Value::as_array) {
+        for event in events {
+            if event_types.len() >= 64 {
+                break;
+            }
+            if let Some(event_type) = event
+                .get("event_type")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                event_types.insert(event_type.to_string());
+            }
+        }
+    }
+    event_types.into_iter().collect()
+}
+
+fn value_contains_any_key(value: &Value, keys: &[&str], depth: usize) -> bool {
+    keys.iter().any(|key| value_contains_key(value, key, depth))
+}
+
+fn value_contains_key(value: &Value, target_key: &str, depth: usize) -> bool {
+    if depth > 10 {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            map.contains_key(target_key)
+                || map
+                    .values()
+                    .any(|value| value_contains_key(value, target_key, depth + 1))
+        }
+        Value::Array(items) => items
+            .iter()
+            .any(|value| value_contains_key(value, target_key, depth + 1)),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
+    }
 }
 
 fn replay_artifact_ref_count(bundle: &Value) -> usize {

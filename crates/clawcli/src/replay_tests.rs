@@ -83,6 +83,114 @@ fn replay_run_summary_is_recorded_only_machine_result() {
     assert_eq!(summary["task_id"], "task-replay-summary");
     assert_eq!(summary["status"], "succeeded");
     assert_eq!(summary["event_count"], 1);
+    assert_eq!(summary["coverage"]["event_types"][0], "task_completed");
+    assert_eq!(summary["coverage"]["has_task_checkpoint"], false);
+}
+
+#[test]
+fn replay_run_summary_reports_failing_task_fixture_coverage() {
+    let fixtures = vec![
+        (
+            replay_fixture_bundle(
+                "task-planner-repair",
+                serde_json::json!({
+                    "status": "failed",
+                    "task_checkpoint": {
+                        "checkpoint_id": "ckpt-repair",
+                        "repair_signal": {
+                            "status_code": "missing_required_evidence",
+                            "repair_class": "planner_repair"
+                        }
+                    }
+                }),
+                "planner_repair",
+            ),
+            "has_repair_signal",
+            "planner_repair",
+        ),
+        (
+            replay_fixture_bundle(
+                "task-async-poll",
+                serde_json::json!({
+                    "status": "failed",
+                    "task_checkpoint": {
+                        "checkpoint_id": "ckpt-async",
+                        "pending_async_job": {
+                            "job_id": "job-async",
+                            "status": "expired",
+                            "poll_after_seconds": 0,
+                            "expires_at": 100,
+                            "cancel_ref": "local_process:/tmp/job-async",
+                            "message_key": "clawd.task.async_job_expired"
+                        }
+                    },
+                    "task_lifecycle": {
+                        "state": "failed",
+                        "terminal_reason": "async_job_expired"
+                    }
+                }),
+                "async_poll_failed",
+            ),
+            "has_pending_async_job",
+            "async_poll_failed",
+        ),
+        (
+            replay_fixture_bundle(
+                "task-lease-recovery",
+                serde_json::json!({
+                    "status": "failed",
+                    "task_lifecycle": {
+                        "state": "failed",
+                        "resume_claim": {
+                            "checkpoint_id": "ckpt-lease",
+                            "owner": "worker-a",
+                            "recovery_reason": "worker_lease_expired"
+                        }
+                    }
+                }),
+                "lease_recovery_failed",
+            ),
+            "has_resume_claim",
+            "lease_recovery_failed",
+        ),
+        (
+            replay_fixture_bundle(
+                "task-subagent-aggregation",
+                serde_json::json!({
+                    "status": "failed",
+                    "result_json": {
+                        "child_results": [
+                            {
+                                "role": "explorer",
+                                "status": "failed",
+                                "error_code": "child_timeout"
+                            }
+                        ],
+                        "aggregation": {
+                            "finding_refs": ["subagent-batch:1"]
+                        }
+                    }
+                }),
+                "subagent_aggregation_failed",
+            ),
+            "has_subagent_results",
+            "subagent_aggregation_failed",
+        ),
+    ];
+
+    for (bundle, coverage_key, event_type) in fixtures {
+        validate_replay_bundle(&bundle).expect("valid replay fixture");
+        let summary = replay_run_summary(&bundle);
+
+        assert_eq!(summary["replay_mode"], "recorded_only");
+        assert_eq!(summary["live_provider"], false);
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["coverage"][coverage_key], true);
+        assert!(summary["coverage"]["event_types"]
+            .as_array()
+            .expect("event type array")
+            .contains(&serde_json::json!(event_type)));
+    }
 }
 
 #[test]
@@ -132,4 +240,31 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(diff["diff"]["artifact_count_changed"], true);
     assert_eq!(diff["left"]["artifact_ref_count"], 1);
     assert_eq!(diff["right"]["artifact_ref_count"], 0);
+}
+
+fn replay_fixture_bundle(
+    task_id: &str,
+    task: serde_json::Value,
+    event_type: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "bundle_kind": "rustclaw_task_replay",
+        "task_id": task_id,
+        "status": "failed",
+        "lifecycle_state": "failed",
+        "redaction": {
+            "policy": "machine_key_redaction_v1"
+        },
+        "task": task,
+        "events": [
+            {
+                "event_type": event_type,
+                "fields": {
+                    "task_id": task_id,
+                    "status": "failed"
+                }
+            }
+        ]
+    })
 }
