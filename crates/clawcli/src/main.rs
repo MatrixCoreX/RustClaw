@@ -72,6 +72,8 @@ enum Command {
         continue_on_background: bool,
         #[arg(long)]
         fail_on_background: bool,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
     },
 
     /// POST /v1/tasks with kind=run_skill.
@@ -251,10 +253,11 @@ fn main() -> Result<()> {
             poll_interval_ms,
             continue_on_background,
             fail_on_background,
+            artifact_dir,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             let prompt = prompt.join(" ");
-            commands::run_exec(
+            let exit_code = commands::run_exec(
                 base_url,
                 k,
                 &prompt,
@@ -266,7 +269,13 @@ fn main() -> Result<()> {
                 *poll_interval_ms,
                 *continue_on_background,
                 *fail_on_background,
-            )
+                artifact_dir.as_ref(),
+            )?;
+            if exit_code == 0 {
+                Ok(())
+            } else {
+                std::process::exit(i32::from(exit_code));
+            }
         }
         Command::RunSkill {
             skill_name,
