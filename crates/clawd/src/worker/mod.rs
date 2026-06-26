@@ -121,13 +121,13 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
     );
     async {
         info!(
-            "worker_once: picked task_id={} user_id={} chat_id={} kind={}",
-            task.task_id, task.user_id, task.chat_id, task.kind
+            "worker_once: worker_id={} picked task_id={} user_id={} chat_id={} kind={}",
+            state.worker.worker_id, task.task_id, task.user_id, task.chat_id, task.kind
         );
         info!("{}", crate::LOG_CALL_WRAP);
         info!(
-            "task_call_begin call_id={} task_id={} kind={} user_id={} chat_id={}",
-            call_id, task.task_id, task.kind, task.user_id, task.chat_id
+            "task_call_begin worker_id={} call_id={} task_id={} kind={} user_id={} chat_id={}",
+            state.worker.worker_id, call_id, task.task_id, task.kind, task.user_id, task.chat_id
         );
         info!("{}", crate::LOG_CALL_WRAP);
 
@@ -207,8 +207,8 @@ async fn finalize_worker_timeout(
         worker_timeout_secs, task_kind_for_timeout_log
     );
     error!(
-        "worker_once timeout: task_id={} kind={} timeout_seconds={}",
-        task.task_id, task_kind_for_timeout_log, worker_timeout_secs
+        "worker_once timeout: worker_id={} task_id={} kind={} timeout_seconds={}",
+        state.worker.worker_id, task.task_id, task_kind_for_timeout_log, worker_timeout_secs
     );
     crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
     let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;

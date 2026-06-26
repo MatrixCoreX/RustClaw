@@ -10,6 +10,7 @@ use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDu
 
 pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot::Sender<()> {
     let interval_secs = state.worker.worker_task_heartbeat_seconds.max(5);
+    let worker_id = state.worker.worker_id.clone();
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
         loop {
@@ -17,8 +18,8 @@ pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot:
                 _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
                     if let Err(err) = repo::touch_running_task(&state, &task_id) {
                         warn!(
-                            "task heartbeat update failed: task_id={} interval_secs={} err={}",
-                            task_id, interval_secs, err
+                            "task heartbeat update failed: worker_id={} task_id={} interval_secs={} err={}",
+                            worker_id, task_id, interval_secs, err
                         );
                     }
                 }
@@ -49,7 +50,8 @@ pub(crate) fn spawn_long_term_summary_refresh(
 pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
     let worker_count = concurrency.max(1);
     info!(
-        "spawn_worker: starting {} worker loop(s), poll_interval_ms={}",
+        "spawn_worker: worker_id={} starting {} worker loop(s), poll_interval_ms={}",
+        state.worker.worker_id,
         worker_count,
         poll_interval_ms.max(10)
     );
@@ -58,7 +60,10 @@ pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: 
         tokio::spawn(async move {
             loop {
                 if let Err(err) = super::super::worker_once(&state_cloned).await {
-                    error!("Worker tick failed (worker_idx={}): {}", worker_idx, err);
+                    error!(
+                        "Worker tick failed (worker_id={} worker_idx={}): {}",
+                        state_cloned.worker.worker_id, worker_idx, err
+                    );
                 }
                 tokio::time::sleep(Duration::from_millis(poll_interval_ms.max(10))).await;
             }
