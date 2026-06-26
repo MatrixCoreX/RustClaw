@@ -390,6 +390,11 @@ fn cancel_adapter_result_from_task_result(
     if cancel_ref.starts_with("local_process:") {
         return Some(cancel_local_process_job(cancel_ref, now_ts));
     }
+    if provider_cancel_ref_kind(cancel_ref).is_some() {
+        return Some(provider_cancel_adapter_required_result(
+            &result, cancel_ref, now_ts,
+        ));
+    }
     None
 }
 
@@ -404,6 +409,93 @@ fn task_cancel_ref(result: &Value) -> Option<&str> {
     .filter_map(Value::as_str)
     .map(str::trim)
     .find(|value| !value.is_empty())
+}
+
+fn provider_cancel_adapter_required_result(result: &Value, cancel_ref: &str, now_ts: i64) -> Value {
+    let adapter_kind = task_cancel_adapter_kind(result, cancel_ref);
+    let contract = provider_cancel_contract(cancel_ref);
+    json!({
+        "schema_version": 1,
+        "adapter_kind": adapter_kind,
+        "status": "requires_provider_adapter",
+        "cancel_ref": cancel_ref,
+        "cancelled_at": now_ts,
+        "message_key": TASK_CANCELLED_MESSAGE_KEY,
+        "error_code": "provider_cancel_adapter_missing",
+        "provider_cancel_contract": contract,
+    })
+}
+
+fn task_cancel_adapter_kind(result: &Value, cancel_ref: &str) -> &'static str {
+    [
+        "/task_checkpoint/pending_async_job/poll_adapter/adapter_kind",
+        "/task_checkpoint/pending_async_job/poll_adapter/kind",
+        "/task_lifecycle/async_timeout_policy/adapter_kind",
+        "/task_lifecycle/poll_adapter_kind",
+    ]
+    .into_iter()
+    .filter_map(|pointer| result.pointer(pointer))
+    .filter_map(Value::as_str)
+    .map(str::trim)
+    .find_map(known_async_cancel_adapter_kind)
+    .or_else(|| inferred_cancel_adapter_kind(cancel_ref))
+    .unwrap_or("remote_job_poll")
+}
+
+fn known_async_cancel_adapter_kind(value: &str) -> Option<&'static str> {
+    match value {
+        "http_job_poll" => Some("http_job_poll"),
+        "mcp_job_poll" => Some("mcp_job_poll"),
+        "media_job_poll" => Some("media_job_poll"),
+        "browser_job_poll" => Some("browser_job_poll"),
+        "remote_job_poll" => Some("remote_job_poll"),
+        _ => None,
+    }
+}
+
+fn inferred_cancel_adapter_kind(cancel_ref: &str) -> Option<&'static str> {
+    match provider_cancel_ref_kind(cancel_ref)? {
+        "http" => Some("http_job_poll"),
+        "mcp" => Some("mcp_job_poll"),
+        "media" | "provider" => Some("media_job_poll"),
+        "browser" => Some("browser_job_poll"),
+        "remote" => Some("remote_job_poll"),
+        _ => None,
+    }
+}
+
+fn provider_cancel_ref_kind(cancel_ref: &str) -> Option<&'static str> {
+    let cancel_ref = cancel_ref.trim();
+    for (prefix, kind) in [
+        ("provider:", "provider"),
+        ("http:", "http"),
+        ("mcp:", "mcp"),
+        ("media:", "media"),
+        ("browser:", "browser"),
+        ("remote:", "remote"),
+    ] {
+        if cancel_ref.starts_with(prefix) {
+            return Some(kind);
+        }
+    }
+    None
+}
+
+fn provider_cancel_contract(cancel_ref: &str) -> Value {
+    let kind = provider_cancel_ref_kind(cancel_ref).unwrap_or("unknown");
+    let parts = cancel_ref
+        .split(':')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "cancel_ref_kind": kind,
+        "action": parts.get(1).copied(),
+        "provider": parts.get(2).copied(),
+        "job_id": parts.get(3).copied(),
+        "required_adapter_fields": ["adapter_kind", "cancel_ref", "job_id"],
+    })
 }
 
 fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
@@ -627,3 +719,7 @@ fn normalized_optional_task_id(value: Option<&str>) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
 }
+
+#[cfg(test)]
+#[path = "task_admin_tests.rs"]
+mod tests;
