@@ -233,6 +233,33 @@ fn append_task_lease_lifecycle_fields(
     }
 }
 
+fn expired_resume_claim_recovery_metadata(
+    lifecycle: &Value,
+    checkpoint_id: &str,
+    now_ts: i64,
+) -> Option<(Option<String>, i64)> {
+    let claim = lifecycle.get("resume_claim")?;
+    let claim_checkpoint_id = claim
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if claim_checkpoint_id != checkpoint_id {
+        return None;
+    }
+    let expires_at = claim.get("expires_at").and_then(Value::as_i64)?;
+    if expires_at <= 0 || expires_at > now_ts {
+        return None;
+    }
+    let owner = claim
+        .get("owner")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    Some((owner, expires_at))
+}
+
 pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
         .core
@@ -688,18 +715,36 @@ pub(crate) fn claim_due_paused_checkpoint_task_internal(
 
     let mut lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result_json), None);
+    let expired_claim_recovery =
+        expired_resume_claim_recovery_metadata(&lifecycle, &ready_checkpoint_id, now_ts);
     if let Some(obj) = lifecycle.as_object_mut() {
-        obj.insert(
-            "resume_claim".to_string(),
-            serde_json::json!({
-                "schema_version": 1,
-                "owner": state.worker.worker_id.clone(),
-                "owner_layer": "worker_recovery",
-                "checkpoint_id": ready_checkpoint_id,
-                "claimed_at": now_ts,
-                "expires_at": now_ts.saturating_add(lease_seconds),
-            }),
-        );
+        let mut resume_claim = serde_json::json!({
+            "schema_version": 1,
+            "owner": state.worker.worker_id.clone(),
+            "owner_layer": "worker_recovery",
+            "checkpoint_id": ready_checkpoint_id.clone(),
+            "claimed_at": now_ts,
+            "expires_at": now_ts.saturating_add(lease_seconds),
+        });
+        if let Some((previous_owner, previous_expires_at)) = expired_claim_recovery {
+            if let Some(claim_obj) = resume_claim.as_object_mut() {
+                claim_obj.insert(
+                    "recovery_reason".to_string(),
+                    serde_json::json!("checkpoint_lease_expired"),
+                );
+                claim_obj.insert(
+                    "previous_claim_expires_at".to_string(),
+                    serde_json::json!(previous_expires_at),
+                );
+                if let Some(previous_owner) = previous_owner {
+                    claim_obj.insert(
+                        "previous_claim_owner".to_string(),
+                        serde_json::json!(previous_owner),
+                    );
+                }
+            }
+        }
+        obj.insert("resume_claim".to_string(), resume_claim);
         obj.insert("resume_due".to_string(), serde_json::json!(true));
         obj.insert("resume_wait_seconds".to_string(), serde_json::json!(0));
     } else {
