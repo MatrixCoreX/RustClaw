@@ -248,6 +248,8 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
             notify_on_failure INTEGER NOT NULL DEFAULT 1,
             last_run_at       TEXT,
             next_run_at       INTEGER,
+            isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace',
+            permission_policy_json TEXT NOT NULL DEFAULT '{}',
             created_at        TEXT NOT NULL,
             updated_at        TEXT NOT NULL
         );
@@ -271,6 +273,18 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_updated ON scheduled_job_runs(job_id, updated_at);
         CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_task ON scheduled_job_runs(task_id);
         CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_triage ON scheduled_job_runs(triage_status, updated_at);",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "isolation_profile",
+        "ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "permission_policy_json",
+        "ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
     )?;
     Ok(())
 }

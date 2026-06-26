@@ -85,6 +85,21 @@ fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
         sql.contains("'wechat'"),
         "tasks schema should allow wechat: {sql}"
     );
+    let scheduled_sql: String = db
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scheduled_jobs'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read scheduled_jobs schema");
+    assert!(
+        scheduled_sql.contains("isolation_profile"),
+        "scheduled_jobs schema should preserve automation isolation profile: {scheduled_sql}"
+    );
+    assert!(
+        scheduled_sql.contains("permission_policy_json"),
+        "scheduled_jobs schema should preserve automation permission policy: {scheduled_sql}"
+    );
 
     db.execute(
         "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at)

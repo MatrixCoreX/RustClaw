@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     notify_on_failure INTEGER NOT NULL DEFAULT 1,
     last_run_at       TEXT,
     next_run_at       INTEGER,
+    isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace',
+    permission_policy_json TEXT NOT NULL DEFAULT '{}',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );

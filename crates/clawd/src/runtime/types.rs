@@ -295,4 +295,6 @@ pub(crate) struct ScheduledJobDue {
     pub(crate) weekday: Option<i64>,
     pub(crate) every_minutes: Option<i64>,
     pub(crate) timezone: String,
+    pub(crate) isolation_profile: String,
+    pub(crate) permission_policy_json: String,
 }

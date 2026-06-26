@@ -105,7 +105,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
             "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
-                    schedule_type, time_of_day, weekday, every_minutes, timezone
+                    schedule_type, time_of_day, weekday, every_minutes, timezone, isolation_profile, permission_policy_json
              FROM scheduled_jobs
              WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
              ORDER BY next_run_at ASC
@@ -128,6 +128,8 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 weekday: row.get(12)?,
                 every_minutes: row.get(13)?,
                 timezone: row.get(14)?,
+                isolation_profile: row.get(15)?,
+                permission_policy_json: row.get(16)?,
             })
         })?;
         for row in rows {
@@ -160,6 +162,12 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             }
             if let Some(v) = job.external_chat_id.as_ref() {
                 map.insert("external_chat_id".to_string(), Value::String(v.clone()));
+            }
+            for (k, v) in crate::scheduled_run_contract::scheduled_run_policy_metadata(
+                &job.isolation_profile,
+                &job.permission_policy_json,
+            ) {
+                map.insert(k, v);
             }
         }
 
