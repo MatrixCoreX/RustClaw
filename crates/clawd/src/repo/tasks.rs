@@ -203,6 +203,36 @@ fn task_worker_lease_expires_at(state: &AppState, now_ts: i64) -> i64 {
     now_ts.saturating_add(lease_seconds as i64)
 }
 
+fn append_task_lease_lifecycle_fields(
+    lifecycle: &mut Value,
+    lease_owner: Option<&str>,
+    lease_expires_at: i64,
+    claim_attempt: i64,
+    claimed_at: i64,
+) {
+    let Some(obj) = lifecycle.as_object_mut() else {
+        return;
+    };
+    if let Some(owner) = lease_owner.map(str::trim).filter(|value| !value.is_empty()) {
+        obj.insert("lease_owner".to_string(), serde_json::json!(owner));
+    }
+    if lease_expires_at > 0 {
+        obj.insert(
+            "lease_expires_at".to_string(),
+            serde_json::json!(lease_expires_at),
+        );
+    }
+    if claim_attempt > 0 {
+        obj.insert(
+            "claim_attempt".to_string(),
+            serde_json::json!(claim_attempt),
+        );
+    }
+    if claimed_at > 0 {
+        obj.insert("claimed_at".to_string(), serde_json::json!(claimed_at));
+    }
+}
+
 pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
         .core
@@ -436,7 +466,11 @@ pub(crate) fn list_active_tasks_internal(
     let mut stmt = db.prepare(
         "SELECT task_id, kind, payload_json, status, result_json,
                 CAST(COALESCE(NULLIF(created_at, ''), '0') AS INTEGER) AS created_ts,
-                CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS updated_ts
+                CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS updated_ts,
+                lease_owner,
+                lease_expires_at,
+                claim_attempt,
+                claimed_at
          FROM tasks
          WHERE user_id = ?1
            AND chat_id = ?2
@@ -456,6 +490,10 @@ pub(crate) fn list_active_tasks_internal(
             let result_json_str: Option<String> = row.get(4)?;
             let created_ts: i64 = row.get(5)?;
             let updated_ts: i64 = row.get(6)?;
+            let lease_owner: Option<String> = row.get(7)?;
+            let lease_expires_at: i64 = row.get(8)?;
+            let claim_attempt: i64 = row.get(9)?;
+            let claimed_at: i64 = row.get(10)?;
             Ok((
                 task_id,
                 kind,
@@ -464,12 +502,28 @@ pub(crate) fn list_active_tasks_internal(
                 result_json_str,
                 created_ts,
                 updated_ts,
+                lease_owner,
+                lease_expires_at,
+                claim_attempt,
+                claimed_at,
             ))
         },
     )?;
     let mut out = Vec::new();
     for (idx, row) in rows.enumerate() {
-        let (task_id, kind, payload_json, status, result_json_str, created_ts, updated_ts) = row?;
+        let (
+            task_id,
+            kind,
+            payload_json,
+            status,
+            result_json_str,
+            created_ts,
+            updated_ts,
+            lease_owner,
+            lease_expires_at,
+            claim_attempt,
+            claimed_at,
+        ) = row?;
         let ref_ts = if updated_ts > 0 {
             updated_ts
         } else {
@@ -480,11 +534,18 @@ pub(crate) fn list_active_tasks_internal(
         let result_json = result_json_str
             .as_deref()
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-        let lifecycle = Some(crate::task_lifecycle::task_query_lifecycle_projection(
+        let mut lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
             &status,
             result_json.as_ref(),
             (updated_ts > 0).then_some(updated_ts),
-        ));
+        );
+        append_task_lease_lifecycle_fields(
+            &mut lifecycle,
+            lease_owner.as_deref(),
+            lease_expires_at,
+            claim_attempt,
+            claimed_at,
+        );
         out.push(ActiveTaskItem {
             index: idx + 1,
             task_id,
@@ -492,7 +553,7 @@ pub(crate) fn list_active_tasks_internal(
             status,
             summary,
             age_seconds,
-            lifecycle,
+            lifecycle: Some(lifecycle),
         });
     }
     Ok(out)
@@ -1462,7 +1523,11 @@ pub(crate) fn get_task_query_record(
 
     let mut stmt = db.prepare(
         "SELECT status, result_json, error_text, user_key, channel,
-                CAST(COALESCE(NULLIF(updated_at, ''), '0') AS INTEGER) AS updated_ts
+                CAST(COALESCE(NULLIF(updated_at, ''), '0') AS INTEGER) AS updated_ts,
+                lease_owner,
+                lease_expires_at,
+                claim_attempt,
+                claimed_at
          FROM tasks
          WHERE task_id = ?1
          LIMIT 1",
@@ -1476,17 +1541,28 @@ pub(crate) fn get_task_query_record(
             let task_user_key: Option<String> = row.get(3)?;
             let channel: String = row.get(4)?;
             let updated_ts: i64 = row.get(5)?;
+            let lease_owner: Option<String> = row.get(6)?;
+            let lease_expires_at: i64 = row.get(7)?;
+            let claim_attempt: i64 = row.get(8)?;
+            let claimed_at: i64 = row.get(9)?;
 
             let status = parse_task_status(&status_str);
 
             let result_json = result_json_str
                 .as_deref()
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-            let lifecycle = Some(crate::task_lifecycle::task_query_lifecycle_projection(
+            let mut lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
                 &status_str,
                 result_json.as_ref(),
                 (updated_ts > 0).then_some(updated_ts),
-            ));
+            );
+            append_task_lease_lifecycle_fields(
+                &mut lifecycle,
+                lease_owner.as_deref(),
+                lease_expires_at,
+                claim_attempt,
+                claimed_at,
+            );
 
             Ok((
                 TaskQueryResponse {
@@ -1494,7 +1570,7 @@ pub(crate) fn get_task_query_record(
                     status,
                     result_json,
                     error_text,
-                    lifecycle,
+                    lifecycle: Some(lifecycle),
                 },
                 task_user_key,
                 channel,
