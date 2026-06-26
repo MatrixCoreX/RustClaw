@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::{client, events::EventFilters, output, task};
@@ -71,7 +72,54 @@ impl ExecWaitOutcome {
     }
 }
 
-fn exec_summary_json(task: &task::TaskStatusView, outcome: ExecWaitOutcome) -> serde_json::Value {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecExitClass {
+    Success,
+    Failed,
+    Cancelled,
+    Timeout,
+    NeedsUser,
+    PolicyDenied,
+    ProviderUnavailable,
+    InvalidRequest,
+    Background,
+}
+
+impl ExecExitClass {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Timeout => "timeout",
+            Self::NeedsUser => "needs_user",
+            Self::PolicyDenied => "policy_denied",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::InvalidRequest => "invalid_request",
+            Self::Background => "background",
+        }
+    }
+
+    fn code(self) -> u8 {
+        match self {
+            Self::Success => 0,
+            Self::Failed => 1,
+            Self::Cancelled => 130,
+            Self::Timeout => 124,
+            Self::NeedsUser => 78,
+            Self::PolicyDenied => 77,
+            Self::ProviderUnavailable => 69,
+            Self::InvalidRequest => 64,
+            Self::Background => 75,
+        }
+    }
+}
+
+fn exec_summary_json(
+    task: &task::TaskStatusView,
+    outcome: ExecWaitOutcome,
+    exit_class: ExecExitClass,
+) -> serde_json::Value {
     json!({
         "task_id": task.task_id,
         "status": task.status,
@@ -79,6 +127,8 @@ fn exec_summary_json(task: &task::TaskStatusView, outcome: ExecWaitOutcome) -> s
         "lifecycle": task.lifecycle().cloned().unwrap_or(serde_json::Value::Null),
         "terminal": task.is_terminal(),
         "outcome": outcome.as_str(),
+        "exit_class": exit_class.as_str(),
+        "exit_code": exit_class.code(),
         "result_text": task.result_text,
         "error_text": task.error_text,
     })
@@ -146,9 +196,24 @@ pub(crate) fn run_exec(
     interval_ms: u64,
     continue_on_background: bool,
     fail_on_background: bool,
-) -> Result<()> {
+    artifact_dir: Option<&PathBuf>,
+) -> Result<u8> {
     if continue_on_background && fail_on_background {
-        anyhow::bail!("exec_background_policy_conflict");
+        let exit_class = ExecExitClass::InvalidRequest;
+        let summary = json!({
+            "exit_class": exit_class.as_str(),
+            "exit_code": exit_class.code(),
+            "error_code": "exec_background_policy_conflict",
+        });
+        if json_output || jsonl_output {
+            output::print_json_pretty(&summary);
+        } else {
+            eprintln!("error_code=exec_background_policy_conflict");
+        }
+        if let Some(artifact_dir) = artifact_dir {
+            write_exec_detached_artifacts(artifact_dir, &summary)?;
+        }
+        return Ok(exit_class.code());
     }
     let task_id = if let Some(resume_task_id) = resume_task_id {
         task::submit_resume_ask(base_url, key, resume_task_id, prompt)?
@@ -156,15 +221,22 @@ pub(crate) fn run_exec(
         task::submit_ask(base_url, key, prompt)?
     };
     if detach {
+        let exit_class = ExecExitClass::Success;
+        let summary = json!({
+            "task_id": task_id,
+            "detached": true,
+            "exit_class": exit_class.as_str(),
+            "exit_code": exit_class.code(),
+        });
         if json_output || jsonl_output {
-            output::print_json_pretty(&json!({
-                "task_id": task_id,
-                "detached": true,
-            }));
+            output::print_json_pretty(&summary);
         } else {
             println!("task_id: {}", task_id);
         }
-        return Ok(());
+        if let Some(artifact_dir) = artifact_dir {
+            write_exec_detached_artifacts(artifact_dir, &summary)?;
+        }
+        return Ok(exit_class.code());
     }
 
     let (task, outcome) = wait_for_exec_task(
@@ -179,27 +251,175 @@ pub(crate) fn run_exec(
             jsonl_output,
         },
     )?;
+    let exit_class = exec_exit_class(&task, outcome, fail_on_background);
+    let summary = exec_summary_json(&task, outcome, exit_class);
+    if let Some(artifact_dir) = artifact_dir {
+        write_exec_artifacts(artifact_dir, &task, &summary)?;
+    }
     if json_output || jsonl_output {
-        output::print_json_pretty(&exec_summary_json(&task, outcome));
+        output::print_json_pretty(&summary);
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
         println!("exec_outcome: {}", outcome.as_str());
+        println!("exec_exit_class: {}", exit_class.as_str());
+        println!("exec_exit_code: {}", exit_class.code());
     }
+    Ok(exit_class.code())
+}
+
+fn exec_exit_class(
+    task: &task::TaskStatusView,
+    outcome: ExecWaitOutcome,
+    fail_on_background: bool,
+) -> ExecExitClass {
     match outcome {
-        ExecWaitOutcome::Terminal => {
-            if task.status == "failed" || task.status == "timeout" || task.status == "canceled" {
-                anyhow::bail!("exec_terminal_failure status={}", task.status);
+        ExecWaitOutcome::Timeout => ExecExitClass::Timeout,
+        ExecWaitOutcome::Background if !fail_on_background => ExecExitClass::Success,
+        ExecWaitOutcome::Background => {
+            if task.lifecycle_state() == Some("needs_user") {
+                ExecExitClass::NeedsUser
+            } else {
+                ExecExitClass::Background
             }
         }
-        ExecWaitOutcome::Background if fail_on_background => {
-            anyhow::bail!("exec_background status={}", task.status);
-        }
-        ExecWaitOutcome::Timeout => {
-            anyhow::bail!("exec_timeout task_id={}", task.task_id);
-        }
-        ExecWaitOutcome::Background => {}
+        ExecWaitOutcome::Terminal => exec_terminal_exit_class(task),
     }
+}
+
+fn exec_terminal_exit_class(task: &task::TaskStatusView) -> ExecExitClass {
+    match task.status.trim() {
+        "succeeded" => ExecExitClass::Success,
+        "canceled" | "cancelled" => ExecExitClass::Cancelled,
+        "timeout" => ExecExitClass::Timeout,
+        "failed" => exec_failure_class_from_machine_tokens(task),
+        _ if task.lifecycle_state() == Some("needs_user") => ExecExitClass::NeedsUser,
+        _ => ExecExitClass::Failed,
+    }
+}
+
+fn exec_failure_class_from_machine_tokens(task: &task::TaskStatusView) -> ExecExitClass {
+    let mut tokens = Vec::new();
+    collect_exec_machine_token(task.lifecycle(), &mut tokens);
+    for pointer in [
+        "/error_code",
+        "/message_key",
+        "/reason_code",
+        "/failure_kind",
+        "/failure_attribution",
+        "/result_json/error_code",
+        "/result_json/message_key",
+        "/result_json/reason_code",
+        "/result_json/failure_kind",
+        "/result_json/failure_attribution",
+        "/result_json/task_journal/trace/final_status",
+        "/result_json/task_journal/trace/final_stop_signal",
+    ] {
+        collect_exec_machine_token(task.raw_data.pointer(pointer), &mut tokens);
+    }
+    if tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "policy_denied" | "permission_denied" | "denied_by_policy" | "skill_policy_denied"
+        )
+    }) {
+        return ExecExitClass::PolicyDenied;
+    }
+    if tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "provider_unavailable"
+                | "provider_rate_limited"
+                | "rate_limited"
+                | "quota_exceeded"
+                | "provider_timeout"
+        )
+    }) {
+        return ExecExitClass::ProviderUnavailable;
+    }
+    if tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "invalid_request" | "invalid_args" | "schema_validation_failed"
+        )
+    }) {
+        return ExecExitClass::InvalidRequest;
+    }
+    ExecExitClass::Failed
+}
+
+fn collect_exec_machine_token(value: Option<&Value>, tokens: &mut Vec<String>) {
+    match value {
+        Some(Value::String(value)) => {
+            let token = value.trim();
+            if is_exec_machine_token(token) {
+                tokens.push(token.to_ascii_lowercase());
+            }
+        }
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_exec_machine_token(Some(item), tokens);
+            }
+        }
+        Some(Value::Object(map)) => {
+            for key in [
+                "state",
+                "status",
+                "db_status",
+                "terminal_reason",
+                "waiting_reason_code",
+                "message_key",
+                "reason_code",
+                "error_code",
+                "failure_kind",
+                "failure_attribution",
+                "policy_decision",
+                "provider_error_kind",
+                "final_status",
+                "final_stop_signal",
+            ] {
+                collect_exec_machine_token(map.get(key), tokens);
+            }
+        }
+        Some(Value::Null | Value::Bool(_) | Value::Number(_)) | None => {}
+    }
+}
+
+fn is_exec_machine_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.')
+        })
+}
+
+fn write_exec_detached_artifacts(artifact_dir: &Path, summary: &Value) -> Result<()> {
+    fs::create_dir_all(artifact_dir)
+        .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
+    write_json_file(&artifact_dir.join("summary.json"), summary)
+}
+
+fn write_exec_artifacts(
+    artifact_dir: &Path,
+    task: &task::TaskStatusView,
+    summary: &Value,
+) -> Result<()> {
+    fs::create_dir_all(artifact_dir)
+        .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
+    write_json_file(&artifact_dir.join("summary.json"), summary)?;
+    write_json_file(&artifact_dir.join("task.json"), &task.raw_data)?;
+    let mut events = String::new();
+    for event in &task.events {
+        events.push_str(&event.line);
+        events.push('\n');
+    }
+    fs::write(artifact_dir.join("events.jsonl"), events)
+        .with_context(|| format!("write artifact dir {}", artifact_dir.display()))?;
     Ok(())
+}
+
+fn write_json_file(path: &Path, value: &Value) -> Result<()> {
+    let body = serde_json::to_vec_pretty(value)?;
+    fs::write(path, body).with_context(|| format!("write artifact {}", path.display()))
 }
 
 pub(crate) fn run_skill(
