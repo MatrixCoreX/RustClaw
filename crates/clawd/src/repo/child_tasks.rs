@@ -88,6 +88,180 @@ pub(crate) fn enqueue_child_task_specs(
     }))
 }
 
+pub(crate) fn is_child_subagent_payload(payload: &Value) -> bool {
+    payload.get("task_role").and_then(Value::as_str) == Some("subagent_child")
+        && payload
+            .get("child_task_contract")
+            .is_some_and(Value::is_object)
+}
+
+pub(crate) fn record_child_task_terminal_projection(
+    state: &AppState,
+    task_id: &str,
+    payload: &Value,
+) -> anyhow::Result<bool> {
+    if !is_child_subagent_payload(payload) {
+        return Ok(false);
+    }
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let row = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((status, raw_result_json)) = row else {
+        return Ok(false);
+    };
+    if !matches!(
+        status.as_str(),
+        "succeeded" | "failed" | "timeout" | "canceled"
+    ) {
+        return Ok(false);
+    }
+    let mut result_json = raw_result_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| json!({}));
+    if !result_json.is_object() {
+        result_json = json!({
+            "observed_result_json": result_json,
+        });
+    }
+    let child_result = child_task_result_projection(&status, payload);
+    let lifecycle = child_terminal_lifecycle_projection(&status, payload);
+    let Some(obj) = result_json.as_object_mut() else {
+        return Ok(false);
+    };
+    obj.insert("child_task_result".to_string(), child_result.clone());
+    obj.insert("task_lifecycle".to_string(), lifecycle);
+    obj.insert(
+        "child_task_id".to_string(),
+        child_result["child_task_id"].clone(),
+    );
+    obj.insert(
+        "parent_task_id".to_string(),
+        child_result["parent_task_id"].clone(),
+    );
+    obj.insert("required".to_string(), child_result["required"].clone());
+    obj.insert("status".to_string(), child_result["status"].clone());
+    db.execute(
+        "UPDATE tasks
+         SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status = ?4",
+        params![task_id, result_json.to_string(), now_ts(), status],
+    )?;
+    Ok(true)
+}
+
+fn child_task_result_projection(status: &str, payload: &Value) -> Value {
+    let contract = payload.get("child_task_contract").unwrap_or(&Value::Null);
+    let child_task_id = contract
+        .get("child_task_id")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("child_task_id").and_then(Value::as_str))
+        .unwrap_or_default();
+    let parent_task_id = contract
+        .get("parent_task_id")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("parent_task_id").and_then(Value::as_str))
+        .unwrap_or_default();
+    let role = contract
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let required = contract
+        .get("required")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let status = child_terminal_status(status);
+    json!({
+        "schema_version": CHILD_TASK_SCHEMA_VERSION,
+        "parent_task_id": parent_task_id,
+        "child_task_id": child_task_id,
+        "role": role,
+        "required": required,
+        "status": status,
+        "permission_profile": contract
+            .get("permission_profile")
+            .and_then(Value::as_str)
+            .unwrap_or("read_only"),
+        "merge_policy": contract
+            .get("merge_policy")
+            .and_then(Value::as_str)
+            .unwrap_or("structured_findings"),
+        "error_code": if status == "succeeded" {
+            Value::Null
+        } else {
+            json!("child_task_terminal_not_succeeded")
+        },
+        "message_key": if status == "succeeded" {
+            "clawd.child_task.succeeded"
+        } else {
+            "clawd.child_task.not_succeeded"
+        },
+        "evidence_refs": [format!("task:{child_task_id}:result_json")],
+        "finding_refs": if status == "succeeded" {
+            json!([format!("child_task:{child_task_id}:structured_result")])
+        } else {
+            json!([])
+        },
+    })
+}
+
+fn child_terminal_lifecycle_projection(status: &str, payload: &Value) -> Value {
+    let contract = payload.get("child_task_contract").unwrap_or(&Value::Null);
+    json!({
+        "schema_version": CHILD_TASK_SCHEMA_VERSION,
+        "state": child_lifecycle_state(status),
+        "state_source": "child_task_terminal_projection",
+        "parent_task_id": contract
+            .get("parent_task_id")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("parent_task_id").and_then(Value::as_str))
+            .unwrap_or_default(),
+        "child_task_id": contract
+            .get("child_task_id")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("child_task_id").and_then(Value::as_str))
+            .unwrap_or_default(),
+        "role": contract
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "required": contract
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "can_poll": false,
+        "can_cancel": false,
+    })
+}
+
+fn child_terminal_status(status: &str) -> &'static str {
+    match status {
+        "succeeded" => "succeeded",
+        "canceled" => "cancelled",
+        "timeout" => "failed",
+        "failed" => "failed",
+        _ => "unknown",
+    }
+}
+
+fn child_lifecycle_state(status: &str) -> &'static str {
+    match status {
+        "succeeded" => "succeeded",
+        "canceled" => "cancelled",
+        "timeout" | "failed" => "failed",
+        _ => "unknown",
+    }
+}
+
 fn child_task_payload(spec: &ChildTaskSpec) -> anyhow::Result<Value> {
     let objective =
         child_task_objective(spec).ok_or_else(|| anyhow::anyhow!("child_objective_missing"))?;

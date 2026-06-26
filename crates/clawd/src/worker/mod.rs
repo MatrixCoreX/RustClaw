@@ -171,6 +171,13 @@ async fn process_claimed_task_by_kind(
     match task.kind.as_str() {
         "ask" => {
             process_ask_task(state, task, payload).await?;
+            if repo::child_tasks::is_child_subagent_payload(payload) {
+                repo::child_tasks::record_child_task_terminal_projection(
+                    state,
+                    &task.task_id,
+                    payload,
+                )?;
+            }
         }
         "run_skill" => {
             process_run_skill_task(state, task, payload).await?;

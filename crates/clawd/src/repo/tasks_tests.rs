@@ -13,7 +13,9 @@ use super::{
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
 };
-use crate::repo::child_tasks::{enqueue_child_task_specs, ChildTaskParentContext};
+use crate::repo::child_tasks::{
+    enqueue_child_task_specs, record_child_task_terminal_projection, ChildTaskParentContext,
+};
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
     get_task_admin_target, pause_task_by_id, resume_task_by_id,
@@ -374,6 +376,65 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
     assert_eq!(
         cancelled_child["task_lifecycle"]["terminal_reason"],
         "parent_cancelled"
+    );
+}
+
+#[test]
+fn child_terminal_projection_uses_machine_contract_not_visible_text() {
+    let state = state_with_tasks_table();
+    let spec = sample_repo_child_spec("task-parent-projection", "task-child-projection", true);
+    let payload = json!({
+        "text": "visible child objective",
+        "task_role": "subagent_child",
+        "parent_task_id": spec.parent_task_id,
+        "child_task_id": spec.child_task_id,
+        "child_task_contract": spec.to_json()
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, 'succeeded', ?3, NULL, '1', '1')",
+        rusqlite::params![
+            spec.child_task_id,
+            payload.to_string(),
+            json!({
+                "text": "visible prose must not become merge data",
+                "task_journal": {
+                    "summary": {
+                        "final_status": "success"
+                    }
+                }
+            })
+            .to_string()
+        ],
+    )
+    .expect("insert child task");
+    drop(db);
+
+    assert!(
+        record_child_task_terminal_projection(&state, "task-child-projection", &payload)
+            .expect("record child projection")
+    );
+
+    let result = stored_result_json(&state, "task-child-projection");
+    assert_eq!(result["child_task_result"]["status"], "succeeded");
+    assert_eq!(result["child_task_result"]["required"], true);
+    assert!(result["child_task_result"].get("text").is_none());
+    assert!(result["child_task_result"].get("error_text").is_none());
+    assert_eq!(
+        result["child_task_result"]["evidence_refs"][0],
+        "task:task-child-projection:result_json"
+    );
+    assert_eq!(
+        result["child_task_result"]["finding_refs"][0],
+        "child_task:task-child-projection:structured_result"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["state_source"],
+        "child_task_terminal_projection"
     );
 }
 
