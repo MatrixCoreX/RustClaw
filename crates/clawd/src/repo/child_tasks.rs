@@ -2,11 +2,12 @@
 
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 use crate::{
     child_task_contract::{
-        child_scheduler_decision, merge_child_task_results, ChildTaskSpec,
-        CHILD_TASK_SCHEMA_VERSION,
+        child_scheduler_decision, merge_child_task_results, ChildTaskPermissionProfile,
+        ChildTaskSpec, CHILD_TASK_SCHEMA_VERSION,
     },
     now_ts, AppState,
 };
@@ -29,12 +30,8 @@ pub(crate) fn enqueue_child_task_specs(
     max_parallel: usize,
     recursion_depth: usize,
 ) -> anyhow::Result<Value> {
-    let scheduler = child_scheduler_decision(specs.len(), max_parallel, recursion_depth);
-    let scheduled_count = scheduler
-        .get("scheduled_child_count")
-        .and_then(Value::as_u64)
-        .unwrap_or_default() as usize;
-    if scheduled_count == 0 {
+    let (scheduled_specs, scheduler) = schedule_child_specs(specs, max_parallel, recursion_depth);
+    if scheduled_specs.is_empty() {
         return Ok(json!({
             "schema_version": CHILD_TASK_SCHEMA_VERSION,
             "parent_task_id": parent.parent_task_id,
@@ -52,7 +49,7 @@ pub(crate) fn enqueue_child_task_specs(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut queued_child_ids = Vec::new();
-    for spec in specs.iter().take(scheduled_count) {
+    for spec in scheduled_specs {
         if spec.parent_task_id != parent.parent_task_id {
             anyhow::bail!("child_parent_mismatch");
         }
@@ -89,6 +86,119 @@ pub(crate) fn enqueue_child_task_specs(
         "child_task_ids": queued_child_ids,
         "scheduler": scheduler,
     }))
+}
+
+fn schedule_child_specs<'a>(
+    specs: &'a [ChildTaskSpec],
+    max_parallel: usize,
+    recursion_depth: usize,
+) -> (Vec<&'a ChildTaskSpec>, Value) {
+    let base = child_scheduler_decision(specs.len(), max_parallel, recursion_depth);
+    let total_capacity = base
+        .get("scheduled_child_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as usize;
+    if total_capacity == 0 {
+        return (Vec::new(), base);
+    }
+
+    let mut scheduled_specs = Vec::new();
+    let mut skipped = Vec::new();
+    let mut group_counts: HashMap<String, usize> = HashMap::new();
+    for spec in specs {
+        let role = machine_token(&spec.role);
+        let permission_profile = spec.permission_profile.as_str();
+        let group_key = format!("{role}:{permission_profile}");
+        let group_capacity =
+            child_profile_group_capacity(spec.permission_profile, total_capacity).max(1);
+        let group_count = *group_counts.get(&group_key).unwrap_or(&0);
+        if scheduled_specs.len() >= total_capacity {
+            skipped.push(child_schedule_skip_projection(
+                spec,
+                "child_parallel_capacity_exceeded",
+                &group_key,
+                group_capacity,
+            ));
+            continue;
+        }
+        if group_count >= group_capacity {
+            skipped.push(child_schedule_skip_projection(
+                spec,
+                "child_role_profile_capacity_exceeded",
+                &group_key,
+                group_capacity,
+            ));
+            continue;
+        }
+        scheduled_specs.push(spec);
+        group_counts.insert(group_key, group_count + 1);
+    }
+
+    let mut scheduler = base;
+    if let Some(obj) = scheduler.as_object_mut() {
+        obj.insert(
+            "role_profile_boundaries_applied".to_string(),
+            Value::Bool(true),
+        );
+        obj.insert(
+            "scheduled_child_count".to_string(),
+            json!(scheduled_specs.len()),
+        );
+        obj.insert("skipped_child_count".to_string(), json!(skipped.len()));
+        obj.insert(
+            "scheduled_child_task_ids".to_string(),
+            json!(scheduled_specs
+                .iter()
+                .map(|spec| spec.child_task_id.clone())
+                .collect::<Vec<_>>()),
+        );
+        obj.insert("skipped_child_tasks".to_string(), Value::Array(skipped));
+        if !obj
+            .get("skipped_child_tasks")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        {
+            obj.insert(
+                "decision".to_string(),
+                json!("role_profile_bounded_partial"),
+            );
+            obj.insert(
+                "reason_code".to_string(),
+                json!("child_role_profile_or_parallel_capacity_exceeded"),
+            );
+        }
+    }
+    (scheduled_specs, scheduler)
+}
+
+fn child_profile_group_capacity(
+    permission_profile: ChildTaskPermissionProfile,
+    total_capacity: usize,
+) -> usize {
+    match permission_profile {
+        ChildTaskPermissionProfile::ReadOnly | ChildTaskPermissionProfile::LocalTempWorkspace => {
+            total_capacity
+        }
+        ChildTaskPermissionProfile::RemoteExecutor => total_capacity.min(2),
+        ChildTaskPermissionProfile::LocalCurrentWorkspace
+        | ChildTaskPermissionProfile::LocalWorktree => 1,
+    }
+}
+
+fn child_schedule_skip_projection(
+    spec: &ChildTaskSpec,
+    reason_code: &str,
+    group_key: &str,
+    group_capacity: usize,
+) -> Value {
+    json!({
+        "child_task_id": spec.child_task_id,
+        "role": machine_token(&spec.role),
+        "permission_profile": spec.permission_profile.as_str(),
+        "reason_code": reason_code,
+        "group_key": group_key,
+        "group_capacity": group_capacity,
+    })
 }
 
 pub(crate) fn is_child_subagent_payload(payload: &Value) -> bool {
@@ -334,6 +444,20 @@ fn machine_task_id(value: &str) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+fn machine_token(value: &str) -> String {
+    let token: String = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | '.' | '/'))
+        .take(160)
+        .collect();
+    if token.is_empty() {
+        "unspecified".to_string()
+    } else {
+        token
+    }
 }
 
 fn child_task_result_projection(status: &str, payload: &Value) -> Value {
