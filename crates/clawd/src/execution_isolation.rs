@@ -193,11 +193,23 @@ pub(crate) fn execution_isolation_artifact_ref(plan: &ExecutionIsolationPlan) ->
         "profile": plan.profile,
         "creation_kind": plan.creation_kind,
         "execution_root": plan.execution_root.display().to_string(),
+        "artifact_path": plan.execution_root.display().to_string(),
         "cleanup_ref": plan.cleanup_ref,
         "read_only": plan.read_only,
         "remote": plan.remote,
         "requires_cleanup": plan.requires_cleanup,
     })
+}
+
+pub(crate) fn isolation_profile_from_token(token: &str) -> Option<CapabilityIsolationProfile> {
+    match token.trim() {
+        "local_current_workspace" => Some(CapabilityIsolationProfile::LocalCurrentWorkspace),
+        "local_worktree" => Some(CapabilityIsolationProfile::LocalWorktree),
+        "local_temp_workspace" => Some(CapabilityIsolationProfile::LocalTempWorkspace),
+        "remote_executor" => Some(CapabilityIsolationProfile::RemoteExecutor),
+        "read_only" => Some(CapabilityIsolationProfile::ReadOnly),
+        _ => None,
+    }
 }
 
 fn isolation_base(workspace_root: &Path) -> PathBuf {

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    admitted_extra_field_exists, build_auto_sudo_retry_args, capability_isolation_policy_error,
-    contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
-    contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
+    admitted_extra_field_exists, build_auto_sudo_retry_args, capability_isolation_artifact_refs,
+    capability_isolation_policy_error, contains_unresolved_runtime_template_arg,
+    contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
+    handle_skill_step_failure, handle_skill_step_success, merge_isolation_artifact_refs,
     preflight_failure_metadata, record_subagent_step_execution, skill_extra_requests_user_input,
     structured_extra_evidence_output, structured_observation_path_argument_error,
     try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
@@ -679,6 +680,52 @@ planner_capabilities = [
 }
 
 #[test]
+fn capability_isolation_artifact_refs_report_cleanup_workspace() {
+    let mut state = test_state();
+    state.skill_rt.workspace_root = std::env::temp_dir().join(format!(
+        "rustclaw_isolation_artifact_refs_{}_{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    fs::create_dir_all(&state.skill_rt.workspace_root).expect("create workspace");
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_temp_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+]
+"#,
+        &["write_file"],
+    );
+    let args = serde_json::json!({
+        "action": "write_text",
+        "path": "out.txt",
+        "content": "value"
+    });
+
+    let refs = capability_isolation_artifact_refs(&state, "task-skill-exec", "write_file", &args);
+
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0]["kind"], "execution_isolation_workspace");
+    assert_eq!(refs[0]["profile"], "local_temp_workspace");
+    assert_eq!(refs[0]["cleanup_ref"], "isolation:temp:task-skill-exec");
+    assert!(refs[0]["artifact_path"]
+        .as_str()
+        .expect("artifact path")
+        .contains("task-skill-exec"));
+
+    let _ = fs::remove_dir_all(&state.skill_rt.workspace_root);
+}
+
+#[test]
 fn contract_matrix_preflight_marks_package_dry_run_as_low_risk_observe() {
     let state = test_state();
     install_test_registry(
@@ -1249,6 +1296,37 @@ fn structured_extra_evidence_output_wraps_text_and_extra_for_journal() {
 }
 
 #[test]
+fn isolation_artifacts_merge_into_journal_evidence() {
+    let artifact_ref = serde_json::json!({
+        "kind": "execution_isolation_workspace",
+        "profile": "local_temp_workspace",
+        "creation_kind": "create_local_temp_workspace",
+        "artifact_path": "/tmp/rustclaw-isolated-task",
+        "cleanup_ref": "isolation:temp:task",
+        "requires_cleanup": true
+    });
+    let output = structured_extra_evidence_output(
+        "ok",
+        Some(&serde_json::json!({
+            "status_code": "ok"
+        })),
+    );
+
+    let merged =
+        merge_isolation_artifact_refs(output, "ok", &[artifact_ref]).expect("merged evidence");
+    let value: serde_json::Value = serde_json::from_str(&merged).expect("json evidence");
+
+    assert_eq!(
+        value.pointer("/artifacts/0/artifact_path"),
+        Some(&serde_json::json!("/tmp/rustclaw-isolated-task"))
+    );
+    assert_eq!(
+        value.pointer("/artifact_refs/0/cleanup_ref"),
+        Some(&serde_json::json!("isolation:temp:task"))
+    );
+}
+
+#[test]
 fn image_output_kind_accepts_skill_text_protocol_schema() {
     let state = test_state();
     install_test_registry(
@@ -1304,6 +1382,13 @@ fn failed_step(step_id: &str, skill: &str, error: &str) -> crate::executor::Step
         started_at: 0,
         finished_at: 0,
     }
+}
+
+fn unique_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos()
 }
 
 #[tokio::test]

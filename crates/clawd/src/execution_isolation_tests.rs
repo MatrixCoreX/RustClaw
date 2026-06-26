@@ -61,6 +61,10 @@ fn local_temp_isolation_creates_marker_and_artifact_ref_then_cleans_up() {
         runtime.artifact_refs[0]["profile"],
         CapabilityIsolationProfile::LocalTempWorkspace.as_token()
     );
+    assert_eq!(
+        runtime.artifact_refs[0]["artifact_path"],
+        runtime.plan.execution_root.display().to_string()
+    );
     assert_eq!(runtime.artifact_refs[0]["requires_cleanup"], true);
 
     cleanup_execution_isolation(&runtime.plan).expect("cleanup temp isolation");
@@ -112,6 +116,15 @@ fn local_worktree_plan_uses_isolated_cleanup_ref() {
         Some("isolation:worktrees:task-worktree")
     );
     assert!(plan.execution_root.ends_with("task-worktree"));
+}
+
+#[test]
+fn isolation_profile_from_token_accepts_only_machine_tokens() {
+    assert_eq!(
+        isolation_profile_from_token("local_temp_workspace"),
+        Some(CapabilityIsolationProfile::LocalTempWorkspace)
+    );
+    assert_eq!(isolation_profile_from_token("Local Temp Workspace"), None);
 }
 
 fn unique_suffix() -> u128 {

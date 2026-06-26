@@ -17,10 +17,10 @@ mod skill_execution_preflight;
 mod skill_execution_subagent;
 
 use skill_execution_preflight::{
-    capability_isolation_policy_error, contract_matrix_action_policy_error,
-    contract_matrix_arg_policy_error, handle_preflight_argument_failure,
-    structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract,
+    capability_isolation_artifact_refs, capability_isolation_policy_error,
+    contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
+    handle_preflight_argument_failure, structured_observation_path_argument_error,
+    unresolved_runtime_template_argument_error, validate_skill_output_contract,
 };
 use skill_execution_subagent::record_subagent_step_execution;
 
@@ -196,6 +196,45 @@ fn structured_extra_evidence_output(out: &str, structured_extra: Option<&Value>)
         })
         .to_string(),
     )
+}
+
+fn merge_isolation_artifact_refs(
+    evidence_output: Option<String>,
+    out: &str,
+    artifact_refs: &[Value],
+) -> Option<String> {
+    if artifact_refs.is_empty() {
+        return evidence_output;
+    }
+    let mut value = evidence_output
+        .as_deref()
+        .and_then(|output| serde_json::from_str::<Value>(output.trim()).ok())
+        .unwrap_or_else(|| json!({ "text": out }));
+    let Some(obj) = value.as_object_mut() else {
+        return Some(
+            json!({
+                "text": out,
+                "artifacts": artifact_refs,
+                "artifact_refs": artifact_refs,
+            })
+            .to_string(),
+        );
+    };
+    append_json_array(obj, "artifacts", artifact_refs);
+    append_json_array(obj, "artifact_refs", artifact_refs);
+    Some(value.to_string())
+}
+
+fn append_json_array(map: &mut serde_json::Map<String, Value>, key: &str, items: &[Value]) {
+    if items.is_empty() {
+        return;
+    }
+    let entry = map
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Some(array) = entry.as_array_mut() {
+        array.extend(items.iter().cloned());
+    }
 }
 
 fn register_structured_extra_file_path_outputs(
@@ -1117,19 +1156,24 @@ async fn handle_skill_step_success(
         step_execution.started_at,
         step_execution.finished_at
     );
-    let journal_step_execution = matrix_admitted_external_evidence_output(
+    let isolation_artifact_refs =
+        capability_isolation_artifact_refs(state, &task.task_id, normalized_skill, action_args);
+    let evidence_output = matrix_admitted_external_evidence_output(
         state,
         normalized_skill,
         action_args,
         out,
         structured_extra,
     )
-    .or_else(|| structured_extra_evidence_output(out, structured_extra))
-    .map(|evidence_output| crate::executor::StepExecutionResult {
-        output: Some(evidence_output),
-        ..step_execution.clone()
-    })
-    .unwrap_or_else(|| step_execution.clone());
+    .or_else(|| structured_extra_evidence_output(out, structured_extra));
+    let evidence_output =
+        merge_isolation_artifact_refs(evidence_output, out, &isolation_artifact_refs);
+    let journal_step_execution = evidence_output
+        .map(|evidence_output| crate::executor::StepExecutionResult {
+            output: Some(evidence_output),
+            ..step_execution.clone()
+        })
+        .unwrap_or_else(|| step_execution.clone());
     loop_state
         .executed_step_results
         .push(journal_step_execution.clone());

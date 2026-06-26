@@ -558,6 +558,44 @@ pub(super) fn capability_isolation_policy_error(
     ))
 }
 
+pub(super) fn capability_isolation_artifact_refs(
+    state: &AppState,
+    task_id: &str,
+    normalized_skill: &str,
+    args: &Value,
+) -> Vec<Value> {
+    let canonical_skill = state.resolve_canonical_skill_name(normalized_skill);
+    let action = normalized_action_arg(args);
+    let Some(capability_policy) =
+        action_scoped_capability_policy(state, &canonical_skill, action.as_deref())
+    else {
+        return Vec::new();
+    };
+    let Some(profile_token) = capability_policy
+        .get("isolation_profile")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Vec::new();
+    };
+    let Some(profile) = crate::execution_isolation::isolation_profile_from_token(profile_token)
+    else {
+        return Vec::new();
+    };
+    let Ok(plan) = crate::execution_isolation::plan_execution_isolation(
+        &state.skill_rt.workspace_root,
+        task_id,
+        profile,
+    ) else {
+        return Vec::new();
+    };
+    if !plan.requires_cleanup {
+        return Vec::new();
+    }
+    vec![crate::execution_isolation::execution_isolation_artifact_ref(&plan)]
+}
+
 fn isolation_profile_violations(
     isolation_profile: &str,
     capability_policy: &Value,
