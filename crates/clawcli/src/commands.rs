@@ -3,7 +3,7 @@ use reqwest::blocking::Client;
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{client, events::EventFilters, output, task};
 
@@ -50,6 +50,154 @@ pub(crate) fn run_submit(
         }));
     } else {
         println!("task_id: {}", task_id);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecWaitOutcome {
+    Terminal,
+    Background,
+    Timeout,
+}
+
+impl ExecWaitOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Background => "background",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+fn exec_summary_json(task: &task::TaskStatusView, outcome: ExecWaitOutcome) -> serde_json::Value {
+    json!({
+        "task_id": task.task_id,
+        "status": task.status,
+        "lifecycle_state": task.lifecycle_state(),
+        "lifecycle": task.lifecycle().cloned().unwrap_or(serde_json::Value::Null),
+        "terminal": task.is_terminal(),
+        "outcome": outcome.as_str(),
+        "result_text": task.result_text,
+        "error_text": task.error_text,
+    })
+}
+
+struct ExecWaitOptions {
+    interval_ms: u64,
+    timeout_seconds: Option<u64>,
+    continue_on_background: bool,
+    fail_on_background: bool,
+    jsonl_output: bool,
+}
+
+fn wait_for_exec_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    options: ExecWaitOptions,
+) -> Result<(task::TaskStatusView, ExecWaitOutcome)> {
+    let interval = Duration::from_millis(options.interval_ms.max(100));
+    let deadline = options
+        .timeout_seconds
+        .map(|seconds| Instant::now() + Duration::from_secs(seconds.max(1)));
+    loop {
+        let task = task::get_task_status(base_url, key, task_id)?;
+        if task.is_terminal() {
+            return Ok((task, ExecWaitOutcome::Terminal));
+        }
+        if task.is_background_waiting()
+            && (options.continue_on_background || options.fail_on_background)
+        {
+            return Ok((task, ExecWaitOutcome::Background));
+        }
+        if let Some(deadline) = deadline {
+            if Instant::now() >= deadline {
+                return Ok((task, ExecWaitOutcome::Timeout));
+            }
+        }
+        if options.jsonl_output {
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "task_id": task.task_id,
+                    "status": task.status,
+                    "lifecycle_state": task.lifecycle_state(),
+                    "terminal": false,
+                    "outcome": "poll",
+                }))?
+            );
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_exec(
+    base_url: &str,
+    key: &str,
+    prompt: &str,
+    resume_task_id: Option<&str>,
+    detach: bool,
+    json_output: bool,
+    jsonl_output: bool,
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+    continue_on_background: bool,
+    fail_on_background: bool,
+) -> Result<()> {
+    if continue_on_background && fail_on_background {
+        anyhow::bail!("exec_background_policy_conflict");
+    }
+    let task_id = if let Some(resume_task_id) = resume_task_id {
+        task::submit_resume_ask(base_url, key, resume_task_id, prompt)?
+    } else {
+        task::submit_ask(base_url, key, prompt)?
+    };
+    if detach {
+        if json_output || jsonl_output {
+            output::print_json_pretty(&json!({
+                "task_id": task_id,
+                "detached": true,
+            }));
+        } else {
+            println!("task_id: {}", task_id);
+        }
+        return Ok(());
+    }
+
+    let (task, outcome) = wait_for_exec_task(
+        base_url,
+        key,
+        &task_id,
+        ExecWaitOptions {
+            interval_ms,
+            timeout_seconds,
+            continue_on_background,
+            fail_on_background,
+            jsonl_output,
+        },
+    )?;
+    if json_output || jsonl_output {
+        output::print_json_pretty(&exec_summary_json(&task, outcome));
+    } else {
+        output::print_task_status(&task, false, &EventFilters::default());
+        println!("exec_outcome: {}", outcome.as_str());
+    }
+    match outcome {
+        ExecWaitOutcome::Terminal => {
+            if task.status == "failed" || task.status == "timeout" || task.status == "canceled" {
+                anyhow::bail!("exec_terminal_failure status={}", task.status);
+            }
+        }
+        ExecWaitOutcome::Background if fail_on_background => {
+            anyhow::bail!("exec_background status={}", task.status);
+        }
+        ExecWaitOutcome::Timeout => {
+            anyhow::bail!("exec_timeout task_id={}", task.task_id);
+        }
+        ExecWaitOutcome::Background => {}
     }
     Ok(())
 }
@@ -462,3 +610,7 @@ pub(crate) fn run_reload_skills(base_url: &str, key: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod tests;
