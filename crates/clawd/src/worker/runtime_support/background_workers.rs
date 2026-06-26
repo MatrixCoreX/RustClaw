@@ -105,7 +105,8 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
             "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
-                    schedule_type, time_of_day, weekday, every_minutes, timezone, isolation_profile, permission_policy_json
+                    schedule_type, time_of_day, weekday, every_minutes, timezone, isolation_profile, permission_policy_json,
+                    thread_resume_enabled, last_thread_task_id
              FROM scheduled_jobs
              WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
              ORDER BY next_run_at ASC
@@ -130,6 +131,8 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 timezone: row.get(14)?,
                 isolation_profile: row.get(15)?,
                 permission_policy_json: row.get(16)?,
+                thread_resume_enabled: row.get::<_, i64>(17)? != 0,
+                last_thread_task_id: row.get(18)?,
             })
         })?;
         for row in rows {
@@ -166,6 +169,12 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             for (k, v) in crate::scheduled_run_contract::scheduled_run_policy_metadata(
                 &job.isolation_profile,
                 &job.permission_policy_json,
+            ) {
+                map.insert(k, v);
+            }
+            for (k, v) in crate::scheduled_run_contract::scheduled_run_thread_resume_metadata(
+                job.thread_resume_enabled,
+                job.last_thread_task_id.as_deref(),
             ) {
                 map.insert(k, v);
             }
@@ -211,17 +220,17 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             Some(ts) => {
                 db.execute(
                     "UPDATE scheduled_jobs
-                     SET last_run_at = ?2, next_run_at = ?3, updated_at = ?2
+                     SET last_run_at = ?2, next_run_at = ?3, last_thread_task_id = ?5, updated_at = ?2
                      WHERE job_id = ?1 AND next_run_at = ?4",
-                    rusqlite::params![job.job_id, now.to_string(), ts, job.next_run_at],
+                    rusqlite::params![job.job_id, now.to_string(), ts, job.next_run_at, task_id],
                 )?;
             }
             None => {
                 db.execute(
                     "UPDATE scheduled_jobs
-                     SET enabled = 0, last_run_at = ?2, next_run_at = NULL, updated_at = ?2
+                     SET enabled = 0, last_run_at = ?2, next_run_at = NULL, last_thread_task_id = ?4, updated_at = ?2
                      WHERE job_id = ?1 AND next_run_at = ?3",
-                    rusqlite::params![job.job_id, now.to_string(), job.next_run_at],
+                    rusqlite::params![job.job_id, now.to_string(), job.next_run_at, task_id],
                 )?;
             }
         }
