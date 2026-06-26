@@ -644,14 +644,48 @@ fn normalize_planner_capabilities(
             execution_mode: mapping.execution_mode,
             async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
                 .map(|value| normalize_schema_token(&value)),
-            isolation_profile: mapping.isolation_profile,
-            network_access: mapping.network_access,
-            filesystem_write: mapping.filesystem_write,
-            external_publish: mapping.external_publish,
-            credential_access: mapping.credential_access,
+            isolation_profile: mapping
+                .isolation_profile
+                .or_else(|| default_isolation_profile_for_effect(mapping.effect)),
+            network_access: mapping
+                .network_access
+                .or_else(|| default_network_access_for_effect(mapping.effect)),
+            filesystem_write: mapping
+                .filesystem_write
+                .or_else(|| default_filesystem_write_for_effect(mapping.effect)),
+            external_publish: mapping
+                .external_publish
+                .or_else(|| default_external_publish_for_effect(mapping.effect)),
+            credential_access: mapping
+                .credential_access
+                .or_else(|| mapping.effect.map(|_| false)),
         });
     }
     out
+}
+
+fn default_isolation_profile_for_effect(
+    effect: Option<PlannerCapabilityEffect>,
+) -> Option<CapabilityIsolationProfile> {
+    match effect? {
+        PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate => {
+            Some(CapabilityIsolationProfile::ReadOnly)
+        }
+        PlannerCapabilityEffect::Mutate => Some(CapabilityIsolationProfile::LocalCurrentWorkspace),
+        PlannerCapabilityEffect::External => Some(CapabilityIsolationProfile::RemoteExecutor),
+    }
+}
+
+fn default_network_access_for_effect(effect: Option<PlannerCapabilityEffect>) -> Option<bool> {
+    Some(matches!(effect?, PlannerCapabilityEffect::External))
+}
+
+fn default_filesystem_write_for_effect(effect: Option<PlannerCapabilityEffect>) -> Option<bool> {
+    Some(matches!(effect?, PlannerCapabilityEffect::Mutate))
+}
+
+fn default_external_publish_for_effect(effect: Option<PlannerCapabilityEffect>) -> Option<bool> {
+    Some(matches!(effect?, PlannerCapabilityEffect::External))
 }
 
 fn matching_planner_capability<'a>(

@@ -424,6 +424,50 @@ fn registry_manifest_exposes_planner_metadata() {
 }
 
 #[test]
+fn planner_capabilities_default_isolation_from_effect() {
+    let toml = r#"
+[[skills]]
+name = "default_policy_tool"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "default.observe", effect = "observe" },
+  { name = "default.mutate", effect = "mutate" },
+  { name = "default.external", effect = "external" }
+]
+"#;
+    let path = std::env::temp_dir().join("test_registry_default_isolation.toml");
+    std::fs::write(&path, toml).unwrap();
+    let reg = SkillsRegistry::load_from_path(&path).unwrap();
+    let caps = reg.planner_capabilities("default_policy_tool");
+
+    assert_eq!(
+        caps[0].isolation_profile,
+        Some(CapabilityIsolationProfile::ReadOnly)
+    );
+    assert_eq!(caps[0].network_access, Some(false));
+    assert_eq!(caps[0].filesystem_write, Some(false));
+    assert_eq!(caps[0].external_publish, Some(false));
+    assert_eq!(caps[0].credential_access, Some(false));
+    assert_eq!(
+        caps[1].isolation_profile,
+        Some(CapabilityIsolationProfile::LocalCurrentWorkspace)
+    );
+    assert_eq!(caps[1].network_access, Some(false));
+    assert_eq!(caps[1].filesystem_write, Some(true));
+    assert_eq!(caps[1].external_publish, Some(false));
+    assert_eq!(
+        caps[2].isolation_profile,
+        Some(CapabilityIsolationProfile::RemoteExecutor)
+    );
+    assert_eq!(caps[2].network_access, Some(true));
+    assert_eq!(caps[2].filesystem_write, Some(false));
+    assert_eq!(caps[2].external_publish, Some(true));
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn registry_resolves_action_governance_from_explicit_fields_effects_and_legacy_defaults() {
     let toml = r#"
 	[[skills]]
