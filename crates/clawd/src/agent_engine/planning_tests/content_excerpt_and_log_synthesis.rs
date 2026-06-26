@@ -1108,36 +1108,6 @@ fn content_excerpt_single_doc_file_without_slice_uses_doc_parse_plan() {
 }
 
 #[test]
-fn content_excerpt_with_summary_log_file_does_not_use_log_analyze_plan() {
-    let root = TempDirGuard::new("content_excerpt_with_summary_log_file_auto_locator");
-    let logs_dir = root.path.join("logs");
-    fs::create_dir_all(&logs_dir).expect("mkdir logs");
-    let log = logs_dir.join("clawd.run.log");
-    fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
-    let log_path = log.display().to_string();
-    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
-        true,
-        OutputResponseShape::Strict,
-    );
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = log_path.clone();
-    route.output_contract.delivery_required = false;
-
-    assert!(generic_path_content_log_analyze_deterministic_plan_result(
-        "inspect the current target",
-        &state,
-        Some(&route),
-        &LoopState::new(1),
-        Some(&log_path),
-    )
-    .is_none());
-}
-
-#[test]
 fn content_excerpt_summary_keeps_bounded_log_read_for_synthesis() {
     let root = TempDirGuard::new("content_excerpt_log_read_synthesis");
     let log = root.path.join("model_io.log");

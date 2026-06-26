@@ -517,6 +517,8 @@ mod file_paths_workspace_and_raw_command;
 mod git_runtime_status_and_observation;
 #[path = "planning_tests/kb_chain.rs"]
 mod kb_chain;
+#[path = "planning_tests/log_analyze_with_summary_policy.rs"]
+mod log_analyze_with_summary_policy;
 #[path = "planning_tests/log_excerpt_quantity_and_skill_policy.rs"]
 mod log_excerpt_quantity_and_skill_policy;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
