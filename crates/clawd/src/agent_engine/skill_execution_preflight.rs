@@ -496,10 +496,17 @@ fn action_scoped_capability_policy(
     action: Option<&str>,
 ) -> Option<Value> {
     state.skill_manifest(canonical_skill).and_then(|manifest| {
-        manifest
-            .planner_capabilities
-            .into_iter()
+        let capabilities = manifest.planner_capabilities;
+        capabilities
+            .iter()
             .find(|mapping| mapping.action.as_deref() == action)
+            .or_else(|| {
+                if capabilities.len() == 1 {
+                    capabilities.first()
+                } else {
+                    None
+                }
+            })
             .map(|mapping| {
                 json!({
                     "isolation_profile": mapping
@@ -601,37 +608,31 @@ fn isolation_profile_violations(
     capability_policy: &Value,
 ) -> Vec<&'static str> {
     let mut violations = Vec::new();
-    if isolation_profile == "read_only" {
-        if capability_policy
-            .get("network_access")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            violations.push("network_access");
+    match isolation_profile {
+        "read_only" => {
+            push_policy_flag_violation(capability_policy, "network_access", &mut violations);
+            push_policy_flag_violation(capability_policy, "filesystem_write", &mut violations);
+            push_policy_flag_violation(capability_policy, "external_publish", &mut violations);
+            push_policy_flag_violation(capability_policy, "credential_access", &mut violations);
         }
-        if capability_policy
-            .get("filesystem_write")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            violations.push("filesystem_write");
+        "local_temp_workspace" | "local_worktree" => {
+            push_policy_flag_violation(capability_policy, "external_publish", &mut violations);
+            push_policy_flag_violation(capability_policy, "credential_access", &mut violations);
         }
-        if capability_policy
-            .get("external_publish")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            violations.push("external_publish");
-        }
-        if capability_policy
-            .get("credential_access")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            violations.push("credential_access");
-        }
+        "local_current_workspace" | "remote_executor" => {}
+        _ => violations.push("unknown_isolation_profile"),
     }
     violations
+}
+
+fn push_policy_flag_violation<'a>(
+    capability_policy: &Value,
+    key: &'a str,
+    violations: &mut Vec<&'a str>,
+) {
+    if capability_policy.get(key).and_then(Value::as_bool) == Some(true) {
+        violations.push(key);
+    }
 }
 
 fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -> bool {
