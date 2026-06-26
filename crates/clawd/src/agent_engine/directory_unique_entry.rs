@@ -477,7 +477,9 @@ pub(super) fn generic_path_content_log_analyze_target_path(
         || route.output_contract.delivery_required
         || !matches!(
             route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
         )
         || !matches!(
             route.output_contract.locator_kind,
@@ -485,6 +487,11 @@ pub(super) fn generic_path_content_log_analyze_target_path(
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::CurrentWorkspace
         )
+    {
+        return None;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptWithSummary
+        && route_content_slice_spec(route).is_some()
     {
         return None;
     }
