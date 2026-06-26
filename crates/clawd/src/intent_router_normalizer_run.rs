@@ -128,6 +128,8 @@ pub(crate) async fn run_intent_normalizer(
         let declared_semantic_kind = output_contract.semantic_kind;
         let mut clarify_question = out.clarify_question.trim().to_string();
         let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let mut execution_recipe_plan_hint =
+            parse_execution_recipe_plan_hint(out.execution_recipe.as_ref());
         let mut needs_clarify = out.needs_clarify;
         let mut attachment_processing_required = out.attachment_processing_required;
         let mut legacy_normalizer_decision = parsed_decision.unwrap_or_else(|| {
@@ -480,6 +482,7 @@ pub(crate) async fn run_intent_normalizer(
                     OutputDeliveryIntent::FileSingle
                 );
             execution_recipe_hint = None;
+            execution_recipe_plan_hint = None;
         }
         if let Some(finalize_style) =
             crate::post_route_policy::content_evidence_execution_finalize_style(
@@ -495,6 +498,10 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         let mut state_patch = out.state_patch.clone().filter(is_meaningful_state_patch);
+        if execution_recipe_plan_hint.is_none() {
+            execution_recipe_plan_hint =
+                parse_runtime_async_job_start_plan_hint(state_patch.as_ref());
+        }
         let state_patch_replacement_literal_conflict_repair =
             repair_state_patch_replacement_literal_conflicts(&mut state_patch);
         let answer_candidate_path_repair = apply_answer_candidate_path_evidence_repair(
@@ -1176,6 +1183,7 @@ pub(crate) async fn run_intent_normalizer(
             confidence,
             output_contract,
             execution_recipe_hint,
+            execution_recipe_plan_hint,
             legacy_normalizer_decision,
             execution_finalize_style,
             turn_analysis,

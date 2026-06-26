@@ -898,6 +898,22 @@ fn ask_agent_loop_async_poll_terminal_machine_reply(
     if let Some(value) = first_machine_value(
         source_result_json,
         projection_payload,
+        &["/task_lifecycle/async_timeout_policy/adapter_kind"],
+        &["/async_timeout_policy/adapter_kind", "/adapter_kind"],
+    ) {
+        reply.insert("adapter_kind".to_string(), value);
+    }
+    if let Some(value) = machine_object_by_pointers(
+        source_result_json,
+        &["/task_lifecycle/async_timeout_policy"],
+    )
+    .or_else(|| machine_object_by_pointers(projection_payload, &["/async_timeout_policy"]))
+    {
+        reply.insert("async_timeout_policy".to_string(), value);
+    }
+    if let Some(value) = first_machine_value(
+        source_result_json,
+        projection_payload,
         &["/task_id"],
         &["/task_id", "/final_result_json/task_id"],
     ) {
@@ -934,6 +950,14 @@ fn machine_value_by_pointers(root: &Value, pointers: &[&str]) -> Option<Value> {
     pointers
         .iter()
         .find_map(|pointer| machine_value_at_pointer(root, pointer))
+}
+
+fn machine_object_by_pointers(root: &Value, pointers: &[&str]) -> Option<Value> {
+    pointers
+        .iter()
+        .filter_map(|pointer| root.pointer(pointer))
+        .find(|value| value.is_object())
+        .cloned()
 }
 
 fn machine_value_at_pointer(root: &Value, pointer: &str) -> Option<Value> {

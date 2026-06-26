@@ -25,6 +25,7 @@ fn dry_run_returns_request_payload_without_key() {
     assert_eq!(text, "VIDEO_GENERATE_DRY_RUN");
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["adapter_kind"], "media_job_poll");
     assert_eq!(extra["request"]["model"], DEFAULT_MODEL);
     assert_eq!(extra["planned_outputs"][0]["type"], "video_file");
     assert!(
@@ -33,6 +34,15 @@ fn dry_run_returns_request_payload_without_key() {
             .is_some_and(|path| path.ends_with(".mp4")),
         "{extra}"
     );
+    assert_eq!(
+        extra["pending_async_job_contract"]["poll_adapter"]["kind"],
+        "media_job_poll"
+    );
+    assert_eq!(
+        extra["pending_async_job_contract"]["poll_adapter"]["skill_name"],
+        "video_generate"
+    );
+    assert!(extra.get("pending_async_job").is_none());
     assert!(extra["outputs"].as_array().unwrap().is_empty());
 }
 

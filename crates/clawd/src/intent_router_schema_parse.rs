@@ -2,6 +2,7 @@ use super::{
     normalize_schema_token, normalize_structured_field_selector,
     scalar_count_filter::{parse_scalar_count_filter, parse_scalar_count_target_kind},
     turn_analysis::{TargetTaskPolicy, TurnType},
+    ExecutionRecipePlanHint,
 };
 use crate::{
     FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
@@ -71,6 +72,70 @@ pub(super) struct IntentExecutionRecipeOut {
     pub(super) profile: String,
     #[serde(default)]
     pub(super) target_scope: String,
+    #[serde(default)]
+    pub(super) command: String,
+    #[serde(default)]
+    pub(super) cmd: String,
+    #[serde(default)]
+    pub(super) shell_command: String,
+    #[serde(default)]
+    pub(super) execution_mode: String,
+    #[serde(default)]
+    pub(super) async_adapter_kind: String,
+}
+
+pub(super) fn parse_execution_recipe_plan_hint(
+    out: Option<&IntentExecutionRecipeOut>,
+) -> Option<ExecutionRecipePlanHint> {
+    let raw = out?;
+    let command = [&raw.command, &raw.cmd, &raw.shell_command]
+        .into_iter()
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty())
+        .map(str::to_string);
+    let kind = raw.kind.trim().to_string();
+    let execution_mode =
+        (!raw.execution_mode.trim().is_empty()).then(|| raw.execution_mode.trim().to_string());
+    let async_adapter_kind = (!raw.async_adapter_kind.trim().is_empty())
+        .then(|| raw.async_adapter_kind.trim().to_string());
+    if kind.is_empty()
+        && command.is_none()
+        && execution_mode.is_none()
+        && async_adapter_kind.is_none()
+    {
+        return None;
+    }
+    Some(ExecutionRecipePlanHint {
+        kind,
+        command,
+        execution_mode,
+        async_adapter_kind,
+    })
+}
+
+pub(super) fn parse_runtime_async_job_start_plan_hint(
+    state_patch: Option<&Value>,
+) -> Option<ExecutionRecipePlanHint> {
+    let patch = state_patch?;
+    let start = patch.get("runtime_async_job_start")?.as_object()?;
+    let field_text = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| start.get(*key).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let command = field_text(&["command", "cmd", "shell_command"])?;
+    let kind = field_text(&["kind"]).unwrap_or_else(|| "runtime_async_job_start".to_string());
+    let execution_mode = field_text(&["execution_mode", "mode"]);
+    let async_adapter_kind = field_text(&["async_adapter_kind", "adapter_kind"]);
+
+    Some(ExecutionRecipePlanHint {
+        kind,
+        command: Some(command),
+        execution_mode,
+        async_adapter_kind,
+    })
 }
 
 pub(super) fn parse_resume_behavior(s: &str) -> ResumeBehavior {

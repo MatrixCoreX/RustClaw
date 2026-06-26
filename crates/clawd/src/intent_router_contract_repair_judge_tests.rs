@@ -160,6 +160,7 @@ fn contract_repair_judge_output_applies_semantic_contract() {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -230,6 +231,7 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -305,6 +307,7 @@ fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarif
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -404,6 +407,7 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -487,6 +491,7 @@ fn contract_repair_judge_preserves_structured_config_key_contract() {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -567,6 +572,7 @@ fn contract_repair_judge_preserves_structured_scalar_field_contract() {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -641,6 +647,7 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
             kind: "fs_basic".to_string(),
             profile: "read_only".to_string(),
             target_scope: "explicit_path".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: "task_request".to_string(),
         target_task_policy: "standalone".to_string(),
@@ -729,6 +736,7 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "none".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: String::new(),
         target_task_policy: String::new(),

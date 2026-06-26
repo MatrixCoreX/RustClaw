@@ -539,6 +539,8 @@ mod session_alias_and_content_evidence;
 mod structured_keys_and_scalar_fields;
 #[path = "planning_tests/system_basic_aliases_and_quantity.rs"]
 mod system_basic_aliases_and_quantity;
+#[path = "planning_tests/task_execution_async_lifecycle.rs"]
+mod task_execution_async_lifecycle;
 #[path = "planning_tests/terminal_placeholder_rewrite.rs"]
 mod terminal_placeholder_rewrite;
 #[path = "planning_tests/terminal_synthesis_and_directory_inventory.rs"]

@@ -259,6 +259,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         confidence: decision.confidence.unwrap_or(0.0),
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
+        execution_recipe_plan_hint: None,
         legacy_first_layer_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,

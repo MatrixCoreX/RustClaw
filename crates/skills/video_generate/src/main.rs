@@ -327,17 +327,52 @@ fn execute_generate(
 
     if optional_bool(obj, "dry_run").unwrap_or(false) {
         let output = output_path.to_string_lossy().to_string();
+        let poll_interval_ms = cfg_poll_interval_ms(&cfg.video_generation);
+        let poll_after_seconds = poll_after_seconds_from_interval_ms(poll_interval_ms);
+        let max_poll_seconds = obj
+            .get("max_poll_seconds")
+            .and_then(Value::as_u64)
+            .or(cfg.video_generation.max_poll_seconds)
+            .unwrap_or(600)
+            .clamp(5, 900);
+        let expires_at = (unix_ts() as i64).saturating_add(max_poll_seconds as i64);
+        let dry_run_job_id = provider_video_job_id(provider_name, "dry_run");
         return Ok((
             "VIDEO_GENERATE_DRY_RUN".to_string(),
             json!({
                 "provider": provider_name,
                 "model": model,
                 "model_kind": adapter_kind_name(adapter_kind_for(vendor, provider_cfg.as_ref())),
+                "adapter_kind": "media_job_poll",
                 "dry_run": true,
                 "request": payload,
                 "output_path": output,
                 "outputs": [],
                 "planned_outputs": [{"type":"video_file","path": output}],
+                "pending_async_job_contract": {
+                    "job_id": dry_run_job_id,
+                    "status": "accepted",
+                    "poll_after_seconds": poll_after_seconds,
+                    "expires_at": expires_at,
+                    "cancel_ref": dry_run_job_id,
+                    "message_key": "clawd.task.async_job_pending",
+                    "poll_adapter": {
+                        "kind": "media_job_poll",
+                        "skill_name": "video_generate",
+                        "args": {
+                            "action": "poll",
+                            "task_id": "dry_run",
+                            "job_id": dry_run_job_id,
+                            "vendor": provider_name,
+                            "model": model,
+                            "download": true,
+                            "output_path": output,
+                            "poll_after_seconds": poll_after_seconds,
+                            "expires_at": expires_at,
+                            "dry_run": true
+                        }
+                    }
+                },
             }),
         ));
     }

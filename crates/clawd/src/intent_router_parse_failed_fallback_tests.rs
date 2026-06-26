@@ -285,6 +285,7 @@ fn parse_execution_recipe_hint_missing_profile_falls_back_to_default_spec() {
         kind: "ops_closed_loop".to_string(),
         profile: String::new(),
         target_scope: "current_repo".to_string(),
+        ..IntentExecutionRecipeOut::default()
     }))
     .expect("normalizer-classified hint should yield Some, even with missing profile");
     assert_eq!(spec.kind, ExecutionRecipeKind::None);
@@ -304,6 +305,7 @@ fn parse_execution_recipe_hint_explicit_none_is_trusted() {
         kind: "none".to_string(),
         profile: "none".to_string(),
         target_scope: "unknown".to_string(),
+        ..IntentExecutionRecipeOut::default()
     }))
     .expect("explicit kind=none should still be Some so local fallback remains bypassed");
     assert_eq!(spec.kind, ExecutionRecipeKind::None);

@@ -817,6 +817,47 @@ fn seed_loop_state_from_agent_context(
             spec.target_scope.as_str().to_string(),
         );
     }
+    if let Some(plan_hint) = ctx.execution_recipe_plan_hint.as_ref() {
+        if !plan_hint.kind.trim().is_empty() {
+            loop_state.output_vars.insert(
+                "route_execution_recipe_plan_kind".to_string(),
+                plan_hint.kind.trim().to_string(),
+            );
+        }
+        if let Some(command) = plan_hint
+            .command
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            loop_state.output_vars.insert(
+                "route_execution_recipe_plan_command".to_string(),
+                command.to_string(),
+            );
+        }
+        if let Some(mode) = plan_hint
+            .execution_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            loop_state.output_vars.insert(
+                "route_execution_recipe_plan_execution_mode".to_string(),
+                mode.to_string(),
+            );
+        }
+        if let Some(adapter_kind) = plan_hint
+            .async_adapter_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            loop_state.output_vars.insert(
+                "route_execution_recipe_plan_async_adapter_kind".to_string(),
+                adapter_kind.to_string(),
+            );
+        }
+    }
 }
 
 pub(crate) fn seed_loop_state_for_agent_run(
@@ -904,6 +945,7 @@ struct RoundOutcome {
 pub(crate) struct AgentRunContext {
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    pub(crate) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,

@@ -81,6 +81,9 @@ Options:
 Case file format:
   suite|name|tags|prompt
   suite|name|tags|prompt|expect=<substring>     # 5th field optional, asserts response contains substring
+  suite|name|tags|prompt|expect=contains:<substring>;json_exists:/data/result_json/machine_reply
+  suite|name|tags|prompt|expect=json_eq:/data/status=succeeded
+  suite|name|tags|prompt|expect=contains:<substring>;confirm:确认执行
 
 Case format:
   suite|name|tags|prompt
@@ -174,7 +177,7 @@ resolve_admin_key() {
 
 load_case_rows() {
   local case_file="$1"
-  # Emit one row per case as: source_line\x1f case_name \x1f tags \x1f prompt \x1f expect
+  # Emit one row per case as: source_line\x1f case_name \x1f tags \x1f prompt \x1f expect \x1f confirm
   # Backwards compatible: 4-field rows (suite|name|tags|prompt) still parse.
   # New 5th field is optional and looks like `expect=<substring>` (literal substring assertion).
   python3 - "$case_file" <<'PY'
@@ -190,6 +193,7 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
     case_name = f"line_{idx:03d}"
     tags = ""
     expect = ""
+    confirm = ""
     if "|" in line:
         # split with limit=4 so we can have at most 5 fields (last field may itself contain '|')
         parts = [part.strip() for part in line.split("|", 4)]
@@ -201,7 +205,14 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
             if len(parts) == 5:
                 tail = parts[4].strip()
                 if tail.startswith("expect="):
-                    expect = tail[len("expect="):]
+                    directives = tail[len("expect="):]
+                    kept = []
+                    for directive in [part.strip() for part in directives.split(";") if part.strip()]:
+                        if directive.startswith("confirm:"):
+                            confirm = directive[len("confirm:"):].strip()
+                        else:
+                            kept.append(directive)
+                    expect = ";".join(kept)
                 # else: silently ignore unknown 5th field for forward-compat
         else:
             prompt = parts[-1]
@@ -209,7 +220,7 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
     if not prompt:
         continue
     # Use \x1f as delimiter — never appears in user prompts.
-    print(f"{idx}\x1f{case_name}\x1f{tags}\x1f{prompt}\x1f{expect}")
+    print(f"{idx}\x1f{case_name}\x1f{tags}\x1f{prompt}\x1f{expect}\x1f{confirm}")
 PY
 }
 
@@ -450,6 +461,39 @@ raise SystemExit(1)
 PY
 }
 
+final_result_needs_confirmation() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+for item in walk(obj):
+    if item.get("needs_confirmation") is True:
+        raise SystemExit(0)
+    if str(item.get("terminal_intent") or "") == "needs_confirmation":
+        raise SystemExit(0)
+    if str(item.get("reason_code") or "") == "confirmation_required":
+        raise SystemExit(0)
+    if str(item.get("status_code") or "") == "confirmation_required":
+        raise SystemExit(0)
+    if str(item.get("resume_reason") or "") == "confirmation_required":
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
 init_llm_trace_offset() {
   local offset_file="$1"
   python3 - "$ROOT_DIR/logs/model_io.log" "$offset_file" <<'PY'
@@ -625,14 +669,84 @@ mode = sys.argv[11] or "ask"
 text = str(result.get("text") or "")
 final_status = effective_status or (data.get("status") or "")
 
+_MISSING = object()
+
+def json_pointer_get(root, pointer):
+    if not pointer.startswith("/"):
+        return _MISSING
+    value = root
+    for raw_part in pointer.split("/")[1:]:
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict):
+            if part not in value:
+                return _MISSING
+            value = value[part]
+        elif isinstance(value, list):
+            try:
+                index = int(part)
+            except ValueError:
+                return _MISSING
+            if index < 0 or index >= len(value):
+                return _MISSING
+            value = value[index]
+        else:
+            return _MISSING
+    return value
+
+def value_to_compare_text(value):
+    if value is _MISSING:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float, str)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+def evaluate_expectations(spec_text):
+    spec_text = (spec_text or "").strip()
+    if not spec_text:
+        return "-", []
+    details = []
+    all_ok = final_status == "succeeded"
+    if final_status != "succeeded":
+        details.append({
+            "kind": "status",
+            "expected": "succeeded",
+            "actual": final_status,
+            "ok": False,
+        })
+    for raw in [part.strip() for part in spec_text.split(";") if part.strip()]:
+        if raw.startswith("contains:"):
+            needle = raw[len("contains:"):]
+            ok = needle in text
+            details.append({"kind": "contains", "value": needle, "ok": ok})
+        elif raw.startswith("json_exists:"):
+            pointer = raw[len("json_exists:"):]
+            ok = json_pointer_get(obj, pointer) is not _MISSING
+            details.append({"kind": "json_exists", "pointer": pointer, "ok": ok})
+        elif raw.startswith("json_eq:"):
+            expr = raw[len("json_eq:"):]
+            pointer, sep, expected = expr.partition("=")
+            actual = json_pointer_get(obj, pointer)
+            actual_text = value_to_compare_text(actual)
+            ok = bool(sep) and actual_text == expected
+            details.append({
+                "kind": "json_eq",
+                "pointer": pointer,
+                "expected": expected,
+                "actual": actual_text,
+                "ok": ok,
+            })
+        else:
+            ok = raw in text
+            details.append({"kind": "contains", "value": raw, "ok": ok})
+        all_ok = all_ok and ok
+    return ("pass" if all_ok else "fail"), details
+
 # B6: assertion = pass / fail / -
-if expect_substr:
-    if final_status == "succeeded" and expect_substr in text:
-        assertion = "pass"
-    else:
-        assertion = "fail"
-else:
-    assertion = "-"
+assertion, assertion_details = evaluate_expectations(expect_substr)
 
 row = {
     "source_line": source_line,
@@ -650,6 +764,7 @@ row = {
     "wall_seconds": max(0, ended_at - started_at) if ended_at and started_at else None,
     "expect_substr": expect_substr or None,
     "assertion": assertion,
+    "assertion_details": assertion_details,
 }
 print(json.dumps(row, ensure_ascii=False))
 PY
@@ -691,6 +806,7 @@ run_one_case() {
   local prompt="$5"
   local expect_substr="$6"
   local chat_id="$7"
+  local confirm_reply="${8:-}"
   local safe_name case_dir submit_file final_file meta_file task_id raw rc llm_offset_file
   local started_at ended_at mode submit_payload skill_args
 
@@ -783,6 +899,55 @@ run_one_case() {
     fi
     print_user_visible_dialog "$final_file" "$prompt" "$PROMPT_REPLY_ONLY"
 
+    if [[ -n "$confirm_reply" ]]; then
+      if ! final_result_needs_confirmation "$final_file"; then
+        if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+          echo "[CONFIRM_SKIPPED] final result does not require confirmation"
+        else
+          echo "[CONFIRM_SKIPPED]"
+          echo "final result does not require confirmation"
+        fi
+      else
+      local confirm_submit_file confirm_final_file confirm_llm_offset_file confirm_raw confirm_task_id confirm_err_file
+      confirm_submit_file="${case_dir}/submit_confirm.json"
+      confirm_final_file="${case_dir}/final_confirm.json"
+      confirm_llm_offset_file="${case_dir}/attempt_${attempt}_confirm_llm.offset"
+      init_llm_trace_offset "$confirm_llm_offset_file"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "[CONFIRM]     $confirm_reply"
+      else
+        echo "[CONFIRM]"
+        echo "$confirm_reply"
+      fi
+      confirm_err_file="$(mktemp)"
+      set +e
+      confirm_raw="$(submit_task "$confirm_reply" 2>"$confirm_err_file")"
+      rc=$?
+      set -e
+      if [[ "$rc" -ne 0 ]]; then
+        echo "  [network] confirm submit failed: $(cat "$confirm_err_file")" >&2
+        rm -f "$confirm_err_file"
+        effective_status="network_error"
+        break
+      fi
+      rm -f "$confirm_err_file"
+      printf '%s\n' "$confirm_raw" > "$confirm_submit_file"
+      confirm_task_id="$(extract_submit_task_id "$confirm_raw")"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "[CONFIRM_TASK] $confirm_task_id"
+      fi
+      if ! poll_until_terminal "$confirm_task_id" "$confirm_final_file" "$confirm_llm_offset_file"; then
+        effective_status="timeout"
+        if [[ ! -s "$confirm_final_file" ]]; then
+          printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"confirm poll timeout"}}' > "$confirm_final_file"
+        fi
+      fi
+      task_id="$confirm_task_id"
+      final_file="$confirm_final_file"
+      print_user_visible_dialog "$final_file" "$confirm_reply" "$PROMPT_REPLY_ONLY"
+      fi
+    fi
+
     if final_result_provider_unavailable "$final_file"; then
       if [[ "$attempt" -le "$PROVIDER_RETRIES" ]]; then
         if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
@@ -801,8 +966,8 @@ run_one_case() {
 
   ended_at="$(date +%s)"
 
-  printf 'ordinal=%s\nsource_line=%s\ncase_name=%s\ntags=%s\nmode=%s\nchat_id=%s\ntask_id=%s\nprompt=%s\nexpect=%s\nstarted_at=%s\nended_at=%s\n' \
-    "$ordinal" "$source_line" "$case_name" "$tags" "$mode" "$CHAT_ID" "$task_id" "$prompt" "$expect_substr" "$started_at" "$ended_at" > "$meta_file"
+  printf 'ordinal=%s\nsource_line=%s\ncase_name=%s\ntags=%s\nmode=%s\nchat_id=%s\ntask_id=%s\nprompt=%s\nconfirm=%s\nexpect=%s\nstarted_at=%s\nended_at=%s\n' \
+    "$ordinal" "$source_line" "$case_name" "$tags" "$mode" "$CHAT_ID" "$task_id" "$prompt" "$confirm_reply" "$expect_substr" "$started_at" "$ended_at" > "$meta_file"
 
   append_summary_jsonl "$source_line" "$case_name" "$tags" "$prompt" "$task_id" "$final_file" "$effective_status" "$started_at" "$ended_at" "$expect_substr" "$mode"
 
@@ -917,6 +1082,39 @@ if failed_assertions:
 
 if aborted:
     print(f"FAIL_FAST: aborted after consecutive bad cases; skipped {skipped_after_abort} remaining cases.")
+PY
+}
+
+summary_exit_code() {
+  python3 - "$SUMMARY_JSONL" "${ABORTED_FAIL_FAST:-0}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+aborted = int(sys.argv[2] or 0)
+bad_statuses = {
+    "failed",
+    "canceled",
+    "timeout",
+    "provider_unavailable",
+    "network_error",
+    "unknown",
+    "",
+}
+
+bad = aborted != 0
+for raw in path.read_text(encoding="utf-8").splitlines():
+    raw = raw.strip()
+    if not raw:
+        continue
+    row = json.loads(raw)
+    if str(row.get("status") or "") in bad_statuses:
+        bad = True
+    if row.get("assertion") == "fail":
+        bad = True
+
+raise SystemExit(1 if bad else 0)
 PY
 }
 
@@ -1114,7 +1312,7 @@ fi
 ordinal=0
 run_count=0
 for row in "${CASE_ROWS[@]}"; do
-  IFS=$'\x1f' read -r source_line case_name tags prompt expect_substr <<< "$row"
+  IFS=$'\x1f' read -r source_line case_name tags prompt expect_substr confirm_reply <<< "$row"
   ordinal=$((ordinal + 1))
   chat_id_for_case=$((BASE_CHAT_ID + ordinal))
 
@@ -1136,7 +1334,7 @@ for row in "${CASE_ROWS[@]}"; do
   fi
 
   run_count=$((run_count + 1))
-  run_one_case "$ordinal" "$source_line" "$case_name" "$tags" "$prompt" "$expect_substr" "$chat_id_for_case"
+  run_one_case "$ordinal" "$source_line" "$case_name" "$tags" "$prompt" "$expect_substr" "$chat_id_for_case" "$confirm_reply"
 
   if (( FAIL_FAST_THRESHOLD > 0 )) && (( CONSECUTIVE_BAD >= FAIL_FAST_THRESHOLD )); then
     if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
@@ -1165,3 +1363,5 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  - $RUN_LOG"
   echo "  - $SUMMARY_JSONL"
 fi
+
+summary_exit_code
