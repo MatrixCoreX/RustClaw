@@ -6,6 +6,7 @@ mod client;
 mod commands;
 mod events;
 mod output;
+mod replay;
 mod task;
 
 use anyhow::Result;
@@ -200,6 +201,30 @@ enum Command {
 
     /// POST /v1/admin/reload-skills
     ReloadSkills,
+
+    /// Export or inspect recorded task replay bundles.
+    Replay {
+        #[command(subcommand)]
+        command: ReplayCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReplayCommand {
+    /// Export a redacted replay bundle for an existing task.
+    Export {
+        task_id: String,
+        #[arg(short, long)]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect a replay bundle without calling providers or tools.
+    Run {
+        bundle: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -432,5 +457,16 @@ fn main() -> Result<()> {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_reload_skills(base_url, k)
         }
+        Command::Replay { command } => match command {
+            ReplayCommand::Export {
+                task_id,
+                output: output_path,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                replay::run_export(base_url, k, task_id, output_path, *json)
+            }
+            ReplayCommand::Run { bundle, json } => replay::run_run(bundle, *json),
+        },
     }
 }

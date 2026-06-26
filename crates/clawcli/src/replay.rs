@@ -1,0 +1,225 @@
+use anyhow::{Context, Result};
+use serde_json::{json, Map, Value};
+use std::fs;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::{output, task};
+
+const REPLAY_SCHEMA_VERSION: u64 = 1;
+const REPLAY_BUNDLE_KIND: &str = "rustclaw_task_replay";
+
+pub(crate) fn run_export(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    output_path: &Path,
+    json_output: bool,
+) -> Result<()> {
+    let task = task::get_task_status(base_url, key, task_id)?;
+    let bundle = replay_bundle_json(&task);
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create replay dir {}", parent.display()))?;
+    }
+    fs::write(output_path, serde_json::to_vec_pretty(&bundle)?)
+        .with_context(|| format!("write replay bundle {}", output_path.display()))?;
+    let summary = json!({
+        "bundle_kind": REPLAY_BUNDLE_KIND,
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "task_id": task.task_id,
+        "output_path": output_path.display().to_string(),
+        "replay_mode": "recorded_only",
+        "redaction_policy": "machine_key_redaction_v1",
+    });
+    if json_output {
+        output::print_json_pretty(&summary);
+    } else {
+        println!("task_id: {}", task.task_id);
+        println!("replay_bundle: {}", output_path.display());
+        println!("replay_mode: recorded_only");
+    }
+    Ok(())
+}
+
+pub(crate) fn run_run(bundle_path: &Path, json_output: bool) -> Result<()> {
+    let body = fs::read_to_string(bundle_path)
+        .with_context(|| format!("read replay bundle {}", bundle_path.display()))?;
+    let bundle: Value = serde_json::from_str(&body).context("parse replay bundle")?;
+    validate_replay_bundle(&bundle)?;
+    let summary = replay_run_summary(&bundle);
+    if json_output {
+        output::print_json_pretty(&summary);
+    } else {
+        println!(
+            "task_id: {}",
+            summary
+                .get("task_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+        );
+        println!("replay_mode: recorded_only");
+        println!(
+            "status: {}",
+            summary
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+fn replay_bundle_json(task: &task::TaskStatusView) -> Value {
+    json!({
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "bundle_kind": REPLAY_BUNDLE_KIND,
+        "exported_at_unix": unix_timestamp(),
+        "redaction": {
+            "policy": "machine_key_redaction_v1",
+            "secret_value": "<redacted:secret>",
+            "private_payload_value": "<redacted:private_payload>",
+        },
+        "task_id": task.task_id,
+        "status": task.status,
+        "lifecycle_state": task.lifecycle_state(),
+        "task": redact_value(&task.raw_data),
+        "events": task.events.iter().map(|event| {
+            json!({
+                "event_type": &event.event_type,
+                "line": &event.line,
+                "fields": redact_value(&json!(&event.fields)),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn replay_run_summary(bundle: &Value) -> Value {
+    let task = bundle.get("task").unwrap_or(&Value::Null);
+    let events = bundle
+        .get("events")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    json!({
+        "bundle_kind": REPLAY_BUNDLE_KIND,
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "replay_mode": "recorded_only",
+        "live_provider": false,
+        "task_id": bundle.get("task_id").and_then(Value::as_str),
+        "status": bundle.get("status").and_then(Value::as_str)
+            .or_else(|| task.get("status").and_then(Value::as_str)),
+        "lifecycle_state": bundle.get("lifecycle_state").and_then(Value::as_str)
+            .or_else(|| task.pointer("/task_lifecycle/state").and_then(Value::as_str)),
+        "event_count": events,
+        "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
+        "result_source": "recorded_bundle",
+    })
+}
+
+fn validate_replay_bundle(bundle: &Value) -> Result<()> {
+    let schema_version = bundle
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let bundle_kind = bundle
+        .get("bundle_kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if schema_version != REPLAY_SCHEMA_VERSION || bundle_kind != REPLAY_BUNDLE_KIND {
+        anyhow::bail!("invalid_replay_bundle");
+    }
+    Ok(())
+}
+
+fn redact_value(value: &Value) -> Value {
+    redact_value_with_key(None, value)
+}
+
+fn redact_value_with_key(key: Option<&str>, value: &Value) -> Value {
+    if let Some(kind) = redaction_kind_for_key(key) {
+        return Value::String(kind.to_string());
+    }
+    match value {
+        Value::Object(map) => Value::Object(redact_map(map)),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| redact_value_with_key(None, item))
+                .collect(),
+        ),
+        Value::String(value) if value_looks_secret_like(value) => {
+            Value::String("<redacted:secret>".to_string())
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => value.clone(),
+    }
+}
+
+fn redact_map(map: &Map<String, Value>) -> Map<String, Value> {
+    map.iter()
+        .map(|(key, value)| (key.clone(), redact_value_with_key(Some(key), value)))
+        .collect()
+}
+
+fn redaction_kind_for_key(key: Option<&str>) -> Option<&'static str> {
+    let key = key?.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    if matches!(
+        key.as_str(),
+        "authorization"
+            | "api_key"
+            | "apikey"
+            | "access_token"
+            | "refresh_token"
+            | "private_key"
+            | "client_secret"
+            | "app_secret"
+            | "password"
+            | "credential"
+            | "credentials"
+            | "secret"
+            | "token"
+    ) || key.ends_with("_secret")
+        || key.ends_with("_token")
+        || key.ends_with("_key")
+    {
+        return Some("<redacted:secret>");
+    }
+    if matches!(
+        key.as_str(),
+        "prompt" | "user_prompt" | "raw_prompt" | "text" | "content" | "messages"
+    ) {
+        return Some("<redacted:private_payload>");
+    }
+    None
+}
+
+fn value_looks_secret_like(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.len() < 24 || trimmed.contains(char::is_whitespace) {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("sk-")
+        || lower.starts_with("tp-")
+        || lower.starts_with("bearer-")
+        || lower.starts_with("rustclaw_")
+        || lower.contains("_secret_")
+        || lower.contains("_token_")
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+#[path = "replay_tests.rs"]
+mod tests;
