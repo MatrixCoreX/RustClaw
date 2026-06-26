@@ -7,10 +7,13 @@ use crate::{repo, AppState};
 
 #[path = "task_config_guard_recovery.rs"]
 mod task_config_guard_recovery;
+#[path = "task_failure_lifecycle.rs"]
+mod task_failure_lifecycle;
 #[path = "task_resume.rs"]
 mod task_resume;
 
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
+use task_failure_lifecycle::failed_task_lifecycle_payload;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
@@ -63,32 +66,6 @@ fn ask_result_payload(
         Some(journal) => journal.attach_to_result(base_result),
         None => base_result,
     }
-}
-
-fn failed_task_lifecycle_payload(err_text: &str) -> Value {
-    let failure_attribution = crate::task_journal::failure_attribution_for_error_text(err_text)
-        .map(|kind| kind.as_str().to_string())
-        .unwrap_or_else(|| "runtime_error".to_string());
-    let mut payload = json!({
-        "schema_version": 1,
-        "state": "failed",
-        "source": "ask_failure_finalize",
-        "can_poll": true,
-        "can_cancel": false,
-        "failure_attribution": failure_attribution,
-    });
-    if let Some(terminal_reason) = match failure_attribution.as_str() {
-        "provider_error" => Some(
-            crate::task_lifecycle::TerminalFailureReason::ProviderWindowExhausted.status_code(),
-        ),
-        "answer_verifier_gap" | "contract_gap" => {
-            Some(crate::task_lifecycle::TerminalFailureReason::VerifierUnrecoverable.status_code())
-        }
-        _ => None,
-    } {
-        payload["terminal_reason"] = json!(terminal_reason);
-    }
-    payload
 }
 
 fn should_skip_ask_memory_pair(
