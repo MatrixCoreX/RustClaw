@@ -220,6 +220,16 @@ fn replay_run_summary(bundle: &Value) -> Value {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or_default();
+    let route_fingerprint = replay_route_fingerprint(bundle);
+    let action_sequence = replay_action_sequence(bundle);
+    let tool_result_summary = replay_tool_result_summary(bundle);
+    let verifier_summary = replay_verifier_summary(bundle);
+    let execution_replay = recorded_execution_replay(
+        &route_fingerprint,
+        &action_sequence,
+        &tool_result_summary,
+        &verifier_summary,
+    );
     json!({
         "bundle_kind": REPLAY_BUNDLE_KIND,
         "schema_version": REPLAY_SCHEMA_VERSION,
@@ -234,11 +244,46 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "redaction_policy": bundle.pointer("/redaction/policy").and_then(Value::as_str),
         "result_source": "recorded_bundle",
         "coverage": replay_recording_coverage(bundle),
-        "route_fingerprint": replay_route_fingerprint(bundle),
-        "action_sequence": replay_action_sequence(bundle),
-        "tool_result_summary": replay_tool_result_summary(bundle),
-        "verifier_summary": replay_verifier_summary(bundle),
+        "execution_replay": execution_replay,
+        "route_fingerprint": route_fingerprint,
+        "action_sequence": action_sequence,
+        "tool_result_summary": tool_result_summary,
+        "verifier_summary": verifier_summary,
     })
+}
+
+fn recorded_execution_replay(
+    route_fingerprint: &[Value],
+    action_sequence: &[Value],
+    tool_result_summary: &[Value],
+    verifier_summary: &[Value],
+) -> Value {
+    let mut steps = Vec::new();
+    push_recorded_replay_steps(&mut steps, "route", route_fingerprint);
+    push_recorded_replay_steps(&mut steps, "action", action_sequence);
+    push_recorded_replay_steps(&mut steps, "tool_result", tool_result_summary);
+    push_recorded_replay_steps(&mut steps, "verifier", verifier_summary);
+    json!({
+        "strategy": "recorded_outputs_first",
+        "deterministic": true,
+        "live_provider": false,
+        "live_tool_invocations": false,
+        "provider_call_count": 0,
+        "tool_invocation_count": 0,
+        "step_count": steps.len(),
+        "steps": steps,
+    })
+}
+
+fn push_recorded_replay_steps(steps: &mut Vec<Value>, stage: &str, items: &[Value]) {
+    for item in items {
+        steps.push(json!({
+            "step_index": steps.len(),
+            "stage": stage,
+            "source": "recorded_bundle",
+            "summary": item,
+        }));
+    }
 }
 
 fn replay_recording_coverage(bundle: &Value) -> Value {
