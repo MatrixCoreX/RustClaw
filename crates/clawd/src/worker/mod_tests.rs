@@ -694,6 +694,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
         &crate::task_lifecycle::CheckpointResumeDirective::PollAsyncJob {
             checkpoint_id: "ckpt-work-item".to_string(),
             job_id: "job-1".to_string(),
+            adapter_kind: "media_job_poll".to_string(),
             poll_after_seconds: 7,
             expires_at: 2_000,
             cancel_ref: "cancel:job-1".to_string(),
@@ -706,6 +707,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
     assert_eq!(poll_decision.next_check_after, Some(1_007));
     assert_eq!(poll_decision.payload["resume_trigger"], "worker_recovery");
     assert_eq!(poll_decision.payload["job_id"], "job-1");
+    assert_eq!(poll_decision.payload["adapter_kind"], "media_job_poll");
     assert_eq!(poll_decision.payload["expires_at"], 2_000);
 
     let user_decision = super::runtime_support::prepare_paused_checkpoint_resume_execution(

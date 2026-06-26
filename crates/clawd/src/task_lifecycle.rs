@@ -198,6 +198,7 @@ pub(crate) enum CheckpointResumeDirective {
     PollAsyncJob {
         checkpoint_id: String,
         job_id: String,
+        adapter_kind: String,
         poll_after_seconds: u64,
         expires_at: i64,
         cancel_ref: String,
@@ -247,6 +248,7 @@ impl CheckpointResumeDirective {
             Self::PollAsyncJob {
                 checkpoint_id,
                 job_id,
+                adapter_kind,
                 poll_after_seconds,
                 expires_at,
                 cancel_ref,
@@ -255,6 +257,7 @@ impl CheckpointResumeDirective {
                 "status_code": self.status_code(),
                 "checkpoint_id": checkpoint_id,
                 "job_id": job_id,
+                "adapter_kind": adapter_kind,
                 "poll_after_seconds": poll_after_seconds,
                 "expires_at": expires_at,
                 "cancel_ref": cancel_ref,
@@ -448,9 +451,12 @@ pub(crate) fn checkpoint_resume_directive(
                         {
                             CheckpointResumeDirective::NotReady { status_code }
                         } else {
+                            let adapter_kind =
+                                async_job_adapter_kind(result_json).unwrap_or("unspecified_poll");
                             CheckpointResumeDirective::PollAsyncJob {
                                 checkpoint_id,
                                 job_id: job.job_id.clone(),
+                                adapter_kind: adapter_kind.to_string(),
                                 poll_after_seconds: job.poll_after_seconds,
                                 expires_at: effective_expires_at,
                                 cancel_ref: job.cancel_ref.clone(),
@@ -586,6 +592,14 @@ fn async_job_effective_expires_at(result_json: &Value, job_expires_at: i64) -> i
     policy_deadline
         .map(|deadline| deadline.min(job_expires_at))
         .unwrap_or(job_expires_at)
+}
+
+fn async_job_adapter_kind(result_json: &Value) -> Option<&str> {
+    result_json
+        .pointer("/task_lifecycle/async_timeout_policy/adapter_kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn active_resume_lease_expires_at(
