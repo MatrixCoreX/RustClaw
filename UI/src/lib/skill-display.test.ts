@@ -11,6 +11,7 @@ import {
   normalizeSkillSearchQuery,
   skillCapabilityLabel,
   skillDescription,
+  skillIsolationLabels,
   skillPlannerCapabilityLabel,
   skillRiskLabel,
   skillRuntimeIssue,
@@ -66,6 +67,27 @@ test("formats runtime and planner capabilities", () => {
   assert.equal(formatCapabilityToken("read_file.by_path"), "read file / by path");
   assert.equal(skillPlannerCapabilityLabel("filesystem.read_file", "en"), "Files: read file");
   assert.equal(skillPlannerCapabilityLabel("database.query_table", "zh"), "数据库: query table");
+});
+
+test("formats isolation policy labels from structured fields", () => {
+  const labels = skillIsolationLabels(
+    {
+      name: "http_basic",
+      planner_capability_policies: [
+        {
+          capability: "http.post_json",
+          isolation_profile: "remote_executor",
+          network_access: true,
+          filesystem_write: false,
+          external_publish: true,
+          credential_access: true,
+        },
+      ],
+    },
+    "en",
+  );
+
+  assert.deepEqual(labels, ["External execution", "Network", "Can publish", "Uses keys"]);
 });
 
 test("formats runtime availability issues from structured fields", () => {
