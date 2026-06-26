@@ -1,7 +1,12 @@
 import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, X } from "lucide-react";
 
 import { formatDuration } from "../lib/display-format";
-import { buildTaskLifecycleView, buildTaskStatusSummary, type TaskStatusSummaryKind } from "../lib/task-lifecycle";
+import {
+  buildTaskLifecycleView,
+  buildTaskPollingView,
+  buildTaskStatusSummary,
+  type TaskStatusSummaryKind,
+} from "../lib/task-lifecycle";
 import type { ActiveTaskItem } from "../types/api";
 
 type UiLanguage = "zh" | "en";
@@ -147,6 +152,7 @@ export function ActiveTasksPanel({
         ) : (
           activeTasks.map((item) => {
             const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
+            const pollingView = buildTaskPollingView(item.lifecycle, lang);
             const canPause = canPauseTask(item);
             const canResume = canResumeTask(item);
             const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
@@ -162,6 +168,7 @@ export function ActiveTasksPanel({
                       <span className="text-xs text-white/45">{formatDuration(item.age_seconds)}</span>
                     </div>
                     <p className="mt-2 break-words text-sm text-white/85">{item.summary || item.task_id}</p>
+                    <p className="mt-1 text-xs text-white/55">{lifecycleView.detail}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-white/40">{item.task_id}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-white/55">
                       {lifecycleView.meta.slice(0, 4).map((meta) => (
@@ -216,6 +223,19 @@ export function ActiveTasksPanel({
                     </button>
                   </div>
                 </div>
+                {pollingView ? (
+                  <div className="mt-3 rounded-lg border border-sky-400/20 bg-sky-500/10 px-3 py-2">
+                    <p className="text-xs font-medium text-sky-50">{t("后台轮询", "Background polling")}</p>
+                    <p className="mt-1 text-xs text-sky-50/75">{pollingView.detail}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-sky-50/75">
+                      {pollingView.meta.map((meta) => (
+                        <span key={`${item.task_id}-${meta}`} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                          {meta}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {item.lifecycle?.state === "needs_user" ? (
                   <div className="mt-3 rounded-lg border border-amber-400/25 bg-amber-500/10 p-3">
                     <label className="block space-y-2">

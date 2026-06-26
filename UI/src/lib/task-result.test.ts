@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildReplaySummary,
   buildTaskOutcome,
   buildTaskPermissionView,
   extractTaskText,
+  taskArtifactRefs,
   taskTraceEvents,
   traceEventMeta,
 } from "./task-result.ts";
@@ -113,4 +115,56 @@ test("extracts trace events and stable machine meta", () => {
     "llm_call_count=1",
     "child_trace_merge_status=merged",
   ]);
+});
+
+test("collects artifact refs recursively without duplicate mirrored arrays", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-artifacts",
+    status: "succeeded",
+    result_json: {
+      extra: {
+        artifact_refs: [
+          { ref: "artifact:summary", path: "out/summary.json", role: "summary" },
+        ],
+        artifacts: [
+          { ref: "artifact:summary", path: "out/summary.json", role: "summary" },
+          { output_path: "out/report.md", kind: "report" },
+        ],
+      },
+    },
+  };
+
+  const refs = taskArtifactRefs(result);
+
+  assert.equal(refs.length, 2);
+  assert.equal(refs[0].summary, "ref=artifact:summary · path=out/summary.json · role=summary");
+  assert.equal(refs[1].summary, "output_path=out/report.md · kind=report");
+});
+
+test("summarizes recorded replay machine fields", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-replay",
+    status: "succeeded",
+    result_json: {
+      replay_mode: "recorded_only",
+      result_source: "recorded_bundle",
+      execution_replay: {
+        strategy: "recorded_outputs_first",
+        deterministic: true,
+        live_provider: false,
+        step_count: 4,
+      },
+      coverage: {
+        has_task_checkpoint: true,
+        event_types: ["route", "tool_result"],
+      },
+    },
+  };
+
+  const summary = buildReplaySummary(result);
+
+  assert.ok(summary?.meta.includes("replay_mode=recorded_only"));
+  assert.ok(summary?.meta.includes("strategy=recorded_outputs_first"));
+  assert.ok(summary?.coverage.includes("has_task_checkpoint=true"));
+  assert.ok(summary?.coverage.includes("event_types=route,tool_result"));
 });

@@ -34,6 +34,11 @@ export interface TaskLifecycleView {
   meta: string[];
 }
 
+export interface TaskPollingView {
+  detail: string;
+  meta: string[];
+}
+
 export type TaskStatusSummaryKind = "active" | "waiting" | "needs_user" | "failed";
 
 export interface TaskStatusSummaryInput {
@@ -149,6 +154,51 @@ export function buildTaskLifecycleView(
     stateLabel: lang === "zh" ? stateCopy.zh : stateCopy.en,
     detail,
     tone: stateCopy.tone,
+    meta,
+  };
+}
+
+export function buildTaskPollingView(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+  lang: TaskLifecycleLang,
+): TaskPollingView | null {
+  if (!lifecycle) return null;
+  const nextPoll = timestampLabel(lang, lifecycle.next_poll_after);
+  const nextCheck = timestampLabel(lang, lifecycle.next_check_after);
+  const visible = Boolean(
+    lifecycle.can_poll ||
+      lifecycle.pending_job_ref ||
+      lifecycle.poll_ref ||
+      lifecycle.cancel_ref ||
+      lifecycle.next_poll_after ||
+      lifecycle.next_check_after,
+  );
+  if (!visible) return null;
+
+  const meta: string[] = [];
+  if (lifecycle.pending_job_ref) {
+    meta.push(`${t(lang, "后台任务", "Background job")}: ${lifecycle.pending_job_ref}`);
+  }
+  if (lifecycle.poll_ref) {
+    meta.push(`${t(lang, "轮询引用", "Poll ref")}: ${lifecycle.poll_ref}`);
+  }
+  if (nextPoll) {
+    meta.push(`${t(lang, "下次轮询", "Next poll")}: ${nextPoll}`);
+  }
+  if (nextCheck) {
+    meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
+  }
+  meta.push(`${t(lang, "可查询", "Pollable")}: ${boolLabel(lang, lifecycle.can_poll)}`);
+  meta.push(`${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle.can_cancel)}`);
+  if (lifecycle.cancel_ref) {
+    meta.push(`${t(lang, "取消引用", "Cancel ref")}: ${lifecycle.cancel_ref}`);
+  }
+
+  return {
+    detail:
+      lifecycle.resume_due === true
+        ? t(lang, "轮询窗口已到，可以继续检查后台结果。", "The polling window is due; the background result can be checked.")
+        : t(lang, "这个任务可以在后台等待，并通过机器字段继续轮询。", "This task can wait in the background and continue polling through machine fields."),
     meta,
   };
 }

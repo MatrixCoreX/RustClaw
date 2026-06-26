@@ -1,9 +1,11 @@
 import { Loader2, MessageCircle, RefreshCw } from "lucide-react";
 
-import { buildTaskLifecycleView, type TaskLifecycleLang } from "../lib/task-lifecycle";
+import { buildTaskLifecycleView, buildTaskPollingView, type TaskLifecycleLang } from "../lib/task-lifecycle";
 import {
+  buildReplaySummary,
   buildTaskOutcome,
   buildTaskPermissionView,
+  taskArtifactRefs,
   taskTraceEvents,
   traceEventMeta,
   type TaskOutcomeView,
@@ -55,8 +57,11 @@ export function TaskResultPanel({
 }: TaskResultPanelProps) {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
+  const taskPollingView = taskResult ? buildTaskPollingView(taskResult.lifecycle, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
+  const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
+  const replaySummary = taskResult ? buildReplaySummary(taskResult) : null;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -108,6 +113,19 @@ export function TaskResultPanel({
               <p className="mt-1 text-sm opacity-80">{taskLifecycleView.detail}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {taskLifecycleView.meta.map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {taskPollingView ? (
+            <div className="mt-4 rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-3 text-sky-50">
+              <p className="font-semibold">{t("后台轮询", "Background polling")}</p>
+              <p className="mt-1 text-sm text-sky-50/75">{taskPollingView.detail}</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {taskPollingView.meta.map((item) => (
                   <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
                     {item}
                   </span>
@@ -216,6 +234,50 @@ export function TaskResultPanel({
                     {t(`还有 ${taskEvents.length - 12} 条事件在技术 JSON 中。`, `${taskEvents.length - 12} more event(s) are in Technical JSON.`)}
                   </p>
                 ) : null}
+              </div>
+            </details>
+          ) : null}
+          {artifactRefs.length > 0 ? (
+            <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
+              <summary className="cursor-pointer text-xs font-medium text-white/65">
+                {t("产物引用", "Artifact refs")} · {artifactRefs.length}
+              </summary>
+              <div className="mt-3 space-y-2">
+                {artifactRefs.slice(0, 12).map((artifact) => (
+                  <div key={artifact.key} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                    <p className="break-words font-mono text-[11px] text-white/75">{artifact.summary}</p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] text-white/45">{t("原始产物字段", "Raw artifact field")}</summary>
+                      <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-black/30 p-2 text-[11px] text-white/70">
+                        {JSON.stringify(artifact.raw, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                ))}
+                {artifactRefs.length > 12 ? (
+                  <p className="text-[11px] text-white/40">
+                    {t(`还有 ${artifactRefs.length - 12} 个产物引用在技术 JSON 中。`, `${artifactRefs.length - 12} more artifact ref(s) are in Technical JSON.`)}
+                  </p>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+          {replaySummary ? (
+            <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
+              <summary className="cursor-pointer text-xs font-medium text-white/65">
+                {t("回放摘要", "Replay summary")}
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {replaySummary.meta.map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
+                    {item}
+                  </span>
+                ))}
+                {replaySummary.coverage.map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-white/70">
+                    {item}
+                  </span>
+                ))}
               </div>
             </details>
           ) : null}

@@ -16,6 +16,17 @@ export interface TaskPermissionView {
   meta: string[];
 }
 
+export interface TaskArtifactRefView {
+  key: string;
+  summary: string;
+  raw: unknown;
+}
+
+export interface TaskReplaySummaryView {
+  meta: string[];
+  coverage: string[];
+}
+
 export function extractTaskText(result: TaskQueryResponse): string {
   if (result.result_json && typeof result.result_json === "object") {
     const maybeText = (result.result_json as { text?: unknown }).text;
@@ -59,6 +70,33 @@ function stringArrayAt(root: unknown, path: string[]): string[] {
 function boolAt(root: unknown, path: string[]): boolean | undefined {
   const value = getPathValue(root, path);
   return typeof value === "boolean" ? value : undefined;
+}
+
+function primitiveKeyValue(value: unknown): string | null {
+  if ((typeof value === "string" && value.trim()) || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function findFirstValueByKey(root: unknown, key: string, depth = 0): unknown {
+  if (depth > 8) return undefined;
+  const record = asRecord(root);
+  if (record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
+    for (const value of Object.values(record)) {
+      const found = findFirstValueByKey(value, key, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (Array.isArray(root)) {
+    for (const value of root) {
+      const found = findFirstValueByKey(value, key, depth + 1);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
 }
 
 function taskTraceRoot(result: TaskQueryResponse): unknown {
@@ -160,6 +198,136 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   const mergeStatus = stringAt(payload, ["merge_contract", "child_trace_merge_status"]);
   if (mergeStatus) meta.push(`merge_status=${mergeStatus}`);
   return meta;
+}
+
+export function taskArtifactRefs(result: TaskQueryResponse): TaskArtifactRefView[] {
+  const refs: TaskArtifactRefView[] = [];
+  const seen = new Set<string>();
+  collectTaskArtifactRefs(result.result_json, refs, seen, 0);
+  return refs;
+}
+
+function collectTaskArtifactRefs(
+  value: unknown,
+  refs: TaskArtifactRefView[],
+  seen: Set<string>,
+  depth: number,
+) {
+  if (depth > 8 || refs.length >= 128) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectTaskArtifactRefs(item, refs, seen, depth + 1);
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) return;
+  for (const key of ["artifact_refs", "artifacts"]) {
+    const items = record[key];
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        addTaskArtifactRef(item, refs, seen);
+        if (refs.length >= 128) return;
+      }
+    }
+  }
+  for (const child of Object.values(record)) {
+    collectTaskArtifactRefs(child, refs, seen, depth + 1);
+  }
+}
+
+function addTaskArtifactRef(
+  raw: unknown,
+  refs: TaskArtifactRefView[],
+  seen: Set<string>,
+) {
+  const key = stableArtifactKey(raw);
+  if (!key || seen.has(key)) return;
+  seen.add(key);
+  refs.push({
+    key,
+    summary: artifactSummary(raw),
+    raw,
+  });
+}
+
+function stableArtifactKey(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+  const record = asRecord(raw);
+  if (record) {
+    for (const key of ["ref", "artifact_ref", "path", "artifact_path", "output_path"]) {
+      const value = primitiveKeyValue(record[key]);
+      if (value) return `${key}:${value}`;
+    }
+  }
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return "";
+  }
+}
+
+function artifactSummary(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+  const record = asRecord(raw);
+  if (!record) return String(raw);
+  const meta: string[] = [];
+  for (const key of [
+    "ref",
+    "artifact_ref",
+    "path",
+    "artifact_path",
+    "output_path",
+    "kind",
+    "role",
+    "cleanup_required",
+    "isolation_profile",
+    "status",
+  ]) {
+    const value = primitiveKeyValue(record[key]);
+    if (value) meta.push(`${key}=${value}`);
+  }
+  if (meta.length > 0) return meta.join(" · ");
+  const fallback = JSON.stringify(raw);
+  return fallback.length > 180 ? `${fallback.slice(0, 177)}...` : fallback;
+}
+
+export function buildReplaySummary(result: TaskQueryResponse): TaskReplaySummaryView | null {
+  const root = result.result_json;
+  const replayMode = primitiveKeyValue(findFirstValueByKey(root, "replay_mode"));
+  const resultSource = primitiveKeyValue(findFirstValueByKey(root, "result_source"));
+  const executionReplay = asRecord(findFirstValueByKey(root, "execution_replay"));
+  const coverage = asRecord(findFirstValueByKey(root, "coverage"));
+  if (!replayMode && !resultSource && !executionReplay && !coverage) return null;
+
+  const meta: string[] = [];
+  if (replayMode) meta.push(`replay_mode=${replayMode}`);
+  if (resultSource) meta.push(`result_source=${resultSource}`);
+  if (executionReplay) {
+    for (const key of [
+      "strategy",
+      "deterministic",
+      "live_provider",
+      "live_tool_invocations",
+      "provider_call_count",
+      "tool_invocation_count",
+      "step_count",
+    ]) {
+      const value = primitiveKeyValue(executionReplay[key]);
+      if (value) meta.push(`${key}=${value}`);
+    }
+  }
+
+  const coverageMeta: string[] = [];
+  if (coverage) {
+    for (const [key, value] of Object.entries(coverage)) {
+      if (Array.isArray(value)) {
+        coverageMeta.push(`${key}=${value.map(String).join(",")}`);
+      } else {
+        const primitive = primitiveKeyValue(value);
+        if (primitive) coverageMeta.push(`${key}=${primitive}`);
+      }
+    }
+  }
+  return { meta, coverage: coverageMeta };
 }
 
 function taskPermissionRoot(result: TaskQueryResponse): unknown {
