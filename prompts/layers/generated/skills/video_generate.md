@@ -77,7 +77,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"outputs":[]},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","adapter_kind":"media_job_poll","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"planned_outputs":[{"type":"video_file","path":"video/download/generated.mp4"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]},"error_text":null}
 ```
 
 ### Example 3

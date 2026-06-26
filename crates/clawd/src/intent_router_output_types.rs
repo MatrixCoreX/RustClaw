@@ -27,6 +27,7 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) confidence: f64,
     pub(crate) output_contract: IntentOutputContract,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    pub(crate) execution_recipe_plan_hint: Option<ExecutionRecipePlanHint>,
     /// Legacy first-layer decision from the normalizer compatibility schema.
     pub(crate) legacy_first_layer_decision: FirstLayerDecision,
     /// Execution finalization style. This is not a semantic gate.
@@ -34,6 +35,14 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) turn_analysis: Option<TurnAnalysis>,
     pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(crate) first_layer_gate_record: FirstLayerDecisionGateRecord,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ExecutionRecipePlanHint {
+    pub(crate) kind: String,
+    pub(crate) command: Option<String>,
+    pub(crate) execution_mode: Option<String>,
+    pub(crate) async_adapter_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

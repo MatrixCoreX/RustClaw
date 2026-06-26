@@ -4,10 +4,10 @@ use super::{
     apply_current_turn_structural_contract_repair,
     apply_self_contained_payload_direct_answer_contract_repair,
     direct_answer_decision_should_be_overridden_by_executable_contract,
-    parse_execution_recipe_hint, structural_alias_binding_fallback_decision,
-    structured_execution_signal_for_effective_route, IntentExecutionRecipeOut,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    parse_execution_recipe_hint, parse_runtime_async_job_start_plan_hint,
+    structural_alias_binding_fallback_decision, structured_execution_signal_for_effective_route,
+    IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 use crate::{
     execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
@@ -21,12 +21,75 @@ fn parse_execution_recipe_hint_accepts_explicit_ops_service_contract() {
         kind: "ops_closed_loop".to_string(),
         profile: "ops_service".to_string(),
         target_scope: "system".to_string(),
+        ..IntentExecutionRecipeOut::default()
     }))
     .expect("execution recipe spec");
     assert_eq!(spec.profile, ExecutionRecipeProfile::OpsService);
     assert_eq!(spec.target_scope, ExecutionRecipeTargetScope::System);
     assert!(spec.inspect_first);
     assert!(spec.validation_required);
+}
+
+#[test]
+fn runtime_async_job_start_state_patch_survives_schema_and_becomes_plan_hint() {
+    let raw = r#"{
+      "resolved_user_intent":"start async local command",
+      "answer_candidate":"",
+      "resume_behavior":"none",
+      "schedule_kind":"none",
+      "schedule_intent":null,
+      "wants_file_delivery":false,
+      "should_refresh_long_term_memory":false,
+      "agent_display_name_hint":"",
+      "needs_clarify":false,
+      "clarify_question":"",
+      "reason":"runtime_async_job_start_plan_hint",
+      "confidence":0.9,
+      "decision":"planner_execute",
+      "output_contract":{
+        "response_shape":"strict",
+        "exact_sentence_count":null,
+        "requires_content_evidence":true,
+        "delivery_required":false,
+        "locator_kind":"none",
+        "delivery_intent":"none",
+        "semantic_kind":"service_status",
+        "locator_hint":"",
+        "scalar_count_filter":null,
+        "list_selector":null,
+        "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+      },
+      "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
+      "turn_type":"task_request",
+      "target_task_policy":"standalone",
+      "should_interrupt_active_run":false,
+      "state_patch":{
+        "runtime_async_job_start":{
+          "command":"sleep 2 && echo RUSTCLAW_ASYNC_LIFECYCLE",
+          "execution_mode":"async_start",
+          "async_adapter_kind":"local_process_poll"
+        }
+      },
+      "attachment_processing_required":false
+    }"#;
+
+    let out = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        raw,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("runtime async job state patch should validate");
+    let hint = parse_runtime_async_job_start_plan_hint(out.value.state_patch.as_ref())
+        .expect("runtime async job state patch should become plan hint");
+
+    assert_eq!(
+        hint.command.as_deref(),
+        Some("sleep 2 && echo RUSTCLAW_ASYNC_LIFECYCLE")
+    );
+    assert_eq!(hint.execution_mode.as_deref(), Some("async_start"));
+    assert_eq!(
+        hint.async_adapter_kind.as_deref(),
+        Some("local_process_poll")
+    );
 }
 
 #[test]

@@ -745,11 +745,24 @@ fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> O
     if let Some(model_kind) = extra.get("model_kind").and_then(clean_machine_field_value) {
         fields.push(format!("model_kind={model_kind}"));
     }
+    if let Some(adapter_kind) = extra
+        .get("adapter_kind")
+        .and_then(clean_machine_field_value)
+    {
+        fields.push(format!("adapter_kind={adapter_kind}"));
+    }
     fields.push(format!("output_path={output_path}"));
     if let Some(planned_outputs_json) =
         compact_machine_json(&serde_json::Value::Array(planned_outputs))
     {
         fields.push(format!("planned_outputs={planned_outputs_json}"));
+    }
+    if let Some(pending_contract) = extra
+        .get("pending_async_job_contract")
+        .filter(|value| value.is_object())
+        .and_then(compact_machine_json)
+    {
+        fields.push(format!("pending_async_job_contract={pending_contract}"));
     }
     Some(fields.join("\n"))
 }

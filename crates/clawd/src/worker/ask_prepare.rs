@@ -40,6 +40,7 @@ pub(super) struct PreparedAskExecutionContext {
 pub(super) struct PreparedAskRouting {
     pub(super) route_result: crate::RouteResult,
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    pub(super) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) resolved_prompt: String,
@@ -1297,6 +1298,7 @@ pub(super) async fn prepare_ask_routing(
         return Ok(PreparedAskRouting {
             route_result,
             execution_recipe_hint: None,
+            execution_recipe_plan_hint: None,
             turn_analysis: None,
             clarify_fallback_source: None,
             resolved_prompt,
@@ -1384,6 +1386,7 @@ pub(super) async fn prepare_ask_routing(
     let turn_analysis = normalizer_out.turn_analysis.clone();
     let clarify_fallback_source = normalizer_out.fallback_source;
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
+    let mut execution_recipe_plan_hint = normalizer_out.execution_recipe_plan_hint.clone();
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
     preserve_locator_reply_runtime_intent(&mut route_result, &clarify_followup_resolution);
@@ -1508,6 +1511,7 @@ pub(super) async fn prepare_ask_routing(
     let resolved_prompt = context_resolution.resolved_user_intent.clone();
     if route_result.needs_clarify || !route_result.is_execute_gate() {
         execution_recipe_hint = None;
+        execution_recipe_plan_hint = None;
     }
     crate::intent::safety_class::apply_route_risk_ceiling(
         &mut route_result,
@@ -1542,6 +1546,7 @@ pub(super) async fn prepare_ask_routing(
     Ok(PreparedAskRouting {
         route_result,
         execution_recipe_hint,
+        execution_recipe_plan_hint,
         turn_analysis,
         clarify_fallback_source,
         resolved_prompt,

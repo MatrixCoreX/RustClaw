@@ -352,7 +352,7 @@ fn contract_matrix_preflight_allows_runtime_async_job_start_marker() {
 }
 
 #[test]
-fn contract_matrix_preflight_rejects_async_start_without_runtime_marker() {
+fn contract_matrix_preflight_allows_bounded_planner_async_start_without_runtime_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -368,8 +368,30 @@ fn contract_matrix_preflight_rejects_async_start_without_runtime_marker() {
         "expires_in_seconds": 600
     });
 
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        "complete planner async-start machine fields should keep agent-loop authority even when the normalizer route was generic"
+    );
+}
+
+#[test]
+fn contract_matrix_preflight_rejects_unbounded_async_start_without_runtime_marker() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+        "async_start": true,
+        "poll_after_seconds": 2
+    });
+
     let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
-        .expect("generic path contracts still reject unclassified run_cmd starts");
+        .expect("unbounded async starts still need an explicit runtime contract");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
     assert_eq!(parsed.error_kind, "contract_action_rejected");

@@ -537,6 +537,7 @@ fn semantic_suspect_keeps_raw_command_output_with_active_execution_recipe() {
             kind: "ops_closed_loop".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
+            ..super::IntentExecutionRecipeOut::default()
         }),
         turn_type: String::new(),
         target_task_policy: String::new(),

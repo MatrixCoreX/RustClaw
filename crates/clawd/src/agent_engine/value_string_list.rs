@@ -1316,14 +1316,16 @@ pub(super) fn async_job_start_deterministic_plan_result(
     user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
+    let recipe_command = loop_state_async_start_command(loop_state);
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
-        || !route_requests_runtime_async_job_contract(route)
+        || (!route_requests_runtime_async_job_contract(route) && recipe_command.is_none())
         || !run_cmd_available_for_plan(state)
     {
         return None;
     }
-    let command = explicit_command_segment(&state.policy.command_intent, &route.resolved_intent)
+    let command = recipe_command
+        .or_else(|| explicit_command_segment(&state.policy.command_intent, &route.resolved_intent))
         .or_else(|| explicit_command_segment(&state.policy.command_intent, user_text))?;
     let action = AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1341,6 +1343,40 @@ pub(super) fn async_job_start_deterministic_plan_result(
         PlanKind::Single,
         &[action],
     ))
+}
+
+fn loop_state_async_start_command(loop_state: &LoopState) -> Option<String> {
+    let command = loop_state
+        .output_vars
+        .get("route_execution_recipe_plan_command")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let kind = loop_state
+        .output_vars
+        .get("route_execution_recipe_plan_kind")
+        .map(String::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let execution_mode = loop_state
+        .output_vars
+        .get("route_execution_recipe_plan_execution_mode")
+        .map(String::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let async_adapter_kind = loop_state
+        .output_vars
+        .get("route_execution_recipe_plan_async_adapter_kind")
+        .map(String::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    (kind.contains("async_job")
+        || execution_mode.contains("async")
+        || async_adapter_kind.contains("poll"))
+    .then(|| command.to_string())
 }
 
 pub(super) fn structured_dry_run_response_deterministic_plan_result(

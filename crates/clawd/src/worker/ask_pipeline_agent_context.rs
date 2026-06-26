@@ -16,6 +16,7 @@ pub(in crate::worker) fn build_agent_run_context_from_prepared_flow(
     crate::agent_engine::AgentRunContext {
         route_result: Some(prepared_flow.route_result.clone()),
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
+        execution_recipe_plan_hint: prepared_flow.execution_recipe_plan_hint.clone(),
         turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         session_alias_bindings: prepared_flow.session_alias_bindings.clone(),

@@ -498,6 +498,20 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 );
                 return action;
             }
+            if structured_run_cmd_async_start_allows_planner_authority_despite_contract(
+                &normalized_skill,
+                args,
+                policy.decision,
+            ) {
+                info!(
+                    "plan_keep_structured_run_cmd_async_start idx={} contract={} action={} decision={}",
+                    idx,
+                    policy.contract_match,
+                    policy.action_key,
+                    policy.decision.as_str()
+                );
+                return action;
+            }
             if super::super::action_is_user_named_new_workspace_write(
                 &state.skill_rt.workspace_root,
                 original_user_text,
@@ -693,6 +707,33 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             action
         })
         .collect()
+}
+
+fn structured_run_cmd_async_start_allows_planner_authority_despite_contract(
+    normalized_skill: &str,
+    args: &Value,
+    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+) -> bool {
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
+        || !matches!(
+            policy_decision,
+            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+                | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+        )
+        || args.get("async_start").and_then(Value::as_bool) != Some(true)
+        || run_cmd_command_from_args(args).is_none()
+    {
+        return false;
+    }
+
+    positive_bounded_i64_arg(args, "poll_after_seconds", 1, 86_400)
+        && positive_bounded_i64_arg(args, "expires_in_seconds", 1, 604_800)
+}
+
+fn positive_bounded_i64_arg(args: &Value, key: &str, min: i64, max: i64) -> bool {
+    args.get(key)
+        .and_then(Value::as_i64)
+        .is_some_and(|value| value >= min && value <= max)
 }
 
 fn registry_declares_non_mutating_planner_action(

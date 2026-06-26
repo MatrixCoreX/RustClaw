@@ -6,7 +6,6 @@ use super::{register_failed_step_output, AppState, ClaimedTask, LoopState, Skill
 use crate::agent_engine::{
     action_has_user_named_output_path_marker, attempt_ledger,
     maybe_publish_execution_recipe_phase_hint, CLAWD_LITERAL_COMMAND_ARG,
-    CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
 };
 
 fn matches_json_schema_type(value: &Value, expected_type: &str) -> bool {
@@ -276,11 +275,8 @@ fn runtime_async_job_start_allows_run_cmd_despite_contract(
         || !matches!(
             decision,
             crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+                | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
         )
-        || classification_args
-            .get(CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
-            .and_then(Value::as_str)
-            != Some("async_job_protocol")
         || classification_args
             .get("async_start")
             .and_then(Value::as_bool)

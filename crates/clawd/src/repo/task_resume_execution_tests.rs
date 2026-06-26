@@ -1728,6 +1728,14 @@ fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
     seed["task_lifecycle"]["poll_ref"] = json!("local_process:poll-1");
     seed["task_lifecycle"]["next_check_after"] = json!(2);
     seed["task_lifecycle"]["async_job_message_key"] = json!("clawd.task.async_job_pending");
+    seed["task_lifecycle"]["async_timeout_policy"] = json!({
+        "schema_version": 1,
+        "policy_source": "async_job_contract",
+        "adapter_kind": "local_process_poll",
+        "effective_deadline_ts": now + 600,
+        "remaining_seconds": 600,
+        "expired": false
+    });
     insert_task(&state, "ask-machine-terminal", "running", Some(&seed), now);
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
@@ -1786,6 +1794,14 @@ fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
     assert_eq!(result["machine_reply"]["checkpoint_id"], checkpoint_id);
     assert_eq!(result["machine_reply"]["poll_ref"], "local_process:poll-1");
     assert_eq!(result["machine_reply"]["next_check_after"], 2);
+    assert_eq!(
+        result["machine_reply"]["adapter_kind"],
+        "local_process_poll"
+    );
+    assert_eq!(
+        result["machine_reply"]["async_timeout_policy"]["adapter_kind"],
+        "local_process_poll"
+    );
     assert_eq!(
         result["machine_reply"]["final_result_json"]["output"],
         "RUSTCLAW_ASYNC_SMOKE"

@@ -52,6 +52,7 @@
 - `provider`: resolved backend provider name.
 - `model`: resolved model name.
 - `model_kind`: adapter/runtime mode, such as `minimax_native` or `unsupported` in dry-run metadata.
+- `adapter_kind`: async adapter family token for provider-backed polling, such as `media_job_poll` in dry-run metadata.
 - `task_id`: provider video task id when a request is sent.
 - `status`: task status when available.
 - `file_id`: provider file id when available.
@@ -59,6 +60,7 @@
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"video_file\",\"path\":\"...\"}]` when downloaded.
 - `planned_outputs`: planned file outputs for dry-run validation responses.
 - `dry_run`: present and true only for dry runs.
+- `pending_async_job_contract`: dry-run-only preview of the machine fields a live `generate` call will place in `pending_async_job`; it is intentionally not named `pending_async_job` so dry-run responses are not treated as real background work.
 - `pending_async_job`: present when `generate.wait_for_completion` is omitted or false; contains `job_id`, `status`, `poll_after_seconds`, `expires_at`, `cancel_ref`, `message_key`, and `poll_adapter`.
 - `async_poll_adapter_result`: present for `poll`; contains `job_id`, `status=accepted|running|succeeded|failed|expired|cancelled`, `poll_after_seconds`, `expires_at`, and `final_result_json`, `failure_result_json`, or `cancellation_result_json` when terminal.
 
@@ -87,7 +89,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"outputs":[]},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","adapter_kind":"media_job_poll","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"planned_outputs":[{"type":"video_file","path":"video/download/generated.mp4"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]},"error_text":null}
 ```
 
 ### Example 3

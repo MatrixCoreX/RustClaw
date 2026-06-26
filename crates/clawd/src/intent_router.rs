@@ -49,7 +49,9 @@ pub(crate) use turn_analysis::{TargetTaskPolicy, TurnAnalysis, TurnType};
 
 #[path = "intent_router_output_types.rs"]
 mod output_types;
-pub(crate) use output_types::{ClarifyQuestionPolicy, ContextResolution, IntentNormalizerOutput};
+pub(crate) use output_types::{
+    ClarifyQuestionPolicy, ContextResolution, ExecutionRecipePlanHint, IntentNormalizerOutput,
+};
 
 #[path = "intent_router_clarify.rs"]
 mod clarify;
@@ -77,10 +79,11 @@ use path_tokens::{
 #[path = "intent_router_schema_parse.rs"]
 mod schema_parse;
 use schema_parse::{
-    infer_missing_turn_type_from_policy, parse_output_contract, parse_output_delivery_intent,
-    parse_output_locator_kind, parse_output_response_shape, parse_output_semantic_kind,
-    parse_positive_usize_value, parse_resume_behavior, parse_schedule_kind,
-    parse_target_task_policy, parse_turn_type, IntentExecutionRecipeOut, IntentOutputContractOut,
+    infer_missing_turn_type_from_policy, parse_execution_recipe_plan_hint, parse_output_contract,
+    parse_output_delivery_intent, parse_output_locator_kind, parse_output_response_shape,
+    parse_output_semantic_kind, parse_positive_usize_value, parse_resume_behavior,
+    parse_runtime_async_job_start_plan_hint, parse_schedule_kind, parse_target_task_policy,
+    parse_turn_type, IntentExecutionRecipeOut, IntentOutputContractOut,
 };
 #[cfg(test)]
 use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};

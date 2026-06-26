@@ -26,6 +26,7 @@ fn prepared_flow_with_context() -> PreparedAskFlow {
         memory_trace: None,
         route_result: base_route(),
         execution_recipe_hint: None,
+        execution_recipe_plan_hint: None,
         turn_analysis: None,
         clarify_fallback_source: None,
         auto_locator_path: Some("/tmp/workspace/README.md".to_string()),
