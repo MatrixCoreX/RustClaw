@@ -212,7 +212,9 @@ async fn skill_poll_async_adapter_result(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    if !adapter_kind.is_some_and(skill_poll_adapter_kind_supported) {
+    if !adapter_kind
+        .is_some_and(crate::async_job_contract::skill_runner_poll_adapter_kind_supported)
+    {
         return Some(skill_poll_failed_adapter_result(
             job_id,
             "skill_poll_adapter_kind_unsupported",
@@ -295,18 +297,6 @@ async fn skill_poll_async_adapter_result(
             })),
         )),
     }
-}
-
-fn skill_poll_adapter_kind_supported(adapter_kind: &str) -> bool {
-    matches!(
-        adapter_kind,
-        "skill_poll"
-            | "http_job_poll"
-            | "mcp_job_poll"
-            | "media_job_poll"
-            | "browser_job_poll"
-            | "remote_job_poll"
-    )
 }
 
 fn skill_poll_adapter_result_from_extra(extra: &Value, job_id: &str) -> Option<Value> {

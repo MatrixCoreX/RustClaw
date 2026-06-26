@@ -5,6 +5,15 @@ use serde_json::Value;
 use crate::task_lifecycle::{AsyncJobRef, AsyncJobStatus};
 
 pub(crate) const ASYNC_POLL_ADAPTER_RESULT_KEY: &str = "async_poll_adapter_result";
+pub(crate) const ASYNC_POLL_ADAPTER_KINDS: &[&str] = &[
+    "skill_poll",
+    "local_process_poll",
+    "http_job_poll",
+    "mcp_job_poll",
+    "media_job_poll",
+    "browser_job_poll",
+    "remote_job_poll",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AsyncJobProtocolPhase {
@@ -79,8 +88,9 @@ pub(crate) fn async_job_protocol_hint_line() -> String {
         .map(|status| status.as_token())
         .collect::<Vec<_>>()
         .join("|");
+    let adapter_kinds = ASYNC_POLL_ADAPTER_KINDS.join("|");
     format!(
-        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;poll_adapter_kinds:skill_poll;adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|expires_at|final_result_json|failure_result_json|error_code|message_key;user_text_fields_forbidden:text|error_text"
+        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;poll_adapter_kinds:{adapter_kinds};adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|expires_at|final_result_json|failure_result_json|error_code|message_key;user_text_fields_forbidden:text|error_text"
     )
 }
 
@@ -166,21 +176,41 @@ pub(crate) fn parse_pending_async_job_poll_adapter_from_extra(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| machine_error(error_prefix, "poll_adapter_kind_missing"))?;
-    if adapter_kind != "skill_poll" {
+    if !async_poll_adapter_kind_supported(adapter_kind) {
         return Err(machine_error(error_prefix, "unsupported_poll_adapter_kind"));
     }
-    adapter
-        .get("skill_name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| machine_error(error_prefix, "poll_adapter_skill_name_missing"))?;
+    if skill_runner_poll_adapter_kind_supported(adapter_kind) {
+        adapter
+            .get("skill_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| machine_error(error_prefix, "poll_adapter_skill_name_missing"))?;
+    }
     if let Some(args) = adapter.get("args") {
         if !args.is_object() || args.get("text").is_some() || args.get("error_text").is_some() {
             return Err(machine_error(error_prefix, "poll_adapter_args_invalid"));
         }
     }
     Ok(Some(adapter.clone()))
+}
+
+pub(crate) fn async_poll_adapter_kind_supported(adapter_kind: &str) -> bool {
+    ASYNC_POLL_ADAPTER_KINDS
+        .iter()
+        .any(|candidate| *candidate == adapter_kind)
+}
+
+pub(crate) fn skill_runner_poll_adapter_kind_supported(adapter_kind: &str) -> bool {
+    matches!(
+        adapter_kind,
+        "skill_poll"
+            | "http_job_poll"
+            | "mcp_job_poll"
+            | "media_job_poll"
+            | "browser_job_poll"
+            | "remote_job_poll"
+    )
 }
 
 fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Value> {
@@ -244,7 +274,7 @@ pub(crate) fn async_job_contract_json() -> Value {
             "cancel_ref",
             "message_key"
         ],
-        "poll_adapter_kinds": ["skill_poll"],
+        "poll_adapter_kinds": ASYNC_POLL_ADAPTER_KINDS,
         "adapter_result_key": ASYNC_POLL_ADAPTER_RESULT_KEY,
         "adapter_result_fields": [
             "job_id",

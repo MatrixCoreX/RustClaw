@@ -91,7 +91,7 @@ fn custom_provider_can_dry_run_with_explicit_adapter_kind() {
 }
 
 #[test]
-fn pending_video_task_response_exposes_skill_poll_adapter() {
+fn pending_video_task_response_exposes_media_job_poll_adapter() {
     let (_, extra) = video_pending_task_response(
         "provider-task-1",
         "minimax",
@@ -110,7 +110,7 @@ fn pending_video_task_response_exposes_skill_poll_adapter() {
     assert_eq!(extra["pending_async_job"]["status"], "accepted");
     assert_eq!(
         extra["pending_async_job"]["poll_adapter"]["kind"],
-        "skill_poll"
+        "media_job_poll"
     );
     assert_eq!(
         extra["pending_async_job"]["poll_adapter"]["skill_name"],
