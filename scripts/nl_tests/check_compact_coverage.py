@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CASE_FILES = [
     ROOT / "scripts/nl_tests/cases/nl_cases_minimal_basic_skill_coverage_20260621.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_codex_parity_runtime_smoke_20260623.txt",
+    ROOT / "scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_media_dry_run_capability_20260623.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_client_like_typical_coverage_20260605.txt",
 ]
@@ -70,6 +71,20 @@ REQUIRED_MEDIA_DRY_RUN = {
     "audio_synthesize",
     "video_generate",
     "music_generate",
+}
+
+REQUIRED_ASYNC_LIFECYCLE = {
+    "async_start",
+    "poll_async_job",
+    "local_process_poll",
+    "media_job_poll",
+    "checkpoint",
+    "cancel_ref",
+    "async_timeout_policy",
+    "effective_deadline",
+    "terminal_projection",
+    "expired",
+    "cancelled",
 }
 
 FORBIDDEN_LIVE_PUBLISH_TAGS = {
@@ -147,6 +162,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
     required_groups = {
         "basic": REQUIRED_BASIC,
         "route_lifecycle": REQUIRED_ROUTE_LIFECYCLE,
+        "async_lifecycle": REQUIRED_ASYNC_LIFECYCLE,
         "media_dry_run": REQUIRED_MEDIA_DRY_RUN,
     }
     missing = {
@@ -191,7 +207,13 @@ def write_case_file(path: Path, tags: set[str]) -> None:
 
 
 def run_self_test() -> int:
-    required_tags = REQUIRED_BASIC | REQUIRED_ROUTE_LIFECYCLE | REQUIRED_MEDIA_DRY_RUN | {"dry_run"}
+    required_tags = (
+        REQUIRED_BASIC
+        | REQUIRED_ROUTE_LIFECYCLE
+        | REQUIRED_ASYNC_LIFECYCLE
+        | REQUIRED_MEDIA_DRY_RUN
+        | {"dry_run"}
+    )
     tmp_parent = ROOT / "tmp"
     tmp_parent.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=tmp_parent) as tmp:
