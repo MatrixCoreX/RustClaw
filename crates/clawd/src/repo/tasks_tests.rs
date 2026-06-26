@@ -71,6 +71,33 @@ fn insert_task(
     .expect("insert task");
 }
 
+fn set_task_lease(
+    state: &crate::AppState,
+    task_id: &str,
+    lease_owner: &str,
+    lease_expires_at: i64,
+    claim_attempt: i64,
+    claimed_at: i64,
+) {
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks
+         SET lease_owner = ?2,
+             lease_expires_at = ?3,
+             claim_attempt = ?4,
+             claimed_at = ?5
+         WHERE task_id = ?1",
+        rusqlite::params![
+            task_id,
+            lease_owner,
+            lease_expires_at,
+            claim_attempt,
+            claimed_at
+        ],
+    )
+    .expect("set task lease");
+}
+
 fn stored_result_json(state: &crate::AppState, task_id: &str) -> serde_json::Value {
     let db = state.core.db.get().expect("get db");
     let raw: String = db
@@ -251,6 +278,14 @@ fn get_task_query_record_exposes_lifecycle_projection() {
         Some(&progress),
         1234,
     );
+    set_task_lease(
+        &state,
+        &task_id.to_string(),
+        "worker:test-query",
+        1300,
+        2,
+        1200,
+    );
 
     let (response, _, _) = get_task_query_record(&state, task_id)
         .expect("query task")
@@ -274,6 +309,10 @@ fn get_task_query_record_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["resume_reason"], "provider_gap_retry_window");
     assert_eq!(lifecycle["checkpoint_id"], "ckpt-query");
     assert_eq!(lifecycle["last_heartbeat_ts"], 1234);
+    assert_eq!(lifecycle["lease_owner"], "worker:test-query");
+    assert_eq!(lifecycle["lease_expires_at"], 1300);
+    assert_eq!(lifecycle["claim_attempt"], 2);
+    assert_eq!(lifecycle["claimed_at"], 1200);
 }
 
 #[test]
@@ -289,6 +328,7 @@ fn list_active_tasks_exposes_lifecycle_projection() {
         }
     });
     insert_task(&state, "task-active-1", "running", Some(&progress), 2222);
+    set_task_lease(&state, "task-active-1", "worker:test-active", 2400, 3, 2200);
 
     let tasks = list_active_tasks_internal(&state, 42, 7, None).expect("list active tasks");
 
@@ -300,6 +340,10 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["resume_reason"], "async_job_poll");
     assert_eq!(lifecycle["pending_job_ref"], "job-17");
     assert_eq!(lifecycle["last_heartbeat_ts"], 2222);
+    assert_eq!(lifecycle["lease_owner"], "worker:test-active");
+    assert_eq!(lifecycle["lease_expires_at"], 2400);
+    assert_eq!(lifecycle["claim_attempt"], 3);
+    assert_eq!(lifecycle["claimed_at"], 2200);
 }
 
 #[test]
