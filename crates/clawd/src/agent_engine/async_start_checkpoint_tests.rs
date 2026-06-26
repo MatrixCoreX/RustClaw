@@ -213,6 +213,14 @@ fn pending_async_job_checkpoint_persists_skill_poll_adapter() {
         payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]["skill_name"],
         "video_generate"
     );
+    assert_eq!(
+        payload["task_lifecycle"]["async_timeout_policy"]["adapter_kind"],
+        "skill_poll"
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["async_timeout_policy"]["policy_source"],
+        "async_job_contract"
+    );
     assert!(
         payload["task_checkpoint"]["boundary_context"]["async_poll_adapter"]
             .get("text")

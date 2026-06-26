@@ -266,6 +266,14 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
         "local_process:job-1"
     );
     assert_eq!(
+        result["task_lifecycle"]["async_timeout_policy"]["adapter_kind"],
+        "local_process_poll"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["async_timeout_policy"]["policy_source"],
+        "async_job_contract"
+    );
+    assert_eq!(
         result["task_journal"]["summary"]["final_stop_signal"],
         "async_job_checkpoint_waiting"
     );

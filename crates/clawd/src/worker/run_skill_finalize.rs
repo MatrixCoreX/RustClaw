@@ -377,6 +377,8 @@ fn direct_run_skill_async_checkpoint_payload(
     poll_adapter: Option<&Value>,
     now_ts: i64,
 ) -> Value {
+    let timeout_policy =
+        crate::async_job_contract::pending_async_job_timeout_policy(poll_adapter, job, now_ts);
     let checkpoint_id = format!("run-skill:{}:async-job:{}", task.task_id, job.job_id);
     let mut boundary_context = json!({
         "schema_version": 1,
@@ -443,6 +445,7 @@ fn direct_run_skill_async_checkpoint_payload(
             "poll_after_seconds": job.poll_after_seconds,
             "async_job_expires_at": job.expires_at,
             "async_job_message_key": job.message_key,
+            "async_timeout_policy": timeout_policy,
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,

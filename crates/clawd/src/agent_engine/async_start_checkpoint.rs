@@ -105,6 +105,8 @@ fn build_pending_async_job_checkpoint_progress_payload(
     poll_adapter: Option<&Value>,
     now_ts: i64,
 ) -> Value {
+    let timeout_policy =
+        crate::async_job_contract::pending_async_job_timeout_policy(poll_adapter, job, now_ts);
     let checkpoint_id = format!(
         "agent-loop:{}:round-{}:step-{}:async-job:{}",
         task.task_id, loop_state.round_no, global_step, job.job_id
@@ -175,6 +177,7 @@ fn build_pending_async_job_checkpoint_progress_payload(
             "poll_after_seconds": job.poll_after_seconds,
             "async_job_expires_at": job.expires_at,
             "async_job_message_key": job.message_key,
+            "async_timeout_policy": timeout_policy,
             "can_poll": true,
             "can_cancel": true,
             "last_heartbeat_ts": now_ts,
@@ -209,6 +212,7 @@ fn pending_async_job_visible_reply_from_progress_payload(payload: &Value) -> Opt
             "poll_after_seconds",
             "async_job_expires_at",
             "async_job_message_key",
+            "async_timeout_policy",
             "can_poll",
             "can_cancel",
             "cancel_ref",
