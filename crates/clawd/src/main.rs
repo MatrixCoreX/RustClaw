@@ -222,6 +222,7 @@ pub(crate) const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 128_000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
+const ISOLATION_STARTUP_CLEANUP_MIN_SECONDS: u64 = 6 * 60 * 60;
 const DEFAULT_AGENT_ID: &str = "main";
 
 pub(crate) const CHAT_RESPONSE_PROMPT_LOGICAL_PATH: &str = "prompts/chat_response_prompt.md";
@@ -300,6 +301,13 @@ fn resolve_startup_config_path() -> anyhow::Result<String> {
 #[cfg(test)]
 #[path = "main_startup_config_path_tests.rs"]
 mod startup_config_path_tests;
+
+fn startup_isolation_cleanup_age_seconds(running_no_progress_timeout_seconds: u64) -> u64 {
+    running_no_progress_timeout_seconds
+        .saturating_mul(4)
+        .max(ISOLATION_STARTUP_CLEANUP_MIN_SECONDS)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -404,6 +412,33 @@ async fn main() -> anyhow::Result<()> {
         info!(
             "startup stale-running recovery: no stale running tasks found (threshold={}s)",
             config.worker.running_no_progress_timeout_seconds.max(1)
+        );
+    }
+    let isolation_cleanup_age_seconds =
+        startup_isolation_cleanup_age_seconds(config.worker.running_no_progress_timeout_seconds);
+    let isolation_cleanup = execution_isolation::cleanup_abandoned_isolation_workspaces(
+        &workspace_root,
+        now_ts_u64(),
+        isolation_cleanup_age_seconds,
+    );
+    if isolation_cleanup.removed > 0 || !isolation_cleanup.errors.is_empty() {
+        info!(
+            "startup isolation cleanup removed={} skipped={} errors={} older_than_seconds={}",
+            isolation_cleanup.removed,
+            isolation_cleanup.skipped,
+            isolation_cleanup.errors.len(),
+            isolation_cleanup_age_seconds
+        );
+        if !isolation_cleanup.errors.is_empty() {
+            warn!(
+                "startup isolation cleanup errors={}",
+                crate::truncate_for_log(&json!(isolation_cleanup.errors).to_string())
+            );
+        }
+    } else {
+        info!(
+            "startup isolation cleanup: no abandoned isolation workspaces found (older_than_seconds={})",
+            isolation_cleanup_age_seconds
         );
     }
 
