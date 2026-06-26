@@ -10,6 +10,10 @@ use super::{
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
 };
+use crate::child_task_contract::{
+    ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
+};
+use crate::repo::child_tasks::{enqueue_child_task_specs, ChildTaskParentContext};
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
     get_task_admin_target, pause_task_by_id, resume_task_by_id,
@@ -137,6 +141,30 @@ fn stored_status(state: &crate::AppState, task_id: &str) -> String {
         |row| row.get(0),
     )
     .expect("select task status")
+}
+
+fn sample_repo_child_spec(
+    parent_task_id: &str,
+    child_task_id: &str,
+    required: bool,
+) -> ChildTaskSpec {
+    ChildTaskSpec {
+        parent_task_id: parent_task_id.to_string(),
+        child_task_id: child_task_id.to_string(),
+        role: if required { "explorer" } else { "verifier" }.to_string(),
+        scope: json!({
+            "objective": format!("machine_child_objective:{child_task_id}"),
+            "scope_ref": "workspace:current"
+        }),
+        permission_profile: ChildTaskPermissionProfile::ReadOnly,
+        required,
+        budget: ChildTaskBudget::readonly_default(),
+        result_contract: json!({
+            "kind": "structured_findings",
+            "required_keys": ["finding_refs", "evidence_refs"]
+        }),
+        merge_policy: ChildTaskMergePolicy::StructuredFindings,
+    }
 }
 
 #[test]
@@ -267,6 +295,84 @@ fn cancel_parent_task_cancels_structured_child_tasks_only() {
     assert_eq!(child["message_key"], "clawd.task.parent_cancelled");
     assert_eq!(
         child["task_lifecycle"]["terminal_reason"],
+        "parent_cancelled"
+    );
+}
+
+#[test]
+fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout() {
+    let state = state_with_tasks_table();
+    insert_task(
+        &state,
+        "task-parent-enqueue",
+        "running",
+        Some(&json!({})),
+        1,
+    );
+    let parent = ChildTaskParentContext {
+        parent_task_id: "task-parent-enqueue".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+    };
+    let specs = vec![
+        sample_repo_child_spec("task-parent-enqueue", "task-child-enqueue-1", true),
+        sample_repo_child_spec("task-parent-enqueue", "task-child-enqueue-2", false),
+    ];
+
+    let summary =
+        enqueue_child_task_specs(&state, &parent, &specs, 2, 1).expect("enqueue child specs");
+
+    assert_eq!(summary["status"], "scheduled");
+    assert_eq!(summary["queued_child_count"], 2);
+    assert_eq!(stored_status(&state, "task-child-enqueue-1"), "queued");
+    assert_eq!(stored_status(&state, "task-child-enqueue-2"), "queued");
+    let parent_result = stored_result_json(&state, "task-parent-enqueue");
+    assert_eq!(parent_result["child_task_ids"][0], "task-child-enqueue-1");
+    assert_eq!(parent_result["child_task_ids"][1], "task-child-enqueue-2");
+    assert_eq!(
+        parent_result["child_task_enqueue"]["scheduler"]["decision"],
+        "scheduled"
+    );
+
+    let claimed = claim_next_task(&state)
+        .expect("claim child")
+        .expect("queued child");
+    assert_eq!(claimed.task_id, "task-child-enqueue-1");
+    assert_eq!(stored_status(&state, "task-child-enqueue-1"), "running");
+    let payload: serde_json::Value =
+        serde_json::from_str(&claimed.payload_json).expect("parse child payload");
+    assert_eq!(payload["task_role"], "subagent_child");
+    assert_eq!(payload["parent_task_id"], "task-parent-enqueue");
+    assert_eq!(
+        payload["child_task_contract"]["permission_profile"],
+        "read_only"
+    );
+    assert_eq!(
+        payload["text"],
+        "machine_child_objective:task-child-enqueue-1"
+    );
+    let child_result = stored_result_json(&state, "task-child-enqueue-1");
+    assert_eq!(child_result["source"], "child_task_enqueue");
+    assert_eq!(
+        child_result["task_lifecycle"]["state_source"],
+        "child_task_enqueue"
+    );
+
+    let affected = cancel_task_by_id(&state, "task-parent-enqueue")
+        .expect("cancel parent with enqueued children");
+
+    assert_eq!(affected, 3);
+    assert_eq!(stored_status(&state, "task-parent-enqueue"), "canceled");
+    assert_eq!(stored_status(&state, "task-child-enqueue-1"), "canceled");
+    assert_eq!(stored_status(&state, "task-child-enqueue-2"), "canceled");
+    let cancelled_child = stored_result_json(&state, "task-child-enqueue-2");
+    assert_eq!(cancelled_child["terminal_reason"], "parent_cancelled");
+    assert_eq!(
+        cancelled_child["task_lifecycle"]["terminal_reason"],
         "parent_cancelled"
     );
 }

@@ -9,6 +9,8 @@ pub(crate) const DEFAULT_MAX_CHILD_DEPTH: usize = 1;
 #[path = "child_task_contract_policy.rs"]
 mod child_task_contract_policy;
 
+pub(crate) use child_task_contract_policy::child_scheduler_decision;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChildTaskLifecycleEvent {
     Queued,
