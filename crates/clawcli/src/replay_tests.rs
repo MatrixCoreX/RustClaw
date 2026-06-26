@@ -69,7 +69,25 @@ fn replay_run_summary_is_recorded_only_machine_result() {
             "policy": "machine_key_redaction_v1"
         },
         "task": {
-            "status": "succeeded"
+            "status": "succeeded",
+            "route_gate_kind": "execute",
+            "steps": [
+                {
+                    "action_type": "call_tool",
+                    "skill": "run_cmd",
+                    "action": "run",
+                    "status": "ok",
+                    "tool_result": {
+                        "skill": "run_cmd",
+                        "status_code": "ok",
+                        "exit_code": 0
+                    },
+                    "answer_verifier": {
+                        "status_code": "passed",
+                        "verdict": "pass"
+                    }
+                }
+            ]
         },
         "events": [
             {
@@ -88,6 +106,17 @@ fn replay_run_summary_is_recorded_only_machine_result() {
     assert_eq!(summary["event_count"], 1);
     assert_eq!(summary["coverage"]["event_types"][0], "task_completed");
     assert_eq!(summary["coverage"]["has_task_checkpoint"], false);
+    assert_eq!(
+        summary["execution_replay"]["strategy"],
+        "recorded_outputs_first"
+    );
+    assert_eq!(summary["execution_replay"]["live_provider"], false);
+    assert_eq!(summary["execution_replay"]["live_tool_invocations"], false);
+    assert_eq!(summary["execution_replay"]["provider_call_count"], 0);
+    assert_eq!(summary["execution_replay"]["tool_invocation_count"], 0);
+    assert!(summary["execution_replay"]["step_count"]
+        .as_u64()
+        .is_some_and(|count| count >= 4));
 }
 
 #[test]
