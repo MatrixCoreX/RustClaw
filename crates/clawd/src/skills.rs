@@ -1,4 +1,4 @@
-use claw_core::skill_registry::{SkillKind, SkillRiskLevel};
+use claw_core::skill_registry::{CapabilityIsolationProfile, SkillKind, SkillRiskLevel};
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
 use tokio::process::Command;
@@ -609,6 +609,11 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) extra: Option<Value>,
 }
 
+struct SkillExecutionIsolation {
+    state: AppState,
+    artifact_refs: Vec<Value>,
+}
+
 fn prepare_builtin_run_cmd_async_start_args(workspace_root: &Path, args: &mut Value) {
     let Some(obj) = args.as_object_mut() else {
         return;
@@ -742,6 +747,46 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
             }))
         }
         _ => None,
+    }
+}
+
+fn append_extra_artifact_refs(extra: Option<Value>, artifact_refs: &[Value]) -> Option<Value> {
+    if artifact_refs.is_empty() {
+        return extra;
+    }
+    let mut value = extra.unwrap_or_else(|| {
+        json!({
+            "schema_version": 1,
+            "source": "skill_execution_isolation",
+        })
+    });
+    if !value.is_object() {
+        value = json!({
+            "schema_version": 1,
+            "source": "skill_execution_isolation",
+            "value": value,
+        });
+    }
+    if let Some(obj) = value.as_object_mut() {
+        append_unique_json_array(obj, "artifact_refs", artifact_refs);
+        append_unique_json_array(obj, "artifacts", artifact_refs);
+    }
+    Some(value)
+}
+
+fn append_unique_json_array(map: &mut Map<String, Value>, key: &str, items: &[Value]) {
+    if items.is_empty() {
+        return;
+    }
+    let entry = map
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Some(array) = entry.as_array_mut() {
+        for item in items {
+            if !array.iter().any(|existing| existing == item) {
+                array.push(item.clone());
+            }
+        }
     }
 }
 
@@ -1267,6 +1312,72 @@ fn skill_action_token(args: &Value) -> Option<String> {
         .map(|value| value.to_ascii_lowercase().replace(['-', ' ', '.'], "_"))
 }
 
+fn action_scoped_isolation_profile(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> Option<CapabilityIsolationProfile> {
+    let action = skill_action_token(args);
+    state.skill_manifest(skill_name).and_then(|manifest| {
+        let capabilities = manifest.planner_capabilities;
+        capabilities
+            .iter()
+            .find(|mapping| mapping.action.as_deref() == action.as_deref())
+            .or_else(|| {
+                if capabilities.len() == 1 {
+                    capabilities.first()
+                } else {
+                    None
+                }
+            })
+            .and_then(|mapping| mapping.isolation_profile)
+    })
+}
+
+fn skill_execution_isolation_error(skill_name: &str, detail: String) -> String {
+    structured_skill_error_from_parts(
+        skill_name,
+        "execution_isolation_setup_failed",
+        "execution_isolation_setup_failed",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "reason_code": "execution_isolation_setup_failed",
+            "message_key": "clawd.execution.isolation_setup_failed",
+            "detail": detail,
+        })),
+    )
+}
+
+fn prepare_skill_execution_isolation(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &Value,
+) -> Result<Option<SkillExecutionIsolation>, String> {
+    let Some(profile) = action_scoped_isolation_profile(state, skill_name, args) else {
+        return Ok(None);
+    };
+    let plan = crate::execution_isolation::plan_execution_isolation(
+        &state.skill_rt.workspace_root,
+        &task.task_id,
+        profile,
+    )
+    .map_err(|err| skill_execution_isolation_error(skill_name, err.to_string()))?;
+    if !plan.requires_cleanup {
+        return Ok(None);
+    }
+    let runtime =
+        crate::execution_isolation::create_execution_isolation(&plan, crate::now_ts_u64())
+            .map_err(|err| skill_execution_isolation_error(skill_name, err.to_string()))?;
+    let mut isolated_state = state.clone();
+    isolated_state.skill_rt.workspace_root = runtime.plan.execution_root.clone();
+    isolated_state.skill_rt.default_locator_search_dir = runtime.plan.execution_root.clone();
+    Ok(Some(SkillExecutionIsolation {
+        state: isolated_state,
+        artifact_refs: runtime.artifact_refs,
+    }))
+}
+
 fn skill_risk_level_token(risk: SkillRiskLevel) -> &'static str {
     match risk {
         SkillRiskLevel::Unknown => "unknown",
@@ -1439,6 +1550,13 @@ pub(crate) async fn run_skill_with_runner_outcome(
         SkillKind::External => "external",
     };
     audit_high_risk_skill_start(state, task, &skill_name, &args);
+    let execution_isolation = prepare_skill_execution_isolation(state, task, &skill_name, &args)?;
+    let (execution_state, isolation_artifact_refs) =
+        if let Some(isolation) = execution_isolation.as_ref() {
+            (&isolation.state, isolation.artifact_refs.as_slice())
+        } else {
+            (state, &[][..])
+        };
     tracing::info!(
         "skill_dispatch skill={} kind={} branch={}",
         skill_name,
@@ -1449,10 +1567,16 @@ pub(crate) async fn run_skill_with_runner_outcome(
     match kind {
         SkillKind::Builtin => {
             if skill_name == "run_cmd" {
-                prepare_builtin_run_cmd_async_start_args(&state.skill_rt.workspace_root, &mut args);
+                prepare_builtin_run_cmd_async_start_args(
+                    &execution_state.skill_rt.workspace_root,
+                    &mut args,
+                );
             }
-            let extra = builtin_success_extra(&state.skill_rt.workspace_root, &skill_name, &args);
-            return execute_builtin_skill_for_task(state, task, &skill_name, &args)
+            let extra = append_extra_artifact_refs(
+                builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
+                isolation_artifact_refs,
+            );
+            return execute_builtin_skill_for_task(execution_state, task, &skill_name, &args)
                 .await
                 .map(|text| SkillRunOutcome {
                     text,
@@ -1492,10 +1616,13 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .await
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
-    let args = inject_skill_memory_context(state, task, &skill_name, args);
-    let args =
-        ensure_default_output_dir_for_skill_args(&state.skill_rt.workspace_root, &skill_name, args);
-    let source = match task_runtime_channel(state, task) {
+    let args = inject_skill_memory_context(execution_state, task, &skill_name, args);
+    let args = ensure_default_output_dir_for_skill_args(
+        &execution_state.skill_rt.workspace_root,
+        &skill_name,
+        args,
+    );
+    let source = match task_runtime_channel(execution_state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
         RuntimeChannel::Wechat => "wechat",
@@ -1505,17 +1632,17 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     let value = match kind {
         SkillKind::External => {
-            execute_external_skill(state, task, &skill_name, &args, &source).await?
+            execute_external_skill(execution_state, task, &skill_name, &args, &source).await?
         }
         SkillKind::Runner => {
-            let runner_name = state.runner_name_for_skill(&skill_name);
+            let runner_name = execution_state.runner_name_for_skill(&skill_name);
             tracing::info!(
                 "skill_dispatch skill={} runner_name={} kind=runner",
                 skill_name,
                 runner_name
             );
             run_skill_with_runner_once(
-                state,
+                execution_state,
                 task,
                 &skill_name,
                 &runner_name,
@@ -1584,7 +1711,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
             .and_then(|v| v.get("validation"))
             .cloned()
     });
-    let extra = value.get("extra").cloned();
+    let extra = append_extra_artifact_refs(value.get("extra").cloned(), isolation_artifact_refs);
     let text = value
         .get("text")
         .and_then(|v| v.as_str())
