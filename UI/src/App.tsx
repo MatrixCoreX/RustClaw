@@ -566,6 +566,7 @@ export default function App() {
     chatAgentMode,
     chatSending,
     chatRecording,
+    chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
     setChatAgentMode,
@@ -1321,6 +1322,7 @@ export default function App() {
               chatAgentMode={chatAgentMode}
               chatSending={chatSending}
               chatRecording={chatRecording}
+              chatVoiceRecordingSupported={chatVoiceRecordingSupported}
               chatError={chatError}
               chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}

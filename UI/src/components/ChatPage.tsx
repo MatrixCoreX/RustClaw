@@ -19,6 +19,7 @@ export interface ChatPageProps {
   chatAgentMode: boolean;
   chatSending: boolean;
   chatRecording: boolean;
+  chatVoiceRecordingSupported: boolean;
   chatError: string | null;
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
@@ -41,6 +42,7 @@ export function ChatPage({
   chatAgentMode,
   chatSending,
   chatRecording,
+  chatVoiceRecordingSupported,
   chatError,
   chatAttachmentInputRef,
   toLocalTime,
@@ -148,49 +150,56 @@ export function ChatPage({
               <Paperclip className="h-3.5 w-3.5" />
               {t("上传图片/文件", "Upload image/file")}
             </button>
-            <button
-              type="button"
-              onPointerDown={(event) => {
-                if (event.button !== 0) return;
-                event.preventDefault();
-                event.currentTarget.setPointerCapture?.(event.pointerId);
-                void onStartVoiceRecording();
-              }}
-              onPointerUp={(event) => {
-                event.preventDefault();
-                onStopVoiceRecording();
-              }}
-              onPointerCancel={() => onStopVoiceRecording()}
-              onKeyDown={(event) => {
-                if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
-                event.preventDefault();
-                void onStartVoiceRecording();
-              }}
-              onKeyUp={(event) => {
-                if (event.key !== " " && event.key !== "Enter") return;
-                event.preventDefault();
-                onStopVoiceRecording();
-              }}
-              onContextMenu={(event) => event.preventDefault()}
-              disabled={chatSending}
-              className={
-                chatRecording
-                  ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  : "inline-flex select-none items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              }
-            >
-              {chatRecording ? (
-                <Square className="h-3.5 w-3.5" />
-              ) : (
-                <Mic className="h-3.5 w-3.5" />
-              )}
-              {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
-            </button>
+            {chatVoiceRecordingSupported ? (
+              <button
+                type="button"
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                  void onStartVoiceRecording();
+                }}
+                onPointerUp={(event) => {
+                  event.preventDefault();
+                  onStopVoiceRecording();
+                }}
+                onPointerCancel={() => onStopVoiceRecording()}
+                onKeyDown={(event) => {
+                  if (event.repeat || (event.key !== " " && event.key !== "Enter")) return;
+                  event.preventDefault();
+                  void onStartVoiceRecording();
+                }}
+                onKeyUp={(event) => {
+                  if (event.key !== " " && event.key !== "Enter") return;
+                  event.preventDefault();
+                  onStopVoiceRecording();
+                }}
+                onContextMenu={(event) => event.preventDefault()}
+                disabled={chatSending}
+                className={
+                  chatRecording
+                    ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    : "inline-flex select-none items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                }
+              >
+                {chatRecording ? (
+                  <Square className="h-3.5 w-3.5" />
+                ) : (
+                  <Mic className="h-3.5 w-3.5" />
+                )}
+                {chatRecording ? t("松开发送", "Release to send") : t("按住说话", "Hold to talk")}
+              </button>
+            ) : null}
             <span className="text-xs text-white/45">
-              {t(
-                "可直接发送图片、文件或语音，也可以带一句说明。",
-                "Send images, files, or voice directly, with an optional note.",
-              )}
+              {chatVoiceRecordingSupported
+                ? t(
+                    "可直接发送图片、文件或语音，也可以带一句说明。",
+                    "Send images, files, or voice directly, with an optional note.",
+                  )
+                : t(
+                    "可直接发送图片或文件，也可以带一句说明。",
+                    "Send images or files directly, with an optional note.",
+                  )}
             </span>
           </div>
           <textarea

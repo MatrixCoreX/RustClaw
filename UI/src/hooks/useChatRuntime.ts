@@ -67,6 +67,7 @@ export function useChatRuntime({
   const [chatAgentMode, setChatAgentMode] = useState(true);
   const [chatSending, setChatSending] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
+  const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
   const [chatError, setChatError] = useState<string | null>(null);
   const chatAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -133,11 +134,7 @@ export function useChatRuntime({
 
   const startChatVoiceRecording = async () => {
     if (chatRecordingValueRef.current || chatSendingValueRef.current) return;
-    const canRecordDirectly =
-      window.isSecureContext &&
-      Boolean(navigator.mediaDevices?.getUserMedia) &&
-      typeof MediaRecorder !== "undefined";
-    if (!canRecordDirectly) {
+    if (!canUseDirectVoiceRecording()) {
       setChatError(
         t(
           "当前浏览器不允许直接录音。请用 HTTPS 或 localhost 打开页面，或点“上传图片/文件”选择音频。",
@@ -415,6 +412,7 @@ export function useChatRuntime({
     chatAgentMode,
     chatSending,
     chatRecording,
+    chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
     setChatAgentMode,
@@ -427,6 +425,16 @@ export function useChatRuntime({
     stopChatVoiceRecording,
     sendChatMessage,
   };
+}
+
+function canUseDirectVoiceRecording(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    window.isSecureContext &&
+    Boolean(navigator.mediaDevices?.getUserMedia) &&
+    typeof MediaRecorder !== "undefined"
+  );
 }
 
 function preferredRecorderMimeType(): string | undefined {
