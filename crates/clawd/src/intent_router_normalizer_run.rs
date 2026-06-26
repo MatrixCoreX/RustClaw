@@ -91,7 +91,7 @@ pub(crate) async fn run_intent_normalizer(
     let contract_repair_report = model_success.contract_repair_report;
     let parsed = model_success.parsed;
     if let Some(mut out) = parsed {
-        let (repaired_out, contract_repair_report, active_text_answer_candidate_repair_applied) =
+        let (repaired_out, contract_repair_report) =
             apply_answer_candidate_and_contract_judge_repair(
                 state,
                 task,
@@ -506,6 +506,15 @@ pub(crate) async fn run_intent_normalizer(
             &mut legacy_normalizer_decision,
             &mut execution_finalize_style,
         );
+        let deictic_missing_locator_state_patch_repair =
+            apply_deictic_missing_locator_state_patch_clarify_repair(
+                &mut output_contract,
+                state_patch.as_ref(),
+                &mut needs_clarify,
+                &mut clarify_question,
+                &mut legacy_normalizer_decision,
+                &mut execution_finalize_style,
+            );
         let archive_unpack_missing_archive_locator_clarify_repair =
             apply_archive_unpack_missing_archive_locator_clarify(
                 &mut output_contract,
@@ -582,6 +591,7 @@ pub(crate) async fn run_intent_normalizer(
             && archive_unpack_missing_archive_locator_clarify_repair.is_none()
             && workspace_default_clarify_repair.is_none()
             && resolved_directory_clarify_repair.is_none()
+            && deictic_missing_locator_state_patch_repair.is_none()
         {
             apply_unbound_workspace_generic_content_clarify_repair(
                 &mut output_contract,
@@ -717,6 +727,7 @@ pub(crate) async fn run_intent_normalizer(
         }
         for repair_reason in [
             archive_unpack_missing_archive_locator_clarify_repair,
+            deictic_missing_locator_state_patch_repair,
             structured_clarify_repair,
             workspace_default_clarify_repair,
             resolved_directory_clarify_repair,
@@ -820,44 +831,8 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        let active_text_followup_route_repair =
-            (!crate::agent_engine::agent_loop_semantic_authority_enabled(state))
-                .then(|| {
-                    apply_active_text_followup_route_repair(
-                        req,
-                        session_snapshot,
-                        &mut turn_type,
-                        &mut target_task_policy,
-                        attachment_processing_required,
-                        &mut legacy_normalizer_decision,
-                        &mut execution_finalize_style,
-                        &mut needs_clarify,
-                        schedule_kind,
-                        out.should_refresh_long_term_memory,
-                        &mut wants_file_delivery,
-                        &mut output_contract,
-                        state_patch.as_ref(),
-                        resolved_existing_directory_from_current_request(state, req).is_some()
-                            || resolved_directory_pair_from_current_request(state, req).is_some(),
-                        active_text_answer_candidate_repair_applied,
-                        &mut out.answer_candidate,
-                    )
-                })
-                .flatten();
-        if let Some(repair_reason) = active_text_followup_route_repair {
-            clarify_question.clear();
-            force_current_request_resolved_intent = true;
-            append_route_reason(&mut reason, repair_reason);
-            info!(
-                "{} intent_normalizer task_id={} active_text_followup_route_repair input={}",
-                crate::highlight_tag("routing"),
-                task.task_id,
-                crate::truncate_for_log(req)
-            );
-        }
         if let Some(repair_reason) = restore_declared_publishing_preview_contract(
             declared_semantic_kind,
-            active_text_followup_route_repair,
             structural_contract_repair,
             schedule_kind,
             &mut output_contract,
@@ -1232,7 +1207,6 @@ pub(crate) async fn run_intent_normalizer(
                 explicit_command_execution_repair,
                 active_file_basename_answer_candidate_repair,
                 decision_contract_conflict_repair,
-                active_text_followup_route_repair,
                 generated_file_delivery_attachment_repair,
             ],
         );

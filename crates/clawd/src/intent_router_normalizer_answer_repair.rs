@@ -26,7 +26,7 @@ pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
     llm_out_for_parse: &str,
     mut contract_repair_report: ContractRepairReport,
     mut out: IntentNormalizerOut,
-) -> (IntentNormalizerOut, ContractRepairReport, bool) {
+) -> (IntentNormalizerOut, ContractRepairReport) {
     let cleared_internal_context_candidate =
         clear_internal_context_answer_candidate(&mut out).is_some();
     let answer_candidate_binding =
@@ -141,7 +141,6 @@ pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
         }
         contract_repair_report.add("semantic_suspect", detail);
     }
-    let mut active_text_answer_candidate_repair_applied = false;
     if contract_repair_report.needs_llm_contract_integrity_repair() {
         if let Some(repair) = run_contract_repair_judge(
             state,
@@ -155,18 +154,14 @@ pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
         .await
         {
             if apply_contract_repair_judge_output(&mut out, repair) {
-                if active_text_answer_candidate_conflict {
-                    active_text_answer_candidate_repair_applied = true;
-                }
                 let mut repair_applied = ContractRepairReport::default();
                 repair_applied.add("llm_semantic", "contract_repair_judge_applied");
+                if active_text_answer_candidate_conflict {
+                    repair_applied.add("llm_semantic", "active_task_answer_candidate_repaired");
+                }
                 contract_repair_report.merge(&repair_applied);
             }
         }
     }
-    (
-        out,
-        contract_repair_report,
-        active_text_answer_candidate_repair_applied,
-    )
+    (out, contract_repair_report)
 }

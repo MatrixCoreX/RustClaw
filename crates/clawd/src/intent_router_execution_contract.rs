@@ -234,7 +234,6 @@ pub(super) fn apply_file_delivery_contract_repair(
 
 pub(super) fn restore_declared_publishing_preview_contract(
     declared_semantic_kind: OutputSemanticKind,
-    active_text_followup_route_repair: Option<&'static str>,
     structural_contract_repair: Option<&'static str>,
     schedule_kind: ScheduleKind,
     output_contract: &mut IntentOutputContract,
@@ -245,7 +244,6 @@ pub(super) fn restore_declared_publishing_preview_contract(
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if declared_semantic_kind != OutputSemanticKind::PublishingPreview
-        || active_text_followup_route_repair.is_some()
         || matches!(
             structural_contract_repair,
             Some("media_generation_path_report_contract_repair")

@@ -272,6 +272,42 @@ fn locatorless_observation_clarify_repair_routes_service_status_to_act() {
 }
 
 #[test]
+fn deictic_missing_locator_state_patch_forces_boundary_clarify_contract() {
+    let patch = serde_json::json!({"deictic_reference": {"target": "missing_locator"}});
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "/home/guagua/rustclaw".to_string(),
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: false,
+        ..IntentOutputContract::default()
+    };
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+
+    let reason = super::apply_deictic_missing_locator_state_patch_clarify_repair(
+        &mut contract,
+        Some(&patch),
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(reason, Some("state_patch_deictic_missing_locator_clarify"));
+    assert!(needs_clarify);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+    assert_eq!(decision, FirstLayerDecision::Clarify);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+}
+
+#[test]
 fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

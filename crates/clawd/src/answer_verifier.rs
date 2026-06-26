@@ -99,32 +99,16 @@ pub(crate) fn should_verify_answer(
         return false;
     }
     let task_contract = TaskContract::from_route_result(route_result);
-    let active_text_rewrite =
-        direct_answer_active_text_rewrite_should_verify(route_result, journal);
     let pure_chat_agent_loop = pure_chat_agent_loop_submode_should_verify(route_result, journal);
-    if task_contract.intent_kind.as_str() != "planner_execute" && !active_text_rewrite {
+    if task_contract.intent_kind.as_str() != "planner_execute" {
         return false;
     }
-    if active_text_rewrite || pure_chat_agent_loop {
+    if pure_chat_agent_loop {
         return true;
     }
     task_contract.evidence_required
         || !journal.step_results.is_empty()
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
-}
-
-fn direct_answer_active_text_rewrite_should_verify(
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    route_result.is_chat_gate()
-        && route_result
-            .route_reason
-            .contains("active_text_followup_route_repair")
-        && journal
-            .context_bundle_summary
-            .as_deref()
-            .is_some_and(|summary| summary.contains("Most recent generated output:"))
 }
 
 fn pure_chat_agent_loop_submode_should_verify(

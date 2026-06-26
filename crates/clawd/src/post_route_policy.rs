@@ -5,7 +5,6 @@ use crate::{
 mod boundary_contract;
 mod boundary_delivery;
 mod boundary_locator;
-mod legacy_semantic_repair;
 
 pub(crate) use boundary_contract::content_evidence_execution_finalize_style;
 
@@ -26,7 +25,6 @@ use boundary_locator::{
     locator_kind_is_current_workspace, locator_kind_requires_path_binding, route_reason_has_marker,
     semantic_locator_hint_satisfies_non_path_binding,
 };
-use legacy_semantic_repair::legacy_semantic_repair_requested;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ClarifyReasonKind {
@@ -139,19 +137,6 @@ impl PostRouteGateRecord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PostRoutePolicyOptions {
-    pub(crate) allow_legacy_semantic_repair: bool,
-}
-
-impl Default for PostRoutePolicyOptions {
-    fn default() -> Self {
-        Self {
-            allow_legacy_semantic_repair: true,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) enum LocatorResolution {
     None,
@@ -172,22 +157,9 @@ pub(crate) struct PostRoutePolicyResult {
     pub(crate) gate_record: PostRouteGateRecord,
 }
 
-#[cfg(test)]
 pub(crate) fn apply_post_route_policy(
     route_result: RouteResult,
     locator_resolution: LocatorResolution,
-) -> PostRoutePolicyResult {
-    apply_post_route_policy_with_options(
-        route_result,
-        locator_resolution,
-        PostRoutePolicyOptions::default(),
-    )
-}
-
-pub(crate) fn apply_post_route_policy_with_options(
-    route_result: RouteResult,
-    locator_resolution: LocatorResolution,
-    options: PostRoutePolicyOptions,
 ) -> PostRoutePolicyResult {
     let mut execution_route_result = route_result.clone();
     let path_scoped_content_request = route_result.output_contract.requires_content_evidence
@@ -327,15 +299,27 @@ pub(crate) fn apply_post_route_policy_with_options(
         || fuzzy_locator_requires_clarify
         || (background_locator_clarify && !direct_auto_locator_satisfies_background_clarify);
     let force_clarify = force_clarify && !existing_file_delivery_can_try_locator_hint;
-    let legacy_semantic_repair_requested = legacy_semantic_repair_requested(
-        force_clarify,
-        missing_locator_for_path_scoped_content,
-        fuzzy_locator_requires_clarify,
-        background_locator_clarify,
-        direct_auto_locator_satisfies_background_clarify,
-    );
-    let apply_force_clarify = force_clarify
-        && (options.allow_legacy_semantic_repair || !legacy_semantic_repair_requested);
+    let clarify_has_boundary_contract = missing_locator_for_path_scoped_content
+        || fuzzy_locator_requires_clarify
+        || deictic_bare_locator_clarify
+        || execution_route_result
+            .output_contract
+            .requires_content_evidence
+        || locator_kind_requires_path_binding(execution_route_result.output_contract.locator_kind)
+        || execution_route_result.output_contract.delivery_required
+        || !matches!(
+            execution_route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        )
+        || current_workspace_content_summary_needs_concrete_locator;
+    let ordinary_semantic_clarify_requested = force_clarify && !clarify_has_boundary_contract;
+    let apply_force_clarify = force_clarify && !ordinary_semantic_clarify_requested;
+    if ordinary_semantic_clarify_requested {
+        execution_route_result.needs_clarify = false;
+        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
+            execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+        }
+    }
     if apply_force_clarify {
         execution_route_result.needs_clarify = true;
         execution_route_result.set_clarify_gate();
@@ -399,16 +383,16 @@ pub(crate) fn apply_post_route_policy_with_options(
             "post_route_file_delivery_locator_hint_deferred_to_execution",
             PostRoutePolicyOutcome::Execute,
         )
-    } else if force_clarify && !options.allow_legacy_semantic_repair {
+    } else if ordinary_semantic_clarify_requested {
         PostRouteGateRecord::with_owner(
-            "legacy_semantic_repair",
-            "post_route_legacy_semantic_repair_deferred_to_agent_loop",
+            "agent_loop_semantic_defer",
+            "post_route_semantic_clarify_deferred_to_agent_loop",
             PostRoutePolicyOutcome::NoChange,
         )
     } else if force_clarify {
         PostRouteGateRecord::with_owner(
-            "legacy_semantic_repair",
-            "post_route_upstream_clarify_required",
+            "boundary_clarify_gate",
+            "post_route_boundary_clarify_required",
             PostRoutePolicyOutcome::Clarify,
         )
     } else if forced_content_evidence

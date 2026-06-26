@@ -24,10 +24,6 @@ pub(super) fn transform_skill_available_for_plan(state: &AppState) -> bool {
     enabled_skills.is_empty() || enabled_skills.contains("transform")
 }
 
-pub(super) fn normalizer_compat_direct_answer_fast_path_allowed(state: &AppState) -> bool {
-    !crate::agent_engine::agent_loop_semantic_authority_enabled(state)
-}
-
 pub(super) fn package_manager_skill_available_for_plan(state: &AppState) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains("package_manager")
@@ -919,14 +915,13 @@ pub(crate) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResu
 }
 
 pub(super) fn direct_answer_gate_direct_answer_should_enter_agent_loop(
-    state: &AppState,
+    _state: &AppState,
     route: Option<&crate::RouteResult>,
 ) -> bool {
     let Some(route) = route else {
         return false;
     };
-    crate::agent_engine::agent_loop_semantic_authority_enabled(state)
-        && !route.needs_clarify
+    !route.needs_clarify
         && !route.wants_file_delivery
         && route.risk_ceiling != crate::RiskCeiling::High
         && matches!(route.schedule_kind, crate::ScheduleKind::None)

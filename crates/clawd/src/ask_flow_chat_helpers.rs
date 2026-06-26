@@ -1168,7 +1168,6 @@ pub(super) fn chat_route_should_include_recent_execution_context(
 ) -> bool {
     route.output_contract.requires_content_evidence
         || route_reason_has_exact_marker(route, "semantic_contract_requires_evidence")
-        || route_reason_has_exact_marker(route, "active_text_followup_route_repair")
 }
 
 pub(super) fn route_reason_has_exact_marker(route: &crate::RouteResult, marker: &str) -> bool {

@@ -204,14 +204,6 @@ pub(super) fn answer_verifier_retry_applicable(
     if !verifier.high_confidence_gap() || !verifier.should_retry {
         return false;
     }
-    let active_text_rewrite = route_result.is_chat_gate()
-        && route_result
-            .route_reason
-            .contains("active_text_followup_route_repair")
-        && journal
-            .context_bundle_summary
-            .as_deref()
-            .is_some_and(|summary| summary.contains("Most recent generated output:"));
     let pure_chat_agent_loop = route_result
         .route_reason
         .contains("pure_chat_agent_loop_submode")
@@ -224,7 +216,7 @@ pub(super) fn answer_verifier_retry_applicable(
         && !route_result.output_contract.delivery_required
         && journal_has_successful_non_terminal_step(journal)
         && !journal_has_failed_non_terminal_step(journal);
-    active_text_rewrite || pure_chat_agent_loop || observed_tool_evidence
+    pure_chat_agent_loop || observed_tool_evidence
 }
 
 fn journal_has_successful_non_terminal_step(journal: &crate::task_journal::TaskJournal) -> bool {
