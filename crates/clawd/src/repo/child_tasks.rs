@@ -4,7 +4,10 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::{
-    child_task_contract::{child_scheduler_decision, ChildTaskSpec, CHILD_TASK_SCHEMA_VERSION},
+    child_task_contract::{
+        child_scheduler_decision, merge_child_task_results, ChildTaskSpec,
+        CHILD_TASK_SCHEMA_VERSION,
+    },
     now_ts, AppState,
 };
 
@@ -156,7 +159,181 @@ pub(crate) fn record_child_task_terminal_projection(
          WHERE task_id = ?1 AND status = ?4",
         params![task_id, result_json.to_string(), now_ts(), status],
     )?;
+    if let Some(parent_task_id) = child_result
+        .get("parent_task_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        refresh_parent_child_task_merge_from_db(&db, parent_task_id)?;
+    }
     Ok(true)
+}
+
+pub(crate) fn refresh_parent_child_task_merge(
+    state: &AppState,
+    parent_task_id: &str,
+) -> anyhow::Result<Option<Value>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    refresh_parent_child_task_merge_from_db(&db, parent_task_id)
+}
+
+fn refresh_parent_child_task_merge_from_db(
+    db: &rusqlite::Connection,
+    parent_task_id: &str,
+) -> anyhow::Result<Option<Value>> {
+    let parent_row = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![parent_task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((parent_status, raw_parent_result)) = parent_row else {
+        return Ok(None);
+    };
+    if !matches!(parent_status.as_str(), "queued" | "running") {
+        return Ok(None);
+    }
+    let mut parent_result = raw_parent_result
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| json!({}));
+    if !parent_result.is_object() {
+        parent_result = json!({});
+    }
+    let child_task_ids = parent_child_task_ids(&parent_result);
+    if child_task_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut child_results = Vec::new();
+    let mut pending_child_ids = Vec::new();
+    let mut missing_child_ids = Vec::new();
+    for child_task_id in &child_task_ids {
+        let child_row = db
+            .query_row(
+                "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+                params![child_task_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        let Some((child_status, raw_child_result)) = child_row else {
+            missing_child_ids.push(child_task_id.clone());
+            continue;
+        };
+        if !matches!(
+            child_status.as_str(),
+            "succeeded" | "failed" | "timeout" | "canceled"
+        ) {
+            pending_child_ids.push(child_task_id.clone());
+            continue;
+        }
+        let Some(child_result) = raw_child_result
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .and_then(|value| value.get("child_task_result").cloned())
+            .filter(Value::is_object)
+        else {
+            pending_child_ids.push(child_task_id.clone());
+            continue;
+        };
+        child_results.push(child_result);
+    }
+
+    let merge = merge_child_task_results(parent_task_id, &child_results);
+    let pending_count = pending_child_ids.len();
+    let missing_count = missing_child_ids.len();
+    let continuation_status = if pending_count > 0 || missing_count > 0 {
+        "waiting"
+    } else if merge
+        .get("parent_can_continue")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "ready"
+    } else {
+        "blocked"
+    };
+    let reason_code = match continuation_status {
+        "waiting" => "child_tasks_pending",
+        "ready" => "child_tasks_merged",
+        _ => "required_child_failed",
+    };
+    let projection = json!({
+        "schema_version": CHILD_TASK_SCHEMA_VERSION,
+        "source": "child_task_parent_merge",
+        "parent_task_id": parent_task_id,
+        "child_task_ids": child_task_ids,
+        "terminal_child_count": child_results.len(),
+        "pending_child_count": pending_count,
+        "missing_child_count": missing_count,
+        "pending_child_ids": pending_child_ids,
+        "missing_child_ids": missing_child_ids,
+        "merge": merge,
+        "parent_continuation": {
+            "status": continuation_status,
+            "reason_code": reason_code,
+            "can_continue": continuation_status == "ready",
+        },
+    });
+    let obj = parent_result
+        .as_object_mut()
+        .expect("object after normalization");
+    obj.insert("child_task_merge".to_string(), projection.clone());
+    db.execute(
+        "UPDATE tasks
+         SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status IN ('queued', 'running')",
+        params![parent_task_id, parent_result.to_string(), now_ts()],
+    )?;
+    Ok(Some(projection))
+}
+
+fn parent_child_task_ids(parent_result: &Value) -> Vec<String> {
+    let mut child_task_ids = Vec::new();
+    append_child_task_id_array(parent_result.get("child_task_ids"), &mut child_task_ids);
+    append_child_task_id_array(
+        parent_result
+            .get("child_task_enqueue")
+            .and_then(|value| value.get("child_task_ids")),
+        &mut child_task_ids,
+    );
+    child_task_ids
+}
+
+fn append_child_task_id_array(value: Option<&Value>, output: &mut Vec<String>) {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return;
+    };
+    for item in items
+        .iter()
+        .take(crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT)
+    {
+        let Some(task_id) = item.as_str().and_then(machine_task_id) else {
+            continue;
+        };
+        if !output.iter().any(|existing| existing == &task_id) {
+            output.push(task_id);
+        }
+    }
+}
+
+fn machine_task_id(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > 160 {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | '.' | '/'))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 fn child_task_result_projection(status: &str, payload: &Value) -> Value {

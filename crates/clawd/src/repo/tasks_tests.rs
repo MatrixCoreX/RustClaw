@@ -14,7 +14,8 @@ use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
 };
 use crate::repo::child_tasks::{
-    enqueue_child_task_specs, record_child_task_terminal_projection, ChildTaskParentContext,
+    enqueue_child_task_specs, record_child_task_terminal_projection,
+    refresh_parent_child_task_merge, ChildTaskParentContext,
 };
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
@@ -436,6 +437,154 @@ fn child_terminal_projection_uses_machine_contract_not_visible_text() {
         result["task_lifecycle"]["state_source"],
         "child_task_terminal_projection"
     );
+}
+
+#[test]
+fn parent_child_merge_continues_from_structured_findings_only() {
+    let state = state_with_tasks_table();
+    insert_task(
+        &state,
+        "task-parent-merge",
+        "running",
+        Some(&json!({
+            "child_task_ids": ["task-child-merge-required", "task-child-merge-optional"],
+            "text": "visible parent prose must not affect child merge"
+        })),
+        1,
+    );
+    for (child_task_id, required, status) in [
+        ("task-child-merge-required", true, "succeeded"),
+        ("task-child-merge-optional", false, "failed"),
+    ] {
+        let spec = sample_repo_child_spec("task-parent-merge", child_task_id, required);
+        let payload = json!({
+            "text": "visible child objective",
+            "task_role": "subagent_child",
+            "parent_task_id": spec.parent_task_id,
+            "child_task_id": spec.child_task_id,
+            "child_task_contract": spec.to_json()
+        });
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at
+            )
+            VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, ?3, ?4, NULL, '1', '1')",
+            rusqlite::params![
+                child_task_id,
+                payload.to_string(),
+                status,
+                json!({
+                    "text": "visible child prose must not become parent merge data",
+                    "error_text": "visible child error must not become parent merge data"
+                })
+                .to_string()
+            ],
+        )
+        .expect("insert child task");
+        drop(db);
+        assert!(
+            record_child_task_terminal_projection(&state, child_task_id, &payload)
+                .expect("record child projection")
+        );
+    }
+
+    let parent = stored_result_json(&state, "task-parent-merge");
+    let merge = &parent["child_task_merge"];
+    assert_eq!(merge["source"], "child_task_parent_merge");
+    assert_eq!(merge["parent_continuation"]["status"], "ready");
+    assert_eq!(merge["parent_continuation"]["can_continue"], true);
+    assert_eq!(merge["merge"]["status"], "partial");
+    assert_eq!(merge["merge"]["required_failed_count"], 0);
+    assert_eq!(merge["merge"]["optional_failed_count"], 1);
+    assert_eq!(
+        merge["merge"]["finding_refs"][0],
+        "child_task:task-child-merge-required:structured_result"
+    );
+    assert!(merge.to_string().find("visible child prose").is_none());
+    assert!(merge.to_string().find("visible child error").is_none());
+}
+
+#[test]
+fn parent_child_merge_waits_for_pending_and_blocks_required_failure() {
+    let state = state_with_tasks_table();
+    insert_task(
+        &state,
+        "task-parent-blocked",
+        "running",
+        Some(&json!({
+            "child_task_ids": ["task-child-blocked-required", "task-child-blocked-pending"]
+        })),
+        1,
+    );
+    insert_task(&state, "task-child-blocked-pending", "running", None, 1);
+    let waiting = refresh_parent_child_task_merge(&state, "task-parent-blocked")
+        .expect("refresh parent merge")
+        .expect("waiting merge");
+    assert_eq!(waiting["parent_continuation"]["status"], "waiting");
+    assert_eq!(waiting["pending_child_count"], 1);
+
+    let spec = sample_repo_child_spec("task-parent-blocked", "task-child-blocked-required", true);
+    let payload = json!({
+        "text": "visible child objective",
+        "task_role": "subagent_child",
+        "parent_task_id": spec.parent_task_id,
+        "child_task_id": spec.child_task_id,
+        "child_task_contract": spec.to_json()
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            status, result_json, error_text, created_at, updated_at
+        )
+        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, 'failed', ?3, NULL, '1', '1')",
+        rusqlite::params![
+            spec.child_task_id,
+            payload.to_string(),
+            json!({"status_code": "machine_failure"}).to_string()
+        ],
+    )
+    .expect("insert required child");
+    drop(db);
+    assert!(
+        record_child_task_terminal_projection(&state, "task-child-blocked-required", &payload)
+            .expect("record child projection")
+    );
+
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET status = 'succeeded', result_json = ?2 WHERE task_id = ?1",
+        rusqlite::params![
+            "task-child-blocked-pending",
+            json!({
+                "child_task_result": {
+                    "schema_version": 1,
+                    "parent_task_id": "task-parent-blocked",
+                    "child_task_id": "task-child-blocked-pending",
+                    "role": "verifier",
+                    "required": false,
+                    "status": "succeeded",
+                    "evidence_refs": ["task:task-child-blocked-pending:result_json"],
+                    "finding_refs": ["child_task:task-child-blocked-pending:structured_result"]
+                }
+            })
+            .to_string()
+        ],
+    )
+    .expect("complete optional child");
+    drop(db);
+    let blocked = refresh_parent_child_task_merge(&state, "task-parent-blocked")
+        .expect("refresh parent merge")
+        .expect("blocked merge");
+    assert_eq!(blocked["parent_continuation"]["status"], "blocked");
+    assert_eq!(
+        blocked["parent_continuation"]["reason_code"],
+        "required_child_failed"
+    );
+    assert_eq!(blocked["merge"]["required_failed_count"], 1);
+    assert_eq!(blocked["merge"]["parent_can_continue"], false);
 }
 
 #[test]
