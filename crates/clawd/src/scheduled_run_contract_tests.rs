@@ -3,8 +3,9 @@ use serde_json::json;
 
 use super::{
     insert_scheduled_run_enqueued, list_scheduled_run_history, scheduled_run_payload_metadata,
-    scheduled_run_terminal_result, scheduled_run_thread_ref, scheduled_run_triage_from_machine,
-    update_scheduled_run_terminal, ScheduledRunEnqueued, ScheduledRunTriage,
+    scheduled_run_policy_metadata, scheduled_run_terminal_result, scheduled_run_thread_ref,
+    scheduled_run_triage_from_machine, update_scheduled_run_terminal, ScheduledRunEnqueued,
+    ScheduledRunTriage,
 };
 
 #[test]
@@ -20,6 +21,49 @@ fn scheduled_run_metadata_binds_job_run_and_thread_refs() {
     assert_eq!(
         scheduled_run_thread_ref("job_abc123"),
         "scheduled_job:job_abc123"
+    );
+}
+
+#[test]
+fn scheduled_run_policy_metadata_sanitizes_profile_and_policy_fields() {
+    let metadata = scheduled_run_policy_metadata(
+        " local_worktree ",
+        r#"{
+            "filesystem_write": true,
+            "network_access": false,
+            "risk_level": "medium",
+            "notes": "visible policy prose"
+        }"#,
+    );
+    let map: serde_json::Map<String, serde_json::Value> = metadata.into_iter().collect();
+
+    assert_eq!(
+        map.get("automation_isolation_profile")
+            .and_then(serde_json::Value::as_str),
+        Some("local_worktree")
+    );
+    let policy = map
+        .get("automation_permission_policy")
+        .expect("permission policy");
+    assert_eq!(policy["filesystem_write"], true);
+    assert_eq!(policy["network_access"], false);
+    assert_eq!(policy["risk_level"], "medium");
+    assert!(policy.get("notes").is_none());
+
+    let fallback = scheduled_run_policy_metadata("bad profile", "not-json");
+    let fallback_map: serde_json::Map<String, serde_json::Value> = fallback.into_iter().collect();
+    assert_eq!(
+        fallback_map
+            .get("automation_isolation_profile")
+            .and_then(serde_json::Value::as_str),
+        Some("local_current_workspace")
+    );
+    assert_eq!(
+        fallback_map
+            .get("automation_permission_policy")
+            .and_then(serde_json::Value::as_object)
+            .map(|value| value.len()),
+        Some(0)
     );
 }
 

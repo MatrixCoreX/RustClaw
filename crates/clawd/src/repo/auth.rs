@@ -181,6 +181,18 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     )?;
     crate::ensure_column_exists(
         db,
+        "scheduled_jobs",
+        "isolation_profile",
+        "ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "permission_policy_json",
+        "ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    crate::ensure_column_exists(
+        db,
         "memories",
         "user_key",
         "ALTER TABLE memories ADD COLUMN user_key TEXT",
@@ -378,6 +390,18 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
     info!(
         "channel schema: rebuilding tasks/scheduled_jobs/memories to allow channel=lark/feishu/wechat"
     );
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "isolation_profile",
+        "ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "scheduled_jobs",
+        "permission_policy_json",
+        "ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
     db.execute_batch(
         "BEGIN IMMEDIATE;
          ALTER TABLE tasks RENAME TO tasks_old;
@@ -434,6 +458,8 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              notify_on_failure INTEGER NOT NULL DEFAULT 1,
              last_run_at       TEXT,
              next_run_at       INTEGER,
+             isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace',
+             permission_policy_json TEXT NOT NULL DEFAULT '{}',
              created_at        TEXT NOT NULL,
              updated_at        TEXT NOT NULL
          );
@@ -441,13 +467,13 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              id, job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key,
              schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr, timezone,
              task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
-             last_run_at, next_run_at, created_at, updated_at
+             last_run_at, next_run_at, isolation_profile, permission_policy_json, created_at, updated_at
          )
          SELECT
              id, job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key,
              schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr, timezone,
              task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
-             last_run_at, next_run_at, created_at, updated_at
+             last_run_at, next_run_at, isolation_profile, permission_policy_json, created_at, updated_at
          FROM scheduled_jobs_old;
          DROP TABLE scheduled_jobs_old;
          CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(enabled, next_run_at);

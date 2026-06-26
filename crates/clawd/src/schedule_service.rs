@@ -1200,8 +1200,8 @@ pub(crate) async fn try_handle_schedule_request(
                 "INSERT INTO scheduled_jobs (
                     job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
                     timezone, task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
-                    last_run_at, next_run_at, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, 1, 1, 1, NULL, ?16, ?17, ?17)",
+                    last_run_at, next_run_at, isolation_profile, permission_policy_json, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, 1, 1, 1, NULL, ?16, 'local_current_workspace', '{}', ?17, ?17)",
                 params![
                     job_id,
                     task.user_id,

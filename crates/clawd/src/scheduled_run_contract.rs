@@ -66,6 +66,49 @@ pub(crate) fn scheduled_run_payload_metadata(job_id: &str, run_id: &str) -> Vec<
     ]
 }
 
+pub(crate) fn scheduled_run_policy_metadata(
+    isolation_profile: &str,
+    permission_policy_json: &str,
+) -> Vec<(String, Value)> {
+    let profile = match stable_machine_ref(isolation_profile).as_str() {
+        "read_only" => "read_only",
+        "local_current_workspace" => "local_current_workspace",
+        "local_worktree" => "local_worktree",
+        "local_temp_workspace" => "local_temp_workspace",
+        "remote_executor" => "remote_executor",
+        _ => "local_current_workspace",
+    };
+    let policy = serde_json::from_str::<Value>(permission_policy_json)
+        .ok()
+        .filter(Value::is_object)
+        .map(|value| {
+            machine_object(
+                Some(&value),
+                &[
+                    "network_access",
+                    "filesystem_write",
+                    "external_publish",
+                    "credential_access",
+                    "risk_level",
+                    "policy_id",
+                    "message_key",
+                ],
+            )
+        })
+        .unwrap_or_else(|| json!({}));
+    vec![
+        (
+            "automation_isolation_profile".to_string(),
+            Value::String(profile.to_string()),
+        ),
+        ("automation_permission_policy".to_string(), policy),
+    ]
+}
+
+pub(crate) fn scheduled_run_default_isolation_profile() -> &'static str {
+    "local_current_workspace"
+}
+
 pub(crate) fn insert_scheduled_run_enqueued(
     db: &Connection,
     record: &ScheduledRunEnqueued<'_>,
