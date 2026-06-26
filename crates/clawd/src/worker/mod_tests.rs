@@ -35,7 +35,11 @@ fn memory_tasks_db() -> rusqlite::Connection {
             result_json TEXT,
             error_text TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            lease_owner TEXT,
+            lease_expires_at INTEGER NOT NULL DEFAULT 0,
+            claim_attempt INTEGER NOT NULL DEFAULT 0,
+            claimed_at INTEGER NOT NULL DEFAULT 0
         );",
     )
     .expect("create tasks table");
@@ -61,7 +65,11 @@ fn state_with_runtime_tasks_table() -> crate::AppState {
             result_json TEXT,
             error_text TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            lease_owner TEXT,
+            lease_expires_at INTEGER NOT NULL DEFAULT 0,
+            claim_attempt INTEGER NOT NULL DEFAULT 0,
+            claimed_at INTEGER NOT NULL DEFAULT 0
         );",
     )
     .expect("create runtime tasks table");
@@ -176,13 +184,44 @@ fn startup_recovery_times_out_only_stale_running_tasks() {
     .collect::<Vec<_>>();
 
     assert_eq!(rows[0].1, "timeout");
-    assert!(rows[0]
-        .2
-        .as_deref()
-        .is_some_and(|text| text.contains("no progress heartbeat")));
+    assert_eq!(rows[0].2.as_deref(), Some("worker_heartbeat_stale"));
     assert_eq!(rows[1].1, "running");
     assert_eq!(rows[2].1, "queued");
     assert_eq!(rows[3].1, "succeeded");
+}
+
+#[test]
+fn startup_recovery_times_out_expired_worker_lease() {
+    let db = memory_tasks_db();
+    let now = crate::now_ts_u64() as i64;
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, status, error_text, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt, claimed_at
+        )
+        VALUES (?1, 'running', NULL, ?2, ?2, 'worker:test-old', ?3, 1, ?4)",
+        rusqlite::params![
+            "lease-expired",
+            now.to_string(),
+            now.saturating_sub(1),
+            now.saturating_sub(120),
+        ],
+    )
+    .expect("insert expired lease task");
+
+    let recovered =
+        super::recover_stale_running_tasks_on_startup(&db, 60).expect("recover stale running");
+
+    assert_eq!(recovered, vec!["lease-expired".to_string()]);
+    let (status, error_text): (String, Option<String>) = db
+        .query_row(
+            "SELECT status, error_text FROM tasks WHERE task_id = ?1",
+            rusqlite::params!["lease-expired"],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query task");
+    assert_eq!(status, "timeout");
+    assert_eq!(error_text.as_deref(), Some("worker_lease_expired"));
 }
 
 fn paused_checkpoint_result(state: &str, next_check_after: i64, checkpoint_id: &str) -> String {
