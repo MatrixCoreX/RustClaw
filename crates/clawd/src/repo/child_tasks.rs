@@ -673,3 +673,7 @@ fn append_parent_child_enqueue_progress(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "child_tasks_tests.rs"]
+mod tests;
