@@ -118,9 +118,7 @@ pub(crate) fn parse_pending_async_job_ref_from_extra(
     let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
         return Ok(None);
     };
-    if candidate.get("text").is_some() || candidate.get("error_text").is_some() {
-        return Err(machine_error(error_prefix, "user_text_fields_forbidden"));
-    }
+    let _contract_summary = pending_async_job_contract_summary(extra, error_prefix)?;
     let Some(status) = parse_pending_async_job_status(candidate) else {
         return Err(machine_error(error_prefix, "unsupported_status"));
     };
@@ -149,6 +147,45 @@ pub(crate) fn parse_pending_async_job_ref_from_extra(
         ));
     }
     Ok(Some(job))
+}
+
+pub(crate) fn pending_async_job_contract_summary(
+    extra: Option<&Value>,
+    error_prefix: &str,
+) -> Result<Option<Value>, String> {
+    let Some(candidate) = pending_async_job_candidate_from_extra(extra) else {
+        return Ok(None);
+    };
+    validate_pending_async_job_contract(candidate, error_prefix)?;
+    let poll_adapter = candidate
+        .get("poll_adapter")
+        .or_else(|| extra.and_then(|extra| extra.get("poll_adapter")));
+    let poll_adapter_kind = poll_adapter
+        .and_then(poll_adapter_kind)
+        .unwrap_or("unspecified_poll");
+    Ok(Some(json!({
+        "schema_version": 1,
+        "status": "valid",
+        "job_id": required_machine_string(candidate, "job_id").unwrap_or_default(),
+        "job_status": candidate.get("status").and_then(Value::as_str).map(str::trim),
+        "poll_after_seconds": candidate.get("poll_after_seconds").and_then(Value::as_u64),
+        "expires_at": candidate.get("expires_at").and_then(Value::as_i64),
+        "cancel_ref_present": required_machine_string(candidate, "cancel_ref").is_some(),
+        "message_key": required_machine_string(candidate, "message_key").unwrap_or_default(),
+        "required_job_fields_present": [
+            "job_id",
+            "status",
+            "poll_after_seconds",
+            "expires_at",
+            "cancel_ref",
+            "message_key"
+        ],
+        "forbidden_user_text_fields_absent": true,
+        "poll_adapter_present": poll_adapter.is_some(),
+        "poll_adapter_kind": poll_adapter_kind,
+        "poll_adapter_supported": async_poll_adapter_kind_supported(poll_adapter_kind)
+            || poll_adapter_kind == "unspecified_poll",
+    })))
 }
 
 pub(crate) fn parse_pending_async_job_poll_adapter_from_extra(
@@ -275,6 +312,42 @@ fn pending_async_job_candidate_from_extra(extra: Option<&Value>) -> Option<&Valu
                 .map(str::trim);
             (kind == Some("pending_async_job")).then_some(extra)
         })
+}
+
+fn validate_pending_async_job_contract(value: &Value, error_prefix: &str) -> Result<(), String> {
+    if value.get("text").is_some() || value.get("error_text").is_some() {
+        return Err(machine_error(error_prefix, "user_text_fields_forbidden"));
+    }
+    let Some(status) = parse_pending_async_job_status(value) else {
+        return Err(machine_error(error_prefix, "unsupported_status"));
+    };
+    if !matches!(status, AsyncJobStatus::Accepted | AsyncJobStatus::Running) {
+        return Err(machine_error(error_prefix, "non_pending_status"));
+    }
+    let mut missing = Vec::new();
+    for key in ["job_id", "cancel_ref", "message_key"] {
+        if required_machine_string(value, key).is_none() {
+            missing.push(key);
+        }
+    }
+    if value
+        .get("poll_after_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        == 0
+    {
+        missing.push("poll_after_seconds");
+    }
+    if value.get("expires_at").and_then(Value::as_i64).unwrap_or(0) <= 0 {
+        missing.push("expires_at");
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "{error_prefix}: missing_required_fields={}",
+            missing.join("|")
+        ));
+    }
+    Ok(())
 }
 
 fn parse_pending_async_job_status(value: &Value) -> Option<AsyncJobStatus> {

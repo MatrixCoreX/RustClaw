@@ -3,7 +3,8 @@ use serde_json::json;
 use super::{
     async_job_contract_json, async_job_protocol_hint_line, async_poll_adapter_kind_supported,
     async_poll_adapter_result_matches_job, async_poll_adapter_status,
-    parse_pending_async_job_poll_adapter_from_extra, pending_async_job_timeout_policy,
+    parse_pending_async_job_poll_adapter_from_extra, parse_pending_async_job_ref_from_extra,
+    pending_async_job_contract_summary, pending_async_job_timeout_policy,
     skill_runner_poll_adapter_kind_supported, ASYNC_POLL_ADAPTER_RESULT_KEY,
 };
 
@@ -124,6 +125,79 @@ fn pending_async_job_poll_adapter_accepts_declared_adapter_kinds() {
         assert!(parsed.get("text").is_none());
         assert!(parsed.get("error_text").is_none());
     }
+}
+
+#[test]
+fn pending_async_job_contract_summary_validates_required_machine_fields() {
+    let extra = json!({
+        "pending_async_job": {
+            "job_id": "provider:video_generate:minimax:task-1",
+            "status": "accepted",
+            "poll_after_seconds": 5,
+            "expires_at": 2_000,
+            "cancel_ref": "provider:video_generate:minimax:task-1",
+            "message_key": "clawd.task.async_job_pending",
+            "poll_adapter": {
+                "kind": "media_job_poll",
+                "skill_name": "video_generate",
+                "args": {"action": "poll", "task_id": "task-1"}
+            }
+        }
+    });
+
+    let summary = pending_async_job_contract_summary(Some(&extra), "test")
+        .expect("valid contract")
+        .expect("summary");
+    let parsed = parse_pending_async_job_ref_from_extra(Some(&extra), "test")
+        .expect("valid pending job")
+        .expect("pending job");
+
+    assert_eq!(summary["status"], "valid");
+    assert_eq!(summary["job_id"], "provider:video_generate:minimax:task-1");
+    assert_eq!(summary["job_status"], "accepted");
+    assert_eq!(summary["poll_adapter_kind"], "media_job_poll");
+    assert_eq!(summary["poll_adapter_supported"], true);
+    assert_eq!(summary["cancel_ref_present"], true);
+    assert_eq!(summary["forbidden_user_text_fields_absent"], true);
+    assert_eq!(parsed.job_id, "provider:video_generate:minimax:task-1");
+}
+
+#[test]
+fn pending_async_job_contract_rejects_missing_required_fields() {
+    let extra = json!({
+        "pending_async_job": {
+            "job_id": "provider:video_generate:minimax:task-1",
+            "status": "accepted",
+            "poll_after_seconds": 5,
+            "expires_at": 2_000,
+            "message_key": "clawd.task.async_job_pending"
+        }
+    });
+
+    let err = pending_async_job_contract_summary(Some(&extra), "test")
+        .expect_err("missing cancel ref should fail");
+
+    assert!(err.contains("missing_required_fields=cancel_ref"));
+}
+
+#[test]
+fn pending_async_job_contract_rejects_user_text_fields() {
+    let extra = json!({
+        "pending_async_job": {
+            "job_id": "job-1",
+            "status": "accepted",
+            "poll_after_seconds": 5,
+            "expires_at": 2_000,
+            "cancel_ref": "cancel:job-1",
+            "message_key": "clawd.task.async_job_pending",
+            "text": "visible fallback must not control async handoff"
+        }
+    });
+
+    let err = pending_async_job_contract_summary(Some(&extra), "test")
+        .expect_err("text field should fail");
+
+    assert!(err.contains("user_text_fields_forbidden"));
 }
 
 #[test]
