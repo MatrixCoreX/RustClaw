@@ -32,6 +32,7 @@ mod bootstrap;
 mod capability_map;
 mod capability_resolver;
 mod channel_send;
+mod child_task_contract;
 mod clarify_followup;
 mod clarify_state;
 mod contract_matrix;
