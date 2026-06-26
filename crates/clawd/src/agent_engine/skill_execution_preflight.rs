@@ -490,6 +490,30 @@ fn action_scoped_risk_level(
     })
 }
 
+fn action_scoped_capability_policy(
+    state: &AppState,
+    canonical_skill: &str,
+    action: Option<&str>,
+) -> Option<Value> {
+    state.skill_manifest(canonical_skill).and_then(|manifest| {
+        manifest
+            .planner_capabilities
+            .into_iter()
+            .find(|mapping| mapping.action.as_deref() == action)
+            .map(|mapping| {
+                json!({
+                    "isolation_profile": mapping
+                        .isolation_profile
+                        .map(|value| value.as_token()),
+                    "network_access": mapping.network_access,
+                    "filesystem_write": mapping.filesystem_write,
+                    "external_publish": mapping.external_publish,
+                    "credential_access": mapping.credential_access,
+                })
+            })
+    })
+}
+
 fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -> bool {
     if canonical_skill != "package_manager" {
         return false;
@@ -522,6 +546,8 @@ fn preflight_permission_decision(
             .or_else(|| manifest.as_ref().and_then(|value| value.risk_level))
     };
     let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
+    let capability_policy =
+        action_scoped_capability_policy(state, &canonical_skill, action.as_deref());
     let needs_confirmation =
         state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
     let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
@@ -559,6 +585,15 @@ fn preflight_permission_decision(
         "mutates": effect.mutates,
         "validates": effect.validates,
         "command_policy": command_policy,
+        "capability_policy": capability_policy.unwrap_or_else(|| {
+            json!({
+                "isolation_profile": null,
+                "network_access": null,
+                "filesystem_write": null,
+                "external_publish": null,
+                "credential_access": null,
+            })
+        }),
         "registry_policy": registry_policy.unwrap_or_else(|| {
             json!({
                 "available": false,
