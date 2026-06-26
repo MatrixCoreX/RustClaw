@@ -120,6 +120,7 @@ fn exec_summary_json(
     outcome: ExecWaitOutcome,
     exit_class: ExecExitClass,
 ) -> serde_json::Value {
+    let artifact_refs = exec_artifact_refs(&task.raw_data);
     json!({
         "task_id": task.task_id,
         "status": task.status,
@@ -131,7 +132,55 @@ fn exec_summary_json(
         "exit_code": exit_class.code(),
         "result_text": task.result_text,
         "error_text": task.error_text,
+        "events": exec_event_summary(task),
+        "artifacts": {
+            "ref_count": artifact_refs.len(),
+            "refs": artifact_refs,
+        },
     })
+}
+
+fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
+    task.events
+        .iter()
+        .map(|event| {
+            json!({
+                "event_type": &event.event_type,
+                "line": &event.line,
+                "fields": &event.fields,
+            })
+        })
+        .collect()
+}
+
+fn exec_artifact_refs(data: &Value) -> Vec<Value> {
+    let mut refs = Vec::new();
+    collect_exec_artifact_refs(data, &mut refs, 0);
+    refs
+}
+
+fn collect_exec_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {
+    if depth > 8 || refs.len() >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(items)) = map.get("artifact_refs") {
+                for item in items.iter().take(128usize.saturating_sub(refs.len())) {
+                    refs.push(item.clone());
+                }
+            }
+            for value in map.values() {
+                collect_exec_artifact_refs(value, refs, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_exec_artifact_refs(item, refs, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 struct ExecWaitOptions {

@@ -12,11 +12,33 @@ fn exec_summary_json_exposes_stable_machine_fields() {
             "task_lifecycle": {
                 "state": "background",
                 "checkpoint_id": "ckpt-exec"
+            },
+            "result_json": {
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "artifact_refs": [
+                                    {
+                                        "ref": "artifact:summary"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
             }
         }),
         result_text: Some("result-token".to_string()),
         error_text: None,
-        events: Vec::new(),
+        events: vec![crate::events::TaskEventLine {
+            event_type: "checkpoint_created".to_string(),
+            line: "type=checkpoint_created checkpoint_id=ckpt-exec".to_string(),
+            fields: std::collections::BTreeMap::from([(
+                "checkpoint_id".to_string(),
+                "ckpt-exec".to_string(),
+            )]),
+        }],
     };
 
     let summary = exec_summary_json(&task, ExecWaitOutcome::Background, ExecExitClass::Success);
@@ -29,6 +51,10 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["exit_code"], 0);
     assert_eq!(summary["terminal"], false);
     assert_eq!(summary["lifecycle"]["checkpoint_id"], "ckpt-exec");
+    assert_eq!(summary["events"][0]["event_type"], "checkpoint_created");
+    assert_eq!(summary["events"][0]["fields"]["checkpoint_id"], "ckpt-exec");
+    assert_eq!(summary["artifacts"]["ref_count"], 1);
+    assert_eq!(summary["artifacts"]["refs"][0]["ref"], "artifact:summary");
 }
 
 #[test]
