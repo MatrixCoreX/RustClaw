@@ -514,6 +514,88 @@ fn action_scoped_capability_policy(
     })
 }
 
+pub(super) fn capability_isolation_policy_error(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<String> {
+    let canonical_skill = state.resolve_canonical_skill_name(normalized_skill);
+    let action = normalized_action_arg(args);
+    let capability_policy =
+        action_scoped_capability_policy(state, &canonical_skill, action.as_deref())?;
+    let isolation_profile = capability_policy
+        .get("isolation_profile")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let violations = isolation_profile_violations(isolation_profile, &capability_policy);
+    if violations.is_empty() {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "isolation_policy_violation",
+        "isolation_policy_violation",
+        None,
+        Some(json!({
+            "reason_code": "isolation_policy_violation",
+            "failure_attribution": crate::contract_matrix::FailureAttribution::PermissionDenied.as_str(),
+            "decision": crate::contract_matrix::ActionPolicyDecision::RejectedForbidden.as_str(),
+            "policy_decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
+            "canonical_skill": canonical_skill,
+            "action": action,
+            "isolation_profile": isolation_profile,
+            "violations": violations,
+            "capability_policy": capability_policy,
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                args,
+                "isolation_policy_violation",
+                "capability_isolation_preflight",
+            ),
+        })),
+    ))
+}
+
+fn isolation_profile_violations(
+    isolation_profile: &str,
+    capability_policy: &Value,
+) -> Vec<&'static str> {
+    let mut violations = Vec::new();
+    if isolation_profile == "read_only" {
+        if capability_policy
+            .get("network_access")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            violations.push("network_access");
+        }
+        if capability_policy
+            .get("filesystem_write")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            violations.push("filesystem_write");
+        }
+        if capability_policy
+            .get("external_publish")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            violations.push("external_publish");
+        }
+        if capability_policy
+            .get("credential_access")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            violations.push("credential_access");
+        }
+    }
+    violations
+}
+
 fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -> bool {
     if canonical_skill != "package_manager" {
         return false;
@@ -844,6 +926,15 @@ pub(super) fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata 
             },
             error_kind,
             retry_instruction,
+        };
+    }
+    if error_kind == "isolation_policy_violation" {
+        return PreflightFailureMetadata {
+            reason: "isolation_policy_violation",
+            error_kind,
+            retry_instruction:
+                "isolation_policy=choose_capability_matching_profile;retry_same_policy=false"
+                    .to_string(),
         };
     }
     if structured

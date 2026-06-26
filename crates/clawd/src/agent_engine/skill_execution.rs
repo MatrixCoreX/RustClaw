@@ -17,9 +17,10 @@ mod skill_execution_preflight;
 mod skill_execution_subagent;
 
 use skill_execution_preflight::{
-    contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
-    handle_preflight_argument_failure, structured_observation_path_argument_error,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    capability_isolation_policy_error, contract_matrix_action_policy_error,
+    contract_matrix_arg_policy_error, handle_preflight_argument_failure,
+    structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract,
 };
 use skill_execution_subagent::record_subagent_step_execution;
 
@@ -1430,6 +1431,21 @@ pub(super) async fn execute_prepared_skill_action(
             stop_signal,
             continue_in_round: false,
         });
+    }
+    if let Some(err) =
+        capability_isolation_policy_error(state, normalized_skill, classification_args)
+    {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
     }
     if let Some(err) = contract_matrix_action_policy_error(
         state,

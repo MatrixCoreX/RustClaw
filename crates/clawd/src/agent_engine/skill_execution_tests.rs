@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    admitted_extra_field_exists, build_auto_sudo_retry_args,
+    admitted_extra_field_exists, build_auto_sudo_retry_args, capability_isolation_policy_error,
     contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
     preflight_failure_metadata, record_subagent_step_execution, skill_extra_requests_user_input,
@@ -620,6 +620,61 @@ planner_capabilities = [
             .pointer("/capability_policy/credential_access")
             .and_then(serde_json::Value::as_bool),
         Some(false)
+    );
+}
+
+#[test]
+fn capability_isolation_preflight_rejects_read_only_write_policy() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "read_only", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+]
+"#,
+        &["write_file"],
+    );
+    let args = serde_json::json!({
+        "action": "write_text",
+        "path": "out.txt",
+        "content": "value"
+    });
+
+    let err = capability_isolation_policy_error(&state, "write_file", &args)
+        .expect("read_only profile must reject filesystem_write");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("isolation preflight error should be structured");
+    let extra = parsed.extra.as_ref().expect("extra");
+
+    assert_eq!(parsed.error_kind, "isolation_policy_violation");
+    assert_eq!(
+        extra.pointer("/violations/0"),
+        Some(&serde_json::json!("filesystem_write"))
+    );
+    assert_eq!(
+        extra.pointer("/permission_decision/reason_code"),
+        Some(&serde_json::json!("isolation_policy_violation"))
+    );
+    assert_eq!(
+        extra.pointer("/permission_decision/owner_layer"),
+        Some(&serde_json::json!("capability_isolation_preflight"))
+    );
+    assert_eq!(
+        extra.pointer("/permission_decision/capability_policy/isolation_profile"),
+        Some(&serde_json::json!("read_only"))
+    );
+    assert_eq!(
+        preflight_failure_metadata(&err).reason,
+        "isolation_policy_violation"
     );
 }
 
