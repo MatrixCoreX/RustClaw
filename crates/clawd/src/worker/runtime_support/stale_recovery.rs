@@ -221,6 +221,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
             }
             if reason == StaleRunningRecoveryReason::WorkerLeaseExpired
                 && lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
+                && state.worker.is_task_active(&task_id)
             {
                 continue;
             }
