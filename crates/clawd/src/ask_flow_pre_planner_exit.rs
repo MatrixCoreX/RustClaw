@@ -469,4 +469,19 @@ mod tests {
             assert_eq!(item.kind.semantic_control_state(), "none");
         }
     }
+
+    #[test]
+    fn ordinary_semantic_debt_is_limited_to_known_migration_reasons() {
+        let actual: BTreeSet<_> = PRE_PLANNER_EXIT_INVENTORY
+            .iter()
+            .filter(|item| item.kind == PrePlannerExitKind::OrdinarySemantic)
+            .map(|item| item.reason_code)
+            .collect();
+        let expected = BTreeSet::from([
+            "direct_answer_gate_promoted_to_planner",
+            "direct_answer_gate_chat_fallback",
+        ]);
+
+        assert_eq!(actual, expected);
+    }
 }
