@@ -825,7 +825,7 @@ fn direct_answer_gate_promotes_explicit_readme_summary_to_planner() {
 
     assert_planner_preflight_reason(
         outcome,
-        "direct_answer_gate_promoted_to_planner",
+        "direct_answer_gate_contract_boundary_execute",
     );
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());

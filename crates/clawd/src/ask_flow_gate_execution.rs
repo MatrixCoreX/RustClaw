@@ -70,6 +70,14 @@ pub(super) fn direct_answer_gate_planner_promotion_reason_code(reason_tag: &str)
     }
 }
 
+pub(super) fn direct_answer_gate_structured_contract_execute(
+    contract: &crate::IntentOutputContract,
+) -> bool {
+    contract.requires_content_evidence
+        && (!matches!(contract.locator_kind, crate::OutputLocatorKind::None)
+            || !matches!(contract.semantic_kind, crate::OutputSemanticKind::None))
+}
+
 pub(super) fn resolve_direct_answer_gate_contract_locator(
     state: &AppState,
     current_user_request: &str,
@@ -1142,6 +1150,8 @@ pub(super) fn apply_direct_answer_gate_outcome(
                 &contract,
             ) {
                 "inline_structured_payload_context_execute"
+            } else if direct_answer_gate_structured_contract_execute(&contract) {
+                "direct_answer_gate_contract_execute"
             } else {
                 "direct_answer_gate_execute"
             };

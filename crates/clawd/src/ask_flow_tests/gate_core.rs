@@ -490,7 +490,7 @@ fn direct_answer_gate_promotion_uses_matrix_finalize_style() {
 
     assert_planner_preflight_reason(
         outcome,
-        "direct_answer_gate_promoted_to_planner",
+        "direct_answer_gate_contract_boundary_execute",
     );
     let route = ctx.route_result.expect("route");
     assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
@@ -796,7 +796,7 @@ fn direct_answer_gate_allows_executionless_promotion_with_explicit_target() {
 
     assert_planner_preflight_reason(
         outcome,
-        "direct_answer_gate_promoted_to_planner",
+        "direct_answer_gate_contract_boundary_execute",
     );
 }
 
