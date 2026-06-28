@@ -12,10 +12,12 @@
 - It writes generated assets to an output path and returns file markers in `text`.
 - It also supports optional vendor/model routing and response language selection for the human-readable success text.
 - It supports `dry_run=true` for capability validation without calling a provider or writing an image file.
+- It exposes provider-neutral async job actions for polling and cancellation: `image.poll` and `image.cancel`.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, and `outputs`.
 
 ## Planner Selection Notes (from interface)
 - For requests that create a new image from text/style requirements and save or return the result, use `image_generate` / planner capability `image.generate`.
+- For existing image-generation jobs with a `task_id`, use `image.poll` to inspect status and `image.cancel` to stop the job. Do not infer job ids from prose; pass structured ids from prior tool evidence or user-provided fields.
 - Do not synthesize images through shell drawing commands or local CLI fallbacks unless the user explicitly requests shell/CLI execution or configured image providers are unavailable and an explicit local fallback is enabled.
 - Preserve requested save locations as `output_path`; the skill returns machine-readable path evidence in `extra.outputs`.
 
@@ -26,8 +28,9 @@
 - Provider credentials use dedicated environment variables such as `IMAGE_GENERATION_MINIMAX_API_KEY`; do not reuse chat/model API key names for image generation.
 
 ## Actions (from interface)
-- No `action` field is required.
-- Generation is controlled by prompt and rendering options.
+- `generate`: create or plan image generation. This is the default when `action` is omitted.
+- `poll`: inspect a previously accepted async image-generation job by `task_id`.
+- `cancel`: request cancellation for a previously accepted async image-generation job by `task_id`.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -43,6 +46,18 @@
 | generate | `model` | no | string | impl default | Backend model selector. |
 | generate | `timeout_seconds` | no | integer | impl/config default | Per-request timeout, clamped by implementation. |
 | generate | `dry_run` | no | boolean | `false` | Validate and return planned machine output without provider calls or file writes. |
+| generate | `poll_after_seconds` / `poll_after_ms` | no | integer | 5 seconds | Poll cadence hint for async-preferred dry-run contracts. |
+| generate | `expires_at` | no | integer(unix seconds) | now + 600 | Expiration timestamp for async-preferred dry-run contracts. |
+| poll | `task_id` | yes | string | - | Provider/runtime task id from prior async evidence. |
+| poll | `job_id` | no | string | derived | Provider job id or result ref. |
+| poll | `output_path` | no | string(path) | auto | Planned or final image output path. |
+| poll | `poll_after_seconds` / `poll_after_ms` | no | integer | 5 seconds | Next poll cadence hint. |
+| poll | `expires_at` | no | integer(unix seconds) | now + 600 | Expiration timestamp for this poll contract. |
+| poll | `dry_run` | no | boolean | `false` | Return synthetic adapter evidence without provider calls. |
+| poll | `mock_status` | no | string | `running` | Dry-run status fixture such as `running`, `succeeded`, `failed`, `expired`, or `cancelled`. |
+| cancel | `task_id` | yes | string | - | Provider/runtime task id from prior async evidence. |
+| cancel | `job_id` / `cancel_token` / `cancel_ref` | no | string | derived | Provider cancellation reference. |
+| cancel | `dry_run` | no | boolean | `false` | Return synthetic cancellation evidence without provider calls. |
 
 ## Error Contract (from interface)
 - Missing or empty `prompt`.
@@ -67,7 +82,27 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"tmp/icon.png","outputs":[],"planned_outputs":[{"type":"image_file","path":"tmp/icon.png"}]},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"IMAGE_GENERATE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"image-01","model_kind":"dry_run","output_path":"tmp/icon.png","outputs":[],"planned_outputs":[{"type":"image_file","path":"tmp/icon.png"}],"pending_async_job_contract":{"poll_adapter":{"kind":"media_job_poll"}}},"error_text":null}
+```
+
+### Example 3
+Request:
+```json
+{"request_id":"demo-3","args":{"action":"poll","task_id":"task-123","job_id":"job-123","output_path":"tmp/icon.png","dry_run":true,"mock_status":"succeeded"}}
+```
+Response:
+```json
+{"request_id":"demo-3","status":"ok","text":"IMAGE_TASK:task-123","extra":{"task_id":"task-123","job_id":"job-123","status":"succeeded","async_poll_adapter_result":{"adapter_kind":"media_job_poll","status":"succeeded"}},"error_text":null}
+```
+
+### Example 4
+Request:
+```json
+{"request_id":"demo-4","args":{"action":"cancel","task_id":"task-123","job_id":"job-123","dry_run":true}}
+```
+Response:
+```json
+{"request_id":"demo-4","status":"ok","text":"IMAGE_TASK_CANCELLED:task-123","extra":{"task_id":"task-123","job_id":"job-123","status":"cancelled","async_cancel_adapter_result":{"adapter_kind":"media_job_poll","status":"cancelled"}},"error_text":null}
 ```
 
 ## Output Contract
