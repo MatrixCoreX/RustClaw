@@ -917,6 +917,25 @@ pub(crate) fn route_allows_agent_loop_pure_chat_submode(route: &crate::RouteResu
         && direct_answer_gate_contract_is_pure_chat(&route.output_contract)
 }
 
+pub(crate) fn route_allows_agent_loop_chat_fallback_handoff(route: &crate::RouteResult) -> bool {
+    route.is_chat_gate()
+        && !route.needs_clarify
+        && !route.wants_file_delivery
+        && !route.should_refresh_long_term_memory
+        && route.risk_ceiling != crate::RiskCeiling::High
+        && matches!(route.schedule_kind, crate::ScheduleKind::None)
+        && !route.output_contract.delivery_required
+        && !route.output_contract.self_extension.execute_now
+        && matches!(
+            route.output_contract.self_extension.mode,
+            crate::SelfExtensionMode::None
+        )
+        && matches!(
+            route.output_contract.self_extension.trigger,
+            crate::SelfExtensionTrigger::None
+        )
+}
+
 pub(super) fn direct_answer_gate_direct_answer_should_enter_agent_loop(
     _state: &AppState,
     route: Option<&crate::RouteResult>,

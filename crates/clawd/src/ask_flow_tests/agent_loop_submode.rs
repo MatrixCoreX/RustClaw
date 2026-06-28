@@ -25,6 +25,37 @@ fn pure_chat_route_submode_rejects_content_evidence_contract() {
 }
 
 #[test]
+fn chat_fallback_handoff_allows_content_evidence_contract() {
+    let mut route = chat_route_for_gate();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+
+    assert!(!route_allows_agent_loop_pure_chat_submode(&route));
+    assert!(route_allows_agent_loop_chat_fallback_handoff(&route));
+}
+
+#[test]
+fn chat_fallback_handoff_rejects_delivery_memory_and_self_extension() {
+    let mut delivery_route = chat_route_for_gate();
+    delivery_route.output_contract.delivery_required = true;
+    assert!(!route_allows_agent_loop_chat_fallback_handoff(
+        &delivery_route
+    ));
+
+    let mut memory_route = chat_route_for_gate();
+    memory_route.should_refresh_long_term_memory = true;
+    assert!(!route_allows_agent_loop_chat_fallback_handoff(
+        &memory_route
+    ));
+
+    let mut self_extension_route = chat_route_for_gate();
+    self_extension_route.output_contract.self_extension.execute_now = true;
+    assert!(!route_allows_agent_loop_chat_fallback_handoff(
+        &self_extension_route
+    ));
+}
+
+#[test]
 fn direct_answer_gate_cannot_override_agent_loop_selected_route() {
     let root = TempDirGuard::new("agent_loop_authority_gate");
     let config_dir = root.path.join("configs");

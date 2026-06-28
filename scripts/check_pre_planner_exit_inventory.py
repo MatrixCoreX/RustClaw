@@ -188,6 +188,7 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
                 )
             if owner not in {
                 "ask_flow_planner_promotion",
+                "ask_flow_chat_fallback",
                 "direct_answer_gate",
             }:
                 findings.append(

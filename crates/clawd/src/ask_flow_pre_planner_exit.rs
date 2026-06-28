@@ -247,6 +247,16 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
+        reason_code: "chat_fallback_agent_loop_activation",
+        kind: PrePlannerExitKind::AgentLoopActivation,
+        migration_target: "agent_loop_authority",
+        migration_stage: "chat_fallback_agent_loop",
+        migration_order: 20,
+        nl_gate_refs: &["nl_chat_answer_general_zh"],
+        deletion_gate: "keep_structured_agent_loop_activation_gate",
+        owner_layer: "ask_flow_chat_fallback",
+    },
+    PrePlannerExitInventoryItem {
         reason_code: "direct_answer_gate_chat_fallback",
         kind: PrePlannerExitKind::OrdinarySemantic,
         migration_target: "agent_loop_respond_or_chat_model_answer",
@@ -387,6 +397,16 @@ mod tests {
 
         assert_eq!(item.kind, PrePlannerExitKind::AgentLoopActivation);
         assert_eq!(item.owner_layer, "direct_answer_gate");
+        assert_eq!(item.kind.decision_source(), "contract_boundary");
+        assert_eq!(item.kind.semantic_control_state(), "none");
+    }
+
+    #[test]
+    fn chat_fallback_handoff_is_structured_activation() {
+        let item = pre_planner_exit_for_reason("chat_fallback_agent_loop_activation").unwrap();
+
+        assert_eq!(item.kind, PrePlannerExitKind::AgentLoopActivation);
+        assert_eq!(item.owner_layer, "ask_flow_chat_fallback");
         assert_eq!(item.kind.decision_source(), "contract_boundary");
         assert_eq!(item.kind.semantic_control_state(), "none");
     }
