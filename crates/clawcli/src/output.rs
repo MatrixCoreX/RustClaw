@@ -12,28 +12,73 @@ pub(crate) fn print_task_status(
     include_events: bool,
     event_filters: &EventFilters,
 ) {
-    println!("task_id: {}", task.task_id);
-    println!("status: {}", task.status);
-    if let Some(state) = task.execution_state() {
-        println!("execution_state: {state}");
-    }
-    if let Some(state) = task.lifecycle_state() {
-        println!("lifecycle_state: {state}");
-    }
-    let lifecycle_tokens = task.lifecycle_summary_tokens();
-    if !lifecycle_tokens.is_empty() {
-        println!("lifecycle: {}", lifecycle_tokens.join(" "));
-    }
-    if let Some(text) = task.result_text.as_deref() {
-        println!("{text}");
+    for line in task_status_lines(task, include_events, event_filters) {
+        println!("{line}");
     }
     if let Some(error_text) = task.error_text.as_deref() {
         eprintln!("error: {error_text}");
     }
+}
+
+pub(crate) fn task_status_lines(
+    task: &task::TaskStatusView,
+    include_events: bool,
+    event_filters: &EventFilters,
+) -> Vec<String> {
+    let mut lines = vec![
+        format!("task_id: {}", task.task_id),
+        format!("status: {}", task.status),
+    ];
+    if let Some(state) = task.execution_state() {
+        lines.push(format!("execution_state: {state}"));
+    }
+    if let Some(state) = task.lifecycle_state() {
+        lines.push(format!("lifecycle_state: {state}"));
+    }
+    if let Some(next_action) = task_next_action_token(task) {
+        lines.push(format!("next_action: {next_action}"));
+    }
+    let lifecycle_tokens = task.lifecycle_summary_tokens();
+    if !lifecycle_tokens.is_empty() {
+        lines.push(format!("lifecycle: {}", lifecycle_tokens.join(" ")));
+    }
+    if let Some(text) = task.result_text.as_deref() {
+        lines.push(text.to_string());
+    }
     if include_events {
         for line in filtered_event_lines(task, event_filters) {
-            println!("{line}");
+            lines.push(line);
         }
+    }
+    lines
+}
+
+fn task_next_action_token(task: &task::TaskStatusView) -> Option<String> {
+    if let Some(next_action) = lifecycle_token(task, "next_action_kind") {
+        return Some(next_action);
+    }
+    if task.is_terminal() {
+        return Some("terminal".to_string());
+    }
+
+    match task.execution_state().or_else(|| task.lifecycle_state()) {
+        Some("needs_confirmation") => Some("needs_confirmation".to_string()),
+        Some("waiting" | "background") => {
+            if lifecycle_bool(task, "resume_due") == Some(true) {
+                Some("resume_due".to_string())
+            } else if lifecycle_token(task, "next_poll_after").is_some()
+                || lifecycle_token(task, "poll_after_seconds").is_some()
+            {
+                Some("poll_later".to_string())
+            } else {
+                Some("wait".to_string())
+            }
+        }
+        Some("queued" | "running" | "submitted") => Some("watch".to_string()),
+        _ if matches!(task.status.as_str(), "queued" | "running" | "submitted") => {
+            Some("watch".to_string())
+        }
+        _ => None,
     }
 }
 
@@ -225,6 +270,17 @@ fn value_token(value: Option<&serde_json::Value>) -> String {
     }
 }
 
+fn lifecycle_token(task: &task::TaskStatusView, key: &str) -> Option<String> {
+    let token = value_token(task.lifecycle().and_then(|lifecycle| lifecycle.get(key)));
+    (!token.is_empty()).then_some(token)
+}
+
+fn lifecycle_bool(task: &task::TaskStatusView, key: &str) -> Option<bool> {
+    task.lifecycle()
+        .and_then(|lifecycle| lifecycle.get(key))
+        .and_then(serde_json::Value::as_bool)
+}
+
 fn truncate_display_token(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let truncated = chars.by_ref().take(max_chars).collect::<String>();
@@ -234,3 +290,7 @@ fn truncate_display_token(value: &str, max_chars: usize) -> String {
         truncated
     }
 }
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod tests;
