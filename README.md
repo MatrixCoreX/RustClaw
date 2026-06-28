@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default for eligible ordinary low-risk work. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing remains only as a compatibility and emergency rollback path for non-eligible, high-risk, schedule, delivery, and release-gated cases.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default when `semantic_route_authority = "agent_loop_default"`. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing is now an explicit `semantic_route_authority = "legacy"` / rollback compatibility path, not the default route for ordinary chat fallback.
 
 ### Request And Agent Loop Flow
 
@@ -38,8 +38,8 @@ flowchart TD
     F --> G[Intent normalizer<br/>structured hint only]
     G --> H[Ask context bundle<br/>memory + attachments + recent execution]
     H --> I[Boundary guards<br/>locator + contract + safety + budget + compat]
-    I -->|ordinary eligible work| J[Agent-loop semantic authority]
-    I -->|schedule / clarify / direct / rollback| K[Boundary-owned finalize path]
+    I -->|agent-loop authority| J[Agent-loop semantic authority]
+    I -->|schedule / clarify / machine fast path / rollback| K[Boundary-owned finalize path]
     J --> L{Loop round}
     L -->|deterministic observation contract| M[Runtime-built observation plan]
     L -->|general work| N[Planner LLM<br/>call_capability preferred]
@@ -92,7 +92,7 @@ Quick facts for direct skill tasks:
 | Question | `kind=ask` | `kind=run_skill` |
 | --- | --- | --- |
 | Does it run the intent normalizer? | Yes, as structured hint and compatibility input. | No. The caller already supplied the target skill. |
-| Does it enter the planner / agent loop? | Yes for eligible ordinary work, with `call_capability` preferred. | No. It does not ask the planner to choose a skill or action. |
+| Does it enter the planner / agent loop? | Yes by default for ordinary natural-language work; boundary-owned clarifications, schedules, and machine fact fast paths may finalize without a planner round. | No. It does not ask the planner to choose a skill or action. |
 | Does it use `CapabilityResolver` / `PlanVerifier` for semantic selection? | Yes, planner steps are resolved and verified before execution. | No semantic selection. It still uses dispatch/protocol validation for the explicit skill call. |
 | Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
 | Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
@@ -101,7 +101,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 
 - `Intent normalizer`: produces structured hints and compatibility trace fields. It is not the final semantic owner for ordinary eligible work.
 - `Boundary guards`: bind identity/session state, apply locator, contract, safety, budget, confirmation, dry-run, and compatibility checks from machine fields. This layer should stay small and must not grow per-language phrase logic.
-- `Agent-loop semantic authority`: ordinary eligible work enters the loop, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
+- `Agent-loop semantic authority`: ordinary natural-language work enters the loop by default, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
 - `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling.
@@ -120,8 +120,8 @@ flowchart TD
     C --> D[Parse schema fields]
     D --> E[Ask context bundle]
     E --> F[Boundary guards<br/>machine fields only]
-    F -->|ordinary eligible| G[Agent-loop context]
-    F -->|compat/direct/schedule| H[Compatibility finalization path]
+    F -->|agent-loop authority| G[Agent-loop context]
+    F -->|compat / schedule / machine fast path| H[Compatibility finalization path]
     G --> I{Round source}
     I -->|runtime can prove plan| J[Deterministic plan]
     I -->|runtime async command contract| JA[Deterministic async job start plan]
@@ -177,7 +177,7 @@ flowchart TD
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
 - `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
-- `Compatibility finalization`: remains for non-eligible, high-risk, schedule, delivery, and rollback cases, but it is not the ordinary semantic decision path.
+- `Compatibility finalization`: remains for schedule, clarify, machine fact fast paths, and explicit legacy/rollback compatibility, but it is not the ordinary semantic decision path.
 
 ### Permission Plane And Command Policy
 
