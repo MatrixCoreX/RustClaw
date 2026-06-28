@@ -742,6 +742,8 @@ fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {
 
 fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
+        "agent_loop_max_rounds" => Some("clawd.task.agent_loop_max_rounds"),
+        "agent_loop_no_progress_limit" => Some("clawd.task.agent_loop_no_progress_limit"),
         "budget_near_exhaustion" => Some("clawd.task.budget_near_exhaustion"),
         _ => None,
     }
