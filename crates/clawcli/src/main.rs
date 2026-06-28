@@ -139,6 +139,24 @@ enum Command {
         jsonl: bool,
     },
 
+    /// Print task event stream through the task API, without reading raw clawd logs.
+    Logs {
+        task_id: String,
+        #[command(flatten)]
+        event_filters: EventFilterArgs,
+        #[arg(long)]
+        jsonl: bool,
+    },
+
+    /// Print a stable task report summary.
+    Report {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        events: bool,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -427,6 +445,32 @@ fn main() -> Result<()> {
                 event_filters.async_job_id.as_deref(),
                 *jsonl,
             )
+        }
+        Command::Logs {
+            task_id,
+            event_filters,
+            jsonl,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_logs(
+                base_url,
+                k,
+                task_id,
+                &event_filters.event_types,
+                event_filters.checkpoint_id.as_deref(),
+                event_filters.policy_decision.as_deref(),
+                event_filters.subagent_id.as_deref(),
+                event_filters.async_job_id.as_deref(),
+                *jsonl,
+            )
+        }
+        Command::Report {
+            task_id,
+            json,
+            events,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_report(base_url, k, task_id, *json, *events)
         }
         Command::Active {
             user_id,
