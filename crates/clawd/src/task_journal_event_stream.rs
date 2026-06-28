@@ -206,6 +206,7 @@ fn checkpoint_event_payload(checkpoint: &Value) -> Value {
         "evidence_refs": checkpoint_ref.iter().map(String::as_str).collect::<Vec<_>>(),
         "resume_entrypoint": checkpoint.get("resume_entrypoint").and_then(Value::as_str),
         "completed_side_effect_count": completed_side_effect_count,
+        "requires_idempotency_guard": completed_side_effect_count > 0,
         "pending_async_job_id": checkpoint.pointer("/pending_async_job/job_id").and_then(Value::as_str),
         "poll_ref": checkpoint.pointer("/pending_async_job/poll_ref").and_then(Value::as_str),
         "cancel_ref": checkpoint.pointer("/pending_async_job/cancel_ref").and_then(Value::as_str),

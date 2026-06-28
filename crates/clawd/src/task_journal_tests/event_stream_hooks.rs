@@ -167,6 +167,12 @@ fn trace_json_projects_checkpoint_as_machine_event() {
     );
     assert_eq!(
         event
+            .pointer("/payload/requires_idempotency_guard")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        event
             .pointer("/payload/pending_async_job_id")
             .and_then(Value::as_str),
         Some("job-event")

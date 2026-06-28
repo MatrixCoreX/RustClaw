@@ -148,6 +148,7 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 checkpoint_ref: "task_checkpoint:ckpt-1",
                 evidence_ref: "task_checkpoint:ckpt-1",
                 completed_side_effect_count: 1,
+                requires_idempotency_guard: true,
                 pending_async_job_id: "job-1",
                 poll_ref: "local_process:123",
                 cancel_ref: "local_process:123",
@@ -207,6 +208,7 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[0]).includes("state_to=finalizing"));
   assert.ok(traceEventMeta(events[1]).includes("checkpoint_ref=task_checkpoint:ckpt-1"));
   assert.ok(traceEventMeta(events[1]).includes("pending_async_job_id=job-1"));
+  assert.ok(traceEventMeta(events[1]).includes("requires_idempotency_guard=true"));
   assert.ok(traceEventMeta(events[2]).includes("phase=started"));
   assert.ok(traceEventMeta(events[2]).includes("started_at=1781800002000"));
   assert.ok(traceEventMeta(events[3]).includes("phase=finished"));
