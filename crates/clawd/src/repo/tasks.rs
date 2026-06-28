@@ -421,12 +421,33 @@ pub(crate) fn update_task_timeout(
     state: &AppState,
     task_id: &str,
     error_text: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let existing_result_json = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 AND status = 'running' LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    if worker_timeout_preserves_recoverable_checkpoint(existing_result_json.as_deref()) {
+        let changed = db.execute(
+            "UPDATE tasks SET updated_at = ?2 WHERE task_id = ?1 AND status = 'running'",
+            params![task_id, now_ts()],
+        )?;
+        if changed > 0 {
+            warn!(
+                "update_task_timeout preserved recoverable checkpoint: task_id={}",
+                task_id
+            );
+            return Ok(false);
+        }
+    }
     let result_json = worker_timeout_result_json(task_id);
     let changed = db.execute(
         "UPDATE tasks
@@ -439,8 +460,22 @@ pub(crate) fn update_task_timeout(
             "update_task_timeout skipped: task_id={} is no longer running",
             task_id
         );
+        return Ok(false);
     }
-    Ok(())
+    Ok(true)
+}
+
+fn worker_timeout_preserves_recoverable_checkpoint(result_json: Option<&str>) -> bool {
+    let Some(raw) = result_json else {
+        return false;
+    };
+    let Ok(result_json) = serde_json::from_str::<Value>(raw) else {
+        return false;
+    };
+    matches!(
+        crate::task_lifecycle::paused_checkpoint_recovery_status(&result_json, now_ts_u64() as i64),
+        crate::task_lifecycle::PausedCheckpointRecoveryStatus::Waiting { .. }
+    )
 }
 
 fn worker_timeout_result_json(task_id: &str) -> String {
@@ -1755,6 +1790,10 @@ pub(crate) fn check_task_view_access(
 #[cfg(test)]
 #[path = "tasks_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tasks_timeout_tests.rs"]
+mod tasks_timeout_tests;
 
 #[cfg(test)]
 #[path = "task_cancel_resume_tests.rs"]
