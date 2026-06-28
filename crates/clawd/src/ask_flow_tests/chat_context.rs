@@ -145,7 +145,7 @@ fn direct_answer_gate_promotes_artifact_candidate_with_recent_file_targets_to_pl
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "compare the recent files", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
@@ -393,7 +393,7 @@ fn direct_answer_gate_promotes_contract_evidence_even_when_decision_is_direct() 
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "summarize /tmp/clawd.log", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert_eq!(
         route.ask_mode,
@@ -429,7 +429,7 @@ fn direct_answer_gate_binds_resolvable_workspace_child_locator() {
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "look at the docs folder", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -465,7 +465,7 @@ fn direct_answer_gate_binds_deictic_request_when_request_itself_resolves_target(
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert_eq!(
         route.output_contract.locator_hint,
@@ -529,7 +529,7 @@ fn direct_answer_gate_allows_deictic_observation_with_structured_auto_locator() 
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -637,7 +637,7 @@ fn direct_answer_gate_allows_deictic_observation_with_authoritative_anchor() {
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "把那个文件开头读 10 行", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(route.output_contract.locator_hint, "/tmp/bound/README.md");
@@ -664,7 +664,7 @@ fn direct_answer_gate_allows_current_workspace_summary_with_deictic_surface() {
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(

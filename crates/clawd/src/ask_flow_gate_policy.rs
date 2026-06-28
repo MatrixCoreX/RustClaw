@@ -419,7 +419,10 @@ pub(super) fn contract_test_hint_forced_planner_preflight(
         route.clarify_question.clear();
         append_route_reason(route, reason_tag);
     }
-    Some(DirectAnswerPreflight::PlannerExecute(ctx.clone()))
+    Some(DirectAnswerPreflight::PlannerExecute(
+        ctx.clone(),
+        "contract_test_hint_promoted_to_planner",
+    ))
 }
 
 pub(super) fn direct_answer_gate_promotion_depends_only_on_background_context(

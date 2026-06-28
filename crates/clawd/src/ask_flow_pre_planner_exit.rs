@@ -209,6 +209,16 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
+        reason_code: "direct_answer_gate_agent_loop_activation",
+        kind: PrePlannerExitKind::AgentLoopActivation,
+        migration_target: "agent_loop_authority",
+        migration_stage: "selected_migration_class_agent_loop",
+        migration_order: 20,
+        nl_gate_refs: &["nl_low_risk_direct_response_en"],
+        deletion_gate: "keep_structured_agent_loop_activation_gate",
+        owner_layer: "direct_answer_gate",
+    },
+    PrePlannerExitInventoryItem {
         reason_code: "direct_answer_gate_chat_fallback",
         kind: PrePlannerExitKind::OrdinarySemantic,
         migration_target: "agent_loop_respond_or_chat_model_answer",
@@ -307,7 +317,9 @@ mod tests {
             }
             assert!(matches!(
                 item.kind,
-                PrePlannerExitKind::BoundarySafety | PrePlannerExitKind::MachineFactFastPath
+                PrePlannerExitKind::BoundarySafety
+                    | PrePlannerExitKind::MachineFactFastPath
+                    | PrePlannerExitKind::AgentLoopActivation
             ));
         }
     }
@@ -337,6 +349,16 @@ mod tests {
             item.deletion_gate,
             "keep_structured_agent_loop_activation_gate"
         );
+    }
+
+    #[test]
+    fn direct_answer_gate_selected_class_is_structured_activation() {
+        let item = pre_planner_exit_for_reason("direct_answer_gate_agent_loop_activation").unwrap();
+
+        assert_eq!(item.kind, PrePlannerExitKind::AgentLoopActivation);
+        assert_eq!(item.owner_layer, "direct_answer_gate");
+        assert_eq!(item.kind.decision_source(), "contract_boundary");
+        assert_eq!(item.kind.semantic_control_state(), "none");
     }
 
     #[test]
