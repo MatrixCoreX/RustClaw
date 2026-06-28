@@ -80,6 +80,15 @@ fn task_report_json_exposes_stable_machine_fields() {
                     {
                         "ref": "artifact:report"
                     }
+                ],
+                "changed_files": ["src/lib.rs"],
+                "step_results": [
+                    {
+                        "step_id": "step_1",
+                        "status": "ok",
+                        "skill": "run_cmd",
+                        "command": "cargo test -p clawd"
+                    }
                 ]
             }
         }),
@@ -105,8 +114,65 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["terminal"], true);
     assert_eq!(report["event_count"], 1);
     assert_eq!(report["events"][0]["event_type"], "task_completed");
+    assert_eq!(report["coding"]["changed_file_count"], 1);
+    assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
+    assert_eq!(report["coding"]["test_count"], 1);
+    assert_eq!(report["coding"]["tests"][0], "cargo test -p clawd");
+    assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
+}
+
+#[test]
+fn task_report_json_summarizes_coding_verification_gaps() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-coding-report".to_string(),
+        status: "failed".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "failed",
+            "result_json": {
+                "files_changed": [
+                    {"path": "crates/clawd/src/main.rs"},
+                    {"file_path": "crates/clawd/src/lib.rs"}
+                ],
+                "repair_count": 2,
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "step_id": "step_1",
+                                "status": "ok",
+                                "skill": "run_cmd",
+                                "command": "cargo fmt --all"
+                            },
+                            {
+                                "step_id": "step_2",
+                                "status": "error",
+                                "skill": "run_cmd",
+                                "requested_action_ref": "run_cmd",
+                                "error_code": "exit_status"
+                            }
+                        ]
+                    }
+                }
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = task_report_json(&task, false);
+
+    assert_eq!(report["coding"]["changed_file_count"], 2);
+    assert_eq!(report["coding"]["command_count"], 1);
+    assert_eq!(report["coding"]["commands"][0], "cargo fmt --all");
+    assert_eq!(report["coding"]["test_count"], 0);
+    assert_eq!(report["coding"]["failure_count"], 1);
+    assert_eq!(report["coding"]["failures"][0]["step_id"], "step_2");
+    assert_eq!(report["coding"]["failures"][0]["error_code"], "exit_status");
+    assert_eq!(report["coding"]["retry_count"], 2);
+    assert_eq!(report["coding"]["unverified_risk"], "tests_not_observed");
 }
 
 #[test]
