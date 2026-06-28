@@ -9,7 +9,7 @@ use std::fs;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -273,6 +273,64 @@ async fn run_cmd_accepts_timeout_seconds_override() {
     .expect("run_cmd should succeed");
 
     assert_eq!(output, "ok");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_cmd_async_start_uses_dedicated_process_group() {
+    let root = TempDirGuard::new("run_cmd_async_process_group");
+    let state = test_state(root.path.clone());
+    let job_dir = root.path.join("async-job");
+    let output = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "sleep 30",
+            "async_start": true,
+            "_clawd_async_job_id": "local_process:test-process-group",
+            "_clawd_async_job_dir": job_dir.display().to_string()
+        }),
+    )
+    .await
+    .expect("async run_cmd should start");
+    assert!(output.contains("\"status\":\"accepted\""));
+
+    let pid = fs::read_to_string(job_dir.join("pid"))
+        .expect("pid file")
+        .trim()
+        .parse::<u32>()
+        .expect("pid number");
+    let mut pgid = None;
+    for _ in 0..20 {
+        pgid = process_group_id(pid);
+        if pgid.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(pgid, Some(pid));
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(format!("-{pid}"))
+        .status();
+}
+
+#[cfg(unix)]
+fn process_group_id(pid: u32) -> Option<u32> {
+    let output = std::process::Command::new("ps")
+        .arg("-o")
+        .arg("pgid=")
+        .arg("-p")
+        .arg(pid.to_string())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
 }
 
 #[tokio::test]

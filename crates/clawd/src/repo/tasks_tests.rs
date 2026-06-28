@@ -961,6 +961,71 @@ fn cancel_task_by_id_runs_local_process_cancel_adapter() {
     assert!(result["cancel_adapter_result"].get("error_text").is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn cancel_task_by_id_terminates_local_process_group() {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let dir = TempDirGuard::new("task_admin_local_process_group_cancel");
+    let mut child = Command::new("bash");
+    child
+        .arg("-lc")
+        .arg("sleep 60")
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = child.spawn().expect("spawn process group child");
+    let pid = child.id();
+    std::fs::write(dir.path.join("pid"), pid.to_string()).expect("write pid");
+    let cancel_ref = format!("local_process:{}", dir.path.display());
+    let result_json = json!({
+        "task_checkpoint": {
+            "pending_async_job": {
+                "job_id": "local_process:test-process-group-cancel",
+                "status": "running",
+                "poll_after_seconds": 10,
+                "expires_at": 9999,
+                "cancel_ref": cancel_ref,
+                "message_key": "clawd.task.async_job_pending"
+            }
+        }
+    });
+    insert_task(&state, &task_id, "running", Some(&result_json), 1234);
+
+    let canceled = cancel_task_by_id(&state, &task_id).expect("cancel task");
+
+    assert_eq!(canceled, 1);
+    let mut exited = false;
+    for _ in 0..30 {
+        if child.try_wait().expect("try wait").is_some() {
+            exited = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if !exited {
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(format!("-{pid}"))
+            .status();
+        let _ = child.wait();
+    }
+    assert!(exited, "local process group should exit after task cancel");
+    let result = stored_result_json(&state, &task_id);
+    assert_eq!(result["cancel_adapter_result"]["status"], "accepted");
+    assert_eq!(
+        result["cancel_adapter_result"]["signal_scope"],
+        "process_group_or_pid"
+    );
+    assert!(result["cancel_adapter_result"].get("text").is_none());
+    assert!(result["cancel_adapter_result"].get("error_text").is_none());
+}
+
 #[test]
 fn cancel_one_task_for_user_chat_writes_machine_lifecycle() {
     let state = state_with_tasks_table();

@@ -199,25 +199,22 @@ pub(crate) fn prepare_paused_checkpoint_resume_execution(
             cancel_ref,
             message_key,
             ..
-        } => {
-            let poll_after_seconds_i64 = (*poll_after_seconds).min(i64::MAX as u64) as i64;
-            PausedCheckpointResumeExecutionDecision {
-                executor_state: "poll_scheduled",
-                lifecycle_state: Some("background"),
-                next_check_after: Some(now_ts.saturating_add(poll_after_seconds_i64)),
-                payload: json!({
-                    "checkpoint_id": work_item.checkpoint_id,
-                    "resume_directive": directive.status_code(),
-                    "resume_trigger": work_item.resume_trigger,
-                    "job_id": job_id,
-                    "adapter_kind": adapter_kind,
-                    "poll_after_seconds": poll_after_seconds,
-                    "expires_at": expires_at,
-                    "cancel_ref": cancel_ref,
-                    "message_key": message_key,
-                }),
-            }
-        }
+        } => PausedCheckpointResumeExecutionDecision {
+            executor_state: "poll_scheduled",
+            lifecycle_state: Some("background"),
+            next_check_after: Some(now_ts),
+            payload: json!({
+                "checkpoint_id": work_item.checkpoint_id,
+                "resume_directive": directive.status_code(),
+                "resume_trigger": work_item.resume_trigger,
+                "job_id": job_id,
+                "adapter_kind": adapter_kind,
+                "poll_after_seconds": poll_after_seconds,
+                "expires_at": expires_at,
+                "cancel_ref": cancel_ref,
+                "message_key": message_key,
+            }),
+        },
         crate::task_lifecycle::CheckpointResumeDirective::AwaitUserInput { .. } => {
             PausedCheckpointResumeExecutionDecision {
                 executor_state: "awaiting_user",

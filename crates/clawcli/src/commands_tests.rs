@@ -124,6 +124,45 @@ fn task_report_json_exposes_stable_machine_fields() {
 }
 
 #[test]
+fn task_report_json_exposes_async_final_result() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-async-report".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "lifecycle": {
+                "state": "completed",
+                "execution_state": "completed",
+                "reason_code": "async_poll_completed"
+            },
+            "result_json": {
+                "task_lifecycle": {
+                    "resume_executor_result_projection": {
+                        "final_result_json": {
+                            "exit_code": 0,
+                            "stdout": "ASYNC_STDOUT_TOKEN\n",
+                            "output": "ASYNC_OUTPUT_TOKEN\n"
+                        }
+                    }
+                }
+            }
+        }),
+        result_text: Some("ASYNC_OUTPUT_TOKEN\n".to_string()),
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = task_report_json(&task, false);
+
+    assert_eq!(report["execution_state"], "completed");
+    assert_eq!(report["lifecycle_state"], "completed");
+    assert_eq!(report["lifecycle"]["reason_code"], "async_poll_completed");
+    assert_eq!(report["result_text"], "ASYNC_OUTPUT_TOKEN\n");
+    assert_eq!(report["async_result"]["exit_code"], 0);
+    assert_eq!(report["async_result"]["output"], "ASYNC_OUTPUT_TOKEN\n");
+}
+
+#[test]
 fn task_report_json_summarizes_coding_verification_gaps() {
     let task = crate::task::TaskStatusView {
         task_id: "task-coding-report".to_string(),

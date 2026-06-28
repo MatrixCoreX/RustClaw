@@ -1067,12 +1067,42 @@ impl From<String> for RunSafeCommandError {
 
 async fn kill_shell_pid(child_pid: Option<u32>) {
     if let Some(pid) = child_pid {
+        if kill_process_group(pid, "-9").await {
+            return;
+        }
         let _ = Command::new("kill")
             .arg("-9")
             .arg(pid.to_string())
             .status()
             .await;
     }
+}
+
+#[cfg(unix)]
+fn place_child_in_own_process_group(cmd: &mut Command) {
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn place_child_in_own_process_group(_cmd: &mut Command) {}
+
+#[cfg(unix)]
+async fn kill_process_group(pid: u32, signal: &str) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    Command::new("kill")
+        .arg(signal)
+        .arg(format!("-{pid}"))
+        .status()
+        .await
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+async fn kill_process_group(_pid: u32, _signal: &str) -> bool {
+    false
 }
 
 pub(crate) async fn run_safe_command(
@@ -1144,6 +1174,7 @@ async fn run_safe_command_detailed(
     // Prevent host-shell locale misconfiguration from polluting command output with
     // bash startup warnings such as "setlocale: LC_ALL...".
     cmd.env_remove("LC_ALL");
+    place_child_in_own_process_group(&mut cmd);
     cmd.kill_on_drop(true);
 
     let soft_timeout = cmd_timeout_seconds.max(1);
@@ -1426,6 +1457,7 @@ async fn start_async_command(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    place_child_in_own_process_group(&mut cmd);
     cmd.kill_on_drop(false);
     let child = cmd.spawn().map_err(|err| {
         RunSafeCommandError::Command(CommandRunFailure::new(

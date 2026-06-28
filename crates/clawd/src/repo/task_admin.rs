@@ -585,6 +585,7 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64) -> Value {
     if let Some(obj) = result.as_object_mut() {
         obj.insert("pid".to_string(), json!(pid));
         obj.insert("signal".to_string(), json!("TERM"));
+        obj.insert("signal_scope".to_string(), json!("process_group_or_pid"));
     }
     result
 }
@@ -620,6 +621,27 @@ fn local_process_cancel_result(
 
 #[cfg(unix)]
 fn terminate_local_process(pid: u32) -> bool {
+    if terminate_local_process_group(pid) {
+        return true;
+    }
+    terminate_local_process_pid(pid)
+}
+
+#[cfg(unix)]
+fn terminate_local_process_group(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    Command::new("kill")
+        .arg("-TERM")
+        .arg(format!("-{pid}"))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn terminate_local_process_pid(pid: u32) -> bool {
     Command::new("kill")
         .arg("-TERM")
         .arg(pid.to_string())
