@@ -161,6 +161,22 @@ enum Command {
         events: bool,
     },
 
+    /// Print coding-oriented task evidence summary.
+    Review {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        events: bool,
+    },
+
+    /// Print subagent child-run summaries for a task.
+    Subagents {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -522,6 +538,18 @@ fn main() -> Result<()> {
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_report(base_url, k, task_id, *json, *events)
+        }
+        Command::Review {
+            task_id,
+            json,
+            events,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_review(base_url, k, task_id, *json, *events)
+        }
+        Command::Subagents { task_id, json } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_subagents(base_url, k, task_id, *json)
         }
         Command::Active {
             user_id,

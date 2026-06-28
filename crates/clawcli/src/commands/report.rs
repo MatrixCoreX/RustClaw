@@ -115,6 +115,139 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
     lines
 }
 
+pub(super) fn coding_review_json(task: &task::TaskStatusView, include_events: bool) -> Value {
+    let report = task_report_json(task, include_events);
+    json!({
+        "report_kind": "rustclaw_coding_review",
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "terminal": task.is_terminal(),
+        "event_count": task.events.len(),
+        "events": report.get("events").cloned().unwrap_or(Value::Null),
+        "coding": report.get("coding").cloned().unwrap_or(Value::Null),
+        "artifacts": report.get("artifacts").cloned().unwrap_or(Value::Null),
+    })
+}
+
+pub(super) fn coding_review_text_lines(task: &task::TaskStatusView, review: &Value) -> Vec<String> {
+    let mut lines = vec![
+        format!("task_id: {}", task.task_id),
+        format!("status: {}", task.status),
+    ];
+    if let Some(state) = task.execution_state() {
+        lines.push(format!("execution_state: {state}"));
+    }
+    if let Some(state) = task.lifecycle_state() {
+        lines.push(format!("lifecycle_state: {state}"));
+    }
+    lines.push(format!("terminal: {}", task.is_terminal()));
+    lines.push(format!(
+        "coding_changed_file_count: {}",
+        report_u64(review, "/coding/changed_file_count")
+    ));
+    lines.push(format!(
+        "coding_verification_command_count: {}",
+        report_u64(review, "/coding/verification_command_count")
+    ));
+    lines.push(format!(
+        "coding_test_count: {}",
+        report_u64(review, "/coding/test_count")
+    ));
+    lines.push(format!(
+        "coding_failure_count: {}",
+        report_u64(review, "/coding/failure_count")
+    ));
+    lines.push(format!(
+        "coding_verification_status: {}",
+        coding_verification_status(review)
+    ));
+    for path in report_string_array(review, "/coding/changed_files")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("changed_file: {path}"));
+    }
+    for command in report_string_array(review, "/coding/verification_commands")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("verification_command: {command}"));
+    }
+    for kind in report_string_array(review, "/coding/verification_failure_kinds")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("verification_failure_kind: {kind}"));
+    }
+    if let Some(unverified_risk) = review
+        .pointer("/coding/unverified_risk")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("coding_unverified_risk: {unverified_risk}"));
+    }
+    lines
+}
+
+pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
+    let mut signals = SubagentReportSignals::default();
+    collect_subagent_report_signals(&task.raw_data, &mut signals, 0);
+    for event in &task.events {
+        collect_subagent_event_fields(event, &mut signals);
+    }
+    json!({
+        "report_kind": "rustclaw_subagent_report",
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "subagent_count": signals.items.len(),
+        "subagents": signals.items,
+    })
+}
+
+pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            "task_id: {}",
+            report.get("task_id").and_then(Value::as_str).unwrap_or("")
+        ),
+        format!(
+            "status: {}",
+            report.get("status").and_then(Value::as_str).unwrap_or("")
+        ),
+        format!(
+            "subagent_count: {}",
+            report
+                .get("subagent_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ),
+    ];
+    if let Some(items) = report.get("subagents").and_then(Value::as_array) {
+        for item in items.iter().take(64) {
+            let child_run_id = item
+                .get("child_run_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let subagent_id = item
+                .get("subagent_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let status = item.get("status").and_then(Value::as_str).unwrap_or("");
+            let finding_refs = report_string_array(item, "/finding_refs").join(",");
+            let evidence_refs = report_string_array(item, "/evidence_refs").join(",");
+            lines.push(format!(
+                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
+            ));
+        }
+    }
+    lines
+}
+
 fn report_u64(report: &Value, pointer: &str) -> u64 {
     report.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
 }
@@ -516,5 +649,130 @@ fn collect_retry_fields(map: &Map<String, Value>, signals: &mut CodingReportSign
         if let Some(count) = map.get(key).and_then(Value::as_u64) {
             signals.retry_count = signals.retry_count.max(count);
         }
+    }
+}
+
+#[derive(Default)]
+struct SubagentReportSignals {
+    seen: BTreeSet<String>,
+    items: Vec<Value>,
+}
+
+fn collect_subagent_report_signals(
+    value: &Value,
+    signals: &mut SubagentReportSignals,
+    depth: usize,
+) {
+    if depth > 12 || signals.items.len() >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(children)) = map.get("child_results") {
+                for child in children {
+                    collect_subagent_report_signals(child, signals, depth + 1);
+                }
+            }
+            if is_subagent_object(map) {
+                push_subagent_item(map, signals);
+            }
+            for value in map.values() {
+                collect_subagent_report_signals(value, signals, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_subagent_report_signals(item, signals, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn collect_subagent_event_fields(
+    event: &crate::events::TaskEventLine,
+    signals: &mut SubagentReportSignals,
+) {
+    let mut map = Map::new();
+    for key in [
+        "child_run_id",
+        "subagent_id",
+        "status",
+        "role",
+        "request_ref",
+        "error_code",
+    ] {
+        if let Some(value) = event.fields.get(key) {
+            map.insert(key.to_string(), Value::String(value.clone()));
+        }
+    }
+    if is_subagent_object(&map) {
+        push_subagent_item(&map, signals);
+    }
+}
+
+fn is_subagent_object(map: &Map<String, Value>) -> bool {
+    map.get("child_run_id").is_some()
+        || map.get("subagent_id").is_some()
+        || map.get("subagent_results").is_some()
+        || map.get("finding_refs").is_some()
+}
+
+fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSignals) {
+    let child_run_id = machine_string_field(map, "child_run_id");
+    let subagent_id = machine_string_field(map, "subagent_id");
+    let request_ref = machine_string_field(map, "request_ref");
+    let identity = child_run_id
+        .as_deref()
+        .or(subagent_id.as_deref())
+        .or(request_ref.as_deref())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            serde_json::to_string(map)
+                .unwrap_or_default()
+                .chars()
+                .take(160)
+                .collect()
+        });
+    if !signals.seen.insert(identity) || signals.items.len() >= 128 {
+        return;
+    }
+    signals.items.push(json!({
+        "child_run_id": child_run_id,
+        "subagent_id": subagent_id,
+        "request_ref": request_ref,
+        "role": machine_string_field(map, "role"),
+        "status": machine_string_field(map, "status"),
+        "error_code": machine_string_field(map, "error_code"),
+        "failure_isolation": machine_string_field(map, "failure_isolation"),
+        "required": map.get("required").and_then(Value::as_bool),
+        "optional": map.get("optional").and_then(Value::as_bool),
+        "finding_refs": machine_ref_array(map.get("finding_refs")),
+        "evidence_refs": machine_ref_array(map.get("evidence_refs")),
+    }));
+}
+
+fn machine_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_report_machine_token(value))
+        .map(ToString::to_string)
+}
+
+fn machine_ref_array(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::String(value)) if is_report_machine_token(value) => vec![value.to_string()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| is_report_machine_token(value))
+            .map(ToString::to_string)
+            .collect(),
+        Some(Value::Object(_) | Value::Null | Value::Bool(_) | Value::Number(_)) | None => {
+            Vec::new()
+        }
+        Some(Value::String(_)) => Vec::new(),
     }
 }

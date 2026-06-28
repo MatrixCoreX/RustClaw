@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 
 use crate::{events::EventFilters, output, task};
 
-use super::report::{task_report_json, task_report_text_lines};
+use super::report::{
+    coding_review_json, coding_review_text_lines, subagent_report_json, subagent_report_text_lines,
+    task_report_json, task_report_text_lines,
+};
 
 pub(crate) fn run_get(
     base_url: &str,
@@ -288,6 +291,43 @@ pub(crate) fn run_report(
         }
         if let Some(error_text) = task.error_text.as_deref() {
             eprintln!("error: {error_text}");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_review(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    json_output: bool,
+    include_events: bool,
+) -> Result<()> {
+    let task = task::get_task_status(base_url, key, task_id)?;
+    let review = coding_review_json(&task, include_events);
+    if json_output {
+        output::print_json_pretty(&review);
+    } else {
+        for line in coding_review_text_lines(&task, &review) {
+            println!("{line}");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_subagents(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    json_output: bool,
+) -> Result<()> {
+    let task = task::get_task_status(base_url, key, task_id)?;
+    let report = subagent_report_json(&task);
+    if json_output {
+        output::print_json_pretty(&report);
+    } else {
+        for line in subagent_report_text_lines(&report) {
+            println!("{line}");
         }
     }
     Ok(())
