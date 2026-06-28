@@ -4,6 +4,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod response_contract;
+
+use response_contract::*;
+
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
@@ -58,6 +62,11 @@ struct SkillInput {
     action: String,
     index: Option<usize>,
     task_id: Option<String>,
+    checkpoint_id: Option<String>,
+    resume_reason: Option<String>,
+    user_message: Option<String>,
+    new_constraints: Option<Value>,
+    pause_seconds: Option<u64>,
     dry_run: bool,
 }
 
@@ -141,6 +150,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
+        "resume" | "resume_task" | "continue_task" => "resume",
+        "pause" | "pause_task" | "delay_task" => "pause",
         _ => return Err("unsupported_action".to_string()),
     }
     .to_string();
@@ -164,11 +175,43 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
+    let checkpoint_id = obj
+        .get("checkpoint_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let resume_reason = obj
+        .get("resume_reason")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let user_message = obj
+        .get("user_message")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let new_constraints = obj
+        .get("new_constraints")
+        .filter(|value| value.is_object())
+        .cloned();
+    let pause_seconds = obj
+        .get("pause_seconds")
+        .or_else(|| obj.get("seconds"))
+        .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n.max(0) as u64)))
+        .filter(|value| *value > 0);
     if action == "get" && task_id.is_none() {
         return Ok(SkillInput {
             action,
             index,
             task_id,
+            checkpoint_id,
+            resume_reason,
+            user_message,
+            new_constraints,
+            pause_seconds,
             dry_run,
         });
     }
@@ -176,6 +219,11 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         action,
         index,
         task_id,
+        checkpoint_id,
+        resume_reason,
+        user_message,
+        new_constraints,
+        pause_seconds,
         dry_run,
     })
 }
@@ -295,6 +343,60 @@ fn execute(
                 )
                 .await?;
                 let extra = cancel_one_result_extra(&task);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "resume" => {
+                let Some(task_id) = input.task_id.as_deref() else {
+                    let extra = task_control_input_status_extra("resume", "missing_task_id", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                if !is_task_id_shape(task_id) {
+                    let extra =
+                        task_control_input_status_extra("resume", "invalid_task_id", Some(task_id));
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
+                if input.dry_run {
+                    let extra = resume_dry_run_extra(&input);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
+                let value = resume_task_by_id(
+                    &client,
+                    &base_url,
+                    task_id,
+                    input.checkpoint_id.as_deref(),
+                    input.resume_reason.as_deref(),
+                    input.user_message.as_deref(),
+                    input.new_constraints.clone(),
+                    user_key.as_deref(),
+                )
+                .await?;
+                let extra = task_control_by_id_result_extra("resume", task_id, value);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
+            }
+            "pause" => {
+                let Some(task_id) = input.task_id.as_deref() else {
+                    let extra = task_control_input_status_extra("pause", "missing_task_id", None);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                };
+                if !is_task_id_shape(task_id) {
+                    let extra =
+                        task_control_input_status_extra("pause", "invalid_task_id", Some(task_id));
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
+                if input.dry_run {
+                    let extra = pause_dry_run_extra(&input);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
+                }
+                let pause_seconds = input.pause_seconds.unwrap_or(3600);
+                let value = pause_task_by_id(
+                    &client,
+                    &base_url,
+                    task_id,
+                    pause_seconds,
+                    user_key.as_deref(),
+                )
+                .await?;
+                let extra = task_control_by_id_result_extra("pause", task_id, value);
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             _ => Err("unsupported action".to_string()),
@@ -437,6 +539,80 @@ async fn cancel_one_task(
             .ok_or_else(|| "cancel-one response missing task".to_string())?,
     )
     .map_err(|e| format!("decode canceled task failed: {e}"))
+}
+
+async fn resume_task_by_id(
+    client: &reqwest::Client,
+    base_url: &str,
+    task_id: &str,
+    checkpoint_id: Option<&str>,
+    resume_reason: Option<&str>,
+    user_message: Option<&str>,
+    new_constraints: Option<Value>,
+    user_key: Option<&str>,
+) -> Result<Value, String> {
+    let mut payload = json!({ "task_id": task_id });
+    if let Some(obj) = payload.as_object_mut() {
+        insert_optional_token(obj, "checkpoint_id", checkpoint_id);
+        insert_optional_token(obj, "resume_reason", resume_reason);
+        insert_optional_token(obj, "user_message", user_message);
+        if let Some(new_constraints) = new_constraints {
+            obj.insert("new_constraints".to_string(), new_constraints);
+        }
+    }
+    post_task_control_by_id(
+        client,
+        base_url,
+        "/v1/tasks/resume-by-task-id",
+        payload,
+        user_key,
+    )
+    .await
+}
+
+async fn pause_task_by_id(
+    client: &reqwest::Client,
+    base_url: &str,
+    task_id: &str,
+    pause_seconds: u64,
+    user_key: Option<&str>,
+) -> Result<Value, String> {
+    post_task_control_by_id(
+        client,
+        base_url,
+        "/v1/tasks/pause-by-task-id",
+        json!({
+            "task_id": task_id,
+            "pause_seconds": pause_seconds,
+        }),
+        user_key,
+    )
+    .await
+}
+
+async fn post_task_control_by_id(
+    client: &reqwest::Client,
+    base_url: &str,
+    path: &str,
+    payload: Value,
+    user_key: Option<&str>,
+) -> Result<Value, String> {
+    let mut req = client.post(format!("{}{}", base_url.trim_end_matches('/'), path));
+    if let Some(key) = user_key {
+        req = req.header("x-rustclaw-key", key);
+    }
+    let resp = req
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("request task control by id failed: {e}"))?;
+    parse_api_response::<Value>(resp).await
+}
+
+fn insert_optional_token(obj: &mut serde_json::Map<String, Value>, key: &str, value: Option<&str>) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        obj.insert(key.to_string(), json!(value));
+    }
 }
 
 fn effective_user_key(req: &Req) -> Option<String> {
@@ -594,7 +770,7 @@ fn task_detail_extra(task_id: &str, detail: &Value) -> Value {
         "message_key": "task_control.get.ok",
         "task_id": task_id,
         "db_status": status,
-        "lifecycle": lifecycle,
+        "lifecycle": lifecycle.clone(),
         "field_value": {
             "action": "get",
             "message_key": "task_control.get.ok",
@@ -602,121 +778,6 @@ fn task_detail_extra(task_id: &str, detail: &Value) -> Value {
             "db_status": status,
             "lifecycle": detail.get("lifecycle").cloned().unwrap_or(Value::Null),
         },
-    })
-}
-
-fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value {
-    json!({
-        "schema_version": 1,
-        "action": "get",
-        "status": status,
-        "message_key": format!("task_control.get.{status}"),
-        "task_id": task_id,
-        "db_status": Value::Null,
-        "lifecycle": {
-            "state": status,
-            "can_poll": false,
-            "can_cancel": false,
-            "last_heartbeat_ts": Value::Null,
-            "checkpoint_id": Value::Null,
-        },
-        "field_value": {
-            "action": "get",
-            "status": status,
-            "message_key": format!("task_control.get.{status}"),
-            "task_id": task_id,
-            "db_status": Value::Null,
-            "state": status,
-            "can_poll": false,
-            "can_cancel": false,
-            "last_heartbeat_ts": Value::Null,
-            "checkpoint_id": Value::Null,
-        },
-    })
-}
-
-fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value {
-    json!({
-        "schema_version": 1,
-        "action": action,
-        "status": "dry_run",
-        "message_key": format!("task_control.{action}.dry_run"),
-        "would_mutate": false,
-        "task_id": task_id,
-        "required_fields": ["task_id", "state", "can_cancel"],
-        "precondition_fields": {
-            "state": "running_or_queued",
-            "can_cancel": true,
-        },
-        "result_projection_fields": {
-            "state": "cancel_requested_or_canceled",
-            "can_cancel": false,
-            "can_poll": true,
-            "db_status": "canceled_or_terminal",
-            "last_heartbeat_ts": "optional",
-            "checkpoint_id": "optional",
-        },
-        "field_value": {
-            "action": action,
-            "status": "dry_run",
-            "message_key": format!("task_control.{action}.dry_run"),
-            "would_mutate": false,
-            "task_id": task_id,
-            "state": "running_or_queued",
-            "can_cancel": true,
-            "can_poll": true,
-        },
-    })
-}
-
-fn cancel_all_result_extra(tasks: &[ActiveTaskItem], canceled: usize) -> Value {
-    let items: Vec<Value> = tasks.iter().take(canceled).map(task_item_extra).collect();
-    let status = if canceled == 0 { "empty" } else { "ok" };
-    json!({
-        "schema_version": 1,
-        "action": "cancel_all",
-        "status": status,
-        "message_key": if canceled == 0 { "task_control.cancel_all.empty" } else { "task_control.cancel_all.ok" },
-        "canceled_count": canceled,
-        "requested_count": tasks.len(),
-        "items": items,
-        "field_value": {
-            "action": "cancel_all",
-            "status": status,
-            "message_key": if canceled == 0 { "task_control.cancel_all.empty" } else { "task_control.cancel_all.ok" },
-            "canceled_count": canceled,
-            "requested_count": tasks.len(),
-            "task_ids": tasks.iter().take(canceled).map(|task| task.task_id.as_str()).collect::<Vec<_>>(),
-        },
-    })
-}
-
-fn cancel_one_result_extra(task: &ActiveTaskItem) -> Value {
-    json!({
-        "schema_version": 1,
-        "action": "cancel_one",
-        "status": "ok",
-        "message_key": "task_control.cancel_one.ok",
-        "canceled_task": task_item_extra(task),
-        "field_value": {
-            "action": "cancel_one",
-            "status": "ok",
-            "message_key": "task_control.cancel_one.ok",
-            "index": task.index,
-            "task_id": task.task_id,
-            "db_status": task.status,
-        },
-    })
-}
-
-fn task_item_extra(task: &ActiveTaskItem) -> Value {
-    json!({
-        "index": task.index,
-        "task_id": task.task_id,
-        "kind": task.kind,
-        "status": task.status,
-        "summary": task.summary,
-        "age_seconds": task.age_seconds,
     })
 }
 
