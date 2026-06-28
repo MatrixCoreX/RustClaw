@@ -187,6 +187,7 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 evidence_ref: "coding_evidence:summary",
                 changed_file_count: 1,
                 command_count: 2,
+                verification_command_count: 2,
                 test_count: 1,
                 diff_summary_count: 1,
                 failure_count: 1,
@@ -211,6 +212,7 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[3]).includes("phase=finished"));
   assert.ok(traceEventMeta(events[3]).includes("finished_at=1781800003000"));
   assert.ok(traceEventMeta(events[4]).includes("changed_file_count=1"));
+  assert.ok(traceEventMeta(events[4]).includes("verification_command_count=2"));
   assert.ok(traceEventMeta(events[4]).includes("test_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("retry_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("unverified_risk=tests_not_observed"));

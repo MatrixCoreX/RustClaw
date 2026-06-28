@@ -239,6 +239,7 @@ fn collect_exec_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize
 struct CodingReportSignals {
     changed_files: BTreeSet<String>,
     commands: BTreeSet<String>,
+    verification_commands: BTreeSet<String>,
     tests: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
@@ -259,6 +260,8 @@ fn coding_report_json(data: &Value) -> Value {
         "changed_files": signals.changed_files.into_iter().collect::<Vec<_>>(),
         "command_count": signals.commands.len(),
         "commands": signals.commands.into_iter().collect::<Vec<_>>(),
+        "verification_command_count": signals.verification_commands.len(),
+        "verification_commands": signals.verification_commands.into_iter().collect::<Vec<_>>(),
         "test_count": signals.tests.len(),
         "tests": signals.tests.into_iter().collect::<Vec<_>>(),
         "diff_summary_count": signals.diff_summaries.len(),
@@ -398,6 +401,9 @@ fn collect_command_token(command: &str, signals: &mut CodingReportSignals) {
         return;
     }
     signals.commands.insert(command.to_string());
+    if is_verification_command_token(command) {
+        signals.verification_commands.insert(command.to_string());
+    }
     if is_test_command_token(command) {
         signals.tests.insert(command.to_string());
     }
@@ -411,6 +417,24 @@ fn is_test_command_token(command: &str) -> bool {
         || command.starts_with("pnpm test")
         || command.starts_with("yarn test")
         || command.starts_with("pytest")
+        || command.starts_with("go test")
+}
+
+fn is_verification_command_token(command: &str) -> bool {
+    let command = command.trim().to_ascii_lowercase();
+    is_test_command_token(&command)
+        || command.starts_with("cargo check")
+        || command.starts_with("cargo clippy")
+        || command.starts_with("cargo fmt")
+        || command.starts_with("npm run lint")
+        || command.starts_with("npm run build")
+        || command.starts_with("pnpm lint")
+        || command.starts_with("pnpm build")
+        || command.starts_with("yarn lint")
+        || command.starts_with("yarn build")
+        || command.starts_with("pytest")
+        || command.starts_with("ruff check")
+        || command.starts_with("go vet")
         || command.starts_with("go test")
 }
 

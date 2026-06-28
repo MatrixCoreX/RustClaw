@@ -462,6 +462,24 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
     );
     assert_eq!(
         event
+            .pointer("/payload/verification_command_count")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/verification_commands/0")
+            .and_then(Value::as_str),
+        Some("cargo fmt --all")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/verification_commands/1")
+            .and_then(Value::as_str),
+        Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        event
             .pointer("/payload/failures/0/step_id")
             .and_then(Value::as_str),
         Some("step_2")

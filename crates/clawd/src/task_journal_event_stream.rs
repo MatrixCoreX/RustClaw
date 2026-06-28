@@ -254,6 +254,7 @@ fn tool_lifecycle_event_payload(
 struct CodingEvidenceSignals {
     changed_files: BTreeSet<String>,
     commands: BTreeSet<String>,
+    verification_commands: BTreeSet<String>,
     tests: BTreeSet<String>,
     evidence_refs: BTreeSet<String>,
     diff_summaries: Vec<Value>,
@@ -285,6 +286,8 @@ impl CodingEvidenceSignals {
             "changed_files": self.changed_files.iter().cloned().collect::<Vec<_>>(),
             "command_count": self.commands.len(),
             "commands": self.commands.iter().cloned().collect::<Vec<_>>(),
+            "verification_command_count": self.verification_commands.len(),
+            "verification_commands": self.verification_commands.iter().cloned().collect::<Vec<_>>(),
             "test_count": self.tests.len(),
             "tests": self.tests.iter().cloned().collect::<Vec<_>>(),
             "diff_summary_count": self.diff_summaries.len(),
@@ -438,6 +441,9 @@ fn collect_command_token(
         return;
     }
     signals.commands.insert(command.to_string());
+    if is_verification_command_token(command) {
+        signals.verification_commands.insert(command.to_string());
+    }
     if is_test_command_token(command) {
         signals.tests.insert(command.to_string());
     }
@@ -555,6 +561,24 @@ fn is_test_command_token(command: &str) -> bool {
         || command.starts_with("pnpm test")
         || command.starts_with("yarn test")
         || command.starts_with("pytest")
+        || command.starts_with("go test")
+}
+
+fn is_verification_command_token(command: &str) -> bool {
+    let command = command.trim().to_ascii_lowercase();
+    is_test_command_token(&command)
+        || command.starts_with("cargo check")
+        || command.starts_with("cargo clippy")
+        || command.starts_with("cargo fmt")
+        || command.starts_with("npm run lint")
+        || command.starts_with("npm run build")
+        || command.starts_with("pnpm lint")
+        || command.starts_with("pnpm build")
+        || command.starts_with("yarn lint")
+        || command.starts_with("yarn build")
+        || command.starts_with("pytest")
+        || command.starts_with("ruff check")
+        || command.starts_with("go vet")
         || command.starts_with("go test")
 }
 
