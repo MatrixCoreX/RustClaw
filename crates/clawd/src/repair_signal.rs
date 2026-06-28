@@ -526,6 +526,34 @@ mod tests {
     }
 
     #[test]
+    fn repair_envelope_excludes_user_visible_text_fields() {
+        let signal = RepairSignal::from_verifier_issue_parts(
+            "step_1",
+            crate::verifier::VerifyIssueKind::MissingRequiredArg,
+            "missing path",
+        );
+        let envelope = signal
+            .to_json()
+            .get("repair_envelope")
+            .cloned()
+            .expect("repair envelope");
+
+        for forbidden in [
+            "text",
+            "error_text",
+            "detail",
+            "signal",
+            "user_message",
+            "localized_reply_text",
+        ] {
+            assert!(
+                envelope.get(forbidden).is_none(),
+                "repair_envelope_forbidden_field={forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn rejected_action_is_exposed_as_failed_action_ref() {
         let signal = RepairSignal::from_verifier_issue_parts(
             "step_3",
