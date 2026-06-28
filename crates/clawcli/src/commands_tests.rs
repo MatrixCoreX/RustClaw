@@ -1,7 +1,8 @@
 use super::{
-    automation_runs_request_payload, exec_exit_class, exec_failure_class_from_machine_tokens,
-    exec_summary_json, run_exec, task_event_output_lines, task_report_json, task_report_text_lines,
-    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    automation_runs_request_payload, exec_effective_options, exec_exit_class,
+    exec_failure_class_from_machine_tokens, exec_summary_json, run_exec, task_event_output_lines,
+    task_report_json, task_report_text_lines, wait_until_matches, write_exec_artifacts,
+    ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -409,10 +410,13 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         std::fs::read_to_string(artifact_dir.join("task.json")).expect("read task artifact");
     let events_file =
         std::fs::read_to_string(artifact_dir.join("events.jsonl")).expect("read event artifact");
+    let resume_file =
+        std::fs::read_to_string(artifact_dir.join("resume.json")).expect("read resume artifact");
 
     assert!(summary_file.contains("\"exit_class\": \"success\""));
     assert!(task_file.contains("\"task-exec-artifact\""));
     assert!(events_file.contains("type=task_completed"));
+    assert!(resume_file.contains("\"task-exec-artifact\""));
 
     std::fs::remove_dir_all(artifact_dir).ok();
 }
@@ -458,6 +462,7 @@ fn exec_offline_smoke_writes_machine_artifact_without_server() {
         "unused-key",
         "unused prompt",
         None,
+        None,
         false,
         false,
         false,
@@ -466,6 +471,7 @@ fn exec_offline_smoke_writes_machine_artifact_without_server() {
         true,
         true,
         Some(&artifact_dir),
+        false,
     )
     .expect("offline exec smoke");
 
@@ -480,6 +486,89 @@ fn exec_offline_smoke_writes_machine_artifact_without_server() {
     assert_eq!(summary["error_code"], "exec_background_policy_conflict");
 
     std::fs::remove_dir_all(artifact_dir).ok();
+}
+
+#[test]
+fn exec_profile_resolves_machine_options_without_prompt_semantics() {
+    let options = exec_effective_options(
+        Some("long-tail"),
+        false,
+        false,
+        false,
+        None,
+        1000,
+        false,
+        false,
+        None,
+    )
+    .expect("resolve long-tail profile");
+
+    assert_eq!(options.timeout_seconds, Some(3600));
+    assert!(options.continue_on_background);
+    assert!(!options.fail_on_background);
+    assert_eq!(
+        options.artifact_dir.as_deref(),
+        Some(std::path::Path::new("artifacts/rustclaw-exec/long-tail"))
+    );
+
+    let release_gate = exec_effective_options(
+        Some("release-gate"),
+        false,
+        false,
+        false,
+        Some(42),
+        1000,
+        false,
+        false,
+        None,
+    )
+    .expect("resolve release-gate profile");
+    assert_eq!(release_gate.timeout_seconds, Some(42));
+    assert!(release_gate.fail_on_background);
+}
+
+#[test]
+fn wait_until_matches_machine_lifecycle_states() {
+    let background = crate::task::TaskStatusView {
+        task_id: "task-wait-background".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "background",
+            "task_lifecycle": {
+                "state": "background"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+    assert!(wait_until_matches(&background, "background"));
+    assert!(!wait_until_matches(&background, "terminal"));
+
+    let needs_user = crate::task::TaskStatusView {
+        task_id: "task-wait-needs-user".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "needs_confirmation"
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+    assert!(wait_until_matches(&needs_user, "needs_user"));
+
+    let completed = crate::task::TaskStatusView {
+        task_id: "task-wait-completed".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed"
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+    assert!(wait_until_matches(&completed, "completed"));
+    assert!(wait_until_matches(&completed, "terminal"));
 }
 
 #[test]

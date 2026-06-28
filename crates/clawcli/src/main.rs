@@ -10,7 +10,7 @@ mod replay;
 mod task;
 
 use anyhow::Result;
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use std::path::PathBuf;
 
@@ -59,6 +59,8 @@ enum Command {
         #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
         prompt: Vec<String>,
         #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
         resume_task_id: Option<String>,
         #[arg(long)]
         detach: bool,
@@ -76,6 +78,8 @@ enum Command {
         fail_on_background: bool,
         #[arg(long)]
         artifact_dir: Option<PathBuf>,
+        #[arg(long)]
+        print_effective_config: bool,
     },
 
     /// POST /v1/tasks with kind=run_skill.
@@ -209,6 +213,30 @@ enum Command {
         constraints_json: Option<String>,
     },
 
+    /// Continue a task by task id, optionally with a user message.
+    Continue {
+        task_id: String,
+        #[arg(num_args = 0.., trailing_var_arg = true)]
+        message: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Wait until a task reaches a selected machine lifecycle state.
+    Wait {
+        task_id: String,
+        #[arg(long, value_enum, default_value = "terminal")]
+        until: WaitUntil,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+    },
+
     /// POST /v1/tasks/pause-by-task-id
     PauseTask {
         task_id: String,
@@ -256,6 +284,25 @@ enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum WaitUntil {
+    Completed,
+    Terminal,
+    Background,
+    NeedsUser,
+}
+
+impl WaitUntil {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Terminal => "terminal",
+            Self::Background => "background",
+            Self::NeedsUser => "needs_user",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -326,6 +373,7 @@ fn main() -> Result<()> {
         }
         Command::Exec {
             prompt,
+            profile,
             resume_task_id,
             detach,
             json,
@@ -335,6 +383,7 @@ fn main() -> Result<()> {
             continue_on_background,
             fail_on_background,
             artifact_dir,
+            print_effective_config,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             let prompt = prompt.join(" ");
@@ -342,6 +391,7 @@ fn main() -> Result<()> {
                 base_url,
                 k,
                 &prompt,
+                profile.as_deref(),
                 resume_task_id.as_deref(),
                 *detach,
                 *json,
@@ -351,6 +401,7 @@ fn main() -> Result<()> {
                 *continue_on_background,
                 *fail_on_background,
                 artifact_dir.as_ref(),
+                *print_effective_config,
             )?;
             if exit_code == 0 {
                 Ok(())
@@ -535,6 +586,46 @@ fn main() -> Result<()> {
                 user_message.as_deref(),
                 constraints_json.as_deref(),
             )
+        }
+        Command::Continue {
+            task_id,
+            message,
+            json,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            let message = message.join(" ");
+            commands::run_continue_task(
+                base_url,
+                k,
+                task_id,
+                (!message.trim().is_empty()).then_some(message.as_str()),
+                *json,
+            )
+        }
+        Command::Wait {
+            task_id,
+            until,
+            timeout_seconds,
+            interval_ms,
+            json,
+            jsonl,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            let exit_code = commands::run_wait(
+                base_url,
+                k,
+                task_id,
+                until.as_str(),
+                *timeout_seconds,
+                *interval_ms,
+                *json,
+                *jsonl,
+            )?;
+            if exit_code == 0 {
+                Ok(())
+            } else {
+                std::process::exit(i32::from(exit_code));
+            }
         }
         Command::PauseTask {
             task_id,

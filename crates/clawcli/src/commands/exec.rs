@@ -68,6 +68,112 @@ impl ExecExitClass {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ExecEffectiveOptions {
+    pub(super) profile: Option<String>,
+    pub(super) detach: bool,
+    pub(super) json_output: bool,
+    pub(super) jsonl_output: bool,
+    pub(super) timeout_seconds: Option<u64>,
+    pub(super) interval_ms: u64,
+    pub(super) continue_on_background: bool,
+    pub(super) fail_on_background: bool,
+    pub(super) artifact_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct ExecProfileDefaults {
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+    continue_on_background: bool,
+    fail_on_background: bool,
+    artifact_dir: Option<PathBuf>,
+}
+
+pub(super) fn exec_effective_options(
+    profile_name: Option<&str>,
+    detach: bool,
+    json_output: bool,
+    jsonl_output: bool,
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+    continue_on_background: bool,
+    fail_on_background: bool,
+    artifact_dir: Option<&PathBuf>,
+) -> Result<ExecEffectiveOptions> {
+    let profile = profile_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let defaults = match profile.as_deref() {
+        None => ExecProfileDefaults::default(),
+        Some("quick") => ExecProfileDefaults {
+            timeout_seconds: Some(120),
+            ..ExecProfileDefaults::default()
+        },
+        Some("coding") => ExecProfileDefaults {
+            timeout_seconds: Some(900),
+            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/coding")),
+            ..ExecProfileDefaults::default()
+        },
+        Some("release-gate") => ExecProfileDefaults {
+            timeout_seconds: Some(600),
+            fail_on_background: true,
+            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/release-gate")),
+            ..ExecProfileDefaults::default()
+        },
+        Some("long-tail") => ExecProfileDefaults {
+            timeout_seconds: Some(3600),
+            continue_on_background: true,
+            artifact_dir: Some(PathBuf::from("artifacts/rustclaw-exec/long-tail")),
+            ..ExecProfileDefaults::default()
+        },
+        Some(other) => anyhow::bail!("exec_profile_unknown:{other}"),
+    };
+
+    Ok(ExecEffectiveOptions {
+        profile,
+        detach,
+        json_output,
+        jsonl_output,
+        timeout_seconds: timeout_seconds.or(defaults.timeout_seconds),
+        interval_ms: interval_ms.max(defaults.interval_ms).max(100),
+        continue_on_background: continue_on_background || defaults.continue_on_background,
+        fail_on_background: fail_on_background || defaults.fail_on_background,
+        artifact_dir: artifact_dir.cloned().or(defaults.artifact_dir),
+    })
+}
+
+impl Default for ExecProfileDefaults {
+    fn default() -> Self {
+        Self {
+            timeout_seconds: None,
+            interval_ms: 1000,
+            continue_on_background: false,
+            fail_on_background: false,
+            artifact_dir: None,
+        }
+    }
+}
+
+fn exec_effective_config_json(options: &ExecEffectiveOptions) -> Value {
+    json!({
+        "schema_version": 1,
+        "profile": options.profile,
+        "detach": options.detach,
+        "json": options.json_output,
+        "jsonl": options.jsonl_output,
+        "timeout_seconds": options.timeout_seconds,
+        "poll_interval_ms": options.interval_ms,
+        "continue_on_background": options.continue_on_background,
+        "fail_on_background": options.fail_on_background,
+        "artifact_dir": options
+            .artifact_dir
+            .as_ref()
+            .map(|path| path.display().to_string()),
+    })
+}
+
 pub(super) fn exec_summary_json(
     task: &task::TaskStatusView,
     outcome: ExecWaitOutcome,
@@ -179,6 +285,7 @@ pub(crate) fn run_exec(
     base_url: &str,
     key: &str,
     prompt: &str,
+    profile_name: Option<&str>,
     resume_task_id: Option<&str>,
     detach: bool,
     json_output: bool,
@@ -188,21 +295,58 @@ pub(crate) fn run_exec(
     continue_on_background: bool,
     fail_on_background: bool,
     artifact_dir: Option<&PathBuf>,
+    print_effective_config: bool,
 ) -> Result<u8> {
-    if continue_on_background && fail_on_background {
+    let effective = match exec_effective_options(
+        profile_name,
+        detach,
+        json_output,
+        jsonl_output,
+        timeout_seconds,
+        interval_ms,
+        continue_on_background,
+        fail_on_background,
+        artifact_dir,
+    ) {
+        Ok(options) => options,
+        Err(error) => {
+            let exit_class = ExecExitClass::InvalidRequest;
+            let summary = json!({
+                "exit_class": exit_class.as_str(),
+                "exit_code": exit_class.code(),
+                "error_code": "exec_profile_invalid",
+                "error_detail": error.to_string(),
+                "resume": exec_resume_summary(resume_task_id),
+            });
+            if json_output || jsonl_output {
+                output::print_json_pretty(&summary);
+            } else {
+                eprintln!("error_code=exec_profile_invalid");
+            }
+            return Ok(exit_class.code());
+        }
+    };
+
+    if print_effective_config {
+        output::print_json_pretty(&exec_effective_config_json(&effective));
+        return Ok(ExecExitClass::Success.code());
+    }
+
+    if effective.continue_on_background && effective.fail_on_background {
         let exit_class = ExecExitClass::InvalidRequest;
         let summary = json!({
             "exit_class": exit_class.as_str(),
             "exit_code": exit_class.code(),
             "error_code": "exec_background_policy_conflict",
             "resume": exec_resume_summary(resume_task_id),
+            "effective_config": exec_effective_config_json(&effective),
         });
-        if json_output || jsonl_output {
+        if effective.json_output || effective.jsonl_output {
             output::print_json_pretty(&summary);
         } else {
             eprintln!("error_code=exec_background_policy_conflict");
         }
-        if let Some(artifact_dir) = artifact_dir {
+        if let Some(artifact_dir) = effective.artifact_dir.as_deref() {
             write_exec_detached_artifacts(artifact_dir, &summary)?;
         }
         return Ok(exit_class.code());
@@ -212,7 +356,7 @@ pub(crate) fn run_exec(
     } else {
         task::submit_ask(base_url, key, prompt)?
     };
-    if detach {
+    if effective.detach {
         let exit_class = ExecExitClass::Success;
         let summary = json!({
             "task_id": task_id,
@@ -220,13 +364,14 @@ pub(crate) fn run_exec(
             "exit_class": exit_class.as_str(),
             "exit_code": exit_class.code(),
             "resume": exec_resume_summary(resume_task_id),
+            "effective_config": exec_effective_config_json(&effective),
         });
-        if json_output || jsonl_output {
+        if effective.json_output || effective.jsonl_output {
             output::print_json_pretty(&summary);
         } else {
             println!("task_id: {}", task_id);
         }
-        if let Some(artifact_dir) = artifact_dir {
+        if let Some(artifact_dir) = effective.artifact_dir.as_deref() {
             write_exec_detached_artifacts(artifact_dir, &summary)?;
         }
         return Ok(exit_class.code());
@@ -237,19 +382,26 @@ pub(crate) fn run_exec(
         key,
         &task_id,
         ExecWaitOptions {
-            interval_ms,
-            timeout_seconds,
-            continue_on_background,
-            fail_on_background,
-            jsonl_output,
+            interval_ms: effective.interval_ms,
+            timeout_seconds: effective.timeout_seconds,
+            continue_on_background: effective.continue_on_background,
+            fail_on_background: effective.fail_on_background,
+            jsonl_output: effective.jsonl_output,
         },
     )?;
-    let exit_class = exec_exit_class(&task, outcome, fail_on_background);
-    let summary = exec_summary_json(&task, outcome, exit_class, resume_task_id);
-    if let Some(artifact_dir) = artifact_dir {
+    let exit_class = exec_exit_class(&task, outcome, effective.fail_on_background);
+    let mut summary = exec_summary_json(&task, outcome, exit_class, resume_task_id);
+    if let Some(map) = summary.as_object_mut() {
+        map.insert(
+            "effective_config".to_string(),
+            exec_effective_config_json(&effective),
+        );
+        map.insert("resume_hint".to_string(), exec_resume_artifact_json(&task));
+    }
+    if let Some(artifact_dir) = effective.artifact_dir.as_deref() {
         write_exec_artifacts(artifact_dir, &task, &summary)?;
     }
-    if json_output || jsonl_output {
+    if effective.json_output || effective.jsonl_output {
         output::print_json_pretty(&summary);
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
@@ -400,6 +552,10 @@ pub(super) fn write_exec_artifacts(
         .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
     write_json_file(&artifact_dir.join("summary.json"), summary)?;
     write_json_file(&artifact_dir.join("task.json"), &task.raw_data)?;
+    write_json_file(
+        &artifact_dir.join("resume.json"),
+        &exec_resume_artifact_json(task),
+    )?;
     let mut events = String::new();
     for event in &task.events {
         events.push_str(&event.line);
@@ -408,6 +564,62 @@ pub(super) fn write_exec_artifacts(
     fs::write(artifact_dir.join("events.jsonl"), events)
         .with_context(|| format!("write artifact dir {}", artifact_dir.display()))?;
     Ok(())
+}
+
+fn exec_resume_artifact_json(task: &task::TaskStatusView) -> Value {
+    let lifecycle = task.lifecycle();
+    let checkpoint_id = lifecycle_string(lifecycle, "checkpoint_id");
+    let mut recommended_command_tokens = vec![
+        "clawcli".to_string(),
+        "watch".to_string(),
+        task.task_id.clone(),
+        "--until-terminal".to_string(),
+    ];
+    if let Some(checkpoint_id) = checkpoint_id.as_deref() {
+        recommended_command_tokens.extend([
+            "clawcli".to_string(),
+            "resume-task".to_string(),
+            task.task_id.clone(),
+            "--checkpoint-id".to_string(),
+            checkpoint_id.to_string(),
+        ]);
+    }
+    json!({
+        "schema_version": 1,
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "checkpoint_id": checkpoint_id,
+        "resume_due": lifecycle_bool(lifecycle, "resume_due"),
+        "next_poll_after": lifecycle_value(lifecycle, "next_poll_after"),
+        "poll_after_seconds": lifecycle_value(lifecycle, "poll_after_seconds"),
+        "poll_ref": lifecycle_string(lifecycle, "poll_ref"),
+        "cancel_ref": lifecycle_string(lifecycle, "cancel_ref"),
+        "recommended_command_tokens": recommended_command_tokens,
+    })
+}
+
+fn lifecycle_value(lifecycle: Option<&Value>, key: &str) -> Value {
+    lifecycle
+        .and_then(|value| value.get(key))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn lifecycle_string(lifecycle: Option<&Value>, key: &str) -> Option<String> {
+    lifecycle
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn lifecycle_bool(lifecycle: Option<&Value>, key: &str) -> Option<bool> {
+    lifecycle
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_bool)
 }
 
 fn write_json_file(path: &Path, value: &Value) -> Result<()> {
