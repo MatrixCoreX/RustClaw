@@ -192,6 +192,8 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 test_count: 1,
                 diff_summary_count: 1,
                 failure_count: 1,
+                verification_status: "failed",
+                verification_failure_kind_count: 1,
                 retry_count: 1,
                 unverified_risk: "tests_not_observed",
               },
@@ -216,6 +218,8 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[4]).includes("changed_file_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("verification_command_count=2"));
   assert.ok(traceEventMeta(events[4]).includes("test_count=1"));
+  assert.ok(traceEventMeta(events[4]).includes("verification_status=failed"));
+  assert.ok(traceEventMeta(events[4]).includes("verification_failure_kind_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("retry_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("unverified_risk=tests_not_observed"));
   assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");

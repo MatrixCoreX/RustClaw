@@ -294,6 +294,8 @@ fn event_lines_include_coding_evidence_machine_fields() {
                                 "test_count": 1,
                                 "diff_summary_count": 1,
                                 "failure_count": 1,
+                                "verification_status": "failed",
+                                "verification_failure_kind_count": 1,
                                 "retry_count": 1,
                                 "unverified_risk": "tests_not_observed"
                             }
@@ -332,6 +334,20 @@ fn event_lines_include_coding_evidence_machine_fields() {
     );
     assert_eq!(
         events[0].fields.get("retry_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("verification_status")
+            .map(String::as_str),
+        Some("failed")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("verification_failure_kind_count")
+            .map(String::as_str),
         Some("1")
     );
     assert!(events[0]
