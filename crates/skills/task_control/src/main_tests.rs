@@ -110,3 +110,119 @@ fn parse_input_reports_machine_error_for_missing_cancel_index() {
 
     assert_eq!(err, "cancel_one_missing_index");
 }
+
+#[test]
+fn parse_input_accepts_resume_and_pause_machine_actions() {
+    let resume = parse_input(&json!({
+        "action": "resume",
+        "task_id": "00000000-0000-4000-8000-000000000010",
+        "checkpoint_id": "ckpt-1",
+        "resume_reason": "manual_resume",
+        "user_message": "continue",
+        "new_constraints": {"max_rounds": 2}
+    }))
+    .expect("resume input");
+
+    assert_eq!(resume.action, "resume");
+    assert_eq!(
+        resume.task_id.as_deref(),
+        Some("00000000-0000-4000-8000-000000000010")
+    );
+    assert_eq!(resume.checkpoint_id.as_deref(), Some("ckpt-1"));
+    assert_eq!(resume.resume_reason.as_deref(), Some("manual_resume"));
+    assert!(resume.user_message.is_some());
+    assert!(resume.new_constraints.is_some());
+
+    let pause = parse_input(&json!({
+        "action": "pause",
+        "task_id": "00000000-0000-4000-8000-000000000011",
+        "pause_seconds": 120
+    }))
+    .expect("pause input");
+
+    assert_eq!(pause.action, "pause");
+    assert_eq!(pause.pause_seconds, Some(120));
+}
+
+#[test]
+fn resume_and_pause_dry_run_extras_are_machine_contracts() {
+    let resume = parse_input(&json!({
+        "action": "resume",
+        "task_id": "00000000-0000-4000-8000-000000000010",
+        "checkpoint_id": "ckpt-1",
+        "resume_reason": "manual_resume",
+        "dry_run": true
+    }))
+    .expect("resume input");
+    let resume_extra = resume_dry_run_extra(&resume);
+
+    assert_eq!(
+        resume_extra.get("message_key").and_then(Value::as_str),
+        Some("task_control.resume.dry_run")
+    );
+    assert_eq!(
+        resume_extra
+            .pointer("/field_value/checkpoint_id")
+            .and_then(Value::as_str),
+        Some("ckpt-1")
+    );
+    assert_eq!(
+        resume_extra
+            .pointer("/result_projection_fields/resume_due")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let pause = parse_input(&json!({
+        "action": "pause",
+        "task_id": "00000000-0000-4000-8000-000000000011",
+        "pause_seconds": 120,
+        "dry_run": true
+    }))
+    .expect("pause input");
+    let pause_extra = pause_dry_run_extra(&pause);
+
+    assert_eq!(
+        pause_extra.get("message_key").and_then(Value::as_str),
+        Some("task_control.pause.dry_run")
+    );
+    assert_eq!(
+        pause_extra
+            .pointer("/field_value/pause_seconds")
+            .and_then(Value::as_u64),
+        Some(120)
+    );
+    assert_eq!(
+        pause_extra
+            .pointer("/result_projection_fields/resume_due")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn task_control_by_id_result_extra_projects_lifecycle() {
+    let response = json!({
+        "task_id": "00000000-0000-4000-8000-000000000012",
+        "status": "running",
+        "lifecycle": {
+            "state": "background",
+            "checkpoint_id": "ckpt-2",
+            "can_poll": true
+        }
+    });
+
+    let extra =
+        task_control_by_id_result_extra("resume", "00000000-0000-4000-8000-000000000012", response);
+
+    assert_eq!(
+        extra.get("message_key").and_then(Value::as_str),
+        Some("task_control.resume.ok")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/lifecycle/checkpoint_id")
+            .and_then(Value::as_str),
+        Some("ckpt-2")
+    );
+}
