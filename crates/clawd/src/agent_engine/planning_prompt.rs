@@ -572,6 +572,10 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     }
 }
 
+#[cfg(test)]
+#[path = "planning_prompt_tests.rs"]
+mod tests;
+
 fn skills_from_action_refs_capped(
     action_refs: Vec<crate::contract_matrix::ActionRef>,
     max_skills: usize,
