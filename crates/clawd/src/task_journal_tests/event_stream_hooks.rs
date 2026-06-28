@@ -47,51 +47,129 @@ fn trace_json_includes_pollable_machine_event_stream() {
         vec![
             "task_lifecycle",
             "agent_round",
+            "tool_started",
             "tool_step",
+            "tool_finished",
             "task_observation",
             "task_final"
         ]
     );
     assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
     assert_eq!(
-        events[2].pointer("/payload/status").and_then(Value::as_str),
-        Some("ok")
+        events[2].pointer("/payload/phase").and_then(Value::as_str),
+        Some("started")
     );
     assert_eq!(
         events[2]
+            .pointer("/payload/evidence_ref")
+            .and_then(Value::as_str),
+        Some("step_1")
+    );
+    assert_eq!(
+        events[3].pointer("/payload/status").and_then(Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(
+        events[3]
             .pointer("/payload/action_kind")
             .and_then(Value::as_str),
         Some("call_capability")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/requested_capability")
             .and_then(Value::as_str),
         Some("filesystem.list_entries")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/resolved_tool_or_skill")
             .and_then(Value::as_str),
         Some("fs_basic")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/resolution_source")
             .and_then(Value::as_str),
         Some("capability_resolver")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/artifact_ref_count")
             .and_then(Value::as_u64),
         Some(1)
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/artifact_refs/0/ref")
             .and_then(Value::as_str),
         Some("reports/out.txt")
+    );
+    assert_eq!(
+        events[4].pointer("/payload/phase").and_then(Value::as_str),
+        Some("finished")
+    );
+    assert_eq!(
+        events[4].pointer("/payload/status").and_then(Value::as_str),
+        Some("ok")
+    );
+}
+
+#[test]
+fn trace_json_projects_checkpoint_as_machine_event() {
+    let mut journal = TaskJournal::for_task("task-checkpoint-event", "ask", "long task");
+    journal.record_task_checkpoint(json!({
+        "schema_version": 1,
+        "checkpoint_id": "ckpt-event",
+        "resume_entrypoint": "poll_async_job",
+        "completed_side_effect_refs": ["write_file:tmp/report.txt"],
+        "pending_async_job": {
+            "job_id": "job-event",
+            "poll_ref": "local_process:123",
+            "cancel_ref": "local_process:123",
+            "message_key": "async_job_running"
+        }
+    }));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("checkpoint_created"))
+        .expect("checkpoint_created event");
+
+    assert_eq!(
+        event
+            .pointer("/payload/checkpoint_id")
+            .and_then(Value::as_str),
+        Some("ckpt-event")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/checkpoint_ref")
+            .and_then(Value::as_str),
+        Some("task_checkpoint:ckpt-event")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/evidence_ref")
+            .and_then(Value::as_str),
+        Some("task_checkpoint:ckpt-event")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/completed_side_effect_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/pending_async_job_id")
+            .and_then(Value::as_str),
+        Some("job-event")
     );
 }
 

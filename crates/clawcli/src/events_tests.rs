@@ -111,6 +111,119 @@ fn event_lines_include_task_transition_machine_fields() {
 }
 
 #[test]
+fn event_lines_include_tool_lifecycle_machine_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 2,
+                            "event_type": "tool_started",
+                            "payload": {
+                                "phase": "started",
+                                "step_id": "step_1",
+                                "step_ref": "step_1",
+                                "evidence_ref": "step_1",
+                                "skill": "run_cmd",
+                                "action_kind": "call_capability",
+                                "requested_capability": "terminal.run_command",
+                                "started_at": 1781800001000_i64
+                            }
+                        },
+                        {
+                            "seq": 3,
+                            "event_type": "tool_finished",
+                            "payload": {
+                                "phase": "finished",
+                                "step_id": "step_1",
+                                "step_ref": "step_1",
+                                "evidence_ref": "step_1",
+                                "skill": "run_cmd",
+                                "status": "ok",
+                                "finished_at": 1781800002000_i64
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].event_type, "tool_started");
+    assert_eq!(
+        events[0].fields.get("phase").map(String::as_str),
+        Some("started")
+    );
+    assert_eq!(
+        events[0].fields.get("step_ref").map(String::as_str),
+        Some("step_1")
+    );
+    assert_eq!(
+        events[0].fields.get("evidence_ref").map(String::as_str),
+        Some("step_1")
+    );
+    assert!(events[0].line.contains("started_at=1781800001000"));
+    assert_eq!(
+        events[1].fields.get("status").map(String::as_str),
+        Some("ok")
+    );
+    assert!(events[1].line.contains("finished_at=1781800002000"));
+}
+
+#[test]
+fn event_lines_include_checkpoint_machine_fields_and_async_filter() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 1,
+                            "event_type": "checkpoint_created",
+                            "payload": {
+                                "checkpoint_id": "ckpt-1",
+                                "checkpoint_ref": "task_checkpoint:ckpt-1",
+                                "evidence_ref": "task_checkpoint:ckpt-1",
+                                "resume_entrypoint": "poll_async_job",
+                                "completed_side_effect_count": 1,
+                                "pending_async_job_id": "job-1",
+                                "poll_ref": "local_process:123",
+                                "cancel_ref": "local_process:123",
+                                "message_key": "async_job_running"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "checkpoint_created");
+    assert_eq!(
+        events[0].fields.get("checkpoint_ref").map(String::as_str),
+        Some("task_checkpoint:ckpt-1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("pending_async_job_id")
+            .map(String::as_str),
+        Some("job-1")
+    );
+    assert!(events[0].line.contains("message_key=async_job_running"));
+
+    let filters = EventFilters::from_parts(&[], None, None, None, Some("job-1"));
+    assert!(filters.matches(&events[0]));
+}
+
+#[test]
 fn event_lines_include_lifecycle_worker_events() {
     let data = json!({
         "result_json": {
