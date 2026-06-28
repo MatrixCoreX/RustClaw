@@ -331,6 +331,82 @@ fn poll_dry_run_expired_returns_adapter_expired_result() {
 }
 
 #[test]
+fn cancel_dry_run_returns_adapter_cancelled_result() {
+    let root = unique_temp_root("video-cancel-dry-run");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "cancel",
+            "task_id": "provider-task-cancel",
+            "job_id": "provider:video_generate:minimax:provider-task-cancel",
+            "vendor": "minimax",
+            "dry_run": true
+        }),
+    )
+    .expect("cancel dry run");
+
+    assert_eq!(extra["status"], "cancelled");
+    assert_eq!(extra["async_cancel_adapter_result"]["status"], "cancelled");
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "cancelled");
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["cancellation_result_json"]["source"],
+        "video_generate_cancel_adapter"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["message_key"],
+        "clawd.task.cancelled"
+    );
+    assert_eq!(extra["async_cancel_adapter_result"]["retryable"], false);
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["cancel_token"],
+        "provider:video_generate:minimax:provider-task-cancel"
+    );
+    assert!(extra["async_cancel_adapter_result"].get("text").is_none());
+    assert!(extra["async_cancel_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn cancel_live_without_provider_adapter_returns_structured_contract() {
+    let root = unique_temp_root("video-cancel-adapter-contract");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "cancel",
+            "task_id": "provider-task-cancel",
+            "job_id": "provider:video_generate:minimax:provider-task-cancel",
+            "vendor": "minimax"
+        }),
+    )
+    .expect("cancel contract");
+
+    assert_eq!(extra["status"], "requires_provider_adapter");
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["status"],
+        "requires_provider_adapter"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["error_code"],
+        "provider_cancel_adapter_missing"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["provider_cancel_contract"]["provider"],
+        "minimax"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["provider_cancel_contract"]["job_id"],
+        "provider:video_generate:minimax:provider-task-cancel"
+    );
+    assert!(extra["async_cancel_adapter_result"].get("text").is_none());
+    assert!(extra["async_cancel_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
 fn local_image_path_converts_to_data_url() {
     let root = unique_temp_root("video-image-source");
     let image = root.join("image.png");

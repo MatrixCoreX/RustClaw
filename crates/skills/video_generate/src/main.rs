@@ -216,6 +216,7 @@ fn execute(
     match action {
         "generate" => execute_generate(cfg, workspace_root, args),
         "poll" => execute_poll(cfg, workspace_root, obj),
+        "cancel" => execute_cancel(cfg, obj),
         _ => Err(format!("unsupported action: {action}")),
     }
 }
@@ -795,6 +796,143 @@ fn execute_poll(
         adapter_result,
         query,
     ))
+}
+
+fn execute_cancel(cfg: &RootConfig, obj: &Map<String, Value>) -> Result<(String, Value), String> {
+    let requested_vendor = obj.get("vendor").and_then(Value::as_str);
+    let vendor = select_vendor(
+        requested_vendor,
+        cfg.video_generation.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    );
+    let provider_name = vendor_name(vendor);
+    let provider_cfg = resolved_vendor_config(cfg, vendor);
+    let model = obj
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| cfg.video_generation.default_model.as_deref())
+        .or_else(|| first_model(vendor_models(&cfg.video_generation, vendor)))
+        .or_else(|| first_model(cfg.video_generation.models.as_ref()))
+        .or_else(|| provider_cfg.as_ref().map(|config| config.model.as_str()))
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let adapter_kind = adapter_kind_for(vendor, provider_cfg.as_ref());
+    let task_id = obj
+        .get("task_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "task_id is required".to_string())?;
+    let job_id = obj
+        .get("job_id")
+        .or_else(|| obj.get("cancel_token"))
+        .or_else(|| obj.get("cancel_ref"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| provider_video_job_id(provider_name, task_id));
+    let cancelled_at = unix_ts() as i64;
+    let provider_cancel_contract = json!({
+        "provider": provider_name,
+        "skill_name": "video_generate",
+        "task_id": task_id,
+        "job_id": job_id,
+        "cancel_ref": job_id,
+    });
+
+    if optional_bool(obj, "dry_run").unwrap_or(false) {
+        let adapter_result = video_cancelled_adapter_result(
+            task_id,
+            &job_id,
+            provider_name,
+            &model,
+            adapter_kind,
+            cancelled_at,
+        );
+        return Ok((
+            format!("VIDEO_TASK_CANCELLED:{task_id}"),
+            json!({
+                "provider": provider_name,
+                "model": model,
+                "model_kind": adapter_kind_name(adapter_kind),
+                "task_id": task_id,
+                "job_id": job_id,
+                "status": "cancelled",
+                "dry_run": true,
+                "provider_cancel_contract": provider_cancel_contract,
+                "async_cancel_adapter_result": adapter_result,
+                "async_poll_adapter_result": adapter_result,
+            }),
+        ));
+    }
+
+    let adapter_result = json!({
+        "schema_version": 1,
+        "adapter_kind": "media_job_poll",
+        "status": "requires_provider_adapter",
+        "job_id": job_id,
+        "result_ref": job_id,
+        "cancel_ref": job_id,
+        "cancel_token": job_id,
+        "cancelled_at": cancelled_at,
+        "message_key": "clawd.task.cancelled",
+        "error_code": "provider_cancel_adapter_missing",
+        "retryable": false,
+        "provider_cancel_contract": provider_cancel_contract,
+    });
+    Ok((
+        format!("VIDEO_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}"),
+        json!({
+            "provider": provider_name,
+            "model": model,
+            "model_kind": adapter_kind_name(adapter_kind),
+            "task_id": task_id,
+            "job_id": job_id,
+            "status": "requires_provider_adapter",
+            "provider_cancel_contract": provider_cancel_contract,
+            "async_cancel_adapter_result": adapter_result,
+        }),
+    ))
+}
+
+fn video_cancelled_adapter_result(
+    task_id: &str,
+    job_id: &str,
+    provider: &str,
+    model: &str,
+    model_kind: VideoAdapterKind,
+    cancelled_at: i64,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "adapter_kind": "media_job_poll",
+        "status": "cancelled",
+        "job_id": job_id,
+        "result_ref": job_id,
+        "cancel_ref": job_id,
+        "cancel_token": job_id,
+        "poll_after_seconds": 0,
+        "poll_after_ms": 0,
+        "expires_at": cancelled_at,
+        "message_key": "clawd.task.cancelled",
+        "retryable": false,
+        "cancellation_result_json": {
+            "schema_version": 1,
+            "source": "video_generate_cancel_adapter",
+            "provider": provider,
+            "model": model,
+            "model_kind": adapter_kind_name(model_kind),
+            "task_id": task_id,
+            "job_id": job_id,
+            "cancel_ref": job_id,
+            "status": "cancelled",
+            "cancelled_at": cancelled_at,
+            "dry_run": true,
+        },
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

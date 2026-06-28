@@ -21,6 +21,7 @@
 ## Actions
 - `generate`: create a video task; optionally wait and download the video file.
 - `poll`: query an existing provider video task once and return a machine-readable async poll adapter result.
+- `cancel`: request cancellation for an existing provider video task; dry-run returns a terminal `cancelled` adapter result, while live provider-native cancellation is represented as a structured adapter contract until a concrete provider cancel adapter is available.
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
@@ -48,6 +49,12 @@
 | poll | `output_path` | no | string(path) | auto | Workspace output path for downloaded video. |
 | poll | `dry_run` | no | boolean | `false` | Return a mock adapter result without provider calls. |
 | poll | `mock_status` / `mock_file_id` | no | string | - | Dry-run-only provider status/file metadata for tests and smoke checks. |
+| cancel | `task_id` | yes | string | - | Provider video task id returned by `generate`. |
+| cancel | `job_id` | no | string | derived | RustClaw async job id; default is `provider:video_generate:<vendor>:<task_id>`. |
+| cancel | `cancel_token` / `cancel_ref` | no | string | `job_id` | Async cancellation token produced by `pending_async_job`. |
+| cancel | `vendor` | no | string | config default | Provider key used to cancel the task. |
+| cancel | `model` | no | string | config default | Model metadata preserved in the cancellation result. |
+| cancel | `dry_run` | no | boolean | `false` | Return a terminal cancellation adapter result without provider calls. |
 
 ## Success `extra` (`status=ok`)
 - `provider`: resolved backend provider name.
@@ -64,6 +71,7 @@
 - `pending_async_job_contract`: dry-run-only preview of the machine fields a live `generate` call will place in `pending_async_job`; it is intentionally not named `pending_async_job` so dry-run responses are not treated as real background work.
 - `pending_async_job`: present when `generate.wait_for_completion` is omitted or false; contains `job_id`, `provider`, `status`, `poll_after_seconds`, `poll_after_ms`, `expires_at`, `cancel_ref`, `cancel_token`, `result_ref`, `message_key`, `retryable`, and `poll_adapter`.
 - `async_poll_adapter_result`: present for `poll`; contains `job_id`, `result_ref`, `status=accepted|running|succeeded|failed|expired|cancelled`, `poll_after_seconds`, `poll_after_ms`, `expires_at`, `message_key`, `retryable`, and `final_result_json`, `failure_result_json`, or `cancellation_result_json` when terminal.
+- `async_cancel_adapter_result`: present for `cancel`; contains `job_id`, `cancel_ref`, `cancel_token`, `status=cancelled|requires_provider_adapter`, `message_key`, `retryable`, and either `cancellation_result_json` or `provider_cancel_contract`.
 
 ## Error Contract
 - Missing/empty `prompt`.
@@ -71,6 +79,7 @@
 - Unsupported vendor, duration, resolution, or path outside workspace.
 - Missing API key for live generation.
 - Provider create/query/retrieve/download failures.
+- Live `cancel` returns `status=requires_provider_adapter` with `error_code=provider_cancel_adapter_missing` until a provider-native cancel adapter is available.
 
 ## Request/Response Examples
 ### Example 1
@@ -101,4 +110,14 @@ Request:
 Response:
 ```json
 {"request_id":"demo-3","status":"ok","text":"VIDEO_TASK:106916112212032","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","status":"Processing","async_poll_adapter_result":{"job_id":"provider:video_generate:minimax:106916112212032","result_ref":"provider:video_generate:minimax:106916112212032","status":"running","poll_after_seconds":5,"poll_after_ms":5000,"expires_at":1999999999,"message_key":"clawd.task.async_job_pending","retryable":true}},"error_text":null}
+```
+
+### Example 4
+Request:
+```json
+{"request_id":"demo-4","args":{"action":"cancel","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","dry_run":true}}
+```
+Response:
+```json
+{"request_id":"demo-4","status":"ok","text":"VIDEO_TASK_CANCELLED:106916112212032","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","status":"cancelled","dry_run":true,"async_cancel_adapter_result":{"schema_version":1,"adapter_kind":"media_job_poll","status":"cancelled","job_id":"provider:video_generate:minimax:106916112212032","result_ref":"provider:video_generate:minimax:106916112212032","cancel_ref":"provider:video_generate:minimax:106916112212032","cancel_token":"provider:video_generate:minimax:106916112212032","message_key":"clawd.task.cancelled","retryable":false,"cancellation_result_json":{"schema_version":1,"source":"video_generate_cancel_adapter","provider":"minimax","task_id":"106916112212032","status":"cancelled","dry_run":true}}},"error_text":null}
 ```
