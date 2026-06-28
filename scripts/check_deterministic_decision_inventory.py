@@ -64,6 +64,20 @@ class InventoryEntry:
     migration_targets: tuple[str, ...] = ()
 
 
+@dataclasses.dataclass(frozen=True)
+class BranchInventoryEntry:
+    name: str
+    path: str
+    category: str
+    input_fields: tuple[str, ...]
+    output_fields: tuple[str, ...]
+    tokens: tuple[str, ...]
+    reads_user_prompt_text: bool = False
+    reads_model_answer_text: bool = False
+    reads_skill_text_fields: bool = False
+    reads_skill_error_text_fields: bool = False
+
+
 INVENTORY: tuple[InventoryEntry, ...] = (
     InventoryEntry(
         name="ask_flow_boundary_and_pre_planner",
@@ -134,6 +148,108 @@ INVENTORY: tuple[InventoryEntry, ...] = (
 )
 
 
+BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
+    BranchInventoryEntry(
+        name="pre_planner_exit_reason_table",
+        path="crates/clawd/src/ask_flow_pre_planner_exit.rs",
+        category="contract_boundary",
+        input_fields=("reason_code", "RouteResult", "IntentOutputContract"),
+        output_fields=("decision_source", "semantic_control_state", "migration_stage"),
+        tokens=("PRE_PLANNER_EXIT_INVENTORY", "semantic_control_state"),
+    ),
+    BranchInventoryEntry(
+        name="direct_answer_gate_promotion_reason_mapper",
+        path="crates/clawd/src/ask_flow_gate_execution.rs",
+        category="contract_boundary",
+        input_fields=("reason_tag",),
+        output_fields=("rewrite_reason_code", "decision_source"),
+        tokens=("direct_answer_gate_planner_promotion_reason_code",),
+    ),
+    BranchInventoryEntry(
+        name="chat_fallback_agent_loop_activation",
+        path="crates/clawd/src/ask_flow.rs",
+        category="contract_boundary",
+        input_fields=("AskMode", "RouteResult", "IntentOutputContract"),
+        output_fields=("chat_fallback_agent_loop_activation",),
+        tokens=("chat_fallback_agent_loop_activation",),
+    ),
+    BranchInventoryEntry(
+        name="route_reason_machine_marker_projection",
+        path="crates/clawd/src/ask_flow_chat_helpers.rs",
+        category="compat_trace",
+        input_fields=("route_reason",),
+        output_fields=("machine_markers",),
+        tokens=("route_reason_machine_markers", "route_reason_has_exact_marker"),
+    ),
+    BranchInventoryEntry(
+        name="planner_structural_route_markers",
+        path="crates/clawd/src/agent_engine/planning_route_markers.rs",
+        category="contract_boundary",
+        input_fields=("route_reason", "needs_clarify"),
+        output_fields=("structured_marker_match",),
+        tokens=("route_reason_has_structural_marker", "route_has_unresolved_clarify_or_locator_marker"),
+    ),
+    BranchInventoryEntry(
+        name="recent_artifact_selector_machine_tokens",
+        path="crates/clawd/src/agent_engine/planning_recent_artifacts.rs",
+        category="contract_boundary",
+        input_fields=("resolved_intent", "route_reason", "list_selector"),
+        output_fields=("selector_target_kind", "selector_limit", "selector_sort_by"),
+        tokens=("selector_value_machine_token", "selector_bool_machine_token"),
+    ),
+    BranchInventoryEntry(
+        name="observed_output_generic_projection",
+        path="crates/clawd/src/agent_engine/observed_output.rs",
+        category="evidence_projection",
+        input_fields=("structured_observation", "output_contract"),
+        output_fields=("scalar", "path", "list", "status", "artifact_refs"),
+        tokens=("extract_direct_answer_from_generic_output", "extract_direct_scalar_from_generic_output"),
+    ),
+    BranchInventoryEntry(
+        name="observed_output_git_machine_summary",
+        path="crates/clawd/src/agent_engine/observed_output_git.rs",
+        category="evidence_projection",
+        input_fields=("git_basic.structured_json_v1", "status_output"),
+        output_fields=("git.branch", "git.worktree"),
+        tokens=("git_repository_state_answer", "answer_is_git_repository_state_machine_summary"),
+    ),
+    BranchInventoryEntry(
+        name="answer_verifier_missing_evidence_gap",
+        path="crates/clawd/src/answer_verifier_runtime.rs",
+        category="recovery_boundary",
+        input_fields=("required_evidence_fields", "observed_evidence"),
+        output_fields=("missing_evidence_fields", "retry_instruction"),
+        tokens=("answer_verifier_observed_gap", "missing_evidence_fields"),
+        reads_model_answer_text=True,
+    ),
+    BranchInventoryEntry(
+        name="finalizer_requested_machine_kv_summary",
+        path="crates/clawd/src/finalize/loop_reply.rs",
+        category="evidence_projection",
+        input_fields=("state_patch", "observed_values", "output_contract"),
+        output_fields=("requested_machine_kv_summary",),
+        tokens=("requested_machine_kv_summary", "log_deterministic_delivery_record"),
+        reads_model_answer_text=True,
+    ),
+    BranchInventoryEntry(
+        name="finalizer_verifier_failure_message_key",
+        path="crates/clawd/src/finalize/task_answer_verifier_failure.rs",
+        category="contract_boundary",
+        input_fields=("AnswerVerifierError", "missing_evidence_fields"),
+        output_fields=("message_key", "reason_code", "status_code"),
+        tokens=("answer_verifier_required_evidence_block", "missing_evidence_fields"),
+    ),
+    BranchInventoryEntry(
+        name="deterministic_delivery_trace_record",
+        path="crates/clawd/src/finalize/loop_reply_delivery_record.rs",
+        category="compat_trace",
+        input_fields=("reason_code", "semantic_kind", "response_shape"),
+        output_fields=("deterministic_delivery_record",),
+        tokens=("log_deterministic_delivery_record", "deterministic_delivery_record"),
+    ),
+)
+
+
 def rel(path: Path) -> str:
     return path.resolve().relative_to(ROOT).as_posix()
 
@@ -194,6 +310,34 @@ def validate_inventory_shape() -> list[str]:
     return findings
 
 
+def validate_branch_inventory() -> list[str]:
+    findings: list[str] = []
+    seen_names: set[str] = set()
+    for entry in BRANCH_INVENTORY:
+        if entry.name in seen_names:
+            findings.append(f"duplicate_branch_inventory_name={entry.name}")
+        seen_names.add(entry.name)
+        if entry.category not in OWNER_CATEGORIES:
+            findings.append(f"{entry.name}: unknown_branch_category={entry.category}")
+        if entry.category in {"unknown", "semantic_rewrite"}:
+            findings.append(f"{entry.name}: branch_category_not_allowed={entry.category}")
+        if not entry.input_fields:
+            findings.append(f"{entry.name}: missing_input_fields")
+        if not entry.output_fields:
+            findings.append(f"{entry.name}: missing_output_fields")
+        if entry.reads_skill_text_fields or entry.reads_skill_error_text_fields:
+            findings.append(f"{entry.name}: reads_visible_skill_text_protocol")
+        path = ROOT / entry.path
+        if not path.is_file():
+            findings.append(f"{entry.name}: missing_path={entry.path}")
+            continue
+        body = path.read_text(encoding="utf-8")
+        for token in entry.tokens:
+            if token not in body:
+                findings.append(f"{entry.name}: missing_token={token}")
+    return findings
+
+
 def validate_target_coverage() -> list[str]:
     findings: list[str] = []
     for path in target_files():
@@ -231,6 +375,23 @@ def print_summary() -> None:
                 str(entry.reads_skill_error_text_fields).lower(),
             )
         )
+    print(f"branch_inventory_entries={len(BRANCH_INVENTORY)}")
+    for entry in BRANCH_INVENTORY:
+        print(
+            "{} file={} category={} inputs={} outputs={} tokens={} reads=user_prompt:{} "
+            "model_answer:{} skill_text:{} skill_error_text:{}".format(
+                entry.name,
+                entry.path,
+                entry.category,
+                ",".join(entry.input_fields),
+                ",".join(entry.output_fields),
+                ",".join(entry.tokens),
+                str(entry.reads_user_prompt_text).lower(),
+                str(entry.reads_model_answer_text).lower(),
+                str(entry.reads_skill_text_fields).lower(),
+                str(entry.reads_skill_error_text_fields).lower(),
+            )
+        )
 
 
 def run_self_test() -> int:
@@ -240,6 +401,15 @@ def run_self_test() -> int:
     assert is_test_path(ROOT / "crates/clawd/src/answer_verifier_tests.rs")
     planning_entries = covering_entries("crates/clawd/src/agent_engine/planning.rs")
     assert not any("semantic_rewrite" in entry.categories for entry in planning_entries)
+    assert any(
+        entry.name == "pre_planner_exit_reason_table"
+        for entry in BRANCH_INVENTORY
+    )
+    assert any(
+        entry.name == "answer_verifier_missing_evidence_gap"
+        and entry.category == "recovery_boundary"
+        for entry in BRANCH_INVENTORY
+    )
     observed_entries = covering_entries(
         "crates/clawd/src/agent_engine/observed_output.rs"
     )
@@ -255,7 +425,11 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
-    findings = validate_inventory_shape() + validate_target_coverage()
+    findings = (
+        validate_inventory_shape()
+        + validate_branch_inventory()
+        + validate_target_coverage()
+    )
     if args.summary:
         print_summary()
     if findings:
@@ -265,7 +439,8 @@ def main(argv: list[str]) -> int:
         return 1
     print(
         "DETERMINISTIC_DECISION_INVENTORY_CHECK ok "
-        f"target_files={len(target_files())} entries={len(INVENTORY)}"
+        f"target_files={len(target_files())} entries={len(INVENTORY)} "
+        f"branch_entries={len(BRANCH_INVENTORY)}"
     )
     return 0
 
