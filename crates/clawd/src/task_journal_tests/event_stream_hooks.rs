@@ -424,6 +424,56 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
     }));
 
     let trace = journal.to_trace_json();
+    let coding_checkpoints = trace
+        .pointer("/event_stream")
+        .and_then(Value::as_array)
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| {
+                    event.get("event_type").and_then(Value::as_str) == Some("coding_checkpoint")
+                })
+                .collect::<Vec<_>>()
+        })
+        .expect("coding checkpoint events");
+    assert_eq!(coding_checkpoints.len(), 3);
+    assert_eq!(
+        coding_checkpoints[0]
+            .pointer("/payload/checkpoint_kind")
+            .and_then(Value::as_str),
+        Some("file_edit_group")
+    );
+    assert_eq!(
+        coding_checkpoints[0]
+            .pointer("/payload/changed_files/0")
+            .and_then(Value::as_str),
+        Some("src/lib.rs")
+    );
+    assert_eq!(
+        coding_checkpoints[1]
+            .pointer("/payload/checkpoint_kind")
+            .and_then(Value::as_str),
+        Some("verification_command")
+    );
+    assert_eq!(
+        coding_checkpoints[1]
+            .pointer("/payload/verification_command")
+            .and_then(Value::as_str),
+        Some("cargo fmt --all")
+    );
+    assert_eq!(
+        coding_checkpoints[2]
+            .pointer("/payload/verification_command")
+            .and_then(Value::as_str),
+        Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        coding_checkpoints[2]
+            .pointer("/payload/verification_failure_kinds/0")
+            .and_then(Value::as_str),
+        Some("test")
+    );
+
     let event = trace
         .pointer("/event_stream")
         .and_then(Value::as_array)

@@ -167,6 +167,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         }
     }
     if coding_evidence.has_signals() {
+        append_coding_checkpoint_events(&mut seq, &mut events, &coding_evidence);
         events.push(task_event_json(
             &mut seq,
             "coding_evidence",
@@ -315,6 +316,54 @@ fn coding_verification_status(signals: &CodingEvidenceSignals) -> &'static str {
         "unverified"
     } else {
         "not_applicable"
+    }
+}
+
+fn append_coding_checkpoint_events(
+    seq: &mut u64,
+    events: &mut Vec<Value>,
+    signals: &CodingEvidenceSignals,
+) {
+    if !signals.changed_files.is_empty() {
+        let checkpoint_ref = "coding_checkpoint:file_edit_group";
+        events.push(task_event_json(
+            seq,
+            "coding_checkpoint",
+            json!({
+                "schema_version": 1,
+                "checkpoint_kind": "file_edit_group",
+                "checkpoint_ref": checkpoint_ref,
+                "evidence_ref": checkpoint_ref,
+                "evidence_refs": signals.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+                "changed_file_count": signals.changed_files.len(),
+                "changed_files": signals.changed_files.iter().cloned().collect::<Vec<_>>(),
+                "verification_status": coding_verification_status(signals),
+            }),
+        ));
+    }
+    for (index, command) in signals.verification_commands.iter().take(32).enumerate() {
+        let checkpoint_ref = format!("coding_checkpoint:verification_command:{}", index + 1);
+        events.push(task_event_json(
+            seq,
+            "coding_checkpoint",
+            json!({
+                "schema_version": 1,
+                "checkpoint_kind": "verification_command",
+                "checkpoint_ref": checkpoint_ref,
+                "evidence_ref": checkpoint_ref,
+                "evidence_refs": signals.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+                "command_index": index + 1,
+                "verification_command": command,
+                "verification_command_count": signals.verification_commands.len(),
+                "verification_status": coding_verification_status(signals),
+                "verification_failure_kind_count": signals.verification_failure_kinds.len(),
+                "verification_failure_kinds": signals
+                    .verification_failure_kinds
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            }),
+        ));
     }
 }
 
