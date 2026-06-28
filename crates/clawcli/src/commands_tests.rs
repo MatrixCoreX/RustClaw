@@ -2,7 +2,8 @@ use super::{
     automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
-    tui_snapshot_json, wait_until_matches, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    tui_snapshot_json, wait_until_matches, watch_progress_json, write_exec_artifacts,
+    ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -745,6 +746,41 @@ fn wait_until_matches_machine_lifecycle_states() {
     };
     assert!(wait_until_matches(&completed, "completed"));
     assert!(wait_until_matches(&completed, "terminal"));
+}
+
+#[test]
+fn watch_progress_json_exposes_compact_lifecycle_machine_fields() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-watch-progress".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "background",
+            "task_lifecycle": {
+                "state": "background",
+                "checkpoint_id": "ckpt-watch",
+                "can_poll": true,
+                "can_cancel": true,
+                "resume_due": false,
+                "next_poll_after": "2030-01-01T00:00:00Z",
+                "poll_ref": "poll:watch",
+                "last_heartbeat_ts": 1781800000,
+                "lease_owner": "worker-a"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let progress = watch_progress_json(&task);
+
+    assert_eq!(progress["execution_state"], "background");
+    assert_eq!(progress["lifecycle_state"], "background");
+    assert_eq!(progress["checkpoint_id"], "ckpt-watch");
+    assert_eq!(progress["can_poll"], true);
+    assert_eq!(progress["poll_ref"], "poll:watch");
+    assert_eq!(progress["last_heartbeat_ts"], 1781800000);
+    assert_eq!(progress["lease_owner"], "worker-a");
 }
 
 #[test]
