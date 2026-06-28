@@ -747,10 +747,12 @@ output_kind = "text"
 capabilities = ["llm", "net", "fs.write"]
 side_effect = true
 planner_capabilities = [
-  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll" },
+  { name = "audio.synthesize", action = "synthesize", effect = "external", required = ["text"], optional = ["output_path", "vendor", "model", "voice", "format", "response_format", "dry_run", "poll_after_seconds", "poll_after_ms", "expires_at"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "media_job_poll" },
+  { name = "audio.poll", action = "poll", effect = "external", required = ["task_id"], optional = ["job_id", "vendor", "model", "poll_after_seconds", "poll_after_ms", "expires_at", "output_path", "format", "response_format", "dry_run", "mock_status", "mock_file_id"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll" },
+  { name = "audio.cancel", action = "cancel", effect = "mutate", required = ["task_id"], optional = ["job_id", "cancel_token", "cancel_ref", "vendor", "model", "dry_run"], risk_level = "medium", once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "async_required", async_adapter_kind = "media_job_poll" },
 ]
-input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, dry_run = { type = "boolean" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string" }, text = { type = "string" }, input = { type = "string" }, task_id = { type = "string" }, job_id = { type = "string" }, cancel_token = { type = "string" }, cancel_ref = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" }, response_format = { type = "string" }, poll_after_seconds = { type = "integer" }, poll_after_ms = { type = "integer" }, expires_at = { type = "integer" }, mock_status = { type = "string" }, mock_file_id = { type = "string" }, dry_run = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "video_generate"

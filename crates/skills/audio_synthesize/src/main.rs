@@ -5,8 +5,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use toml::Value as TomlValue;
+
+mod async_contract;
+mod async_projection;
+
+use async_contract::{
+    audio_expires_at, audio_poll_after_seconds, execute_cancel, execute_poll, provider_audio_job_id,
+};
+use async_projection::audio_pending_async_job_contract;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -203,6 +211,25 @@ fn execute(
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("synthesize");
+    match action {
+        "synthesize" => execute_synthesize(cfg, workspace_root, obj),
+        "poll" => execute_poll(cfg, workspace_root, obj),
+        "cancel" => execute_cancel(cfg, obj),
+        _ => Err(format!("unsupported action: {action}")),
+    }
+}
+
+fn execute_synthesize(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+) -> Result<(String, Value), String> {
     let input = obj
         .get("text")
         .or_else(|| obj.get("input"))
@@ -277,13 +304,20 @@ fn execute(
                 cfg.audio_synthesize.models.as_ref(),
             ))
             .unwrap_or("default");
+        let provider = vendor_name(vendor);
+        let poll_after_seconds = audio_poll_after_seconds(obj);
+        let expires_at = audio_expires_at(obj);
+        let dry_run_job_id = provider_audio_job_id(provider, "dry_run");
         return Ok(build_dry_run_response(
-            vendor_name(vendor),
+            provider,
             model,
             &voice,
             &actual_format,
             input,
             &output_path,
+            poll_after_seconds,
+            expires_at,
+            &dry_run_job_id,
         ));
     }
 
@@ -340,6 +374,9 @@ fn build_dry_run_response(
     response_format: &str,
     input: &str,
     output_path: &Path,
+    poll_after_seconds: u64,
+    expires_at: i64,
+    job_id: &str,
 ) -> (String, Value) {
     let saved_path = output_path.to_string_lossy().to_string();
     (
@@ -354,6 +391,15 @@ fn build_dry_run_response(
             "output_path": saved_path,
             "outputs": [],
             "planned_outputs": [{"type":"audio_file","path": saved_path}],
+            "pending_async_job_contract": audio_pending_async_job_contract(
+                provider,
+                model,
+                job_id,
+                "dry_run",
+                &saved_path,
+                poll_after_seconds,
+                expires_at,
+            ),
             "request": {
                 "input_chars": input.chars().count()
             },

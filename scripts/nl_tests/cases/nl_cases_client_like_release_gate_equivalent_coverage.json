@@ -1,5 +1,5 @@
 {
-  "input_rows": 2089,
+  "input_rows": 2087,
   "target_cases": 285,
   "selected_rows": 356,
   "coverage_categories": 501,
@@ -481,7 +481,7 @@
     "scripts/nl_tests/cases/regression_trace_ask_cases_real.txt": 1,
     "scripts/nl_tests/cases/regression_user_instruction_cases.txt": 5
   },
-  "excluded_rows": 11,
+  "excluded_rows": 13,
   "excluded_tags": [
     "audio",
     "image",
