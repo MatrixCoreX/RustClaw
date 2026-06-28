@@ -123,6 +123,66 @@
             },
             {
               "seq": 3,
+              "event_type": "coding_task_contract",
+              "payload": {
+                "schema_version": 1,
+                "contract_ref": "coding_task_contract:summary",
+                "evidence_ref": "coding_task_contract:summary",
+                "evidence_refs": [
+                  "step_1",
+                  "step_2",
+                  "step_3"
+                ],
+                "files_read_count": 1,
+                "files_read": [
+                  "src/lib.rs"
+                ],
+                "files_changed_count": 1,
+                "files_changed": [
+                  "src/lib.rs"
+                ],
+                "changed_file_count": 1,
+                "changed_files": [
+                  "src/lib.rs"
+                ],
+                "commands_run_count": 1,
+                "commands_run": [
+                  "cargo test -p fixture"
+                ],
+                "command_count": 1,
+                "commands": [
+                  "cargo test -p fixture"
+                ],
+                "verification_command_count": 1,
+                "verification_commands": [
+                  "cargo test -p fixture"
+                ],
+                "tests_run_count": 1,
+                "tests_run": [
+                  "cargo test -p fixture"
+                ],
+                "test_count": 1,
+                "tests": [
+                  "cargo test -p fixture"
+                ],
+                "failure_count": 1,
+                "retry_count": 1,
+                "final_diff_summary": {
+                  "field": "diff_summary",
+                  "value": {
+                    "summary_code": "fixed_fixture_addition"
+                  }
+                },
+                "verification_status": "verified",
+                "verification_failure_kind_count": 1,
+                "verification_failure_kinds": [
+                  "test"
+                ],
+                "unverified_risk": null
+              }
+            },
+            {
+              "seq": 4,
               "event_type": "coding_evidence",
               "payload": {
                 "schema_version": 1,

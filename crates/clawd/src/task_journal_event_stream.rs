@@ -170,6 +170,11 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         append_coding_checkpoint_events(&mut seq, &mut events, &coding_evidence);
         events.push(task_event_json(
             &mut seq,
+            "coding_task_contract",
+            coding_evidence.to_contract_payload(),
+        ));
+        events.push(task_event_json(
+            &mut seq,
             "coding_evidence",
             coding_evidence.to_payload(),
         ));
@@ -254,6 +259,7 @@ fn tool_lifecycle_event_payload(
 
 #[derive(Default)]
 struct CodingEvidenceSignals {
+    files_read: BTreeSet<String>,
     changed_files: BTreeSet<String>,
     commands: BTreeSet<String>,
     verification_commands: BTreeSet<String>,
@@ -267,7 +273,8 @@ struct CodingEvidenceSignals {
 
 impl CodingEvidenceSignals {
     fn has_signals(&self) -> bool {
-        !self.changed_files.is_empty()
+        !self.files_read.is_empty()
+            || !self.changed_files.is_empty()
             || !self.commands.is_empty()
             || !self.tests.is_empty()
             || !self.diff_summaries.is_empty()
@@ -286,6 +293,8 @@ impl CodingEvidenceSignals {
             "schema_version": 1,
             "evidence_ref": "coding_evidence:summary",
             "evidence_refs": self.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+            "files_read_count": self.files_read.len(),
+            "files_read": self.files_read.iter().cloned().collect::<Vec<_>>(),
             "changed_file_count": self.changed_files.len(),
             "changed_files": self.changed_files.iter().cloned().collect::<Vec<_>>(),
             "command_count": self.commands.len(),
@@ -302,6 +311,51 @@ impl CodingEvidenceSignals {
             "verification_failure_kind_count": self.verification_failure_kinds.len(),
             "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
             "retry_count": self.retry_count,
+            "unverified_risk": unverified_risk,
+        })
+    }
+
+    fn to_contract_payload(&self) -> Value {
+        let unverified_risk = if !self.changed_files.is_empty() && self.tests.is_empty() {
+            Value::String("tests_not_observed".to_string())
+        } else {
+            Value::Null
+        };
+        let final_diff_summary = self
+            .diff_summaries
+            .last()
+            .cloned()
+            .unwrap_or(Value::Null);
+        json!({
+            "schema_version": 1,
+            "contract_ref": "coding_task_contract:summary",
+            "evidence_ref": "coding_task_contract:summary",
+            "evidence_refs": self.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+            "files_read_count": self.files_read.len(),
+            "files_read": self.files_read.iter().cloned().collect::<Vec<_>>(),
+            "files_changed_count": self.changed_files.len(),
+            "files_changed": self.changed_files.iter().cloned().collect::<Vec<_>>(),
+            "changed_file_count": self.changed_files.len(),
+            "changed_files": self.changed_files.iter().cloned().collect::<Vec<_>>(),
+            "commands_run_count": self.commands.len(),
+            "commands_run": self.commands.iter().cloned().collect::<Vec<_>>(),
+            "command_count": self.commands.len(),
+            "commands": self.commands.iter().cloned().collect::<Vec<_>>(),
+            "verification_command_count": self.verification_commands.len(),
+            "verification_commands": self.verification_commands.iter().cloned().collect::<Vec<_>>(),
+            "tests_run_count": self.tests.len(),
+            "tests_run": self.tests.iter().cloned().collect::<Vec<_>>(),
+            "test_count": self.tests.len(),
+            "tests": self.tests.iter().cloned().collect::<Vec<_>>(),
+            "failure_count": self.failures.len(),
+            "failures": self.failures.clone(),
+            "retry_count": self.retry_count,
+            "final_diff_summary": final_diff_summary,
+            "diff_summary_count": self.diff_summaries.len(),
+            "diff_summaries": self.diff_summaries.clone(),
+            "verification_status": coding_verification_status(self),
+            "verification_failure_kind_count": self.verification_failure_kinds.len(),
+            "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
             "unverified_risk": unverified_risk,
         })
     }
@@ -398,6 +452,7 @@ fn collect_coding_evidence_value(
     }
     match value {
         Value::Object(map) => {
+            collect_read_file_fields(map, signals, evidence_ref);
             collect_changed_file_fields(map, signals, evidence_ref);
             collect_command_fields(map, signals, evidence_ref);
             collect_diff_summary_fields(map, signals, evidence_ref);
@@ -414,6 +469,27 @@ fn collect_coding_evidence_value(
         }
         Value::String(text) => collect_command_machine_tokens(text, signals, evidence_ref),
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn collect_read_file_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    let mut paths = BTreeSet::new();
+    for key in [
+        "files_read",
+        "read_files",
+        "opened_files",
+        "input_files",
+        "source_files",
+    ] {
+        collect_path_tokens(map.get(key), &mut paths);
+    }
+    if !paths.is_empty() {
+        signals.files_read.extend(paths);
+        record_evidence_ref(signals, evidence_ref);
     }
 }
 
