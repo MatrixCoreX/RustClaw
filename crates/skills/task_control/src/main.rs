@@ -4,6 +4,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -64,13 +68,6 @@ struct SkillOutput {
 }
 
 impl SkillOutput {
-    fn text(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            extra: None,
-        }
-    }
-
     fn structured(text: impl Into<String>, extra: Value) -> Self {
         Self {
             text: text.into(),
@@ -144,9 +141,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
-        _ => {
-            return Err("unsupported action; use list | get | cancel_all | cancel_one".to_string())
-        }
+        _ => return Err("unsupported_action".to_string()),
     }
     .to_string();
     let dry_run = obj
@@ -160,7 +155,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n.max(0) as u64)))
         .map(|v| v as usize);
     if action == "cancel_one" && index.unwrap_or(0) == 0 && !dry_run {
-        return Err("cancel_one requires index >= 1".to_string());
+        return Err("cancel_one_missing_index".to_string());
     }
     let task_id = obj
         .get("task_id")
@@ -212,7 +207,7 @@ fn execute(
                 )
                 .await?;
                 Ok(SkillOutput::structured(
-                    render_task_list(&tasks),
+                    task_list_extra(&tasks).to_string(),
                     task_list_extra(&tasks),
                 ))
             }
@@ -268,7 +263,8 @@ fn execute(
                 )
                 .await?;
                 if tasks.is_empty() {
-                    return Ok(SkillOutput::text("当前没有可结束的未完成任务。"));
+                    let extra = cancel_all_result_extra(&tasks, 0);
+                    return Ok(SkillOutput::structured(extra.to_string(), extra));
                 }
                 let canceled = cancel_all_tasks(
                     &client,
@@ -279,7 +275,8 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(SkillOutput::text(render_cancel_all(tasks, canceled)))
+                let extra = cancel_all_result_extra(&tasks, canceled);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "cancel_one" => {
                 let index = input.index.unwrap_or(0);
@@ -297,7 +294,8 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(SkillOutput::text(render_cancel_one(&task)))
+                let extra = cancel_one_result_extra(&task);
+                Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             _ => Err("unsupported action".to_string()),
         }
@@ -474,20 +472,6 @@ async fn parse_api_response<T: for<'de> Deserialize<'de>>(
     serde_json::from_value(data).map_err(|e| format!("decode api data failed: {e}"))
 }
 
-fn render_task_list(tasks: &[ActiveTaskItem]) -> String {
-    if tasks.is_empty() {
-        return "当前没有未完成任务。".to_string();
-    }
-    let mut lines = vec![format!("当前未完成任务（{} 个）：", tasks.len())];
-    for task in tasks {
-        lines.push(format!(
-            "{}. [{}][{}] {}（已运行 {}s）",
-            task.index, task.status, task.kind, task.summary, task.age_seconds
-        ));
-    }
-    lines.join("\n")
-}
-
 fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
     let items: Vec<Value> = tasks
         .iter()
@@ -504,10 +488,16 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
         .collect();
     let task_count = tasks.len();
     let status = if task_count == 0 { "empty" } else { "ok" };
+    let message_key = if task_count == 0 {
+        "task_control.list.empty"
+    } else {
+        "task_control.list.ok"
+    };
     json!({
         "schema_version": 1,
         "action": "list",
         "status": status,
+        "message_key": message_key,
         "count": task_count,
         "task_count": task_count,
         "has_unfinished": task_count > 0,
@@ -515,6 +505,7 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
         "field_value": {
             "action": "list",
             "status": status,
+            "message_key": message_key,
             "count": task_count,
             "task_count": task_count,
             "has_unfinished": task_count > 0,
@@ -559,6 +550,7 @@ fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&V
         "schema_version": 1,
         "action": "list_with_first_detail",
         "status": if count == 0 { "empty" } else { "ok" },
+        "message_key": if count == 0 { "task_control.list.empty" } else { "task_control.list_with_first_detail.ok" },
         "count": count,
         "selected_task_id": selected_task_id,
         "list": list,
@@ -566,6 +558,7 @@ fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&V
         "field_value": {
             "action": "list_with_first_detail",
             "status": if count == 0 { "empty" } else { "ok" },
+            "message_key": if count == 0 { "task_control.list.empty" } else { "task_control.list_with_first_detail.ok" },
             "count": count,
             "selected_task_id": selected_task_id,
             "detail_available": detail_available,
@@ -598,11 +591,13 @@ fn task_detail_extra(task_id: &str, detail: &Value) -> Value {
         "schema_version": 1,
         "action": "get",
         "status": if status.is_empty() { "unknown" } else { status },
+        "message_key": "task_control.get.ok",
         "task_id": task_id,
         "db_status": status,
         "lifecycle": lifecycle,
         "field_value": {
             "action": "get",
+            "message_key": "task_control.get.ok",
             "task_id": task_id,
             "db_status": status,
             "lifecycle": detail.get("lifecycle").cloned().unwrap_or(Value::Null),
@@ -615,6 +610,7 @@ fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value 
         "schema_version": 1,
         "action": "get",
         "status": status,
+        "message_key": format!("task_control.get.{status}"),
         "task_id": task_id,
         "db_status": Value::Null,
         "lifecycle": {
@@ -627,6 +623,7 @@ fn task_detail_input_status_extra(status: &str, task_id: Option<&str>) -> Value 
         "field_value": {
             "action": "get",
             "status": status,
+            "message_key": format!("task_control.get.{status}"),
             "task_id": task_id,
             "db_status": Value::Null,
             "state": status,
@@ -643,6 +640,7 @@ fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value {
         "schema_version": 1,
         "action": action,
         "status": "dry_run",
+        "message_key": format!("task_control.{action}.dry_run"),
         "would_mutate": false,
         "task_id": task_id,
         "required_fields": ["task_id", "state", "can_cancel"],
@@ -661,6 +659,7 @@ fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value {
         "field_value": {
             "action": action,
             "status": "dry_run",
+            "message_key": format!("task_control.{action}.dry_run"),
             "would_mutate": false,
             "task_id": task_id,
             "state": "running_or_queued",
@@ -670,31 +669,61 @@ fn cancel_dry_run_extra(action: &str, task_id: Option<&str>) -> Value {
     })
 }
 
+fn cancel_all_result_extra(tasks: &[ActiveTaskItem], canceled: usize) -> Value {
+    let items: Vec<Value> = tasks.iter().take(canceled).map(task_item_extra).collect();
+    let status = if canceled == 0 { "empty" } else { "ok" };
+    json!({
+        "schema_version": 1,
+        "action": "cancel_all",
+        "status": status,
+        "message_key": if canceled == 0 { "task_control.cancel_all.empty" } else { "task_control.cancel_all.ok" },
+        "canceled_count": canceled,
+        "requested_count": tasks.len(),
+        "items": items,
+        "field_value": {
+            "action": "cancel_all",
+            "status": status,
+            "message_key": if canceled == 0 { "task_control.cancel_all.empty" } else { "task_control.cancel_all.ok" },
+            "canceled_count": canceled,
+            "requested_count": tasks.len(),
+            "task_ids": tasks.iter().take(canceled).map(|task| task.task_id.as_str()).collect::<Vec<_>>(),
+        },
+    })
+}
+
+fn cancel_one_result_extra(task: &ActiveTaskItem) -> Value {
+    json!({
+        "schema_version": 1,
+        "action": "cancel_one",
+        "status": "ok",
+        "message_key": "task_control.cancel_one.ok",
+        "canceled_task": task_item_extra(task),
+        "field_value": {
+            "action": "cancel_one",
+            "status": "ok",
+            "message_key": "task_control.cancel_one.ok",
+            "index": task.index,
+            "task_id": task.task_id,
+            "db_status": task.status,
+        },
+    })
+}
+
+fn task_item_extra(task: &ActiveTaskItem) -> Value {
+    json!({
+        "index": task.index,
+        "task_id": task.task_id,
+        "kind": task.kind,
+        "status": task.status,
+        "summary": task.summary,
+        "age_seconds": task.age_seconds,
+    })
+}
+
 fn is_task_id_shape(task_id: &str) -> bool {
     task_id.len() == 36
         && task_id.char_indices().all(|(idx, ch)| match idx {
             8 | 13 | 18 | 23 => ch == '-',
             _ => ch.is_ascii_hexdigit(),
         })
-}
-
-fn render_cancel_all(tasks: Vec<ActiveTaskItem>, canceled: usize) -> String {
-    let mut lines = vec![format!("已结束 {} 个任务。", canceled)];
-    if canceled > 0 {
-        lines.push("本次结束的任务：".to_string());
-        for task in tasks.into_iter().take(canceled.max(1)) {
-            lines.push(format!(
-                "{}. [{}][{}] {}",
-                task.index, task.status, task.kind, task.summary
-            ));
-        }
-    }
-    lines.join("\n")
-}
-
-fn render_cancel_one(task: &ActiveTaskItem) -> String {
-    format!(
-        "已结束任务 #{}。\n[{}][{}] {}\ntask_id: {}",
-        task.index, task.status, task.kind, task.summary, task.task_id
-    )
 }
