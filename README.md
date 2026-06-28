@@ -50,8 +50,8 @@ flowchart TD
     Q -->|respond| R[Terminal response]
     Q -->|synthesize_answer| S[Grounded synthesis]
     Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
-    QP -->|long-tail async_start| AS[Async job start adapter<br/>pending_async_job + checkpoint]
-    AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after]
+    QP -->|long-tail async_start| AS[Async media/job adapter<br/>pending_async_job + poll/cancel contract + checkpoint]
+    AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
     QP -->|call_tool| T[Tool execution]
     QP -->|call_skill| U[Shared skill dispatch]
     RS --> RSG[No normalizer / planner / resolver choice<br/>no PlanVerifier semantic selection]
@@ -107,7 +107,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Agent-loop semantic authority`: ordinary natural-language work enters the loop by default, where the planner/runtime decides whether to respond, call a capability, execute a tool or skill, synthesize from evidence, repair, or stop.
 - `CapabilityResolver / PlanVerifier`: resolves `call_capability` into the current tool or skill implementation, then checks visibility, required arguments, allowed action, risk/effect, confirmation, and output contract before execution.
 - `permission_decision`: verifier and preflight blockers expose machine fields such as `allowed`, `needs_confirmation`, `denied_by_policy`, `dry_run_required`, `external_provider_blocked`, `risk_level`, `action_effect`, and registry dedup/idempotency metadata. UI, API clients, finalizers, and i18n should render these fields instead of parsing runtime prose.
-- `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling.
+- `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling. Media skills expose this shape through registry capabilities such as `image.generate` / `image.poll` / `image.cancel`, `audio.synthesize` / `audio.poll` / `audio.cancel`, `video.generate` / `video.poll` / `video.cancel`, and `music.generate` / `music.poll` / `music.cancel`.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
 - `RepairEnvelope`: repair is bounded loop recovery. Runtime supplies machine fields such as `repair_source`, `issue_codes`, `missing_evidence`, `permission_decision`, `provider_status`, `attempt_fingerprint`, `side_effect_fingerprint`, `checkpoint_id`, and `next_recovery_kind`; planner/finalizer can use those fields to replan, clarify, wait in background, or fail structurally without parsing localized prose.
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
@@ -128,7 +128,7 @@ flowchart TD
     F -->|compat / schedule / machine fast path| H[Compatibility finalization path]
     G --> I{Round source}
     I -->|runtime can prove plan| J[Deterministic plan]
-    I -->|runtime async command contract| JA[Deterministic async job start plan]
+    I -->|runtime async command contract| JA[Deterministic async job plan<br/>start / poll / cancel]
     I -->|needs reasoning| K[LLM: planner round]
     K --> L[Plan JSON steps]
     J --> M[CapabilityResolver]
@@ -410,7 +410,7 @@ Important lifecycle details:
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` reads the flattened `/v1/capabilities` machine endpoint. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls. See `docs/clawcli_exec_replay.md`.
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
-- Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Worker recovery later polls through `poll_async_job`.
+- Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
@@ -691,7 +691,7 @@ RustClaw currently ships a broad skill set. Representative groups:
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
 - files, config, and developer tools: `run_cmd`, `fs_basic`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
-- multimodal and media generation: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`, `video_generate`, `music_generate`
+- multimodal and media generation: `image_generate` (`image.generate` / `image.poll` / `image.cancel`), `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize` (`audio.synthesize` / `audio.poll` / `audio.cancel`), `video_generate` (`video.generate` / `video.poll` / `video.cancel`), `music_generate` (`music.generate` / `music.poll` / `music.cancel`)
 - workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
 - domain and knowledge skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`
 
