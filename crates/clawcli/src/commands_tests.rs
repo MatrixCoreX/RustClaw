@@ -1,6 +1,7 @@
 use super::{
     automation_runs_request_payload, exec_exit_class, exec_failure_class_from_machine_tokens,
-    exec_summary_json, run_exec, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    exec_summary_json, run_exec, task_report_json, write_exec_artifacts, ExecExitClass,
+    ExecWaitOutcome,
 };
 
 #[test]
@@ -61,6 +62,51 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["events"][0]["fields"]["checkpoint_id"], "ckpt-exec");
     assert_eq!(summary["artifacts"]["ref_count"], 1);
     assert_eq!(summary["artifacts"]["refs"][0]["ref"], "artifact:summary");
+}
+
+#[test]
+fn task_report_json_exposes_stable_machine_fields() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-report".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "task_lifecycle": {
+                "state": "completed",
+                "reason_code": "succeeded"
+            },
+            "result_json": {
+                "artifact_refs": [
+                    {
+                        "ref": "artifact:report"
+                    }
+                ]
+            }
+        }),
+        result_text: Some("result-token".to_string()),
+        error_text: None,
+        events: vec![crate::events::TaskEventLine {
+            event_type: "task_completed".to_string(),
+            line: "seq=1 type=task_completed status=succeeded".to_string(),
+            fields: std::collections::BTreeMap::from([(
+                "status".to_string(),
+                "succeeded".to_string(),
+            )]),
+        }],
+    };
+
+    let report = task_report_json(&task, true);
+
+    assert_eq!(report["report_kind"], "rustclaw_task_report");
+    assert_eq!(report["task_id"], "task-report");
+    assert_eq!(report["status"], "succeeded");
+    assert_eq!(report["execution_state"], "completed");
+    assert_eq!(report["lifecycle_state"], "completed");
+    assert_eq!(report["terminal"], true);
+    assert_eq!(report["event_count"], 1);
+    assert_eq!(report["events"][0]["event_type"], "task_completed");
+    assert_eq!(report["artifacts"]["ref_count"], 1);
+    assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
 }
 
 #[test]

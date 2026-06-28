@@ -171,6 +171,31 @@ fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
         .collect()
 }
 
+pub(crate) fn task_report_json(task: &task::TaskStatusView, include_events: bool) -> Value {
+    let artifact_refs = exec_artifact_refs(&task.raw_data);
+    json!({
+        "report_kind": "rustclaw_task_report",
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "lifecycle": task.lifecycle().cloned().unwrap_or(Value::Null),
+        "terminal": task.is_terminal(),
+        "result_text": task.result_text,
+        "error_text": task.error_text,
+        "event_count": task.events.len(),
+        "events": if include_events {
+            Value::Array(exec_event_summary(task))
+        } else {
+            Value::Null
+        },
+        "artifacts": {
+            "ref_count": artifact_refs.len(),
+            "refs": artifact_refs,
+        },
+    })
+}
+
 fn exec_artifact_refs(data: &Value) -> Vec<Value> {
     let mut refs = Vec::new();
     collect_exec_artifact_refs(data, &mut refs, 0);
@@ -714,6 +739,69 @@ pub(crate) fn run_events(
             );
         } else {
             println!("event: {}", event.line);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_logs(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    event_types: &[String],
+    checkpoint_id: Option<&str>,
+    policy_decision: Option<&str>,
+    subagent_id: Option<&str>,
+    async_job_id: Option<&str>,
+    jsonl_output: bool,
+) -> Result<()> {
+    run_events(
+        base_url,
+        key,
+        task_id,
+        event_types,
+        checkpoint_id,
+        policy_decision,
+        subagent_id,
+        async_job_id,
+        jsonl_output,
+    )
+}
+
+pub(crate) fn run_report(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    json_output: bool,
+    include_events: bool,
+) -> Result<()> {
+    let task = task::get_task_status(base_url, key, task_id)?;
+    let report = task_report_json(&task, include_events);
+    if json_output {
+        output::print_json_pretty(&report);
+    } else {
+        println!("task_id: {}", task.task_id);
+        println!("status: {}", task.status);
+        if let Some(state) = task.execution_state() {
+            println!("execution_state: {state}");
+        }
+        if let Some(state) = task.lifecycle_state() {
+            println!("lifecycle_state: {state}");
+        }
+        println!("terminal: {}", task.is_terminal());
+        println!("event_count: {}", task.events.len());
+        println!(
+            "artifact_ref_count: {}",
+            report
+                .pointer("/artifacts/ref_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        );
+        if let Some(text) = task.result_text.as_deref() {
+            println!("{text}");
+        }
+        if let Some(error_text) = task.error_text.as_deref() {
+            eprintln!("error: {error_text}");
         }
     }
     Ok(())
