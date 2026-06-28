@@ -17,6 +17,7 @@ use super::{
     direct_answer_gate_candidate_needs_unbound_context_clarify,
     direct_answer_gate_direct_answer_should_enter_agent_loop,
     direct_answer_gate_planner_needs_unbound_locator_clarify,
+    direct_answer_gate_planner_promotion_reason_code,
     direct_answer_gate_promotion_depends_only_on_background_context,
     direct_answer_gate_promotion_needs_unbound_deictic_clarify,
     direct_answer_gate_recent_execution_context, direct_answer_gate_route_context,
@@ -38,6 +39,15 @@ use super::{
     DirectAnswerGateReferenceResolutionOut, DirectAnswerGateSelfExtensionOut,
     DirectAnswerPreflight,
 };
+
+fn assert_planner_preflight_reason(outcome: DirectAnswerPreflight, expected: &'static str) {
+    match outcome {
+        DirectAnswerPreflight::PlannerExecute(_, reason_code) => {
+            assert_eq!(reason_code, expected);
+        }
+        _ => panic!("expected planner execution preflight"),
+    }
+}
 
 fn schema_enum_strings(schema: &serde_json::Value, path: &[&str]) -> Vec<String> {
     let mut node = schema;

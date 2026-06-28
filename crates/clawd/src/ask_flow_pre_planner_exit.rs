@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PrePlannerExitKind {
     BoundarySafety,
+    ContractBoundary,
+    EvidenceProjection,
     MachineFactFastPath,
     CompatTrace,
     AgentLoopActivation,
@@ -13,6 +15,8 @@ impl PrePlannerExitKind {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::BoundarySafety => "boundary_safety",
+            Self::ContractBoundary => "contract_boundary",
+            Self::EvidenceProjection => "evidence_projection",
             Self::MachineFactFastPath => "machine_fact_fast_path",
             Self::CompatTrace => "compat_trace",
             Self::AgentLoopActivation => "agent_loop_activation",
@@ -23,6 +27,8 @@ impl PrePlannerExitKind {
     pub(super) fn decision_source(self) -> &'static str {
         match self {
             Self::BoundarySafety => "safety_policy",
+            Self::ContractBoundary => "contract_boundary",
+            Self::EvidenceProjection => "evidence_projection",
             Self::MachineFactFastPath => "evidence_projection",
             Self::CompatTrace => "compat_trace",
             Self::AgentLoopActivation => "contract_boundary",
@@ -34,6 +40,8 @@ impl PrePlannerExitKind {
         match self {
             Self::OrdinarySemantic => "legacy_migration_debt",
             Self::BoundarySafety
+            | Self::ContractBoundary
+            | Self::EvidenceProjection
             | Self::MachineFactFastPath
             | Self::CompatTrace
             | Self::AgentLoopActivation => "none",
@@ -196,6 +204,26 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
+        reason_code: "direct_answer_gate_contract_boundary_execute",
+        kind: PrePlannerExitKind::ContractBoundary,
+        migration_target: "planner_loop_contract_boundary",
+        migration_stage: "structured_contract_execute_boundary",
+        migration_order: 10,
+        nl_gate_refs: &[],
+        deletion_gate: "keep_contract_boundary",
+        owner_layer: "direct_answer_gate",
+    },
+    PrePlannerExitInventoryItem {
+        reason_code: "direct_answer_gate_evidence_projection_execute",
+        kind: PrePlannerExitKind::EvidenceProjection,
+        migration_target: "planner_loop_evidence_projection",
+        migration_stage: "structured_evidence_projection_execute",
+        migration_order: 10,
+        nl_gate_refs: &[],
+        deletion_gate: "keep_evidence_projection",
+        owner_layer: "direct_answer_gate",
+    },
+    PrePlannerExitInventoryItem {
         reason_code: "direct_answer_gate_promoted_to_planner",
         kind: PrePlannerExitKind::OrdinarySemantic,
         migration_target: "planner_loop_authority",
@@ -318,6 +346,8 @@ mod tests {
             assert!(matches!(
                 item.kind,
                 PrePlannerExitKind::BoundarySafety
+                    | PrePlannerExitKind::ContractBoundary
+                    | PrePlannerExitKind::EvidenceProjection
                     | PrePlannerExitKind::MachineFactFastPath
                     | PrePlannerExitKind::AgentLoopActivation
             ));
@@ -359,6 +389,19 @@ mod tests {
         assert_eq!(item.owner_layer, "direct_answer_gate");
         assert_eq!(item.kind.decision_source(), "contract_boundary");
         assert_eq!(item.kind.semantic_control_state(), "none");
+    }
+
+    #[test]
+    fn direct_answer_gate_contract_and_evidence_execute_are_not_semantic_rewrite() {
+        for reason_code in [
+            "direct_answer_gate_contract_boundary_execute",
+            "direct_answer_gate_evidence_projection_execute",
+        ] {
+            let item = pre_planner_exit_for_reason(reason_code).unwrap();
+            assert_ne!(item.kind.decision_source(), "semantic_rewrite");
+            assert_eq!(item.kind.semantic_control_state(), "none");
+            assert_eq!(item.owner_layer, "direct_answer_gate");
+        }
     }
 
     #[test]

@@ -145,7 +145,10 @@ fn direct_answer_gate_promotes_artifact_candidate_with_recent_file_targets_to_pl
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "compare the recent files", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
+    assert_planner_preflight_reason(
+        outcome,
+        "direct_answer_gate_evidence_projection_execute",
+    );
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);

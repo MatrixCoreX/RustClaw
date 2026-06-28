@@ -28,6 +28,8 @@ NL_REFS_RE = re.compile(r"nl_gate_refs:\s*&\[(?P<refs>.*?)\]", re.DOTALL)
 CALL_NAME = "with_pre_planner_exit_snapshot"
 KNOWN_KINDS = {
     "BoundarySafety",
+    "ContractBoundary",
+    "EvidenceProjection",
     "MachineFactFastPath",
     "CompatTrace",
     "AgentLoopActivation",
@@ -35,6 +37,8 @@ KNOWN_KINDS = {
 }
 KNOWN_DELETION_GATES = {
     "keep_boundary",
+    "keep_contract_boundary",
+    "keep_evidence_projection",
     "keep_machine_fact_fast_path",
     "keep_structured_agent_loop_activation_gate",
     "delete_after_agent_loop_default",
@@ -150,6 +154,20 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
             }:
                 findings.append(
                     f"{prefix}: agent_loop_activation_requires_known_owner"
+                )
+        if kind == "ContractBoundary":
+            if deletion_gate != "keep_contract_boundary":
+                findings.append(f"{prefix}: contract_boundary_requires_keep_gate")
+            if target != "planner_loop_contract_boundary":
+                findings.append(
+                    f"{prefix}: contract_boundary_requires_contract_target"
+                )
+        if kind == "EvidenceProjection":
+            if deletion_gate != "keep_evidence_projection":
+                findings.append(f"{prefix}: evidence_projection_requires_keep_gate")
+            if "evidence_projection" not in target:
+                findings.append(
+                    f"{prefix}: evidence_projection_requires_projection_target"
                 )
         for ref in refs:
             if not re.fullmatch(r"[a-z0-9_]+", str(ref)):

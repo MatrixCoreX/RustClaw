@@ -47,7 +47,26 @@ pub(super) fn promote_direct_answer_gate_to_planner(
         }
     }
     append_route_reason(route, &format!("{reason_tag}:{}", gate.reason.trim()));
-    DirectAnswerPreflight::PlannerExecute(ctx.clone(), "direct_answer_gate_promoted_to_planner")
+    DirectAnswerPreflight::PlannerExecute(
+        ctx.clone(),
+        direct_answer_gate_planner_promotion_reason_code(reason_tag),
+    )
+}
+
+pub(super) fn direct_answer_gate_planner_promotion_reason_code(reason_tag: &str) -> &'static str {
+    match reason_tag {
+        "direct_answer_gate_inline_transform_execute"
+        | "direct_answer_gate_package_manager_detect_execute"
+        | "inline_structured_payload_context_execute" => {
+            "direct_answer_gate_contract_boundary_execute"
+        }
+        "direct_answer_gate_artifact_listing_execute"
+        | "direct_answer_gate_recent_file_context_execute"
+        | "direct_answer_gate_workspace_child_context_execute" => {
+            "direct_answer_gate_evidence_projection_execute"
+        }
+        _ => "direct_answer_gate_promoted_to_planner",
+    }
 }
 
 pub(super) fn resolve_direct_answer_gate_contract_locator(
