@@ -782,10 +782,12 @@ fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
         failed_ts: Some(7),
         has_newer_successful_ask_after_failed_task: false,
     };
-    assert!(
-        crate::intent::resume_policy::select_resume_runtime_binding(&route, Some(&binding))
-            .is_none()
-    );
+    assert!(crate::intent::resume_policy::select_resume_runtime_binding(
+        &route,
+        Some(&binding),
+        None
+    )
+    .is_none());
 }
 
 #[test]

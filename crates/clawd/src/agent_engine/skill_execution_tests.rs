@@ -777,6 +777,49 @@ fn contract_matrix_preflight_allows_internal_synthesis_actions() {
 }
 
 #[test]
+fn contract_matrix_preflight_allows_task_control_lifecycle_dry_run_only() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+        requires_content_evidence: true,
+        response_shape: crate::OutputResponseShape::Strict,
+        ..crate::IntentOutputContract::default()
+    });
+    let dry_run_args = serde_json::json!({
+        "action": "resume",
+        "task_id": "00000000-0000-4000-8000-000000000010",
+        "checkpoint_id": "ckpt-1",
+        "dry_run": true
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "task_control", &dry_run_args)
+            .is_none(),
+        "task_control resume dry_run should be admitted as a no-mutation preview"
+    );
+    let effect = crate::execution_recipe::classify_skill_action_effect(
+        &state,
+        "task_control",
+        &dry_run_args,
+    );
+    assert!(effect.observes);
+    assert!(!effect.mutates);
+
+    let real_args = serde_json::json!({
+        "action": "resume",
+        "task_id": "00000000-0000-4000-8000-000000000010",
+        "checkpoint_id": "ckpt-1",
+        "dry_run": false
+    });
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "task_control", &real_args)
+            .is_some(),
+        "real task_control resume must remain governed by the service_status contract"
+    );
+}
+
+#[test]
 fn contract_matrix_preflight_allows_virtual_find_entries_backing_action() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);

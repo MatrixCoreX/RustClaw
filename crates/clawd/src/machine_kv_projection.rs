@@ -3,25 +3,29 @@ pub(crate) fn requested_machine_kv_summary_from_observations(
     observed_texts: &[String],
 ) -> Option<String> {
     let pairs = requested_machine_kv_pairs(input);
-    if pairs.is_empty() || observed_texts.is_empty() {
+    let markers = requested_machine_markers(input);
+    if (pairs.is_empty() && markers.is_empty()) || observed_texts.is_empty() {
         return None;
     }
-    if !pairs
+    if !markers
         .iter()
-        .any(|pair| machine_kv_pair_has_observed_value(pair, observed_texts))
+        .all(|marker| machine_marker_is_observed(marker, observed_texts))
+    {
+        return None;
+    }
+    if !pairs.is_empty()
+        && !pairs
+            .iter()
+            .any(|pair| machine_kv_pair_has_observed_value(pair, observed_texts))
     {
         return None;
     }
     if !machine_kv_pairs_grounded_by_observation(&pairs, observed_texts) {
         return None;
     }
-    Some(
-        pairs
-            .iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
+    let mut parts = markers;
+    parts.extend(pairs.iter().map(|(key, value)| format!("{key}={value}")));
+    Some(parts.join(" "))
 }
 
 pub(crate) fn requested_machine_kv_summary_from_observation_inputs<'a>(
@@ -100,7 +104,50 @@ fn requested_machine_kv_pairs(input: &str) -> Vec<(String, String)> {
             index += 1;
         }
     }
+    collect_embedded_machine_kv_pairs(input, &mut pairs);
     pairs
+}
+
+fn collect_embedded_machine_kv_pairs(input: &str, pairs: &mut Vec<(String, String)>) {
+    for segment in input.split(machine_token_boundary) {
+        let token = trim_machine_kv_token(segment);
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if valid_machine_key(key) && valid_machine_value_atom(value) {
+            let pair = (key.to_string(), value.to_string());
+            if !pairs.iter().any(|(existing_key, _)| existing_key == key) {
+                pairs.push(pair);
+            }
+        }
+    }
+}
+
+fn requested_machine_markers(input: &str) -> Vec<String> {
+    let mut markers = Vec::new();
+    for segment in input.split(machine_token_boundary) {
+        let token = trim_machine_marker_token(segment);
+        if valid_machine_marker(token) && !markers.iter().any(|existing| existing == token) {
+            markers.push(token.to_string());
+        }
+    }
+    markers
+        .iter()
+        .filter(|candidate| {
+            !markers.iter().any(|other| {
+                other.len() > candidate.len()
+                    && other.starts_with(candidate.as_str())
+                    && other.as_bytes().get(candidate.len()) == Some(&b'.')
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+fn machine_token_boundary(ch: char) -> bool {
+    !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '=' | '@' | ','))
 }
 
 fn trim_machine_kv_token(token: &str) -> &str {
@@ -112,12 +159,26 @@ fn trim_machine_kv_token(token: &str) -> &str {
         .trim_end_matches(|ch: char| matches!(ch, ',' | ';' | '.'))
 }
 
+fn trim_machine_marker_token(token: &str) -> &str {
+    token
+        .trim_matches(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+        .trim_end_matches(|ch: char| matches!(ch, ',' | ';' | '.'))
+}
+
 fn valid_machine_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+}
+
+fn valid_machine_marker(value: &str) -> bool {
+    valid_machine_key(value)
+        && value.contains('.')
+        && value
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().any(|ch| ch.is_ascii_alphabetic()))
 }
 
 fn valid_machine_value_atom(value: &str) -> bool {
@@ -230,6 +291,10 @@ fn machine_kv_pair_has_observed_value(pair: &(String, String), observed_texts: &
     observed_texts
         .iter()
         .any(|text| text.contains(pair.1.as_str()))
+}
+
+fn machine_marker_is_observed(marker: &str, observed_texts: &[String]) -> bool {
+    observed_texts.iter().any(|text| text.contains(marker))
 }
 
 fn machine_value_is_inline_literal(value: &str) -> bool {

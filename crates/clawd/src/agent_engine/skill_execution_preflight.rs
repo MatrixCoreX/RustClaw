@@ -212,6 +212,18 @@ pub(super) fn contract_matrix_action_policy_error(
         );
         return None;
     }
+    let canonical_skill = state.resolve_canonical_skill_name(normalized_skill);
+    if task_control_lifecycle_dry_run_can_extend_contract(
+        &canonical_skill,
+        classification_args,
+        &policy.contract_match,
+    ) {
+        info!(
+            "preflight_keep_task_control_lifecycle_dry_run skill={} action={} contract={}",
+            canonical_skill, policy.action_key, policy.contract_match
+        );
+        return None;
+    }
     if action_has_user_named_output_path_marker(classification_args) {
         return None;
     }
@@ -471,6 +483,28 @@ fn registry_action_can_extend_summary_contract(
         && registry_declares_non_mutating_planner_action(state, canonical_skill, args)
 }
 
+fn task_control_lifecycle_dry_run_can_extend_contract(
+    canonical_skill: &str,
+    args: &Value,
+    contract_match: &str,
+) -> bool {
+    matches!(contract_match, "service_status" | "command_output_summary")
+        && task_control_lifecycle_dry_run_action(canonical_skill, args)
+}
+
+fn task_control_lifecycle_dry_run_action(canonical_skill: &str, args: &Value) -> bool {
+    if canonical_skill != "task_control" {
+        return false;
+    }
+    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    matches!(
+        normalized_action_arg(args).as_deref(),
+        Some("resume" | "pause")
+    )
+}
+
 fn action_scoped_risk_level(
     state: &AppState,
     canonical_skill: &str,
@@ -656,7 +690,9 @@ fn preflight_permission_decision(
     let effect =
         crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args);
     let manifest = state.skill_manifest(&canonical_skill);
-    let risk_level = if package_manager_dry_run_install_action(&canonical_skill, args) {
+    let risk_level = if package_manager_dry_run_install_action(&canonical_skill, args)
+        || task_control_lifecycle_dry_run_action(&canonical_skill, args)
+    {
         Some(SkillRiskLevel::Low)
     } else {
         action_scoped_risk_level(state, &canonical_skill, action.as_deref())
