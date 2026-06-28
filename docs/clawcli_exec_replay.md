@@ -131,6 +131,13 @@ clawcli permission explain "$TASK_ID" --json
 clawcli permission capability --capability image.generate --json
 ```
 
+Open a read-only terminal console over the same task APIs:
+
+```bash
+clawcli tui --user-id 1 --chat-id 1
+clawcli tui --user-id 1 --chat-id 1 --task-id "$TASK_ID" --once --json
+```
+
 ## CI Examples
 
 Read-only audit:

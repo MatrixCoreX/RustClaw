@@ -92,6 +92,13 @@ if [[ -n "${RUSTCLAW_CLI_SMOKE_USER_ID:-}" && -n "${RUSTCLAW_CLI_SMOKE_CHAT_ID:-
     --user-id "$RUSTCLAW_CLI_SMOKE_USER_ID" \
     --chat-id "$RUSTCLAW_CLI_SMOKE_CHAT_ID" \
     --json >/dev/null
+  echo "SMOKE tui"
+  run_cli tui \
+    --user-id "$RUSTCLAW_CLI_SMOKE_USER_ID" \
+    --chat-id "$RUSTCLAW_CLI_SMOKE_CHAT_ID" \
+    --task-id "$task_id" \
+    --once \
+    --json >/dev/null
 fi
 
 if [[ -n "${RUSTCLAW_CLI_SMOKE_CANCEL_TASK_ID:-}" ]]; then
