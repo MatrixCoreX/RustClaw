@@ -1,4 +1,4 @@
-import type { NniDevicePayload } from "../types/api";
+import type { NniDeviceActionResponse, NniDevicePayload } from "../types/api";
 
 export type UiLanguage = "zh" | "en";
 
@@ -46,6 +46,17 @@ export function nniPayloadHexField(payload?: NniDevicePayload | null): NniPayloa
     return { label: "root_cert_hex", value: payload.root_cert_hex, size: payload.root_cert_hex_size };
   }
   return null;
+}
+
+export function nniTimestampSignatureReady(value?: NniDeviceActionResponse | null): boolean {
+  const payload = value?.payload;
+  return (
+    value?.action === "sign_timestamp" &&
+    typeof payload?.timestamp === "number" &&
+    Number.isFinite(payload.timestamp) &&
+    typeof payload.signature === "string" &&
+    payload.signature.trim().length > 0
+  );
 }
 
 export function findNniJoinErrorCode(data?: unknown): string | null {
