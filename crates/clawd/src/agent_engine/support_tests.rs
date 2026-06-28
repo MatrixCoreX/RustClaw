@@ -250,6 +250,10 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         "next_planner_round"
     );
     assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
+        "max_rounds"
+    );
+    assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
         2
     );
@@ -360,6 +364,10 @@ fn no_progress_checkpoint_payload_records_repair_budget_state() {
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["next_recovery_kind"],
         "wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
+        "no_progress"
     );
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["round_no"],
