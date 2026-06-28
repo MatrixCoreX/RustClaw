@@ -3,6 +3,7 @@
 mod common;
 mod exec;
 mod health;
+mod permission;
 mod report;
 mod run_skill;
 mod skills;
@@ -12,6 +13,9 @@ mod task_query;
 
 pub(crate) use exec::run_exec;
 pub(crate) use health::run_health;
+pub(crate) use permission::{
+    run_permission_capability, run_permission_explain, run_permission_inspect,
+};
 pub(crate) use run_skill::run_skill;
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
@@ -28,6 +32,8 @@ use exec::{
     exec_effective_options, exec_exit_class, exec_failure_class_from_machine_tokens,
     exec_summary_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
+#[cfg(test)]
+use permission::permission_report_json;
 #[cfg(test)]
 use report::{coding_review_json, subagent_report_json, task_report_json, task_report_text_lines};
 #[cfg(test)]

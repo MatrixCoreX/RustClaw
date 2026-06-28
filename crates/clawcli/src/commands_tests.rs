@@ -1,8 +1,8 @@
 use super::{
     automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
-    exec_failure_class_from_machine_tokens, exec_summary_json, run_exec, subagent_report_json,
-    task_event_output_lines, task_report_json, task_report_text_lines, wait_until_matches,
-    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
+    subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
+    wait_until_matches, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -225,6 +225,55 @@ fn subagent_report_json_collects_child_results_and_events() {
         report["subagents"][1]["child_run_id"],
         "subagent:1:2:verifier"
     );
+}
+
+#[test]
+fn permission_report_json_collects_structured_decisions() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-permission".to_string(),
+        status: "failed".to_string(),
+        raw_data: serde_json::json!({
+            "result_json": {
+                "permission_decision": {
+                    "decision": "denied_by_policy",
+                    "allowed": false,
+                    "needs_confirmation": false,
+                    "dry_run_required": true,
+                    "risk_level": "high",
+                    "action_effect": "external_publish",
+                    "reason_code": "dry_run_required"
+                },
+                "step_results": [
+                    {
+                        "extra": {
+                            "command_policy": {
+                                "policy_authority": "contract_matrix",
+                                "effect": "filesystem_write"
+                            }
+                        }
+                    }
+                ]
+            }
+        }),
+        result_text: Some("ignored visible fallback".to_string()),
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = permission_report_json(&task);
+
+    assert_eq!(report["report_kind"], "rustclaw_permission_report");
+    assert_eq!(report["permission_entry_count"], 2);
+    assert_eq!(
+        report["permission_entries"][0]["decision"],
+        "denied_by_policy"
+    );
+    assert_eq!(report["permission_entries"][0]["risk_level"], "high");
+    assert_eq!(
+        report["permission_entries"][1]["decision"],
+        "contract_matrix"
+    );
+    assert!(report.get("result_text").is_none());
 }
 
 #[test]
