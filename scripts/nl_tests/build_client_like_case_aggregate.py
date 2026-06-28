@@ -42,7 +42,8 @@ CANONICAL_SUITES = {
 }
 
 AUTH_CONTEXT_VALUES = {"user", "admin"}
-METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:+-]+$")
+METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:+-=]+$")
+TAG_SPLIT_RE = re.compile(r"[,;]")
 
 SIDE_EFFECT_NAME_TOKENS = (
     "absolute_saved_path",
@@ -112,7 +113,7 @@ def should_preserve_expect(tags: str, expect: str, preserve_expects: bool) -> bo
         return False
     if preserve_expects:
         return True
-    tagset = {part.strip().lower() for part in tags.split(",") if part.strip()}
+    tagset = {part.strip().lower() for part in TAG_SPLIT_RE.split(tags) if part.strip()}
     return "expect_exact_scalar" in tagset
 
 
@@ -147,14 +148,12 @@ def sanitize_field(value: str) -> str:
 
 
 def sanitize_tags(value: str) -> str:
-    value = value.strip().replace("\t", " ")
-    value = re.sub(r"\s+", "_", value)
-    value = value.replace("|", "_")
-    return value or "client_like,aggregate"
+    tags = split_tag_values(value.replace("\t", " "))
+    return ",".join(tags) or "client_like,aggregate"
 
 
 def split_tag_values(value: str) -> list[str]:
-    return [tag.strip() for tag in value.split(",") if tag.strip()]
+    return [tag.strip() for tag in TAG_SPLIT_RE.split(value) if tag.strip()]
 
 
 def append_tag(value: str, tag: str) -> str:
@@ -254,7 +253,7 @@ def looks_like_metadata_tags(value: str) -> bool:
     stripped = value.strip()
     if not stripped:
         return True
-    return all(METADATA_TAG_RE.fullmatch(part.strip()) for part in stripped.split(","))
+    return all(METADATA_TAG_RE.fullmatch(part.strip()) for part in TAG_SPLIT_RE.split(stripped))
 
 
 def row_from_prompt(
@@ -429,6 +428,26 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
     return []
 
 
+def run_self_test() -> int:
+    source = Path("scripts/nl_tests/cases/self_test_semicolon_tags.txt")
+    line = (
+        "runtime_smoke|case_semicolon_tags|"
+        "covers:agent_loop,run_cmd;requires_tool_call=true;local_readonly|"
+        "Prompt body|expect=machine_token"
+    )
+    rows = parse_line(source, line, 1, preserve_expects=True)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row.suite == "runtime_smoke", row
+    assert row.name == "self_test_semicolon_tags_case_semicolon_tags", row
+    rendered = row.line()
+    assert "covers:agent_loop,run_cmd,requires_tool_call=true,local_readonly" in rendered, rendered
+    assert "legacy_shape" not in rendered, rendered
+    assert rendered.endswith("|expect=machine_token"), rendered
+    print("CLIENT_LIKE_AGGREGATE_SELF_TEST_OK")
+    return 0
+
+
 def build_rows(
     cases_dir: Path,
     include_risky: bool,
@@ -599,7 +618,11 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero if the aggregate file is missing or not up to date.",
     )
+    parser.add_argument("--self-test", action="store_true", help="run built-in parser tests")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     cases_dir = Path(args.cases_dir)
     out_path = Path(args.out)
