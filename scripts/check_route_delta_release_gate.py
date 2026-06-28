@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+
+ALLOWED_RUNTIME_DECISION_SOURCES = {
+    "not_recorded",
+    "contract_boundary",
+    "safety_policy",
+    "permission_policy",
+    "evidence_projection",
+    "lifecycle_projection",
+    "recovery_boundary",
+    "compat_trace",
+}
+
+ALLOWED_SEMANTIC_CONTROL_STATES = {
+    "not_recorded",
+    "none",
+}
+
+ALLOWED_DIRECT_ANSWER_BOUNDARY_CLASSES = {
+    "not_recorded",
+    "not_observed_in_planner_shadow",
+    "locator_binding_fallback",
+    "evidence_backed_direct_candidate",
+    "fallback_safety_filter",
+    "contract_execution_boundary",
+    "evidence_projection_execution",
+    "agent_loop_activation_boundary",
+    "clarify_boundary",
+}
+
+ALLOWED_DIRECT_ANSWER_OWNERSHIP_CLASSES = {
+    "not_recorded",
+    "fallback_safety_check",
+    "contract_boundary",
+    "evidence_projection",
+    "agent_loop_activation",
+}
+
+ALLOWED_DIRECT_ANSWER_MIGRATION_TARGETS = {
+    "not_recorded",
+    "none",
+}
+
+
+def load_summarizer() -> ModuleType:
+    path = Path(__file__).with_name("summarize_agent_decides_route_delta.py")
+    spec = importlib.util.spec_from_file_location("route_delta_summary", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load summarizer: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def int_value(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def counter_total(counter: dict[str, Any], *keys: str) -> int:
+    return sum(int_value(counter.get(key)) for key in keys)
+
+
+def unexpected_keys(counter: dict[str, Any], allowed: set[str]) -> list[str]:
+    return sorted(
+        key
+        for key, value in counter.items()
+        if int_value(value) > 0 and str(key) not in allowed
+    )
+
+
+def add_counter_findings(
+    findings: list[str],
+    summary: dict[str, Any],
+    field: str,
+    allowed: set[str],
+) -> None:
+    counter = dict_value(summary.get(field))
+    bad_keys = unexpected_keys(counter, allowed)
+    if bad_keys:
+        findings.append(f"{field}: unexpected_keys={','.join(bad_keys)}")
+
+
+def evaluate_summary(summary: dict[str, Any], allow_semantic_debt: bool) -> list[str]:
+    findings: list[str] = []
+    if int_value(summary.get("parse_errors")):
+        findings.append(f"parse_errors={summary.get('parse_errors')}")
+    if int_value(summary.get("route_delta_items")) <= 0:
+        findings.append("route_delta_items=0")
+    if int_value(summary.get("unexplained_mismatch_count")):
+        findings.append(
+            f"unexplained_mismatch_count={summary.get('unexplained_mismatch_count')}"
+        )
+
+    runtime_sources = dict_value(summary.get("runtime_decision_source_counts"))
+    semantic_rewrite_count = counter_total(runtime_sources, "semantic_rewrite")
+    if semantic_rewrite_count and not allow_semantic_debt:
+        findings.append(f"runtime_decision_source_counts.semantic_rewrite={semantic_rewrite_count}")
+    add_counter_findings(
+        findings,
+        summary,
+        "runtime_decision_source_counts",
+        ALLOWED_RUNTIME_DECISION_SOURCES
+        | ({"semantic_rewrite"} if allow_semantic_debt else set()),
+    )
+
+    control_states = dict_value(summary.get("runtime_semantic_control_state_counts"))
+    legacy_debt_count = counter_total(control_states, "legacy_migration_debt")
+    if legacy_debt_count and not allow_semantic_debt:
+        findings.append(
+            f"runtime_semantic_control_state_counts.legacy_migration_debt={legacy_debt_count}"
+        )
+    add_counter_findings(
+        findings,
+        summary,
+        "runtime_semantic_control_state_counts",
+        ALLOWED_SEMANTIC_CONTROL_STATES
+        | ({"legacy_migration_debt"} if allow_semantic_debt else set()),
+    )
+
+    add_counter_findings(
+        findings,
+        summary,
+        "pre_agent_direct_answer_boundary_class_counts",
+        ALLOWED_DIRECT_ANSWER_BOUNDARY_CLASSES,
+    )
+    add_counter_findings(
+        findings,
+        summary,
+        "pre_agent_direct_answer_ownership_class_counts",
+        ALLOWED_DIRECT_ANSWER_OWNERSHIP_CLASSES
+        | ({"semantic_policy_candidate"} if allow_semantic_debt else set()),
+    )
+    add_counter_findings(
+        findings,
+        summary,
+        "pre_agent_direct_answer_semantic_migration_target_counts",
+        ALLOWED_DIRECT_ANSWER_MIGRATION_TARGETS
+        | ({"planner_loop_decision_envelope"} if allow_semantic_debt else set()),
+    )
+    return findings
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("run_dirs", nargs="+", type=Path)
+    parser.add_argument("--max-examples", type=int, default=3)
+    parser.add_argument(
+        "--allow-semantic-debt",
+        action="store_true",
+        help="Permit known migration debt counters while still checking parse errors and unexplained mismatches.",
+    )
+    parser.add_argument(
+        "--print-summary",
+        action="store_true",
+        help="Print the computed route-delta summary before gate findings.",
+    )
+    args = parser.parse_args()
+
+    for run_dir in args.run_dirs:
+        if not run_dir.is_dir():
+            raise SystemExit(f"run dir not found: {run_dir}")
+
+    summarizer = load_summarizer()
+    summary = summarizer.summarize_run_dirs(
+        args.run_dirs,
+        max(args.max_examples, 0),
+        dedupe_latest_case=False,
+    )
+    if args.print_summary:
+        print(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2))
+
+    findings = evaluate_summary(summary, args.allow_semantic_debt)
+    if findings:
+        print("ROUTE_DELTA_RELEASE_GATE failed")
+        for finding in findings:
+            print(f"- {finding}")
+        return 1
+
+    print(
+        "ROUTE_DELTA_RELEASE_GATE ok "
+        f"route_delta_items={int_value(summary.get('route_delta_items'))} "
+        f"unexplained_mismatch_count={int_value(summary.get('unexplained_mismatch_count'))}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
