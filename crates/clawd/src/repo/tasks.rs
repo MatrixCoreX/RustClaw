@@ -375,7 +375,7 @@ pub(crate) fn update_task_failure(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let result_json = worker_failure_result_json(task_id);
+    let result_json = worker_failure_result_json(task_id, error_text);
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
@@ -507,19 +507,23 @@ fn worker_timeout_result_json(task_id: &str) -> String {
     .to_string()
 }
 
-fn worker_failure_result_json(task_id: &str) -> String {
-    let reason_code = "worker_runtime_error";
+fn worker_failure_result_json(task_id: &str, error_text: &str) -> String {
+    let reason_code = worker_failure_reason_code(error_text);
+    let failure_attribution = worker_failure_attribution(reason_code);
+    let message_key = worker_failure_message_key(reason_code);
     json!({
         "schema_version": 1,
         "status_code": "worker_task_failed",
         "reason_code": reason_code,
-        "message_key": "clawd.task.worker_failed",
+        "message_key": message_key,
+        "failure_attribution": failure_attribution,
         "task_lifecycle": {
             "schema_version": 1,
             "state": "failed",
             "source": "worker_failure",
             "terminal_reason": reason_code,
             "reason_code": reason_code,
+            "failure_attribution": failure_attribution,
             "worker_events": [
                 {
                     "event_type": "worker_failure",
@@ -533,6 +537,58 @@ fn worker_failure_result_json(task_id: &str) -> String {
         }
     })
     .to_string()
+}
+
+fn worker_failure_reason_code(error_text: &str) -> &'static str {
+    let Some(structured) = crate::skills::parse_structured_skill_error(error_text.trim()) else {
+        return "worker_runtime_error";
+    };
+    let error_kind = structured.error_kind.trim().to_ascii_lowercase();
+    if matches!(error_kind.as_str(), "timeout" | "idle_timeout") {
+        return crate::task_lifecycle::TerminalFailureReason::ToolTimeoutWithoutAsyncResume
+            .status_code();
+    }
+    if error_kind == "confirmation_timeout" {
+        return crate::task_lifecycle::TerminalFailureReason::ConfirmationTimeout.status_code();
+    }
+    if worker_failure_kind_is_provider_window(&error_kind) {
+        return crate::task_lifecycle::TerminalFailureReason::ProviderWindowExhausted.status_code();
+    }
+    "worker_runtime_error"
+}
+
+fn worker_failure_kind_is_provider_window(error_kind: &str) -> bool {
+    matches!(
+        error_kind,
+        "provider_error"
+            | "provider_retryable_response"
+            | "provider_retryable_business"
+            | "provider_non_retryable_business"
+            | "provider_response_invalid"
+            | "provider_schema_error"
+            | "provider_unavailable"
+            | "provider_rate_limited"
+            | "llm_provider_error"
+            | "llm_provider_unavailable"
+    )
+}
+
+fn worker_failure_attribution(reason_code: &str) -> &'static str {
+    match reason_code {
+        "provider_window_exhausted" => "provider_error",
+        "confirmation_timeout" => "confirmation_wait",
+        "tool_timeout_without_async_resume" => "tool_timeout",
+        _ => "runtime_error",
+    }
+}
+
+fn worker_failure_message_key(reason_code: &str) -> &'static str {
+    match reason_code {
+        "provider_window_exhausted" => "clawd.task.provider_window_exhausted",
+        "confirmation_timeout" => "clawd.task.confirmation_timeout",
+        "tool_timeout_without_async_resume" => "clawd.task.worker_timeout",
+        _ => "clawd.task.worker_failed",
+    }
 }
 
 fn normalized_optional_task_id(raw: Option<&str>) -> Option<String> {
