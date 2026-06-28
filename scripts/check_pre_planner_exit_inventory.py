@@ -144,9 +144,12 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
                 findings.append(
                     f"{prefix}: agent_loop_activation_requires_agent_loop_authority"
                 )
-            if owner != "ask_flow_planner_promotion":
+            if owner not in {
+                "ask_flow_planner_promotion",
+                "direct_answer_gate",
+            }:
                 findings.append(
-                    f"{prefix}: agent_loop_activation_requires_planner_promotion_owner"
+                    f"{prefix}: agent_loop_activation_requires_known_owner"
                 )
         for ref in refs:
             if not re.fullmatch(r"[a-z0-9_]+", str(ref)):

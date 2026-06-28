@@ -84,7 +84,7 @@ enum DirectAnswerGateDecision {
 
 enum DirectAnswerPreflight {
     DirectAnswer,
-    PlannerExecute(crate::agent_engine::AgentRunContext),
+    PlannerExecute(crate::agent_engine::AgentRunContext, &'static str),
     Clarify(String),
 }
 
@@ -732,10 +732,11 @@ pub(crate) async fn execute_ask_routed(
                                 "direct_answer_gate_clarify",
                             ));
                         }
-                        DirectAnswerPreflight::PlannerExecute(promoted_ctx) => {
+                        DirectAnswerPreflight::PlannerExecute(promoted_ctx, reason_code) => {
                             tracing::info!(
-                                "{} worker_once: ask direct_answer_gate_promoted_to_planner task_id={}",
+                                "{} worker_once: ask {} task_id={}",
                                 crate::highlight_tag("routing"),
+                                reason_code,
                                 task.task_id
                             );
                             let promoted_prompt_with_memory = promoted_ctx
@@ -758,14 +759,36 @@ pub(crate) async fn execute_ask_routed(
                                 Some(promoted_ctx.clone()),
                             )
                             .await?;
-                            return Ok(with_pre_planner_exit_snapshot(
-                                state,
-                                task,
-                                &current_turn_user_request,
-                                reply,
-                                Some(&promoted_ctx),
-                                "direct_answer_gate_promoted_to_planner",
-                            ));
+                            return Ok(match reason_code {
+                                "direct_answer_gate_agent_loop_activation" => {
+                                    with_pre_planner_exit_snapshot(
+                                        state,
+                                        task,
+                                        &current_turn_user_request,
+                                        reply,
+                                        Some(&promoted_ctx),
+                                        "direct_answer_gate_agent_loop_activation",
+                                    )
+                                }
+                                "contract_test_hint_promoted_to_planner" => {
+                                    with_pre_planner_exit_snapshot(
+                                        state,
+                                        task,
+                                        &current_turn_user_request,
+                                        reply,
+                                        Some(&promoted_ctx),
+                                        "contract_test_hint_promoted_to_planner",
+                                    )
+                                }
+                                _ => with_pre_planner_exit_snapshot(
+                                    state,
+                                    task,
+                                    &current_turn_user_request,
+                                    reply,
+                                    Some(&promoted_ctx),
+                                    "direct_answer_gate_promoted_to_planner",
+                                ),
+                            });
                         }
                     }
                 }

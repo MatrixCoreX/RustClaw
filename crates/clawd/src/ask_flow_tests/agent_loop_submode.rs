@@ -51,7 +51,13 @@ semantic_route_authority = "agent_loop_default"
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "list docs", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    match outcome {
+        DirectAnswerPreflight::PlannerExecute(_, reason_code) => assert_eq!(
+            reason_code,
+            "direct_answer_gate_agent_loop_activation"
+        ),
+        _ => panic!("expected planner execution preflight"),
+    }
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route

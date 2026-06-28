@@ -47,7 +47,7 @@ pub(super) fn promote_direct_answer_gate_to_planner(
         }
     }
     append_route_reason(route, &format!("{reason_tag}:{}", gate.reason.trim()));
-    DirectAnswerPreflight::PlannerExecute(ctx.clone())
+    DirectAnswerPreflight::PlannerExecute(ctx.clone(), "direct_answer_gate_promoted_to_planner")
 }
 
 pub(super) fn resolve_direct_answer_gate_contract_locator(
@@ -613,7 +613,10 @@ pub(super) fn apply_direct_answer_gate_outcome(
     };
     if crate::agent_engine::agent_loop_authority_selected_migration_class(state, route).is_some() {
         append_route_reason(route, "direct_answer_gate_demoted_for_agent_loop_authority");
-        return DirectAnswerPreflight::PlannerExecute(ctx.clone());
+        return DirectAnswerPreflight::PlannerExecute(
+            ctx.clone(),
+            "direct_answer_gate_agent_loop_activation",
+        );
     }
     let structured_scalar_extraction =
         resolved_intent_declares_structured_scalar_extraction(&route.resolved_intent);

@@ -281,7 +281,7 @@ fn direct_answer_gate_clarify_cannot_override_contract_hint_planner_execution() 
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(!route.needs_clarify);
     assert!(route.is_execute_gate());
@@ -485,7 +485,7 @@ fn direct_answer_gate_promotion_uses_matrix_finalize_style() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "list workspace files", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
     assert_eq!(
@@ -788,7 +788,7 @@ fn direct_answer_gate_allows_executionless_promotion_with_explicit_target() {
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
 }
 
 #[test]
@@ -819,7 +819,7 @@ fn direct_answer_gate_promotes_resolved_workspace_child_context() {
     let request = "Preview how images under ./document could be categorized. Do not move files.";
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(route.resolved_intent, request);
@@ -900,7 +900,7 @@ fn direct_answer_gate_planner_execute_preserves_current_workspace_child_request(
     let request = "List files under ./docs, then read release.md and classify it in one sentence.";
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(route.resolved_intent, request);
@@ -1029,7 +1029,7 @@ fn direct_answer_gate_allows_executionless_promotion_with_session_alias_target()
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "read the title of the note file", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert_eq!(
         route.output_contract.response_shape,

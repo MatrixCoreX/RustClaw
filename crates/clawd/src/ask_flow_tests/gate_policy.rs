@@ -157,7 +157,7 @@ fn direct_answer_gate_still_promotes_locatorless_runtime_observation() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "what is the hostname?", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn direct_answer_gate_allows_locatorless_targetless_planner_request() {
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -395,7 +395,7 @@ fn direct_answer_gate_allows_locatorless_scalar_runtime_execution() {
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "current runtime account", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -513,7 +513,7 @@ fn direct_answer_gate_allows_generated_file_delivery_without_locator() {
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.delivery_required);
@@ -563,7 +563,7 @@ fn direct_answer_gate_promotes_artifact_listing_candidate_to_planner() {
     let outcome =
         apply_direct_answer_gate_outcome(&state, &mut ctx, "list the selected logs", gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
     assert!(route.is_execute_gate());
@@ -617,7 +617,7 @@ fn direct_answer_gate_promotes_inline_json_transform_to_planner() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
@@ -642,7 +642,7 @@ fn direct_answer_gate_promotes_inline_json_table_candidate_to_transform_planner(
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -670,7 +670,7 @@ fn direct_answer_gate_promotes_fenced_inline_json_table_candidate_to_transform_p
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route
@@ -695,7 +695,7 @@ fn direct_answer_gate_promotes_inline_json_planner_without_candidate_to_transfor
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -723,7 +723,7 @@ fn direct_answer_gate_marks_contextual_inline_payload_execution() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -779,7 +779,7 @@ fn direct_answer_gate_promotes_explicit_readme_summary_to_planner() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, current_request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
@@ -811,7 +811,7 @@ fn direct_answer_gate_promotes_package_manager_detect_to_planner() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
@@ -849,7 +849,7 @@ fn direct_answer_gate_promotes_package_install_preview_without_locator() {
         gate,
     );
 
-    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(..)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
