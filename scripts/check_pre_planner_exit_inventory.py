@@ -35,7 +35,6 @@ KNOWN_KINDS = {
     "MachineFactFastPath",
     "CompatTrace",
     "AgentLoopActivation",
-    "OrdinarySemantic",
 }
 KNOWN_DELETION_GATES = {
     "keep_boundary",
@@ -46,9 +45,6 @@ KNOWN_DELETION_GATES = {
     "delete_after_agent_loop_default",
     "delete_after_selected_class_release_gate",
     "test_fixture_only",
-}
-KNOWN_ORDINARY_SEMANTIC_DEBT = {
-    "direct_answer_gate_chat_fallback",
 }
 KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES = {
     "not_observed_in_planner_shadow",
@@ -165,21 +161,6 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
             )
         if order < 0:
             findings.append(f"{prefix}: missing_migration_order")
-        if kind == "OrdinarySemantic":
-            if reason not in KNOWN_ORDINARY_SEMANTIC_DEBT:
-                findings.append(
-                    f"{prefix}: ordinary_semantic_requires_known_debt_reason={reason}"
-                )
-            if order <= 0:
-                findings.append(f"{prefix}: ordinary_semantic_requires_positive_order")
-            if not (1 <= len(refs) <= 3):
-                findings.append(
-                    f"{prefix}: ordinary_semantic_requires_1_to_3_nl_gate_refs"
-                )
-            if not deletion_gate.startswith("delete_after_"):
-                findings.append(
-                    f"{prefix}: ordinary_semantic_requires_delete_after_gate"
-                )
         if kind == "AgentLoopActivation":
             if deletion_gate != "keep_structured_agent_loop_activation_gate":
                 findings.append(

@@ -8,7 +8,6 @@ pub(super) enum PrePlannerExitKind {
     MachineFactFastPath,
     CompatTrace,
     AgentLoopActivation,
-    OrdinarySemantic,
 }
 
 impl PrePlannerExitKind {
@@ -20,7 +19,6 @@ impl PrePlannerExitKind {
             Self::MachineFactFastPath => "machine_fact_fast_path",
             Self::CompatTrace => "compat_trace",
             Self::AgentLoopActivation => "agent_loop_activation",
-            Self::OrdinarySemantic => "ordinary_semantic",
         }
     }
 
@@ -32,20 +30,11 @@ impl PrePlannerExitKind {
             Self::MachineFactFastPath => "evidence_projection",
             Self::CompatTrace => "compat_trace",
             Self::AgentLoopActivation => "contract_boundary",
-            Self::OrdinarySemantic => "semantic_rewrite",
         }
     }
 
     pub(super) fn semantic_control_state(self) -> &'static str {
-        match self {
-            Self::OrdinarySemantic => "legacy_migration_debt",
-            Self::BoundarySafety
-            | Self::ContractBoundary
-            | Self::EvidenceProjection
-            | Self::MachineFactFastPath
-            | Self::CompatTrace
-            | Self::AgentLoopActivation => "none",
-        }
+        "none"
     }
 }
 
@@ -245,15 +234,15 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
     },
     PrePlannerExitInventoryItem {
         reason_code: "direct_answer_gate_chat_fallback",
-        kind: PrePlannerExitKind::OrdinarySemantic,
-        migration_target: "agent_loop_respond_or_chat_model_answer",
-        migration_stage: "active_task_followup_or_chat_rewrite",
-        migration_order: 20,
+        kind: PrePlannerExitKind::CompatTrace,
+        migration_target: "legacy_pre_agent_chat_fallback",
+        migration_stage: "legacy_semantic_route_authority_only",
+        migration_order: 0,
         nl_gate_refs: &[
             "nl_active_task_followup_rewrite_zh",
             "nl_chat_answer_general_zh",
         ],
-        deletion_gate: "delete_after_selected_class_release_gate",
+        deletion_gate: "delete_after_agent_loop_default",
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
@@ -296,33 +285,29 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_semantic_exits_have_migration_targets() {
+    fn inventory_items_have_migration_metadata() {
         for item in PRE_PLANNER_EXIT_INVENTORY {
-            if item.kind == PrePlannerExitKind::OrdinarySemantic {
-                assert!(!item.migration_target.trim().is_empty());
-                assert!(!item.migration_stage.trim().is_empty());
-                assert!(item.deletion_gate.starts_with("delete_after_"));
-                assert!(item.migration_order > 0);
-                assert!((1..=3).contains(&item.nl_gate_refs.len()));
-                for case_ref in item.nl_gate_refs {
-                    assert!(case_ref
-                        .chars()
-                        .all(|ch| { ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' }));
-                }
+            assert!(!item.migration_target.trim().is_empty());
+            assert!(!item.migration_stage.trim().is_empty());
+            for case_ref in item.nl_gate_refs {
+                assert!(case_ref
+                    .chars()
+                    .all(|ch| { ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' }));
             }
         }
     }
 
     #[test]
-    fn remaining_semantic_migration_debt_is_chat_fallback_only() {
-        let active_followup =
-            pre_planner_exit_for_reason("direct_answer_gate_chat_fallback").unwrap();
+    fn chat_fallback_is_legacy_compat_trace_only() {
+        let legacy_chat = pre_planner_exit_for_reason("direct_answer_gate_chat_fallback").unwrap();
 
+        assert_eq!(legacy_chat.kind, PrePlannerExitKind::CompatTrace);
         assert_eq!(
-            active_followup.migration_stage,
-            "active_task_followup_or_chat_rewrite"
+            legacy_chat.migration_stage,
+            "legacy_semantic_route_authority_only"
         );
-        assert_eq!(active_followup.kind, PrePlannerExitKind::OrdinarySemantic);
+        assert_eq!(legacy_chat.kind.decision_source(), "compat_trace");
+        assert_eq!(legacy_chat.kind.semantic_control_state(), "none");
     }
 
     #[test]
@@ -459,27 +444,10 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_semantic_exits_are_explicit_semantic_rewrite_debt() {
+    fn pre_planner_inventory_has_no_ordinary_semantic_debt() {
         for item in PRE_PLANNER_EXIT_INVENTORY {
-            if item.kind == PrePlannerExitKind::OrdinarySemantic {
-                assert_eq!(item.kind.decision_source(), "semantic_rewrite");
-                assert_eq!(item.kind.semantic_control_state(), "legacy_migration_debt");
-                continue;
-            }
             assert_ne!(item.kind.decision_source(), "semantic_rewrite");
             assert_eq!(item.kind.semantic_control_state(), "none");
         }
-    }
-
-    #[test]
-    fn ordinary_semantic_debt_is_limited_to_known_migration_reasons() {
-        let actual: BTreeSet<_> = PRE_PLANNER_EXIT_INVENTORY
-            .iter()
-            .filter(|item| item.kind == PrePlannerExitKind::OrdinarySemantic)
-            .map(|item| item.reason_code)
-            .collect();
-        let expected = BTreeSet::from(["direct_answer_gate_chat_fallback"]);
-
-        assert_eq!(actual, expected);
     }
 }
