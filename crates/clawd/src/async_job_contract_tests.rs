@@ -16,7 +16,8 @@ fn async_job_protocol_hint_exposes_machine_contract() {
     assert!(hint.contains("phases:start|checkpoint|poll|observation|verify_finalize"));
     assert!(hint.contains("resume_entrypoint:poll_async_job"));
     assert!(hint.contains("checkpoint_states:waiting|background"));
-    assert!(hint.contains("adapter_statuses:accepted|running|succeeded|failed|expired|cancelled"));
+    assert!(hint
+        .contains("adapter_statuses:started|accepted|running|succeeded|failed|expired|cancelled"));
     assert!(hint.contains(
         "required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
     ));
@@ -43,8 +44,9 @@ fn async_job_contract_json_uses_only_machine_fields() {
         ASYNC_POLL_ADAPTER_RESULT_KEY
     );
     assert_eq!(contract["phases"][0], "start");
-    assert_eq!(contract["adapter_statuses"][2], "succeeded");
-    assert_eq!(contract["adapter_statuses"][5], "cancelled");
+    assert_eq!(contract["adapter_statuses"][0], "started");
+    assert_eq!(contract["adapter_statuses"][3], "succeeded");
+    assert_eq!(contract["adapter_statuses"][6], "cancelled");
     assert_eq!(contract["poll_adapter_kinds"][1], "local_process_poll");
     assert_eq!(contract["poll_adapter_kinds"][4], "media_job_poll");
     assert_eq!(contract["canonical_job_fields"][1], "provider");
@@ -218,6 +220,45 @@ fn pending_async_job_contract_accepts_canonical_alias_fields() {
     assert_eq!(summary["retryable"], true);
     assert_eq!(parsed.poll_after_seconds, 2);
     assert_eq!(parsed.cancel_ref, "provider:video_generate:minimax:task-1");
+}
+
+#[test]
+fn pending_async_job_contract_accepts_started_status_alias() {
+    let extra = json!({
+        "provider": "generic_media",
+        "pending_async_job": {
+            "job_id": "provider:music_generate:generic_media:job-1",
+            "provider": "generic_media",
+            "status": "started",
+            "poll_after_ms": 2_000,
+            "expires_at": 2_000,
+            "cancel_token": "provider:music_generate:generic_media:job-1",
+            "result_ref": "provider:music_generate:generic_media:job-1",
+            "message_key": "clawd.task.async_job_pending",
+            "retryable": true,
+            "poll_adapter": {
+                "kind": "media_job_poll",
+                "skill_name": "music_generate",
+                "args": {"action": "poll", "job_id": "job-1"}
+            }
+        }
+    });
+
+    let summary = pending_async_job_contract_summary(Some(&extra), "test")
+        .expect("valid started contract")
+        .expect("summary");
+    let parsed = parse_pending_async_job_ref_from_extra(Some(&extra), "test")
+        .expect("valid started pending job")
+        .expect("pending job");
+
+    assert_eq!(summary["job_status"], "started");
+    assert_eq!(summary["poll_after_seconds"], 2);
+    assert_eq!(summary["poll_after_ms"], 2_000);
+    assert_eq!(
+        parsed.status,
+        crate::task_lifecycle::AsyncJobStatus::Accepted
+    );
+    assert_eq!(parsed.poll_after_seconds, 2);
 }
 
 #[test]

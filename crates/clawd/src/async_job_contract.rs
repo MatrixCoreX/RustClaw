@@ -46,6 +46,7 @@ impl AsyncJobProtocolPhase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AsyncJobAdapterStatus {
+    Started,
     Accepted,
     Running,
     Succeeded,
@@ -57,6 +58,7 @@ enum AsyncJobAdapterStatus {
 impl AsyncJobAdapterStatus {
     fn all() -> &'static [Self] {
         &[
+            Self::Started,
             Self::Accepted,
             Self::Running,
             Self::Succeeded,
@@ -68,6 +70,7 @@ impl AsyncJobAdapterStatus {
 
     fn as_token(self) -> &'static str {
         match self {
+            Self::Started => "started",
             Self::Accepted => "accepted",
             Self::Running => "running",
             Self::Succeeded => "succeeded",
@@ -381,6 +384,7 @@ fn validate_pending_async_job_contract(value: &Value, error_prefix: &str) -> Res
 
 fn parse_pending_async_job_status(value: &Value) -> Option<AsyncJobStatus> {
     match value.get("status").and_then(Value::as_str).map(str::trim)? {
+        "started" => Some(AsyncJobStatus::Accepted),
         "accepted" => Some(AsyncJobStatus::Accepted),
         "running" => Some(AsyncJobStatus::Running),
         "succeeded" => Some(AsyncJobStatus::Succeeded),
