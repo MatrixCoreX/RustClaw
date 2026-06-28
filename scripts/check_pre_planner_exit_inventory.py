@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY_PATH = ROOT / "crates/clawd/src/ask_flow_pre_planner_exit.rs"
+LOOP_CONTROL_PATH = ROOT / "crates/clawd/src/agent_engine/loop_control.rs"
 SRC_ROOT = ROOT / "crates/clawd/src"
 
 REASON_RE = re.compile(r'reason_code:\s*"([^"]+)"')
@@ -48,6 +49,35 @@ KNOWN_DELETION_GATES = {
 KNOWN_ORDINARY_SEMANTIC_DEBT = {
     "direct_answer_gate_promoted_to_planner",
     "direct_answer_gate_chat_fallback",
+}
+KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES = {
+    "not_observed_in_planner_shadow",
+    "locator_binding_fallback",
+    "evidence_backed_direct_candidate",
+    "fallback_safety_filter",
+    "contract_execution_boundary",
+    "evidence_projection_execution",
+    "agent_loop_activation_boundary",
+    "clarify_boundary",
+    "semantic_execution_promotion",
+    "legacy_unclassified_gate_observed",
+}
+DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES = {
+    "not_observed_in_planner_shadow",
+    "locator_binding_fallback",
+    "evidence_backed_direct_candidate",
+    "fallback_safety_filter",
+    "contract_execution_boundary",
+    "evidence_projection_execution",
+    "agent_loop_activation_boundary",
+    "clarify_boundary",
+}
+KNOWN_DIRECT_ANSWER_OWNERSHIP_CLASSES = {
+    "fallback_safety_check",
+    "contract_boundary",
+    "evidence_projection",
+    "agent_loop_activation",
+    "semantic_policy_candidate",
 }
 
 
@@ -183,6 +213,85 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
     return findings
 
 
+def function_body(raw: str, fn_name: str, next_fn_name: str) -> str:
+    start = raw.find(f"fn {fn_name}")
+    end = raw.find(f"fn {next_fn_name}", start + 1)
+    if start < 0 or end < 0:
+        return ""
+    return raw[start:end]
+
+
+def returned_class_tokens(body: str) -> set[str]:
+    values = set(re.findall(r'return\s+"([^"]+)"', body))
+    fallback = re.search(r'\n\s*"([^"]+)"\s*\n\}', body)
+    if fallback:
+        values.add(fallback.group(1))
+    return values
+
+
+def validate_direct_answer_boundary_classes() -> list[str]:
+    findings: list[str] = []
+    raw = LOOP_CONTROL_PATH.read_text(encoding="utf-8")
+    class_body = function_body(
+        raw,
+        "direct_answer_gate_boundary_class",
+        "direct_answer_gate_ownership_class",
+    )
+    owner_body = function_body(
+        raw,
+        "direct_answer_gate_ownership_class",
+        "direct_answer_gate_boundary_class_is_boundary_owned",
+    )
+    owned_body = function_body(
+        raw,
+        "direct_answer_gate_boundary_class_is_boundary_owned",
+        "route_reason_has_marker",
+    )
+    if not class_body:
+        findings.append("loop_control.rs: missing_direct_answer_gate_boundary_class")
+        return findings
+    class_tokens = returned_class_tokens(class_body)
+    unknown_classes = sorted(class_tokens - KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES)
+    if unknown_classes:
+        findings.append(
+            "loop_control.rs: unknown_direct_answer_boundary_class="
+            + ",".join(unknown_classes)
+        )
+    missing_classes = sorted(KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES - class_tokens)
+    if missing_classes:
+        findings.append(
+            "loop_control.rs: missing_direct_answer_boundary_class_return="
+            + ",".join(missing_classes)
+        )
+    if not owner_body:
+        findings.append("loop_control.rs: missing_direct_answer_gate_ownership_class")
+    else:
+        owner_tokens = set(re.findall(r'=>\s*"([^"]+)"', owner_body))
+        unknown_owners = sorted(owner_tokens - KNOWN_DIRECT_ANSWER_OWNERSHIP_CLASSES)
+        if unknown_owners:
+            findings.append(
+                "loop_control.rs: unknown_direct_answer_ownership_class="
+                + ",".join(unknown_owners)
+            )
+    if not owned_body:
+        findings.append("loop_control.rs: missing_direct_answer_boundary_owned_check")
+    else:
+        owned_tokens = set(rust_string_values(owned_body))
+        unknown_owned = sorted(owned_tokens - DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES)
+        if unknown_owned:
+            findings.append(
+                "loop_control.rs: boundary_owned_contains_unexpected_class="
+                + ",".join(unknown_owned)
+            )
+        missing_owned = sorted(DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES - owned_tokens)
+        if missing_owned:
+            findings.append(
+                "loop_control.rs: boundary_owned_missing_class="
+                + ",".join(missing_owned)
+            )
+    return findings
+
+
 def skip_rust_string(raw: str, index: int) -> int:
     quote = raw[index]
     index += 1
@@ -271,6 +380,7 @@ def main() -> int:
     findings: list[str] = []
     items = parse_inventory_items()
     findings.extend(validate_inventory_items(items))
+    findings.extend(validate_direct_answer_boundary_classes())
     observed = 0
     for path in rust_files():
         for line, reason in find_exit_reasons(path):
