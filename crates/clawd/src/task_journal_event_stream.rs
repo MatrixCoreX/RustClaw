@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::{json, Value};
 
 use super::{
@@ -18,6 +20,7 @@ fn task_event_json(seq: &mut u64, event_type: &'static str, payload: Value) -> V
 pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
     let mut seq = 0;
     let mut events = Vec::new();
+    let mut coding_evidence = CodingEvidenceSignals::default();
     if let Some(lifecycle) = journal.task_lifecycle.as_ref() {
         events.push(task_event_json(
             &mut seq,
@@ -69,6 +72,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         let requested = next_requested_capability(&mut requested, step);
         let action_kind = step_action_kind(step, requested.as_ref());
         let step_trace = super::step_trace_json(step, requested.as_ref(), None);
+        collect_coding_evidence_from_step(step, &step_trace, &mut coding_evidence);
         events.push(task_event_json(
             &mut seq,
             "tool_started",
@@ -128,6 +132,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         ));
     }
     for (index, observation) in journal.task_observations.iter().enumerate() {
+        collect_coding_evidence_value(observation, &mut coding_evidence, None, 0);
         if observation
             .get("owner_layer")
             .and_then(Value::as_str)
@@ -160,6 +165,13 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 }),
             ));
         }
+    }
+    if coding_evidence.has_signals() {
+        events.push(task_event_json(
+            &mut seq,
+            "coding_evidence",
+            coding_evidence.to_payload(),
+        ));
     }
     if journal.final_status.is_some() || journal.final_stop_signal.is_some() {
         events.push(task_event_json(
@@ -236,6 +248,328 @@ fn tool_lifecycle_event_payload(
         "started_at": step.started_at,
         "finished_at": step.finished_at,
     })
+}
+
+#[derive(Default)]
+struct CodingEvidenceSignals {
+    changed_files: BTreeSet<String>,
+    commands: BTreeSet<String>,
+    tests: BTreeSet<String>,
+    evidence_refs: BTreeSet<String>,
+    diff_summaries: Vec<Value>,
+    failures: Vec<Value>,
+    retry_count: u64,
+}
+
+impl CodingEvidenceSignals {
+    fn has_signals(&self) -> bool {
+        !self.changed_files.is_empty()
+            || !self.commands.is_empty()
+            || !self.tests.is_empty()
+            || !self.diff_summaries.is_empty()
+            || !self.failures.is_empty()
+            || self.retry_count > 0
+    }
+
+    fn to_payload(&self) -> Value {
+        let unverified_risk = if !self.changed_files.is_empty() && self.tests.is_empty() {
+            Value::String("tests_not_observed".to_string())
+        } else {
+            Value::Null
+        };
+        json!({
+            "schema_version": 1,
+            "evidence_ref": "coding_evidence:summary",
+            "evidence_refs": self.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+            "changed_file_count": self.changed_files.len(),
+            "changed_files": self.changed_files.iter().cloned().collect::<Vec<_>>(),
+            "command_count": self.commands.len(),
+            "commands": self.commands.iter().cloned().collect::<Vec<_>>(),
+            "test_count": self.tests.len(),
+            "tests": self.tests.iter().cloned().collect::<Vec<_>>(),
+            "diff_summary_count": self.diff_summaries.len(),
+            "diff_summaries": self.diff_summaries.clone(),
+            "failure_count": self.failures.len(),
+            "failures": self.failures.clone(),
+            "retry_count": self.retry_count,
+            "unverified_risk": unverified_risk,
+        })
+    }
+}
+
+fn collect_coding_evidence_from_step(
+    step: &super::TaskJournalStepTrace,
+    step_trace: &Value,
+    signals: &mut CodingEvidenceSignals,
+) {
+    let step_ref = step.step_id.trim();
+    let step_ref = (!step_ref.is_empty()).then_some(step_ref);
+    collect_coding_evidence_value(step_trace, signals, step_ref, 0);
+    if let Some(output) = step.output_excerpt.as_deref().and_then(parse_json_value) {
+        collect_coding_evidence_value(&output, signals, step_ref, 0);
+    } else if let Some(output) = step.output_excerpt.as_deref() {
+        collect_command_machine_tokens(output, signals, step_ref);
+    }
+    if let Some(error) = step.error_excerpt.as_deref().and_then(parse_json_value) {
+        collect_coding_evidence_value(&error, signals, step_ref, 0);
+    } else if let Some(error) = step.error_excerpt.as_deref() {
+        collect_command_machine_tokens(error, signals, step_ref);
+    }
+}
+
+fn collect_coding_evidence_value(
+    value: &Value,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+    depth: usize,
+) {
+    if depth > 10 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            collect_changed_file_fields(map, signals, evidence_ref);
+            collect_command_fields(map, signals, evidence_ref);
+            collect_diff_summary_fields(map, signals, evidence_ref);
+            collect_failure_fields(map, signals, evidence_ref);
+            collect_retry_fields(map, signals);
+            for value in map.values() {
+                collect_coding_evidence_value(value, signals, evidence_ref, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_coding_evidence_value(item, signals, evidence_ref, depth + 1);
+            }
+        }
+        Value::String(text) => collect_command_machine_tokens(text, signals, evidence_ref),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn parse_json_value(text: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(text.trim()).ok()
+}
+
+fn collect_changed_file_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    let mut paths = BTreeSet::new();
+    for key in [
+        "changed_files",
+        "files_changed",
+        "modified_files",
+        "created_files",
+        "deleted_files",
+        "touched_files",
+    ] {
+        collect_path_tokens(map.get(key), &mut paths);
+    }
+    if !paths.is_empty() {
+        signals.changed_files.extend(paths);
+        record_evidence_ref(signals, evidence_ref);
+    }
+}
+
+fn collect_path_tokens(value: Option<&Value>, out: &mut BTreeSet<String>) {
+    match value {
+        Some(Value::String(path)) => {
+            let path = path.trim();
+            if is_bounded_single_line_token(path) {
+                out.insert(path.to_string());
+            }
+        }
+        Some(Value::Object(map)) => {
+            for key in ["path", "file", "file_path", "resolved_path"] {
+                collect_path_tokens(map.get(key), out);
+            }
+        }
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_path_tokens(Some(item), out);
+            }
+        }
+        Some(Value::Null | Value::Bool(_) | Value::Number(_)) | None => {}
+    }
+}
+
+fn collect_command_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    if let Some(command) = map.get("command").and_then(Value::as_str) {
+        collect_command_token(command, signals, evidence_ref);
+    }
+    if let Some(summary) = map.get("sanitized_args_summary").and_then(Value::as_str) {
+        if let Some(command) = summary.trim().strip_prefix("command=") {
+            collect_command_token(command, signals, evidence_ref);
+        }
+    }
+}
+
+fn collect_command_machine_tokens(
+    text: &str,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    for line in text.lines().map(str::trim) {
+        if let Some(command) = line.strip_prefix("command=") {
+            collect_command_token(command, signals, evidence_ref);
+        } else if (line.starts_with("exit=") || line.starts_with("detached="))
+            && line.contains(" command=")
+        {
+            if let Some((_, command)) = line.split_once(" command=") {
+                collect_command_token(command, signals, evidence_ref);
+            }
+        }
+    }
+}
+
+fn collect_command_token(
+    command: &str,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    let command = command.trim();
+    if !is_bounded_single_line_token(command) || command.len() > 500 {
+        return;
+    }
+    signals.commands.insert(command.to_string());
+    if is_test_command_token(command) {
+        signals.tests.insert(command.to_string());
+    }
+    record_evidence_ref(signals, evidence_ref);
+}
+
+fn collect_diff_summary_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    if signals.diff_summaries.len() >= 16 {
+        return;
+    }
+    for key in [
+        "diff_summary",
+        "final_diff_summary",
+        "change_summary",
+        "patch_summary",
+        "git_diff_summary",
+    ] {
+        let Some(value) = map.get(key).and_then(bounded_diff_summary_value) else {
+            continue;
+        };
+        signals.diff_summaries.push(json!({
+            "field": key,
+            "value": value,
+        }));
+        record_evidence_ref(signals, evidence_ref);
+        if signals.diff_summaries.len() >= 16 {
+            return;
+        }
+    }
+}
+
+fn bounded_diff_summary_value(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() || trimmed.len() > 2_000 {
+                None
+            } else {
+                Some(Value::String(trimmed.to_string()))
+            }
+        }
+        Value::Object(_) | Value::Array(_) => serde_json::to_string(value)
+            .ok()
+            .filter(|serialized| serialized.len() <= 4_000)
+            .map(|_| value.clone()),
+        Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::Null => None,
+    }
+}
+
+fn collect_failure_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    let Some(status) = map.get("status").and_then(Value::as_str) else {
+        return;
+    };
+    if !is_failure_status_token(status) || signals.failures.len() >= 32 {
+        return;
+    }
+    let has_step_identity = map.get("step_id").is_some()
+        || map.get("action_ref").is_some()
+        || map.get("requested_action_ref").is_some();
+    if !has_step_identity {
+        return;
+    }
+    signals.failures.push(json!({
+        "step_id": map.get("step_id").cloned().unwrap_or(Value::Null),
+        "status": status,
+        "skill": map.get("skill").cloned().unwrap_or(Value::Null),
+        "action_ref": map
+            .get("action_ref")
+            .or_else(|| map.get("requested_action_ref"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "error_code": map
+            .get("error_code")
+            .or_else(|| map.get("error_kind"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    }));
+    record_evidence_ref(signals, evidence_ref);
+}
+
+fn collect_retry_fields(map: &serde_json::Map<String, Value>, signals: &mut CodingEvidenceSignals) {
+    for key in [
+        "repair_count",
+        "retry_count",
+        "retry_attempt",
+        "repair_attempt",
+    ] {
+        if let Some(count) = map.get(key).and_then(Value::as_u64) {
+            signals.retry_count = signals.retry_count.max(count);
+        }
+    }
+}
+
+fn is_failure_status_token(status: &str) -> bool {
+    matches!(
+        status.trim(),
+        "error" | "failed" | "failure" | "timeout" | "cancelled" | "canceled"
+    )
+}
+
+fn is_test_command_token(command: &str) -> bool {
+    let command = command.trim().to_ascii_lowercase();
+    command.starts_with("cargo test")
+        || command.starts_with("npm test")
+        || command.starts_with("npm run test")
+        || command.starts_with("pnpm test")
+        || command.starts_with("yarn test")
+        || command.starts_with("pytest")
+        || command.starts_with("go test")
+}
+
+fn is_bounded_single_line_token(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 300 && !value.chars().any(|ch| matches!(ch, '\n' | '\r'))
+}
+
+fn record_evidence_ref(signals: &mut CodingEvidenceSignals, evidence_ref: Option<&str>) {
+    let Some(evidence_ref) = evidence_ref
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    signals.evidence_refs.insert(evidence_ref.to_string());
 }
 
 fn append_provider_call_events(seq: &mut u64, events: &mut Vec<Value>, journal: &TaskJournal) {

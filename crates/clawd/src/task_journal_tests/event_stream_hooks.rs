@@ -386,6 +386,110 @@ fn trace_json_projects_http_download_artifact_ref_to_tool_event() {
 }
 
 #[test]
+fn trace_json_projects_coding_evidence_as_machine_event() {
+    let mut journal = TaskJournal::for_task("task-coding-evidence", "ask", "patch");
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "run_cmd",
+        json!({
+            "extra": {
+                "changed_files": ["src/lib.rs"],
+                "final_diff_summary": {
+                    "summary_code": "patched"
+                }
+            },
+            "text": "exit=0 command=cargo fmt --all"
+        })
+        .to_string(),
+    ));
+    journal.step_results.push(TaskJournalStepTrace::new(
+        "step_2",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Error,
+        Some("exit=101 command=cargo test -p clawd".to_string()),
+        Some(
+            r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"exit_status","error_text":"failed","text":null}"#
+                .to_string(),
+        ),
+    ));
+    journal.push_task_observation(json!({
+        "owner_layer": "coding_loop",
+        "retry_count": 1
+    }));
+
+    let trace = journal.to_trace_json();
+    let event = trace
+        .pointer("/event_stream")
+        .and_then(Value::as_array)
+        .and_then(|events| {
+            events.iter().find(|event| {
+                event.get("event_type").and_then(Value::as_str) == Some("coding_evidence")
+            })
+        })
+        .expect("coding_evidence event");
+
+    assert_eq!(
+        event
+            .pointer("/payload/evidence_ref")
+            .and_then(Value::as_str),
+        Some("coding_evidence:summary")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/evidence_refs/0")
+            .and_then(Value::as_str),
+        Some("step_1")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/evidence_refs/1")
+            .and_then(Value::as_str),
+        Some("step_2")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/changed_files/0")
+            .and_then(Value::as_str),
+        Some("src/lib.rs")
+    );
+    assert_eq!(
+        event.pointer("/payload/commands/0").and_then(Value::as_str),
+        Some("cargo fmt --all")
+    );
+    assert_eq!(
+        event.pointer("/payload/tests/0").and_then(Value::as_str),
+        Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/failures/0/step_id")
+            .and_then(Value::as_str),
+        Some("step_2")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/failures/0/error_code")
+            .and_then(Value::as_str),
+        Some("exit_status")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/diff_summaries/0/value/summary_code")
+            .and_then(Value::as_str),
+        Some("patched")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/retry_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(event
+        .pointer("/payload/unverified_risk")
+        .is_some_and(Value::is_null));
+}
+
+#[test]
 fn trace_json_projects_agent_hook_observations_as_hook_events() {
     let mut journal = TaskJournal::for_task("task-hook-events", "ask", "inspect");
     journal.push_task_observation(json!({
