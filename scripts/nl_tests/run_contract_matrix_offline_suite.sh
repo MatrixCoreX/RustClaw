@@ -217,6 +217,7 @@ fixtures=(
   provider_error_attribution
   delivery_error_attribution
   prompt_budget_error_attribution
+  coding_loop_repair
 )
 
 for fixture in "${fixtures[@]}"; do

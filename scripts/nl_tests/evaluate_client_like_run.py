@@ -45,7 +45,9 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
     "executed_none_of": ["run_cmd"],
     "error_kind_any": ["contract_action_rejected"],
     "failure_attribution_any": ["contract_gap"],
-    "contract_policy_decision_any": ["rejected_not_allowed"]
+    "contract_policy_decision_any": ["rejected_not_allowed"],
+    "event_type_all": ["coding_checkpoint", "coding_evidence"],
+    "event_field_all": ["checkpoint_kind=verification_command"]
   }
 
 Use --write-baseline to capture the current observed route/plan/final shape.
@@ -320,6 +322,54 @@ def collect_contract_policy_decisions(trace: dict[str, Any]) -> list[str]:
     return values
 
 
+def collect_event_types(trace: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    events = trace.get("event_stream")
+    if not isinstance(events, list):
+        return values
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("event_type")
+        if isinstance(event_type, str) and event_type.strip():
+            values.append(event_type.strip())
+    return values
+
+
+def collect_event_field_tokens(trace: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    events = trace.get("event_stream")
+    if not isinstance(events, list):
+        return values
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("event_type")
+        if isinstance(event_type, str) and event_type.strip():
+            values.append(f"event_type={event_type.strip()}")
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            collect_event_payload_tokens(payload, values)
+    return values
+
+
+def collect_event_payload_tokens(payload: dict[str, Any], out: list[str]) -> None:
+    for key, value in payload.items():
+        key = str(key).strip()
+        if not key:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            text = str(value).strip()
+            if text:
+                out.append(f"{key}={text}")
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, (str, int, float, bool)):
+                    text = str(item).strip()
+                    if text:
+                        out.append(f"{key}={text}")
+
+
 def list_strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -345,6 +395,8 @@ class Observation:
     error_kinds: list[str]
     failure_attributions: list[str]
     contract_policy_decisions: list[str]
+    event_types: list[str]
+    event_field_tokens: list[str]
     verifier_approvals: list[bool]
     verifier_issue_kinds: list[str]
     verifier_issue_attributions: list[str]
@@ -418,6 +470,8 @@ def observe_file(path: Path) -> Observation:
             )
         ),
         contract_policy_decisions=collect_contract_policy_decisions(trace if isinstance(trace, dict) else {}),
+        event_types=collect_event_types(trace if isinstance(trace, dict) else {}),
+        event_field_tokens=collect_event_field_tokens(trace if isinstance(trace, dict) else {}),
         verifier_approvals=collect_verifier_approved(trace if isinstance(trace, dict) else {}),
         verifier_issue_kinds=collect_verifier_issue_kinds(trace if isinstance(trace, dict) else {}),
         verifier_issue_attributions=collect_verifier_issue_attributions(trace if isinstance(trace, dict) else {}),
@@ -629,6 +683,26 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
         failures.append(
             f"contract_policy_decision_all: expected all {expected['contract_policy_decision_all']!r}, got {obs.contract_policy_decisions!r}"
         )
+    if "event_type_any" in expected and not any_expected_present(expected["event_type_any"], obs.event_types):
+        failures.append(
+            f"event_type_any: expected one of {expected['event_type_any']!r}, got {obs.event_types!r}"
+        )
+    if "event_type_all" in expected and not all_expected_present(expected["event_type_all"], obs.event_types):
+        failures.append(
+            f"event_type_all: expected all {expected['event_type_all']!r}, got {obs.event_types!r}"
+        )
+    if "event_field_any" in expected and not any_expected_present(
+        expected["event_field_any"], obs.event_field_tokens
+    ):
+        failures.append(
+            f"event_field_any: expected one of {expected['event_field_any']!r}, got {obs.event_field_tokens!r}"
+        )
+    if "event_field_all" in expected and not all_expected_present(
+        expected["event_field_all"], obs.event_field_tokens
+    ):
+        failures.append(
+            f"event_field_all: expected all {expected['event_field_all']!r}, got {obs.event_field_tokens!r}"
+        )
     if "verifier_approved" in expected:
         wanted = bool(expected["verifier_approved"])
         if not obs.verifier_approvals or wanted not in obs.verifier_approvals:
@@ -749,6 +823,8 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "error_kinds": obs.error_kinds,
         "failure_attributions": obs.failure_attributions,
         "contract_policy_decisions": obs.contract_policy_decisions,
+        "event_types": obs.event_types,
+        "event_field_tokens": obs.event_field_tokens,
         "verifier_approvals": obs.verifier_approvals,
         "verifier_issue_kinds": obs.verifier_issue_kinds,
         "verifier_issue_attributions": obs.verifier_issue_attributions,
