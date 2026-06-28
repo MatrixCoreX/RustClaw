@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{events::EventFilters, output, task};
 
@@ -109,6 +109,95 @@ pub(crate) fn run_watch(
         std::thread::sleep(interval);
     }
     Ok(())
+}
+
+pub(crate) fn run_wait(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    until: &str,
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+    json_output: bool,
+    jsonl_output: bool,
+) -> Result<u8> {
+    let interval = Duration::from_millis(interval_ms.max(100));
+    let deadline = timeout_seconds.map(|seconds| Instant::now() + Duration::from_secs(seconds));
+    loop {
+        let task = task::get_task_status(base_url, key, task_id)?;
+        if wait_until_matches(&task, until) {
+            let summary = wait_summary_json(&task, until, true, 0);
+            if json_output || jsonl_output {
+                output::print_json_pretty(&summary);
+            } else {
+                output::print_task_status(&task, false, &EventFilters::default());
+                println!("wait_until: {until}");
+                println!("wait_matched: true");
+                println!("wait_exit_code: 0");
+            }
+            return Ok(0);
+        }
+        if let Some(deadline) = deadline {
+            if Instant::now() >= deadline {
+                let exit_code = 124;
+                let summary = wait_summary_json(&task, until, false, exit_code);
+                if json_output || jsonl_output {
+                    output::print_json_pretty(&summary);
+                } else {
+                    output::print_task_status(&task, false, &EventFilters::default());
+                    eprintln!("error_code=wait_timeout");
+                    println!("wait_until: {until}");
+                    println!("wait_matched: false");
+                    println!("wait_exit_code: {exit_code}");
+                }
+                return Ok(exit_code);
+            }
+        }
+        if jsonl_output {
+            println!(
+                "{}",
+                serde_json::to_string(&wait_summary_json(&task, until, false, 0))?
+            );
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+pub(super) fn wait_until_matches(task: &task::TaskStatusView, until: &str) -> bool {
+    match until {
+        "completed" => {
+            task.execution_state() == Some("completed") || task.status.as_str() == "succeeded"
+        }
+        "terminal" => task.is_terminal(),
+        "background" => matches!(
+            task.execution_state().or_else(|| task.lifecycle_state()),
+            Some("background" | "waiting")
+        ),
+        "needs_user" => matches!(
+            task.execution_state().or_else(|| task.lifecycle_state()),
+            Some("needs_user" | "needs_confirmation")
+        ),
+        _ => false,
+    }
+}
+
+fn wait_summary_json(
+    task: &task::TaskStatusView,
+    until: &str,
+    matched: bool,
+    exit_code: u8,
+) -> serde_json::Value {
+    json!({
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "lifecycle": task.lifecycle().cloned().unwrap_or(serde_json::Value::Null),
+        "terminal": task.is_terminal(),
+        "wait_until": until,
+        "matched": matched,
+        "exit_code": exit_code,
+    })
 }
 
 pub(crate) fn run_events(

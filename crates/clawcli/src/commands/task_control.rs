@@ -149,6 +149,34 @@ pub(crate) fn run_resume_task(
     Ok(())
 }
 
+pub(crate) fn run_continue_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    user_message: Option<&str>,
+    json_output: bool,
+) -> Result<()> {
+    let body = task::resume_task_by_id(
+        base_url,
+        key,
+        task_id,
+        None,
+        Some("user_continue"),
+        user_message,
+        None,
+    )?;
+    if json_output {
+        output::print_json_pretty(&body);
+    } else {
+        output::print_json_pretty(&json!({
+            "task_id": task_id,
+            "operation": "continue",
+            "response": body,
+        }));
+    }
+    Ok(())
+}
+
 pub(crate) fn run_pause_task(
     base_url: &str,
     key: &str,

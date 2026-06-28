@@ -16,15 +16,15 @@ pub(crate) use run_skill::run_skill;
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
 pub(crate) use task_control::{
-    run_active, run_automation_runs, run_cancel, run_cancel_index, run_cancel_task, run_pause_task,
-    run_resume_task,
+    run_active, run_automation_runs, run_cancel, run_cancel_index, run_cancel_task,
+    run_continue_task, run_pause_task, run_resume_task,
 };
-pub(crate) use task_query::{run_events, run_get, run_logs, run_report, run_watch};
+pub(crate) use task_query::{run_events, run_get, run_logs, run_report, run_wait, run_watch};
 
 #[cfg(test)]
 use exec::{
-    exec_exit_class, exec_failure_class_from_machine_tokens, exec_summary_json,
-    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    exec_effective_options, exec_exit_class, exec_failure_class_from_machine_tokens,
+    exec_summary_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 #[cfg(test)]
 use report::{task_report_json, task_report_text_lines};
@@ -32,6 +32,8 @@ use report::{task_report_json, task_report_text_lines};
 use task_control::automation_runs_request_payload;
 #[cfg(test)]
 use task_query::task_event_output_lines;
+#[cfg(test)]
+use task_query::wait_until_matches;
 
 #[cfg(test)]
 #[path = "commands_tests.rs"]
