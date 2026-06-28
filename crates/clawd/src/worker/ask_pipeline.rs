@@ -336,6 +336,28 @@ fn resume_discussion_uses_direct_chat_renderer(route_result: &crate::RouteResult
     crate::ask_flow::route_allows_agent_loop_pure_chat_submode(route_result)
 }
 
+fn route_targets_agent_execution_state(
+    state: &crate::AppState,
+    route_result: &crate::RouteResult,
+) -> bool {
+    route_result.is_execute_gate()
+        || (crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+            && crate::ask_flow::route_allows_agent_loop_pure_chat_submode(route_result))
+}
+
+fn execute_ask_routed_transition_reason(
+    route_result: &crate::RouteResult,
+    targets_agent_execution: bool,
+) -> &'static str {
+    if route_result.is_execute_gate() {
+        "execute_ask_routed_act"
+    } else if targets_agent_execution {
+        "execute_ask_routed_pure_chat_agent_loop"
+    } else {
+        "execute_ask_routed_chat"
+    }
+}
+
 fn ordinary_clarify_should_enter_agent_loop(
     _state: &crate::AppState,
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
@@ -1647,8 +1669,8 @@ pub(super) async fn execute_ask_dispatch(
         {
             return Ok(None);
         }
-        let routed_to_execute = route_result.is_execute_gate();
-        let target_state = if routed_to_execute {
+        let targets_agent_execution = route_targets_agent_execution_state(state, route_result);
+        let target_state = if targets_agent_execution {
             crate::AskState::Executing
         } else {
             crate::AskState::Chatting
@@ -1658,7 +1680,7 @@ pub(super) async fn execute_ask_dispatch(
             &task.task_id,
             Some(crate::AskState::Routing),
             target_state,
-            "execute_ask_routed_in_schedule_branch",
+            execute_ask_routed_transition_reason(route_result, targets_agent_execution),
             None,
         );
         return Ok(Some(
@@ -1677,8 +1699,8 @@ pub(super) async fn execute_ask_dispatch(
             .await,
         ));
     }
-    let routed_to_execute = route_result.is_execute_gate();
-    let target_state = if routed_to_execute {
+    let targets_agent_execution = route_targets_agent_execution_state(state, route_result);
+    let target_state = if targets_agent_execution {
         crate::AskState::Executing
     } else {
         crate::AskState::Chatting
@@ -1688,11 +1710,7 @@ pub(super) async fn execute_ask_dispatch(
         &task.task_id,
         Some(crate::AskState::Routing),
         target_state,
-        if routed_to_execute {
-            "execute_ask_routed_act"
-        } else {
-            "execute_ask_routed_chat"
-        },
+        execute_ask_routed_transition_reason(route_result, targets_agent_execution),
         None,
     );
     Ok(Some(

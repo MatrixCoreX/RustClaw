@@ -4,16 +4,71 @@ use super::test_support::{
 use super::{
     apply_ask_post_route, background_only_locator_route_should_force_clarify,
     clarify_fallback_source_or_default, current_request_resolves_workspace_child_locator,
-    path_scoped_locator_guard_can_defer_to_prompt_targets,
+    execute_ask_routed_transition_reason, path_scoped_locator_guard_can_defer_to_prompt_targets,
     prebind_clarify_workspace_child_locator_from_current_request,
     prebind_existing_workspace_locator_hint_from_current_request,
     prebind_runtime_status_scalar_path_to_current_workspace,
     promote_clarify_path_scoped_filename_targets_to_execute,
     promote_clarify_resolved_multifile_targets_to_execute, route_reason_has_marker,
-    unbound_model_context_target_route_should_force_clarify,
+    route_targets_agent_execution_state, unbound_model_context_target_route_should_force_clarify,
     unbound_targeted_evidence_route_should_force_clarify,
     WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
 };
+
+fn state_with_semantic_route_authority(authority: &str) -> crate::AppState {
+    let root = make_temp_root(authority);
+    std::fs::create_dir_all(root.join("configs")).expect("create config dir");
+    std::fs::write(
+        root.join("configs/agent_guard.toml"),
+        format!("[agent.loop_guard]\nsemantic_route_authority = \"{authority}\"\n"),
+    )
+    .expect("write agent guard");
+    test_state_with_root(root)
+}
+
+fn pure_chat_route() -> crate::RouteResult {
+    crate::RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "machine_pure_chat_fixture".to_string(),
+        needs_clarify: false,
+        route_reason: String::new(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    }
+}
+
+#[test]
+fn pure_chat_agent_loop_submode_targets_executing_state() {
+    let state = state_with_semantic_route_authority("agent_loop_default");
+    let route = pure_chat_route();
+
+    assert!(route_targets_agent_execution_state(&state, &route));
+    assert_eq!(
+        execute_ask_routed_transition_reason(&route, true),
+        "execute_ask_routed_pure_chat_agent_loop"
+    );
+}
+
+#[test]
+fn pure_chat_legacy_route_targets_chatting_state() {
+    let state = state_with_semantic_route_authority("legacy");
+    let route = pure_chat_route();
+
+    assert!(!route_targets_agent_execution_state(&state, &route));
+    assert_eq!(
+        execute_ask_routed_transition_reason(&route, false),
+        "execute_ask_routed_chat"
+    );
+}
 
 #[test]
 fn compound_file_paths_summary_repair_runs_before_unbound_context_guard() {
