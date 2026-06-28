@@ -237,6 +237,8 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "test_count",
         "diff_summary_count",
         "failure_count",
+        "verification_status",
+        "verification_failure_kind_count",
         "retry_count",
         "unverified_risk",
         "final_status",

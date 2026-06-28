@@ -210,6 +210,8 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "test_count",
     "diff_summary_count",
     "failure_count",
+    "verification_status",
+    "verification_failure_kind_count",
     "retry_count",
     "unverified_risk",
     "final_status",

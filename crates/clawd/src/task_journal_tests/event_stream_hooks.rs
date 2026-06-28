@@ -498,6 +498,18 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
     );
     assert_eq!(
         event
+            .pointer("/payload/verification_status")
+            .and_then(Value::as_str),
+        Some("failed")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/verification_failure_kinds/0")
+            .and_then(Value::as_str),
+        Some("test")
+    );
+    assert_eq!(
+        event
             .pointer("/payload/diff_summaries/0/value/summary_code")
             .and_then(Value::as_str),
         Some("patched")

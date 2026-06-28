@@ -260,6 +260,7 @@ struct CodingEvidenceSignals {
     evidence_refs: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
+    verification_failure_kinds: BTreeSet<String>,
     retry_count: u64,
 }
 
@@ -279,6 +280,7 @@ impl CodingEvidenceSignals {
         } else {
             Value::Null
         };
+        let verification_status = coding_verification_status(self);
         json!({
             "schema_version": 1,
             "evidence_ref": "coding_evidence:summary",
@@ -295,9 +297,24 @@ impl CodingEvidenceSignals {
             "diff_summaries": self.diff_summaries.clone(),
             "failure_count": self.failures.len(),
             "failures": self.failures.clone(),
+            "verification_status": verification_status,
+            "verification_failure_kind_count": self.verification_failure_kinds.len(),
+            "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
             "retry_count": self.retry_count,
             "unverified_risk": unverified_risk,
         })
+    }
+}
+
+fn coding_verification_status(signals: &CodingEvidenceSignals) -> &'static str {
+    if !signals.failures.is_empty() {
+        "failed"
+    } else if !signals.verification_commands.is_empty() {
+        "verified"
+    } else if !signals.changed_files.is_empty() {
+        "unverified"
+    } else {
+        "not_applicable"
     }
 }
 
@@ -427,6 +444,9 @@ fn collect_command_machine_tokens(
         {
             if let Some((_, command)) = line.split_once(" command=") {
                 collect_command_token(command, signals, evidence_ref);
+                if line.starts_with("exit=") && !line.starts_with("exit=0 ") {
+                    record_verification_failure_kind(command, signals);
+                }
             }
         }
     }
@@ -531,6 +551,9 @@ fn collect_failure_fields(
             .cloned()
             .unwrap_or(Value::Null),
     }));
+    if let Some(command) = map.get("command").and_then(Value::as_str) {
+        record_verification_failure_kind(command, signals);
+    }
     record_evidence_ref(signals, evidence_ref);
 }
 
@@ -581,6 +604,41 @@ fn is_verification_command_token(command: &str) -> bool {
         || command.starts_with("ruff check")
         || command.starts_with("go vet")
         || command.starts_with("go test")
+}
+
+fn record_verification_failure_kind(command: &str, signals: &mut CodingEvidenceSignals) {
+    let Some(kind) = verification_failure_kind_for_command(command) else {
+        return;
+    };
+    signals.verification_failure_kinds.insert(kind.to_string());
+}
+
+fn verification_failure_kind_for_command(command: &str) -> Option<&'static str> {
+    let command = command.trim().to_ascii_lowercase();
+    if is_test_command_token(&command) {
+        Some("test")
+    } else if command.starts_with("cargo check") {
+        Some("compile")
+    } else if command.starts_with("cargo fmt") {
+        Some("formatter")
+    } else if command.starts_with("cargo clippy")
+        || command.starts_with("npm run lint")
+        || command.starts_with("pnpm lint")
+        || command.starts_with("yarn lint")
+        || command.starts_with("ruff check")
+        || command.starts_with("go vet")
+    {
+        Some("lint")
+    } else if command.starts_with("npm run build")
+        || command.starts_with("pnpm build")
+        || command.starts_with("yarn build")
+    {
+        Some("build")
+    } else if is_verification_command_token(&command) {
+        Some("other_verification")
+    } else {
+        None
+    }
 }
 
 fn is_bounded_single_line_token(value: &str) -> bool {
