@@ -66,6 +66,7 @@ export function LogsPage({
             <option value="act_plan.log">act_plan.log</option>
             <option value="clawd.log">clawd.log</option>
             <option value="nni.log">nni.log</option>
+            <option value="nni-server.log">nni-server.log</option>
             <option value="telegramd.log">telegramd.log</option>
             <option value="whatsappd.log">whatsappd.log</option>
             <option value="whatsapp_webd.log">whatsapp_webd.log</option>

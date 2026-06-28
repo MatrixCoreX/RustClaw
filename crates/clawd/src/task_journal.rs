@@ -69,6 +69,7 @@ const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
     "clawd_health_port_open",
     "clawd_log",
     "nni_log",
+    "nni_server_log",
     "telegramd_log",
     "listener_count",
     "public_listener_count",
