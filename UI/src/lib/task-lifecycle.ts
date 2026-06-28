@@ -121,10 +121,6 @@ export function buildTaskLifecycleView(
   const nextPoll = timestampLabel(lang, lifecycle?.next_poll_after);
   const heartbeat = timestampLabel(lang, lifecycle?.last_heartbeat_ts);
   const meta: string[] = [];
-  if (lifecycle?.next_action_kind) meta.push(`${t(lang, "下一步", "Next action")}: ${lifecycle.next_action_kind}`);
-  if (lifecycle?.next_action_ref !== undefined && lifecycle?.next_action_ref !== null) {
-    meta.push(`${t(lang, "下一步引用", "Next action ref")}: ${String(lifecycle.next_action_ref)}`);
-  }
   if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
   if (Number.isFinite(lifecycle?.resume_wait_seconds)) {
     meta.push(`${t(lang, "恢复等待", "Resume wait")}: ${Math.max(0, Number(lifecycle?.resume_wait_seconds))}s`);
