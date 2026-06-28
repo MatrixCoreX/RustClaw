@@ -813,6 +813,40 @@ pub(crate) async fn execute_ask_routed(
                     }
                 }
             }
+            if crate::agent_engine::agent_loop_semantic_authority_enabled(state)
+                && agent_run_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.route_result.as_ref())
+                    .is_some_and(route_allows_agent_loop_chat_fallback_handoff)
+            {
+                let mut loop_ctx = agent_run_context.clone();
+                if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
+                    route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+                    append_route_reason(route, "chat_fallback_deferred_to_agent_loop");
+                }
+                tracing::info!(
+                    "{} worker_once: ask chat_fallback_agent_loop_activation task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+                let reply = execute_via_planner_loop(
+                    state,
+                    task,
+                    prompt_with_memory,
+                    execution_user_request,
+                    &crate::AskMode::planner_execute_chat_wrapped(),
+                    loop_ctx.clone(),
+                )
+                .await?;
+                return Ok(with_pre_planner_exit_snapshot(
+                    state,
+                    task,
+                    &current_turn_user_request,
+                    reply,
+                    loop_ctx.as_ref(),
+                    "chat_fallback_agent_loop_activation",
+                ));
+            }
             let chat_user_request = direct_answer_chat_user_request(
                 chat_user_request,
                 &current_turn_user_request,
