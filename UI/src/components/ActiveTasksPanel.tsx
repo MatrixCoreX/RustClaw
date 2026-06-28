@@ -242,11 +242,23 @@ export function ActiveTasksPanel({
                         {t("恢复", "Resume")}
                       </button>
                     ) : null}
+                  </div>
+                  <div className="mt-3 border-t border-rose-300/20 pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-1.5 text-xs font-medium text-rose-50">
+                          <CircleAlert className="h-3.5 w-3.5" />
+                          {t("停止这个任务", "Stop this task")}
+                        </p>
+                        <p className="mt-1 text-[11px] text-white/50">
+                          {t("只在确定不需要继续执行时使用。", "Use this only when the task should not continue.")}
+                        </p>
+                      </div>
                     <button
                       type="button"
                       onClick={() => void onCancelTask(item)}
                       disabled={cancelingTaskIndex === item.index || !canUseInteractionContext || item.lifecycle?.can_cancel === false}
-                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-rose-300/35 bg-rose-500/15 px-3 py-2 text-xs font-medium text-rose-50 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {cancelingTaskIndex === item.index ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -255,6 +267,7 @@ export function ActiveTasksPanel({
                       )}
                       {t("取消", "Cancel")}
                     </button>
+                    </div>
                   </div>
                 </div>
                 {pollingView ? (
