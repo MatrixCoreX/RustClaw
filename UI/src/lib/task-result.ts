@@ -195,6 +195,13 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "pending_async_job_id",
     "job_id",
     "provider_job_id",
+    "changed_file_count",
+    "command_count",
+    "test_count",
+    "diff_summary_count",
+    "failure_count",
+    "retry_count",
+    "unverified_risk",
     "final_status",
     "final_stop_signal",
   ]) {

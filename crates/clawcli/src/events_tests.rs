@@ -268,6 +268,62 @@ fn event_lines_include_lifecycle_worker_events() {
 }
 
 #[test]
+fn event_lines_include_coding_evidence_machine_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 5,
+                            "event_type": "coding_evidence",
+                            "payload": {
+                                "schema_version": 1,
+                                "evidence_ref": "coding_evidence:summary",
+                                "changed_file_count": 1,
+                                "command_count": 2,
+                                "test_count": 1,
+                                "diff_summary_count": 1,
+                                "failure_count": 1,
+                                "retry_count": 1,
+                                "unverified_risk": "tests_not_observed"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "coding_evidence");
+    assert_eq!(
+        events[0].fields.get("evidence_ref").map(String::as_str),
+        Some("coding_evidence:summary")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("changed_file_count")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0].fields.get("test_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0].fields.get("retry_count").map(String::as_str),
+        Some("1")
+    );
+    assert!(events[0]
+        .line
+        .contains("unverified_risk=tests_not_observed"));
+}
+
+#[test]
 fn event_filters_reject_mismatched_machine_fields() {
     let event = TaskEventLine {
         event_type: "checkpoint".to_string(),
