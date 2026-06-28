@@ -45,6 +45,10 @@ KNOWN_DELETION_GATES = {
     "delete_after_selected_class_release_gate",
     "test_fixture_only",
 }
+KNOWN_ORDINARY_SEMANTIC_DEBT = {
+    "direct_answer_gate_promoted_to_planner",
+    "direct_answer_gate_chat_fallback",
+}
 
 
 def rust_files() -> list[Path]:
@@ -129,6 +133,10 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
         if order < 0:
             findings.append(f"{prefix}: missing_migration_order")
         if kind == "OrdinarySemantic":
+            if reason not in KNOWN_ORDINARY_SEMANTIC_DEBT:
+                findings.append(
+                    f"{prefix}: ordinary_semantic_requires_known_debt_reason={reason}"
+                )
             if order <= 0:
                 findings.append(f"{prefix}: ordinary_semantic_requires_positive_order")
             if not (1 <= len(refs) <= 3):
