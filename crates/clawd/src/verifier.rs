@@ -6,11 +6,14 @@ use serde_json::{json, Value};
 
 use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
 
+#[path = "verifier_risk_policy.rs"]
+mod risk_policy;
 #[path = "verifier_structured_fields.rs"]
 mod structured_fields;
 #[path = "verifier_templates.rs"]
 mod templates;
 
+use risk_policy::high_risk_side_effect_requires_confirmation;
 use templates::{
     step_can_produce_output_for_template_scope, value_contains_unresolved_template,
     TemplatePlaceholderScope,
@@ -861,7 +864,8 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
     let risk_level = effective_step_risk_level(state, &normalized_skill, &step.args);
     let requires_confirmation = state
         .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
-        || is_confirmation_like_skill(&normalized_skill);
+        || is_confirmation_like_skill(&normalized_skill)
+        || high_risk_side_effect_requires_confirmation(effect, risk_level, &step.args);
     let action = step
         .args
         .as_object()
@@ -1823,6 +1827,11 @@ pub(crate) fn verify_plan(
             let safe_autonomous_creation =
                 safe_autonomous_creation_step(state, &normalized_skill, &step.args);
             let step_risk = effective_step_risk_level(state, &normalized_skill, &step.args);
+            let effect = crate::execution_recipe::classify_skill_action_effect(
+                state,
+                &normalized_skill,
+                &step.args,
+            );
             if input
                 .route_result
                 .is_some_and(|route| risk_exceeds_ceiling(step_risk, route.risk_ceiling))
@@ -1847,7 +1856,8 @@ pub(crate) fn verify_plan(
                 && (state.skill_invocation_requires_confirmation_policy(
                     &normalized_skill,
                     Some(&step.args),
-                ) || is_confirmation_like_skill(&normalized_skill))
+                ) || is_confirmation_like_skill(&normalized_skill)
+                    || high_risk_side_effect_requires_confirmation(effect, step_risk, &step.args))
             {
                 needs_confirmation = true;
                 issues.push(VerifyIssue {

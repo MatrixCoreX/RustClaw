@@ -161,9 +161,9 @@ planner_kind = "skill"
 output_kind = "image"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, output_path = { type = "string" } } }
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, output_path = { type = "string" }, dry_run = { type = "boolean" } } }
 planner_capabilities = [
-  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["output_path"], risk_level = "high" },
+  { name = "image.generate", action = "generate", effect = "external", required = ["prompt"], optional = ["output_path", "dry_run"], risk_level = "high" },
 ]
 
 [[skills]]
@@ -1761,6 +1761,102 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
             .pointer("/permission_decision/steps/0/decision")
             .and_then(serde_json::Value::as_str),
         Some("require_confirmation")
+    );
+}
+
+#[test]
+fn high_risk_external_generation_requires_confirmation_without_dry_run() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("generate media"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "image_generate".to_string(),
+                args: json!({ "action": "generate", "prompt": "status card" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved);
+    assert!(result.needs_confirmation);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
+    );
+}
+
+#[test]
+fn high_risk_external_generation_dry_run_skips_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("plan media dry run"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "image_generate".to_string(),
+                args: json!({
+                    "action": "generate",
+                    "prompt": "status card",
+                    "dry_run": true
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
     );
 }
 
