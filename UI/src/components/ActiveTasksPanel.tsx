@@ -189,6 +189,11 @@ export function ActiveTasksPanel({
                       </div>
                     ) : null}
                     <p className="mt-1 text-xs text-white/55">{lifecycleView.detail}</p>
+                    <div className="mt-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">
+                      <div className="font-medium text-white/80">{t("下一步", "Next step")}</div>
+                      <p className="mt-1 font-medium text-white/85">{lifecycleView.recommendedAction.label}</p>
+                      <p className="mt-1 text-white/55">{lifecycleView.recommendedAction.detail}</p>
+                    </div>
                     <p className="mt-1 break-all font-mono text-[11px] text-white/40">{item.task_id}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-white/55">
                       {lifecycleView.meta.slice(0, 4).map((meta) => (
