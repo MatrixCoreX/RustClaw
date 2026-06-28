@@ -113,7 +113,7 @@ flowchart TD
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_transition`、`checkpoint_created`、`tool_started`、`tool_step`、`tool_finished`、`coding_evidence`、`provider_call`、`agent_hook`、`subagent` 和 `task_final`。CLI 与 UI 直接渲染这些字段，包括 `evidence_ref`、`checkpoint_ref`、`pending_async_job_id`、coding 计数、验证命令计数/token、未验证风险 token 和 step 时间字段，不读取原始日志或本地化文本来判断状态。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_transition`、`checkpoint_created`、`tool_started`、`tool_step`、`tool_finished`、`coding_evidence`、`provider_call`、`agent_hook`、`subagent` 和 `task_final`。CLI 与 UI 直接渲染这些字段，包括 `evidence_ref`、`checkpoint_ref`、`pending_async_job_id`、coding 计数、验证命令计数/token、验证状态/失败类别 token、未验证风险 token 和 step 时间字段，不读取原始日志或本地化文本来判断状态。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -177,7 +177,7 @@ flowchart TD
 - `Command payload contract repair`：声明了 command payload 的任务会按需要归一到 `RawCommandOutput` 或 `CommandOutputSummary` 机器契约，包括上游提示误标成 service-status 的情况。
 - `PlanVerifier`：执行前阻断不可用能力、缺必填字段、不安全 mutation，以及不符合输出/证据形状的计划。拒绝路径应携带稳定机器字段，不写固定用户可见回复模板。
 - `Pre-tool hooks + adapter preflight`：循环执行和有边界的恢复重试都必须经过同一套 hook、contract-argument、command-policy 与结构化错误检查，之后才允许真正执行有副作用的 adapter。
-- `Task journal event`：executor observation 会投影为稳定的 `tool_started`、`tool_step`、`tool_finished` 和可选 `coding_evidence` 事件，带 step refs、evidence refs、artifact 计数、coding 计数、验证命令计数/token、验证风险 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
+- `Task journal event`：executor observation 会投影为稳定的 `tool_started`、`tool_step`、`tool_finished` 和可选 `coding_evidence` 事件，带 step refs、evidence refs、artifact 计数、coding 计数、验证命令计数/token、验证状态/失败类别 token、验证风险 token、时间字段和 failure attribution，供 CLI/UI 进度视图使用。
 - `subagent tool`：planner 授权的子代理必须显式、只读。单个 child run 或有界 `children` batch 都通过 role/config 校验、timeout/cancellation policy 字段、optional/required failure 隔离，以及只包含机器字段的聚合（`child_results`、`finding_refs`、`evidence_refs`）记录；不会授予写入或外部发布权限。
 - `Skill dispatcher`：直接 `run_skill` 和 planner skill call 复用同一调度层。直接 `run_skill` 不让 normalizer / planner 选择技能，只派发显式的 `payload.skill_name`。Builtin 在进程内运行，external 走 adapter，runner 才启动 `skill-runner` 和具体二进制。
 - `Skill process protocol`：runner 技能通过 stdin/stdout 交换单行 JSON；运行时需要判断时，技能应在 `extra` 返回稳定机器字段。
@@ -361,7 +361,7 @@ flowchart TD
 - `clawcli resume-task <task_id>` 会把已有 checkpoint 标记为到期恢复；`clawcli pause-task <task_id> --pause-seconds N` 只延迟已有 waiting/background checkpoint，不会重启没有 checkpoint 的任务。
 - `clawcli submit --detach` 快速返回 `task_id`；`clawcli submit --wait` 轮询到终态；`--json` 保持 submit/watch 输出适合脚本消费。
 - `clawcli active` 默认打印紧凑任务表，也支持 `--json`；`clawcli events <task_id>` 支持 `--jsonl` 和 `--event-type`、`--checkpoint-id`、`--policy-decision`、`--subagent-id`、`--async-job-id` 等机器过滤器。
-- task event stream 包含状态迁移、checkpoint、工具生命周期、coding evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_commands`、`unverified_risk`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
+- task event stream 包含状态迁移、checkpoint、工具生命周期、coding evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch`、`clawcli report` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_commands`、`verification_status`、`verification_failure_kinds`、`unverified_risk`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
 - `clawcli run-skill <skill_name> --args-json '{...}'` 提交显式 `kind=run_skill` 任务，不走自然语言路由；加 `--wait` 可轮询同一个 `task_id`。
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
 - 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
