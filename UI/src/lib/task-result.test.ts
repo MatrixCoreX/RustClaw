@@ -117,6 +117,86 @@ test("extracts trace events and stable machine meta", () => {
   ]);
 });
 
+test("extracts task lifecycle event meta for UI progress cards", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-events",
+    status: "running",
+    result_json: {
+      task_journal: {
+        trace: {
+          event_stream: [
+            {
+              seq: 1,
+              event_type: "task_transition",
+              payload: {
+                task_id: "task-events",
+                transition_ref: "task_transition:1",
+                evidence_ref: "task_transition:1",
+                state_from: "executing",
+                state_to: "finalizing",
+                reason_code: "agent_loop_ready_to_finalize",
+                round_no: 2,
+                at_ms: 1781800001000,
+              },
+            },
+            {
+              seq: 2,
+              event_type: "checkpoint_created",
+              payload: {
+                checkpoint_id: "ckpt-1",
+                checkpoint_ref: "task_checkpoint:ckpt-1",
+                evidence_ref: "task_checkpoint:ckpt-1",
+                completed_side_effect_count: 1,
+                pending_async_job_id: "job-1",
+                poll_ref: "local_process:123",
+                cancel_ref: "local_process:123",
+                message_key: "async_job_running",
+              },
+            },
+            {
+              seq: 3,
+              event_type: "tool_started",
+              payload: {
+                phase: "started",
+                step_id: "step_1",
+                step_ref: "step_1",
+                evidence_ref: "step_1",
+                skill: "run_cmd",
+                requested_capability: "terminal.run_command",
+                started_at: 1781800002000,
+              },
+            },
+            {
+              seq: 4,
+              event_type: "tool_finished",
+              payload: {
+                phase: "finished",
+                step_id: "step_1",
+                step_ref: "step_1",
+                evidence_ref: "step_1",
+                skill: "run_cmd",
+                status: "ok",
+                finished_at: 1781800003000,
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const events = taskTraceEvents(result);
+
+  assert.ok(traceEventMeta(events[0]).includes("transition_ref=task_transition:1"));
+  assert.ok(traceEventMeta(events[0]).includes("state_to=finalizing"));
+  assert.ok(traceEventMeta(events[1]).includes("checkpoint_ref=task_checkpoint:ckpt-1"));
+  assert.ok(traceEventMeta(events[1]).includes("pending_async_job_id=job-1"));
+  assert.ok(traceEventMeta(events[2]).includes("phase=started"));
+  assert.ok(traceEventMeta(events[2]).includes("started_at=1781800002000"));
+  assert.ok(traceEventMeta(events[3]).includes("phase=finished"));
+  assert.ok(traceEventMeta(events[3]).includes("finished_at=1781800003000"));
+});
+
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {
   const result: TaskQueryResponse = {
     task_id: "task-artifacts",
