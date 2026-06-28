@@ -135,6 +135,7 @@ pub(crate) struct TaskJournalVerifyIssue {
     pub(crate) step_id: String,
     pub(crate) kind: crate::verifier::VerifyIssueKind,
     pub(crate) detail: String,
+    pub(crate) missing_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -536,6 +537,7 @@ fn verifier_issue_repair_signal_json(
         issue.kind,
         &issue.detail,
     )
+    .with_missing_fields(&issue.missing_fields)
     .with_rejected_action(rejected_action)
     .with_forbidden_repeat_fingerprint(verifier_issue_forbidden_repeat_fingerprint(
         issue, plan, route,
@@ -1254,6 +1256,7 @@ fn summarize_verify_result(
                 step_id: issue.step_id.clone(),
                 kind: issue.kind,
                 detail: issue.detail.clone(),
+                missing_fields: issue.missing_fields.clone(),
             })
             .collect(),
     }

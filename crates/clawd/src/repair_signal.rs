@@ -305,6 +305,15 @@ impl RepairSignal {
         self
     }
 
+    pub(crate) fn with_missing_fields(mut self, fields: &[String]) -> Self {
+        self.missing_fields = fields
+            .iter()
+            .map(|field| field.trim().to_string())
+            .filter(|field| !field.is_empty())
+            .collect();
+        self
+    }
+
     pub(crate) fn with_contract_failure_policy(mut self, contract_policy: Option<Value>) -> Self {
         self.permission_decision = contract_policy
             .as_ref()

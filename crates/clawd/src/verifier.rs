@@ -191,6 +191,7 @@ pub(crate) struct VerifyIssue {
     pub(crate) step_id: String,
     pub(crate) kind: VerifyIssueKind,
     pub(crate) detail: String,
+    pub(crate) missing_fields: Vec<String>,
 }
 
 pub(crate) struct VerifyInput<'a> {
@@ -342,6 +343,7 @@ fn set_or_anchor_creation_path(
             detail: format!(
                 "skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
             ),
+            missing_fields: Vec::new(),
         });
         return true;
     };
@@ -361,6 +363,7 @@ fn set_or_anchor_creation_path(
         detail: format!(
             "skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
         ),
+        missing_fields: Vec::new(),
     });
     true
 }
@@ -1009,6 +1012,7 @@ fn push_group_conflict_issues(
             step_id: step_id.clone(),
             kind: VerifyIssueKind::PrimaryFallbackConflict,
             detail: format!("group `{group}` skill `{normalized_skill}` conflict: {detail}"),
+            missing_fields: Vec::new(),
         });
     }
 }
@@ -1120,6 +1124,7 @@ fn verify_step_args(
             detail: format!(
                 "skill `{normalized_skill}` has unresolved template placeholder in args"
             ),
+            missing_fields: Vec::new(),
         });
     }
     if required.is_empty() {
@@ -1130,6 +1135,7 @@ fn verify_step_args(
             step_id: step.step_id.clone(),
             kind: VerifyIssueKind::MissingRequiredArg,
             detail: format!("skill `{normalized_skill}` args must be an object"),
+            missing_fields: required.clone(),
         });
         return;
     };
@@ -1139,6 +1145,7 @@ fn verify_step_args(
                 step_id: step.step_id.clone(),
                 kind: VerifyIssueKind::MissingRequiredArg,
                 detail: format!("skill `{normalized_skill}` missing required arg `{key}`"),
+                missing_fields: vec![key.clone()],
             });
         }
     }
@@ -1405,6 +1412,7 @@ fn verify_execution_recipe(
             step_id,
             kind: VerifyIssueKind::RecipeInspectBeforeMutateRequired,
             detail: "ops_closed_loop requires at least one inspect/read-only evidence step before mutating".to_string(),
+            missing_fields: Vec::new(),
         });
     }
 
@@ -1427,6 +1435,7 @@ fn verify_execution_recipe(
             step_id,
             kind: VerifyIssueKind::RecipeValidationAfterMutateRequired,
             detail: crate::execution_recipe::validation_detail_for_recipe(recipe).to_string(),
+            missing_fields: Vec::new(),
         });
     }
 
@@ -1438,6 +1447,7 @@ fn verify_execution_recipe(
                     kind: VerifyIssueKind::RecipeTargetScopeRequired,
                     detail: crate::execution_recipe::target_scope_detail_for_recipe(recipe)
                         .to_string(),
+                    missing_fields: Vec::new(),
                 });
             }
         }
@@ -1448,6 +1458,7 @@ fn verify_execution_recipe(
                     kind: VerifyIssueKind::RecipeTargetScopeRequired,
                     detail: crate::execution_recipe::target_scope_detail_for_recipe(recipe)
                         .to_string(),
+                    missing_fields: Vec::new(),
                 });
             } else if let Some(step_id) = target_scope_conflict_step_id {
                 issues.push(VerifyIssue {
@@ -1455,6 +1466,7 @@ fn verify_execution_recipe(
                     kind: VerifyIssueKind::RecipeTargetScopeRequired,
                     detail: crate::execution_recipe::target_scope_detail_for_recipe(recipe)
                         .to_string(),
+                    missing_fields: Vec::new(),
                 });
             }
         }
@@ -1465,6 +1477,7 @@ fn verify_execution_recipe(
                     kind: VerifyIssueKind::RecipeTargetScopeRequired,
                     detail: crate::execution_recipe::target_scope_detail_for_recipe(recipe)
                         .to_string(),
+                    missing_fields: Vec::new(),
                 });
             }
         }
@@ -1669,6 +1682,7 @@ pub(crate) fn verify_plan(
                 "route requires clarify before execution; context={}",
                 input.context_bundle_summary.unwrap_or("<none>")
             ),
+            missing_fields: Vec::new(),
         });
     }
     let route_contract_missing = input
@@ -1687,6 +1701,7 @@ pub(crate) fn verify_plan(
             step_id: "route".to_string(),
             kind: VerifyIssueKind::ContractMissing,
             detail: format!("no contract matrix entry matched semantic kind `{semantic_kind}`"),
+            missing_fields: Vec::new(),
         });
     }
 
@@ -1700,6 +1715,7 @@ pub(crate) fn verify_plan(
                     "capability `{}` was not resolved to an executable tool or skill",
                     step.skill
                 ),
+                missing_fields: Vec::new(),
             });
         } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
@@ -1710,6 +1726,7 @@ pub(crate) fn verify_plan(
                     step_id: step.step_id.clone(),
                     kind: VerifyIssueKind::SkillNotVisible,
                     detail: format!("skill `{normalized_skill}` is not in planner visible skills"),
+                    missing_fields: Vec::new(),
                 });
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
@@ -1750,6 +1767,7 @@ pub(crate) fn verify_plan(
                             policy.decision.as_str(),
                             policy.final_answer_shape
                         ),
+                        missing_fields: Vec::new(),
                     });
                 } else if !policy.preferred_actions.is_empty()
                     && !policy.action_matches_preferred()
@@ -1764,6 +1782,7 @@ pub(crate) fn verify_plan(
                             policy.contract_match,
                             policy.preferred_actions.join(",")
                         ),
+                        missing_fields: Vec::new(),
                     });
                 }
             } else if route_requires_contract(input.route_result)
@@ -1779,6 +1798,7 @@ pub(crate) fn verify_plan(
                         "planner step skill `{}` could not be converted to a contract action reference",
                         step.skill
                     ),
+                    missing_fields: Vec::new(),
                 });
             }
             let safe_autonomous_creation =
@@ -1795,6 +1815,7 @@ pub(crate) fn verify_plan(
                         "skill `{normalized_skill}` action risk `{:?}` exceeds route risk ceiling",
                         step_risk
                     ),
+                    missing_fields: Vec::new(),
                 });
             }
             if !confirmation_already_granted
@@ -1814,6 +1835,7 @@ pub(crate) fn verify_plan(
                     step_id: step.step_id.clone(),
                     kind: VerifyIssueKind::ConfirmationRequired,
                     detail: format!("skill `{normalized_skill}` may require explicit confirmation"),
+                    missing_fields: Vec::new(),
                 });
             }
         }
@@ -1824,6 +1846,7 @@ pub(crate) fn verify_plan(
                     step_id: step.step_id.clone(),
                     kind: VerifyIssueKind::InvalidDependsOn,
                     detail: format!("depends_on references missing step `{dep}`"),
+                    missing_fields: Vec::new(),
                 });
             }
         }
