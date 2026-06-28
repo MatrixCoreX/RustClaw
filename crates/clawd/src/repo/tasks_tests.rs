@@ -19,7 +19,7 @@ use crate::repo::child_tasks::{
 };
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    get_task_admin_target, pause_task_by_id, resume_task_by_id,
+    get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskResumeControlInput,
 };
 
 struct TempDirGuard {
@@ -794,6 +794,10 @@ fn get_task_query_record_exposes_lifecycle_projection() {
         claw_core::types::TaskStatus::Running
     ));
     assert_eq!(
+        response.execution_state,
+        Some(claw_core::types::TaskExecutionState::Waiting)
+    );
+    assert_eq!(
         response
             .result_json
             .as_ref()
@@ -803,13 +807,17 @@ fn get_task_query_record_exposes_lifecycle_projection() {
     );
     let lifecycle = response.lifecycle.expect("lifecycle projection");
     assert_eq!(lifecycle["state"], "waiting");
+    assert_eq!(lifecycle["execution_state"], "waiting");
     assert_eq!(lifecycle["db_status"], "running");
     assert_eq!(lifecycle["resume_reason"], "provider_gap_retry_window");
+    assert_eq!(lifecycle["reason_code"], "provider_gap_retry_window");
     assert_eq!(lifecycle["checkpoint_id"], "ckpt-query");
     assert_eq!(lifecycle["last_heartbeat_ts"], 1234);
+    assert_eq!(lifecycle["heartbeat_at"], 1234);
     assert_eq!(lifecycle["lease_owner"], "worker:test-query");
     assert_eq!(lifecycle["lease_expires_at"], 1300);
     assert_eq!(lifecycle["claim_attempt"], 2);
+    assert_eq!(lifecycle["attempt_id"], 2);
     assert_eq!(lifecycle["claimed_at"], 1200);
 }
 
@@ -833,14 +841,19 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].task_id, "task-active-1");
     assert_eq!(tasks[0].status, "running");
+    assert_eq!(tasks[0].execution_state, "background");
     let lifecycle = tasks[0].lifecycle.as_ref().expect("lifecycle projection");
     assert_eq!(lifecycle["state"], "background");
+    assert_eq!(lifecycle["execution_state"], "background");
     assert_eq!(lifecycle["resume_reason"], "async_job_poll");
+    assert_eq!(lifecycle["reason_code"], "async_job_poll");
     assert_eq!(lifecycle["pending_job_ref"], "job-17");
     assert_eq!(lifecycle["last_heartbeat_ts"], 2222);
+    assert_eq!(lifecycle["heartbeat_at"], 2222);
     assert_eq!(lifecycle["lease_owner"], "worker:test-active");
     assert_eq!(lifecycle["lease_expires_at"], 2400);
     assert_eq!(lifecycle["claim_attempt"], 3);
+    assert_eq!(lifecycle["attempt_id"], 3);
     assert_eq!(lifecycle["claimed_at"], 2200);
 }
 
@@ -996,7 +1009,7 @@ fn cancel_tasks_for_user_chat_writes_machine_lifecycle_and_honors_exclude() {
 }
 
 #[test]
-fn resume_task_by_id_marks_checkpoint_due_without_restart() {
+fn resume_task_with_input_marks_checkpoint_due_without_restart() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();
     let checkpoint_id = "ckpt-resume-now";
@@ -1012,9 +1025,18 @@ fn resume_task_by_id_marks_checkpoint_due_without_restart() {
     });
     insert_task(&state, &task_id, "running", Some(&result), 1234);
 
-    let update = resume_task_by_id(&state, &task_id)
-        .expect("resume task")
-        .expect("task resumable");
+    let update = resume_task_with_input(
+        &state,
+        TaskResumeControlInput {
+            task_id: task_id.clone(),
+            checkpoint_id: Some(checkpoint_id.to_string()),
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+        },
+    )
+    .expect("resume task")
+    .expect("task resumable");
 
     assert_eq!(update.task_id, task_id);
     assert_eq!(update.checkpoint_id, checkpoint_id);

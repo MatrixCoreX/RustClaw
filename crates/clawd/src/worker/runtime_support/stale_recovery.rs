@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::{now_ts, now_ts_u64, AppState};
@@ -24,6 +24,7 @@ impl StaleRunningRecoveryReason {
 struct StaleRunningTaskCandidate {
     task_id: String,
     reason: StaleRunningRecoveryReason,
+    result_json: Option<String>,
 }
 
 fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i64) -> bool {
@@ -133,7 +134,11 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
-            candidates.push(StaleRunningTaskCandidate { task_id, reason });
+            candidates.push(StaleRunningTaskCandidate {
+                task_id,
+                reason,
+                result_json,
+            });
         }
     }
     if candidates.is_empty() {
@@ -149,6 +154,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                      WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?3
                      ELSE error_text
                  END,
+                 result_json = ?6,
                  updated_at = ?4
              WHERE task_id = ?1
                AND status = 'running'
@@ -161,7 +167,13 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                 stale_before.to_string(),
                 candidate.reason.error_token(),
                 now_ts(),
-                now
+                now,
+                stale_running_timeout_result_json(
+                    &candidate.task_id,
+                    candidate.result_json.as_deref(),
+                    &candidate.reason,
+                    now,
+                )
             ],
         )?;
     }
@@ -225,7 +237,11 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
             {
                 continue;
             }
-            candidates.push(StaleRunningTaskCandidate { task_id, reason });
+            candidates.push(StaleRunningTaskCandidate {
+                task_id,
+                reason,
+                result_json,
+            });
         }
     }
 
@@ -242,6 +258,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                      WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?3
                      ELSE error_text
                  END,
+                 result_json = ?6,
                  updated_at = ?4
              WHERE task_id = ?1
                AND status = 'running'
@@ -254,7 +271,13 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                 stale_before.to_string(),
                 candidate.reason.error_token(),
                 now_ts(),
-                now
+                now,
+                stale_running_timeout_result_json(
+                    &candidate.task_id,
+                    candidate.result_json.as_deref(),
+                    &candidate.reason,
+                    now,
+                )
             ],
         )?;
     }
@@ -277,4 +300,52 @@ fn parse_recovery_reason(raw: &str) -> StaleRunningRecoveryReason {
     } else {
         StaleRunningRecoveryReason::WorkerHeartbeatStale
     }
+}
+
+fn stale_running_timeout_result_json(
+    task_id: &str,
+    raw_result_json: Option<&str>,
+    reason: &StaleRunningRecoveryReason,
+    recovered_at: i64,
+) -> String {
+    let mut result_json = raw_result_json
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let reason_code = reason.error_token();
+    let event_type = match reason {
+        StaleRunningRecoveryReason::WorkerHeartbeatStale => "heartbeat_missed",
+        StaleRunningRecoveryReason::WorkerLeaseExpired => "lease_reclaimed",
+    };
+    if let Some(obj) = result_json.as_object_mut() {
+        obj.insert("status_code".to_string(), json!(reason_code));
+        obj.insert("reason_code".to_string(), json!(reason_code));
+        obj.insert(
+            "message_key".to_string(),
+            json!("clawd.task.stale_running_recovered"),
+        );
+        obj.insert(
+            "task_lifecycle".to_string(),
+            json!({
+                "schema_version": 1,
+                "state": "failed",
+                "source": "worker_stale_recovery",
+                "terminal_reason": reason_code,
+                "reason_code": reason_code,
+                "recovered_at": recovered_at,
+                "worker_events": [
+                    {
+                        "event_type": event_type,
+                        "owner_layer": "worker_runtime",
+                        "task_id": task_id,
+                        "state_from": "running",
+                        "state_to": "timeout",
+                        "reason_code": reason_code,
+                        "recovered_at": recovered_at
+                    }
+                ]
+            }),
+        );
+    }
+    result_json.to_string()
 }

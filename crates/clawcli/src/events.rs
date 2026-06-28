@@ -117,10 +117,32 @@ fn field_matches(
 }
 
 pub(crate) fn task_event_lines(data: &serde_json::Value) -> Vec<TaskEventLine> {
-    data.pointer("/result_json/task_journal/trace/event_stream")
+    let mut events: Vec<TaskEventLine> = data
+        .pointer("/result_json/task_journal/trace/event_stream")
         .and_then(serde_json::Value::as_array)
         .map(|events| events.iter().filter_map(task_event_line).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if let Some(worker_events) = data
+        .pointer("/result_json/task_lifecycle/worker_events")
+        .and_then(serde_json::Value::as_array)
+    {
+        events.extend(worker_events.iter().filter_map(lifecycle_worker_event_line));
+    }
+    events
+}
+
+fn lifecycle_worker_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
+    let event_type = event
+        .get("event_type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let normalized = serde_json::json!({
+        "event_type": event_type,
+        "owner_layer": "task_lifecycle",
+        "payload": event,
+    });
+    task_event_line(&normalized)
 }
 
 fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
@@ -139,6 +161,9 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
     for key in [
         "status",
         "state",
+        "task_id",
+        "state_from",
+        "state_to",
         "error_kind",
         "failure_attribution",
         "owner_layer",
@@ -180,6 +205,8 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "prompt_bytes_budget_min",
         "prompt_bytes_after_max",
         "prompt_truncated_bytes_total",
+        "at_ms",
+        "round_no",
         "checkpoint_id",
         "poll_ref",
         "async_job_id",
@@ -187,6 +214,10 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "provider_job_id",
         "final_status",
         "final_stop_signal",
+        "recovered_at",
+        "worker_id",
+        "lease_owner",
+        "lease_expires_at",
     ] {
         push_scalar_token(
             &mut parts,

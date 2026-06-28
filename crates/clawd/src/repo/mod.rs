@@ -30,7 +30,8 @@ pub(crate) use submit::{
 };
 pub(crate) use task_admin::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    get_task_admin_target, pause_task_by_id, resume_task_by_id, TaskAdminTarget,
+    get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskAdminTarget,
+    TaskResumeControlInput,
 };
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{

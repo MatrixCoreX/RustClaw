@@ -1,11 +1,13 @@
 use serde_json::json;
 
+use claw_core::types::TaskExecutionState;
+
 use super::{
     checkpoint_resume_directive, paused_checkpoint_recovery_status,
-    paused_checkpoint_resume_readiness, task_query_lifecycle_projection, AsyncJobRef,
-    AsyncJobStatus, CheckpointBudgetCounters, CheckpointResumeDirective,
-    PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness, ResumeEntrypoint,
-    ResumeTrigger, TaskCheckpoint, TerminalFailureReason,
+    paused_checkpoint_resume_readiness, task_execution_state_from_lifecycle,
+    task_query_lifecycle_projection, AsyncJobRef, AsyncJobStatus, CheckpointBudgetCounters,
+    CheckpointResumeDirective, PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness,
+    ResumeEntrypoint, ResumeTrigger, TaskCheckpoint, TerminalFailureReason,
 };
 
 #[test]
@@ -681,11 +683,18 @@ fn task_query_lifecycle_projects_db_status_when_progress_has_no_lifecycle() {
 
     assert_eq!(lifecycle["schema_version"], 1);
     assert_eq!(lifecycle["state"], "running");
+    assert_eq!(lifecycle["execution_state"], "running");
+    assert_eq!(
+        task_execution_state_from_lifecycle(&lifecycle),
+        TaskExecutionState::Running
+    );
     assert_eq!(lifecycle["db_status"], "running");
     assert_eq!(lifecycle["source"], "db_status_projection");
+    assert_eq!(lifecycle["reason_code"], "running");
     assert_eq!(lifecycle["can_poll"], true);
     assert_eq!(lifecycle["can_cancel"], true);
     assert_eq!(lifecycle["last_heartbeat_ts"], 1234);
+    assert_eq!(lifecycle["heartbeat_at"], 1234);
 }
 
 #[test]
@@ -704,9 +713,11 @@ fn task_query_lifecycle_preserves_checkpoint_waiting_fields() {
     let lifecycle = task_query_lifecycle_projection("running", Some(&result), Some(1234));
 
     assert_eq!(lifecycle["state"], "waiting");
+    assert_eq!(lifecycle["execution_state"], "waiting");
     assert_eq!(lifecycle["db_status"], "running");
     assert_eq!(lifecycle["state_source"], "task_lifecycle_payload");
     assert_eq!(lifecycle["resume_reason"], "provider_gap_retry_window");
+    assert_eq!(lifecycle["reason_code"], "provider_gap_retry_window");
     assert_eq!(lifecycle["next_check_after"], 1781800300);
     assert_eq!(lifecycle["checkpoint_id"], "ckpt-1");
     assert_eq!(lifecycle["pending_job_ref"], "job-1");
@@ -791,9 +802,11 @@ fn task_query_lifecycle_maps_timeout_to_failed_machine_state() {
     let lifecycle = task_query_lifecycle_projection("timeout", None, None);
 
     assert_eq!(lifecycle["state"], "failed");
+    assert_eq!(lifecycle["execution_state"], "failed");
     assert_eq!(lifecycle["db_status"], "timeout");
     assert_eq!(lifecycle["state_source"], "db_status_projection");
     assert_eq!(lifecycle["terminal_reason"], "worker_task_timeout");
+    assert_eq!(lifecycle["reason_code"], "worker_task_timeout");
     assert_eq!(lifecycle["next_action_kind"], "inspect_result");
     assert_eq!(lifecycle["next_action_ref"], "timeout");
     assert_eq!(lifecycle["can_cancel"], false);
@@ -803,6 +816,7 @@ fn task_query_lifecycle_maps_timeout_to_failed_machine_state() {
 fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
     let queued = task_query_lifecycle_projection("queued", None, None);
     assert_eq!(queued["state"], "queued");
+    assert_eq!(queued["execution_state"], "queued");
     assert_eq!(queued["can_poll"], true);
     assert_eq!(queued["can_cancel"], true);
     assert_eq!(queued["next_action_kind"], "poll_task");
@@ -820,7 +834,9 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
         Some(321),
     );
     assert_eq!(needs_user["state"], "needs_user");
+    assert_eq!(needs_user["execution_state"], "needs_confirmation");
     assert_eq!(needs_user["db_status"], "running");
+    assert_eq!(needs_user["heartbeat_at"], 321);
     assert_eq!(needs_user["can_poll"], true);
     assert_eq!(needs_user["can_cancel"], true);
     assert_eq!(needs_user["next_action_kind"], "await_user_input");
@@ -829,11 +845,13 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
 
     let succeeded = task_query_lifecycle_projection("succeeded", None, None);
     assert_eq!(succeeded["state"], "succeeded");
+    assert_eq!(succeeded["execution_state"], "completed");
     assert_eq!(succeeded["can_poll"], true);
     assert_eq!(succeeded["can_cancel"], false);
 
     let cancelled = task_query_lifecycle_projection("canceled", None, None);
     assert_eq!(cancelled["state"], "cancelled");
+    assert_eq!(cancelled["execution_state"], "cancelled");
     assert_eq!(cancelled["can_poll"], true);
     assert_eq!(cancelled["can_cancel"], false);
 }

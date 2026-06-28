@@ -169,13 +169,14 @@ fn startup_recovery_times_out_only_stale_running_tasks() {
     .into_iter()
     .map(|task_id| {
         db.query_row(
-            "SELECT status, error_text FROM tasks WHERE task_id = ?1",
+            "SELECT status, error_text, result_json FROM tasks WHERE task_id = ?1",
             rusqlite::params![task_id],
             |row| {
                 Ok((
                     task_id,
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
                 ))
             },
         )
@@ -185,6 +186,29 @@ fn startup_recovery_times_out_only_stale_running_tasks() {
 
     assert_eq!(rows[0].1, "timeout");
     assert_eq!(rows[0].2.as_deref(), Some("worker_heartbeat_stale"));
+    let result_json: serde_json::Value =
+        serde_json::from_str(rows[0].3.as_deref().expect("result_json")).expect("parse result");
+    assert_eq!(result_json["reason_code"], "worker_heartbeat_stale");
+    assert_eq!(
+        result_json["message_key"],
+        "clawd.task.stale_running_recovered"
+    );
+    assert_eq!(
+        result_json["task_lifecycle"]["terminal_reason"],
+        "worker_heartbeat_stale"
+    );
+    assert_eq!(
+        result_json["task_lifecycle"]["source"],
+        "worker_stale_recovery"
+    );
+    assert_eq!(
+        result_json["task_lifecycle"]["worker_events"][0]["event_type"],
+        "heartbeat_missed"
+    );
+    assert_eq!(
+        result_json["task_lifecycle"]["worker_events"][0]["task_id"],
+        "running-old"
+    );
     assert_eq!(rows[1].1, "running");
     assert_eq!(rows[2].1, "queued");
     assert_eq!(rows[3].1, "succeeded");
@@ -213,15 +237,26 @@ fn startup_recovery_times_out_expired_worker_lease() {
         super::recover_stale_running_tasks_on_startup(&db, 60).expect("recover stale running");
 
     assert_eq!(recovered, vec!["lease-expired".to_string()]);
-    let (status, error_text): (String, Option<String>) = db
+    let (status, error_text, raw_result): (String, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT status, error_text FROM tasks WHERE task_id = ?1",
+            "SELECT status, error_text, result_json FROM tasks WHERE task_id = ?1",
             rusqlite::params!["lease-expired"],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("query task");
     assert_eq!(status, "timeout");
     assert_eq!(error_text.as_deref(), Some("worker_lease_expired"));
+    let result_json: serde_json::Value =
+        serde_json::from_str(raw_result.as_deref().expect("result_json")).expect("parse result");
+    assert_eq!(result_json["reason_code"], "worker_lease_expired");
+    assert_eq!(
+        result_json["task_lifecycle"]["terminal_reason"],
+        "worker_lease_expired"
+    );
+    assert_eq!(
+        result_json["task_lifecycle"]["worker_events"][0]["event_type"],
+        "lease_reclaimed"
+    );
 }
 
 #[test]
@@ -382,17 +417,30 @@ async fn runtime_recovery_tick_materializes_due_checkpoint_without_nl_fields() {
         .expect("runtime recovery tick");
 
     let db = state.core.db.get().expect("get db");
-    let (stale_status, stale_error): (String, Option<String>) = db
+    let (stale_status, stale_error, stale_result): (String, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-stale'",
+            "SELECT status, error_text, result_json FROM tasks WHERE task_id = 'runtime-stale'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("query runtime stale task");
     assert_eq!(stale_status, "timeout");
     assert!(stale_error
         .as_deref()
         .is_some_and(|text| !text.trim().is_empty()));
+    let stale_result: serde_json::Value =
+        serde_json::from_str(stale_result.as_deref().expect("result_json")).expect("parse result");
+    assert_eq!(stale_result["reason_code"], "worker_heartbeat_stale");
+    assert_eq!(
+        stale_result["task_lifecycle"]["terminal_reason"],
+        "worker_heartbeat_stale"
+    );
+    assert_eq!(
+        stale_result["task_lifecycle"]["worker_events"][0]["event_type"],
+        "heartbeat_missed"
+    );
+    assert!(stale_result.get("text").is_none());
+    assert!(stale_result.get("error_text").is_none());
 
     let (status, raw_result): (String, String) = db
         .query_row(
@@ -483,17 +531,27 @@ async fn runtime_recovery_skips_current_worker_expired_lease() {
             |row| row.get(0),
         )
         .expect("query current worker task");
-    let (old_status, old_error): (String, Option<String>) = db
+    let (old_status, old_error, old_result): (String, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-old-worker-expired'",
+            "SELECT status, error_text, result_json FROM tasks WHERE task_id = 'runtime-old-worker-expired'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("query old worker task");
 
     assert_eq!(current_status, "running");
     assert_eq!(old_status, "timeout");
     assert_eq!(old_error.as_deref(), Some("worker_lease_expired"));
+    let old_result: serde_json::Value =
+        serde_json::from_str(old_result.as_deref().expect("result_json")).expect("parse result");
+    assert_eq!(
+        old_result["task_lifecycle"]["terminal_reason"],
+        "worker_lease_expired"
+    );
+    assert_eq!(
+        old_result["task_lifecycle"]["worker_events"][0]["event_type"],
+        "lease_reclaimed"
+    );
     state
         .worker
         .unregister_active_task("runtime-current-worker-expired");
@@ -529,16 +587,22 @@ async fn runtime_recovery_times_out_current_worker_expired_lease_after_active_re
         .expect("runtime recovery tick");
 
     let db = state.core.db.get().expect("get db");
-    let (status, error): (String, Option<String>) = db
+    let (status, error, raw_result): (String, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-current-worker-released-expired'",
+            "SELECT status, error_text, result_json FROM tasks WHERE task_id = 'runtime-current-worker-released-expired'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("query released current worker task");
 
     assert_eq!(status, "timeout");
     assert_eq!(error.as_deref(), Some("worker_lease_expired"));
+    let result_json: serde_json::Value =
+        serde_json::from_str(raw_result.as_deref().expect("result_json")).expect("parse result");
+    assert_eq!(
+        result_json["task_lifecycle"]["terminal_reason"],
+        "worker_lease_expired"
+    );
 }
 
 #[tokio::test]

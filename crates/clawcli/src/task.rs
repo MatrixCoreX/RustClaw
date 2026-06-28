@@ -15,8 +15,8 @@ pub(crate) struct TaskStatusView {
 
 impl TaskStatusView {
     pub(crate) fn is_terminal(&self) -> bool {
-        if let Some(state) = self.lifecycle_state() {
-            if matches!(state, "succeeded" | "failed" | "cancelled") {
+        if let Some(state) = self.execution_state() {
+            if matches!(state, "completed" | "failed" | "cancelled") {
                 return true;
             }
         }
@@ -27,8 +27,8 @@ impl TaskStatusView {
     }
 
     pub(crate) fn is_background_waiting(&self) -> bool {
-        self.lifecycle_state()
-            .is_some_and(|state| matches!(state, "waiting" | "background" | "needs_user"))
+        self.execution_state()
+            .is_some_and(|state| matches!(state, "waiting" | "background" | "needs_confirmation"))
     }
 
     pub(crate) fn lifecycle(&self) -> Option<&Value> {
@@ -43,6 +43,18 @@ impl TaskStatusView {
             .filter(|value| !value.is_empty())
     }
 
+    pub(crate) fn execution_state(&self) -> Option<&str> {
+        self.raw_data
+            .get("execution_state")
+            .or_else(|| {
+                self.lifecycle()
+                    .and_then(|lifecycle| lifecycle.get("execution_state"))
+            })
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
     pub(crate) fn lifecycle_summary_tokens(&self) -> Vec<String> {
         let Some(lifecycle) = self.lifecycle() else {
             return Vec::new();
@@ -50,6 +62,7 @@ impl TaskStatusView {
         let mut tokens = Vec::new();
         for key in [
             "state",
+            "execution_state",
             "db_status",
             "state_source",
             "can_poll",
@@ -58,13 +71,16 @@ impl TaskStatusView {
             "resume_due",
             "resume_wait_seconds",
             "last_heartbeat_ts",
+            "heartbeat_at",
             "lease_owner",
             "lease_expires_at",
             "claim_attempt",
+            "attempt_id",
             "claimed_at",
             "resume_entrypoint",
             "resume_reason",
             "waiting_reason_code",
+            "reason_code",
             "next_action_kind",
             "next_action_ref",
             "poll_ref",
@@ -280,13 +296,32 @@ pub(crate) fn resume_task_by_id(
     base_url: &str,
     key: &str,
     task_id: &str,
+    checkpoint_id: Option<&str>,
+    resume_reason: Option<&str>,
+    user_message: Option<&str>,
+    new_constraints: Option<serde_json::Value>,
 ) -> Result<serde_json::Value> {
+    let mut payload = json!({ "task_id": task_id });
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(checkpoint_id) = non_empty_token(checkpoint_id) {
+            obj.insert("checkpoint_id".to_string(), json!(checkpoint_id));
+        }
+        if let Some(resume_reason) = non_empty_token(resume_reason) {
+            obj.insert("resume_reason".to_string(), json!(resume_reason));
+        }
+        if let Some(user_message) = non_empty_token(user_message) {
+            obj.insert("user_message".to_string(), json!(user_message));
+        }
+        if let Some(new_constraints) = new_constraints {
+            obj.insert("new_constraints".to_string(), new_constraints);
+        }
+    }
     task_control_by_id(
         base_url,
         key,
         "/tasks/resume-by-task-id",
         "resume-task",
-        json!({ "task_id": task_id }),
+        payload,
     )
 }
 
@@ -306,6 +341,10 @@ pub(crate) fn pause_task_by_id(
             "pause_seconds": pause_seconds,
         }),
     )
+}
+
+fn non_empty_token(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 fn task_control_by_id(
