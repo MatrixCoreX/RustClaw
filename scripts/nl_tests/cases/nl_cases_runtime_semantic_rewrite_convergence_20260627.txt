@@ -45,7 +45,7 @@ runtime_semantic_rewrite_convergence|answer_verifier_contract_dry_run_zh|covers:
 
 runtime_semantic_rewrite_convergence|observed_output_projection_dry_run_en|covers:observed_output,evidence_projection,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|Dry run only: return the generic observed-output evidence families runtime may project. Include scalar, list, path, JSON field, status, and artifact_refs as machine tokens.|expect=artifact_refs
 
-runtime_semantic_rewrite_convergence|route_delta_metric_doc_zh|covers:route_delta,metrics,semantic_rewrite_count;requires_tool_call=true;local_readonly|用 read_range 分别读取 /home/guagua/rustclaw/scripts/summarize_agent_decides_route_delta.py 第 95 到 96 行和第 931 到 933 行，只回答机器摘要：field1=runtime_decision_source_counts field2=runtime_semantic_control_state_counts。|expect=contains:field1=runtime_decision_source_counts;contains:field2=runtime_semantic_control_state_counts
+runtime_semantic_rewrite_convergence|route_delta_metric_doc_zh|covers:route_delta,metrics,semantic_rewrite_count;requires_tool_call=true;local_readonly|用 read_range 分别读取 /home/guagua/rustclaw/scripts/summarize_agent_decides_route_delta.py 第 95 到 97 行和第 944 到 946 行，只回答机器摘要：field1=runtime_decision_source_counts field2=runtime_semantic_control_state_counts。|expect=contains:field1=runtime_decision_source_counts;contains:field2=runtime_semantic_control_state_counts
 
 runtime_semantic_rewrite_convergence|semantic_rewrite_inventory_doc_en|covers:inventory,semantic_rewrite,docs;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/docs/runtime_semantic_rewrite_inventory.md line 22. Answer exactly as machine summary: owner=semantic_rewrite status=Migration.|expect=contains:owner=semantic_rewrite;contains:status=Migration
 
@@ -67,6 +67,6 @@ runtime_semantic_rewrite_convergence|long_file_guard_rule_en|covers:long_file_gu
 
 runtime_semantic_rewrite_convergence|media_skill_dry_run_boundary_zh|covers:media,video,music,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|只做 dry-run，不生成图片、语音、视频或音乐：说明媒体类长尾 skill 应如何返回 pending_async_job 和 adapter_kind=media_job_poll。|expect=media_job_poll
 
-runtime_semantic_rewrite_convergence|provider_blocker_attribution_en|covers:provider_blocker,external_blocker,no_code_failure;requires_tool_call=false;dry_run|Dry run only: if provider quota is unavailable, return the machine attribution token that should classify the test as external blocker rather than route/code failure. Include provider_blocker.|expect=provider_blocker
+runtime_semantic_rewrite_convergence|provider_blocker_attribution_en|covers:provider_blocker,external_blocker,no_code_failure;requires_tool_call=false;local_readonly|Deterministic machine-token rendering check. Do not call tools. Do not simulate async jobs. Return exactly one line: attribution=provider_blocker failure_class=external_blocker code=provider_blocker|expect=provider_blocker
 
 runtime_semantic_rewrite_convergence|finalizer_language_policy_zh|covers:finalizer,i18n,no_hard_reply,multilingual;requires_tool_call=false;dry_run|只做 dry-run：说明最终自然语言应该由 finalizer/LLM/i18n 按用户语言生成，runtime 只能输出 message_key 或结构化 evidence。回答必须包含 message_key。|expect=message_key
