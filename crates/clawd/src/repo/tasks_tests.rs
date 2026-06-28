@@ -179,6 +179,51 @@ fn update_task_failure_records_structured_worker_reason() {
     assert_eq!(lifecycle["terminal_reason"], "worker_runtime_error");
 }
 
+#[test]
+fn update_task_failure_preserves_structured_terminal_reason() {
+    for (error_kind, expected_reason, expected_attribution) in [
+        (
+            "provider_unavailable",
+            "provider_window_exhausted",
+            "provider_error",
+        ),
+        (
+            "confirmation_timeout",
+            "confirmation_timeout",
+            "confirmation_wait",
+        ),
+        (
+            "timeout",
+            "tool_timeout_without_async_resume",
+            "tool_timeout",
+        ),
+    ] {
+        let state = state_with_tasks_table();
+        let task_id = Uuid::new_v4();
+        insert_task(&state, &task_id.to_string(), "running", None, 1234);
+        let err = crate::skills::structured_skill_error_from_parts(
+            "agent_loop",
+            error_kind,
+            error_kind,
+            None,
+            Some(json!({"error_code": error_kind})),
+        );
+
+        update_task_failure(&state, &task_id.to_string(), &err).expect("update failure");
+
+        assert_eq!(stored_status(&state, &task_id.to_string()), "failed");
+        let result = stored_result_json(&state, &task_id.to_string());
+        assert_eq!(result["status_code"], "worker_task_failed");
+        assert_eq!(result["reason_code"], expected_reason);
+        assert_eq!(result["failure_attribution"], expected_attribution);
+        assert_eq!(result["task_lifecycle"]["terminal_reason"], expected_reason);
+        assert_eq!(
+            result["task_lifecycle"]["failure_attribution"],
+            expected_attribution
+        );
+    }
+}
+
 fn task_row_count(state: &crate::AppState, task_id: &str) -> i64 {
     let db = state.core.db.get().expect("get db");
     db.query_row(
