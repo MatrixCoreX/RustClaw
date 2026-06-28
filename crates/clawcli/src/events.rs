@@ -223,6 +223,7 @@ fn task_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {
         "checkpoint_id",
         "checkpoint_ref",
         "completed_side_effect_count",
+        "requires_idempotency_guard",
         "poll_ref",
         "cancel_ref",
         "message_key",

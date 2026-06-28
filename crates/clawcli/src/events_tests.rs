@@ -190,6 +190,7 @@ fn event_lines_include_checkpoint_machine_fields_and_async_filter() {
                                 "evidence_ref": "task_checkpoint:ckpt-1",
                                 "resume_entrypoint": "poll_async_job",
                                 "completed_side_effect_count": 1,
+                                "requires_idempotency_guard": true,
                                 "pending_async_job_id": "job-1",
                                 "poll_ref": "local_process:123",
                                 "cancel_ref": "local_process:123",
@@ -216,6 +217,13 @@ fn event_lines_include_checkpoint_machine_fields_and_async_filter() {
             .get("pending_async_job_id")
             .map(String::as_str),
         Some("job-1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("requires_idempotency_guard")
+            .map(String::as_str),
+        Some("true")
     );
     assert!(events[0].line.contains("message_key=async_job_running"));
 

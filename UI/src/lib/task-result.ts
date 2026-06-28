@@ -196,6 +196,7 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "checkpoint_id",
     "checkpoint_ref",
     "completed_side_effect_count",
+    "requires_idempotency_guard",
     "poll_ref",
     "cancel_ref",
     "message_key",
