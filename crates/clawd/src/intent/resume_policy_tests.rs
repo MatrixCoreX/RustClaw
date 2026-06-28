@@ -5,6 +5,18 @@ use super::{
     ResumeContextBinding, ResumeContextSource,
 };
 
+fn turn_analysis(
+    target_task_policy: Option<crate::intent_router::TargetTaskPolicy>,
+) -> crate::intent_router::TurnAnalysis {
+    crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    }
+}
+
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
         task_id: "resume-task".to_string(),
@@ -118,7 +130,49 @@ fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
         failed_ts: Some(7),
         has_newer_successful_ask_after_failed_task: false,
     };
-    assert!(select_resume_runtime_binding(&route, Some(&binding)).is_none());
+    assert!(select_resume_runtime_binding(&route, Some(&binding), None).is_none());
+}
+
+#[test]
+fn ambient_resume_binding_is_blocked_for_standalone_turns() {
+    let route = route_with_resume_behavior(crate::ResumeBehavior::ResumeExecute);
+    let binding = ResumeContextBinding {
+        source: ResumeContextSource::ActiveCheckpointCandidate,
+        resume_context: json!({"source":"active_checkpoint_resume"}),
+        failed_ts: None,
+        has_newer_successful_ask_after_failed_task: false,
+    };
+    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::Standalone));
+
+    assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_none());
+}
+
+#[test]
+fn explicit_continue_binding_is_not_blocked_by_standalone_turn_policy() {
+    let route = route_with_resume_behavior(crate::ResumeBehavior::ResumeExecute);
+    let binding = ResumeContextBinding {
+        source: ResumeContextSource::ExplicitContinue,
+        resume_context: json!({"resume_context_id":"ctx-explicit"}),
+        failed_ts: None,
+        has_newer_successful_ask_after_failed_task: false,
+    };
+    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::Standalone));
+
+    assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_some());
+}
+
+#[test]
+fn ambient_resume_binding_is_allowed_for_reuse_active_turns() {
+    let route = route_with_resume_behavior(crate::ResumeBehavior::ResumeDiscuss);
+    let binding = ResumeContextBinding {
+        source: ResumeContextSource::RecentFailedCandidate,
+        resume_context: json!({"resume_context_id":"ctx-reuse"}),
+        failed_ts: Some(7),
+        has_newer_successful_ask_after_failed_task: false,
+    };
+    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::ReuseActive));
+
+    assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_some());
 }
 
 #[test]

@@ -94,6 +94,15 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             }],
         ));
     }
+    if let Some(intent) = task_control_lifecycle_dry_run_intent(&route_tokens) {
+        let actions = task_control_lifecycle_dry_run_actions(intent);
+        return Some(build_plan_result(
+            goal,
+            "deterministic:task_control_lifecycle_dry_run_contract",
+            PlanKind::Single,
+            &actions,
+        ));
+    }
     if observed_output_projection_dry_run_tokens_present(&route_tokens) {
         return Some(build_plan_result(
             goal,
@@ -271,4 +280,132 @@ fn has_dry_run_machine_token(normalized: &str) -> bool {
     normalized.contains("dry_run")
         || normalized.contains("dry-run")
         || normalized.contains("would_mutate=false")
+}
+
+#[derive(Clone)]
+struct TaskControlLifecycleDryRunIntent {
+    include_resume: bool,
+    include_pause: bool,
+    task_id: Option<String>,
+    checkpoint_id: Option<String>,
+    pause_seconds: Option<u64>,
+}
+
+fn task_control_lifecycle_dry_run_intent(text: &str) -> Option<TaskControlLifecycleDryRunIntent> {
+    let normalized = text.to_ascii_lowercase();
+    if !normalized.contains("task_control") || !has_dry_run_machine_token(&normalized) {
+        return None;
+    }
+    let include_resume =
+        normalized.contains("task_control.resume") || normalized.contains("action=resume");
+    let include_pause =
+        normalized.contains("task_control.pause") || normalized.contains("action=pause");
+    if !include_resume && !include_pause {
+        return None;
+    }
+    Some(TaskControlLifecycleDryRunIntent {
+        include_resume,
+        include_pause,
+        task_id: machine_assignment_value(text, "task_id"),
+        checkpoint_id: machine_assignment_value(text, "checkpoint_id"),
+        pause_seconds: machine_assignment_value(text, "pause_seconds")
+            .and_then(|value| value.parse::<u64>().ok()),
+    })
+}
+
+fn task_control_lifecycle_dry_run_actions(
+    intent: TaskControlLifecycleDryRunIntent,
+) -> Vec<AgentAction> {
+    let mut actions = Vec::new();
+    if intent.include_resume {
+        actions.push(AgentAction::CallSkill {
+            skill: "task_control".to_string(),
+            args: task_control_lifecycle_dry_run_skill_args("resume", &intent),
+        });
+    }
+    if intent.include_pause {
+        actions.push(AgentAction::CallSkill {
+            skill: "task_control".to_string(),
+            args: task_control_lifecycle_dry_run_skill_args("pause", &intent),
+        });
+    }
+    actions.push(AgentAction::Respond {
+        content: task_control_lifecycle_dry_run_summary(&intent),
+    });
+    actions
+}
+
+fn task_control_lifecycle_dry_run_skill_args(
+    action: &str,
+    intent: &TaskControlLifecycleDryRunIntent,
+) -> Value {
+    let mut args = serde_json::Map::new();
+    args.insert("action".to_string(), Value::String(action.to_string()));
+    args.insert("dry_run".to_string(), Value::Bool(true));
+    if let Some(task_id) = intent.task_id.as_deref() {
+        args.insert("task_id".to_string(), Value::String(task_id.to_string()));
+    }
+    if action == "resume" {
+        if let Some(checkpoint_id) = intent.checkpoint_id.as_deref() {
+            args.insert(
+                "checkpoint_id".to_string(),
+                Value::String(checkpoint_id.to_string()),
+            );
+        }
+    }
+    if action == "pause" {
+        if let Some(pause_seconds) = intent.pause_seconds {
+            args.insert(
+                "pause_seconds".to_string(),
+                Value::Number(serde_json::Number::from(pause_seconds)),
+            );
+        }
+    }
+    Value::Object(args)
+}
+
+fn task_control_lifecycle_dry_run_summary(intent: &TaskControlLifecycleDryRunIntent) -> String {
+    let mut summary_tokens = Vec::new();
+    if intent.include_resume {
+        summary_tokens.push("task_control.resume.dry_run".to_string());
+    }
+    if intent.include_pause {
+        summary_tokens.push("task_control.pause.dry_run".to_string());
+    }
+    if let Some(checkpoint_id) = intent.checkpoint_id.as_deref() {
+        summary_tokens.push(format!("checkpoint_id={checkpoint_id}"));
+    }
+    if let Some(task_id) = intent.task_id.as_deref() {
+        summary_tokens.push(format!("task_id={task_id}"));
+    }
+    if let Some(pause_seconds) = intent.pause_seconds {
+        summary_tokens.push(format!("pause_seconds={pause_seconds}"));
+    }
+    summary_tokens.push("would_mutate=false".to_string());
+    summary_tokens.join(" ")
+}
+
+fn machine_assignment_value(text: &str, key: &str) -> Option<String> {
+    let normalized = text.to_ascii_lowercase();
+    for marker in [
+        format!("{key}="),
+        format!("{key}:"),
+        format!("\"{key}\":\""),
+        format!("\"{key}\": \""),
+    ] {
+        let Some(start) = normalized.find(&marker).map(|idx| idx + marker.len()) else {
+            continue;
+        };
+        let value: String = text[start..]
+            .chars()
+            .skip_while(|ch| ch.is_ascii_whitespace())
+            .take_while(|ch| {
+                ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_' | '.' | '/' | ':' | '@')
+            })
+            .collect();
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+    None
 }

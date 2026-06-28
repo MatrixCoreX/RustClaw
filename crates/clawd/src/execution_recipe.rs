@@ -747,6 +747,9 @@ pub(crate) fn classify_skill_action_effect(
     if package_manager_dry_run_install_action(&normalized_skill, args) {
         return ActionEffect::observe();
     }
+    if task_control_lifecycle_dry_run_action(&normalized_skill, args) {
+        return ActionEffect::observe();
+    }
     if let Some(effect) = args
         .get("action")
         .and_then(|value| value.as_str())
@@ -883,6 +886,17 @@ fn package_manager_dry_run_install_action(normalized_skill: &str, args: &Value) 
     }
     let action = normalized_action_arg(args);
     contains_any(&action, &["install", "uninstall", "smart_install"])
+}
+
+fn task_control_lifecycle_dry_run_action(normalized_skill: &str, args: &Value) -> bool {
+    if normalized_skill != "task_control" {
+        return false;
+    }
+    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let action = normalized_action_arg(args);
+    contains_any(&action, &["resume", "pause"])
 }
 
 fn service_state_is_healthy(state: &str) -> bool {

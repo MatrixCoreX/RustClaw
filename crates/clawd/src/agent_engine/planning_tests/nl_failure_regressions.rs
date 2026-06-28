@@ -35,6 +35,58 @@ fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
 }
 
 #[test]
+fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projection() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "capability_ref=task_control.resume capability_ref=task_control.pause dry_run=true"
+            .to_string();
+    route.resolved_intent = concat!(
+        "task_control.resume task_control.pause ",
+        "task_id=00000000-0000-4000-8000-000000000010 ",
+        "checkpoint_id=ckpt-1 pause_seconds=120 would_mutate=false"
+    )
+    .to_string();
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "task-control lifecycle dry-run contract",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .expect("task_control lifecycle dry-run contract should return structured response");
+
+    assert_eq!(plan.steps.len(), 3);
+    let action = plan.steps[0].to_agent_action().expect("resume action");
+    let AgentAction::CallSkill { skill, args } = action else {
+        panic!("unexpected action: {action:?}");
+    };
+    assert_eq!(skill, "task_control");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("resume"));
+    assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        args.get("checkpoint_id").and_then(Value::as_str),
+        Some("ckpt-1")
+    );
+
+    let action = plan.steps[1].to_agent_action().expect("pause action");
+    let AgentAction::CallSkill { skill, args } = action else {
+        panic!("unexpected action: {action:?}");
+    };
+    assert_eq!(skill, "task_control");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("pause"));
+    assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("pause_seconds").and_then(Value::as_u64), Some(120));
+
+    let action = plan.steps[2].to_agent_action().expect("respond action");
+    let AgentAction::Respond { content } = action else {
+        panic!("unexpected action: {action:?}");
+    };
+    assert!(content.contains("task_control.resume.dry_run"));
+    assert!(content.contains("task_control.pause.dry_run"));
+    assert!(content.contains("checkpoint_id=ckpt-1"));
+    assert!(content.contains("would_mutate=false"));
+}
+
+#[test]
 fn config_risk_preview_uses_git_plan_change_and_guard_observations() {
     let state = test_state_with_enabled_skills(&["git_basic", "config_edit", "config_basic"]);
     let mut route = base_route_result();

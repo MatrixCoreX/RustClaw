@@ -1433,6 +1433,7 @@ pub(super) async fn prepare_ask_routing(
     let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
         &route_result,
         resume_binding.as_ref(),
+        turn_analysis.as_ref(),
     );
     info!(
         "worker_once: ask raw_message task_id={} user_id={} chat_id={} text={}",

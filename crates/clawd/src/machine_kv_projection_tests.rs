@@ -69,6 +69,24 @@ fn machine_summary_accepts_nested_machine_token_value() {
 }
 
 #[test]
+fn machine_summary_preserves_dotted_markers_and_embedded_pairs() {
+    let observed = vec![
+        "task_control.resume.dry_run task_control.pause.dry_run checkpoint_id=ckpt-1 task_id=00000000-0000-4000-8000-000000000010 pause_seconds=120 would_mutate=false"
+            .to_string(),
+    ];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Preview task_control.resume(checkpoint_id=ckpt-1) and task_control.pause(pause_seconds=120). Final must contain task_control.resume.dry_run task_control.pause.dry_run and checkpoint_id. task_id=00000000-0000-4000-8000-000000000010",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("task_control.resume.dry_run task_control.pause.dry_run task_id=00000000-0000-4000-8000-000000000010 checkpoint_id=ckpt-1 pause_seconds=120")
+    );
+}
+
+#[test]
 fn single_inline_flag_pair_still_requires_observed_value() {
     let observed = vec!["This line does not contain the requested flag.".to_string()];
 
