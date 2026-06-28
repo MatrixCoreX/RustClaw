@@ -408,6 +408,69 @@ fn event_lines_include_coding_checkpoint_machine_fields() {
 }
 
 #[test]
+fn event_lines_include_coding_task_contract_machine_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 7,
+                            "event_type": "coding_task_contract",
+                            "payload": {
+                                "schema_version": 1,
+                                "contract_ref": "coding_task_contract:summary",
+                                "files_read_count": 1,
+                                "files_changed_count": 1,
+                                "commands_run_count": 2,
+                                "tests_run_count": 1,
+                                "verification_command_count": 2,
+                                "verification_status": "verified",
+                                "retry_count": 1
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "coding_task_contract");
+    assert_eq!(
+        events[0].fields.get("contract_ref").map(String::as_str),
+        Some("coding_task_contract:summary")
+    );
+    assert_eq!(
+        events[0].fields.get("files_read_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("files_changed_count")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("commands_run_count")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        events[0].fields.get("tests_run_count").map(String::as_str),
+        Some("1")
+    );
+    assert!(events[0]
+        .line
+        .contains("contract_ref=coding_task_contract:summary"));
+}
+
+#[test]
 fn event_filters_reject_mismatched_machine_fields() {
     let event = TaskEventLine {
         event_type: "checkpoint".to_string(),

@@ -193,6 +193,7 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "started_at",
     "finished_at",
     "round_no",
+    "contract_ref",
     "checkpoint_id",
     "checkpoint_kind",
     "checkpoint_ref",
@@ -205,6 +206,10 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "pending_async_job_id",
     "job_id",
     "provider_job_id",
+    "files_read_count",
+    "files_changed_count",
+    "commands_run_count",
+    "tests_run_count",
     "changed_file_count",
     "command_count",
     "command_index",
@@ -264,7 +269,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       ? "failed"
       : unverifiedRisk
         ? "attention"
-        : eventType === "tool_finished" || eventType === "coding_evidence" || eventType === "coding_checkpoint"
+        : eventType === "tool_finished" || eventType === "coding_evidence" || eventType === "coding_checkpoint" || eventType === "coding_task_contract"
           ? "ok"
           : "running";
 
@@ -331,6 +336,23 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       detail: tLocal(
         `变更文件 ${changed} 个，验证命令 ${verificationCommands} 条，测试记录 ${tests} 条。`,
         `${changed} changed file(s), ${verificationCommands} verification command(s), ${tests} test record(s).`,
+      ),
+      tone,
+      meta,
+    };
+  }
+
+  if (eventType === "coding_task_contract") {
+    const read = field("files_read_count") || "0";
+    const changed = field("files_changed_count") || field("changed_file_count") || "0";
+    const commands = field("commands_run_count") || field("command_count") || "0";
+    const tests = field("tests_run_count") || field("test_count") || "0";
+    return {
+      eventType,
+      title: tLocal("代码任务契约", "Coding task contract"),
+      detail: tLocal(
+        `读取文件 ${read} 个，变更文件 ${changed} 个，命令 ${commands} 条，测试 ${tests} 条。`,
+        `${read} file(s) read, ${changed} changed file(s), ${commands} command(s), ${tests} test record(s).`,
       ),
       tone,
       meta,

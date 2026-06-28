@@ -399,6 +399,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         "run_cmd",
         json!({
             "extra": {
+                "files_read": ["src/main.rs"],
                 "changed_files": ["src/lib.rs"],
                 "final_diff_summary": {
                     "summary_code": "patched"
@@ -474,6 +475,52 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         Some("test")
     );
 
+    let contract_event = trace
+        .pointer("/event_stream")
+        .and_then(Value::as_array)
+        .and_then(|events| {
+            events.iter().find(|event| {
+                event.get("event_type").and_then(Value::as_str) == Some("coding_task_contract")
+            })
+        })
+        .expect("coding_task_contract event");
+    assert_eq!(
+        contract_event
+            .pointer("/payload/contract_ref")
+            .and_then(Value::as_str),
+        Some("coding_task_contract:summary")
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/files_read/0")
+            .and_then(Value::as_str),
+        Some("src/main.rs")
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/files_changed/0")
+            .and_then(Value::as_str),
+        Some("src/lib.rs")
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/commands_run_count")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/tests_run/0")
+            .and_then(Value::as_str),
+        Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/final_diff_summary/value/summary_code")
+            .and_then(Value::as_str),
+        Some("patched")
+    );
+
     let event = trace
         .pointer("/event_stream")
         .and_then(Value::as_array)
@@ -489,6 +536,12 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .pointer("/payload/evidence_ref")
             .and_then(Value::as_str),
         Some("coding_evidence:summary")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/files_read/0")
+            .and_then(Value::as_str),
+        Some("src/main.rs")
     );
     assert_eq!(
         event
