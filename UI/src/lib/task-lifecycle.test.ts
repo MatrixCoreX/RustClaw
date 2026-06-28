@@ -18,6 +18,8 @@ test("builds a pollable running lifecycle view", () => {
   assert.equal(view.stateLabel, "Running");
   assert.equal(view.tone, "running");
   assert.match(view.detail, /refresh/i);
+  assert.equal(view.recommendedAction.actionKind, "running");
+  assert.equal(view.recommendedAction.label, "Keep monitoring");
   assert.ok(view.meta.some((item) => item === "Pollable: Yes"));
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
   assert.ok(view.meta.some((item) => item.startsWith("Last heartbeat:")));
@@ -43,6 +45,7 @@ test("surfaces waiting checkpoint details without raw json", () => {
   assert.equal(view.stateLabel, "等待中");
   assert.equal(view.tone, "attention");
   assert.equal(view.detail, "恢复原因: provider_gap_retry_window");
+  assert.equal(view.recommendedAction.label, "保持等待");
   assert.ok(view.meta.some((item) => item === "恢复等待: 120s"));
   assert.ok(view.meta.some((item) => item === "检查点: ckpt-1"));
   assert.ok(view.meta.some((item) => item === "后台任务: job-1"));
@@ -64,6 +67,7 @@ test("surfaces due resume window without exposing checkpoint json", () => {
 
   assert.equal(view.stateLabel, "Background");
   assert.equal(view.detail, "The resume window is due and the system can continue.");
+  assert.equal(view.recommendedAction.label, "Ready to resume");
   assert.ok(view.meta.some((item) => item === "Resume wait: 0s"));
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-ready"));
 });
@@ -95,6 +99,8 @@ test("prioritizes next action fields for active task summaries", () => {
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-9"));
   assert.ok(view.meta.some((item) => item === "Pollable: Yes"));
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
+  assert.equal(view.recommendedAction.actionKind, "poll_async_job");
+  assert.equal(view.recommendedAction.label, "Waiting for background result");
 });
 
 test("falls back to database status when lifecycle is absent", () => {
@@ -103,6 +109,16 @@ test("falls back to database status when lifecycle is absent", () => {
   assert.equal(view.stateLabel, "Cancelled");
   assert.equal(view.tone, "failed");
   assert.equal(view.detail, "The task will not continue.");
+  assert.equal(view.recommendedAction.label, "Stopped");
+});
+
+test("renders timeout as a clear stopped state", () => {
+  const view = buildTaskLifecycleView({ terminal_reason: "worker_task_timeout" }, "timeout", "en");
+
+  assert.equal(view.stateLabel, "Timed out");
+  assert.equal(view.tone, "failed");
+  assert.equal(view.recommendedAction.actionKind, "timeout");
+  assert.equal(view.recommendedAction.label, "Review reason");
 });
 
 test("summarizes task states for dashboard cards", () => {

@@ -111,6 +111,11 @@ export function TaskResultPanel({
                 <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{taskLifecycleView.stateLabel}</span>
               </div>
               <p className="mt-1 text-sm opacity-80">{taskLifecycleView.detail}</p>
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                <div className="font-medium">{t("下一步", "Next step")}</div>
+                <p className="mt-1 font-medium">{taskLifecycleView.recommendedAction.label}</p>
+                <p className="mt-1 opacity-75">{taskLifecycleView.recommendedAction.detail}</p>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {taskLifecycleView.meta.map((item) => (
                   <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1">

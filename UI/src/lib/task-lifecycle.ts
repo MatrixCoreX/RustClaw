@@ -35,8 +35,15 @@ export interface TaskLifecycleProjection {
 export interface TaskLifecycleView {
   stateLabel: string;
   detail: string;
+  recommendedAction: TaskRecommendedActionView;
   tone: "ok" | "running" | "attention" | "failed";
   meta: string[];
+}
+
+export interface TaskRecommendedActionView {
+  actionKind: string;
+  label: string;
+  detail: string;
 }
 
 export interface TaskPollingView {
@@ -66,6 +73,7 @@ const STATE_LABELS: Record<string, { zh: string; en: string; tone: TaskLifecycle
   needs_user: { zh: "等待确认", en: "Needs input", tone: "attention" },
   succeeded: { zh: "已完成", en: "Completed", tone: "ok" },
   failed: { zh: "失败", en: "Failed", tone: "failed" },
+  timeout: { zh: "超时", en: "Timed out", tone: "failed" },
   cancelled: { zh: "已取消", en: "Cancelled", tone: "failed" },
   canceled: { zh: "已取消", en: "Cancelled", tone: "failed" },
 };
@@ -158,8 +166,78 @@ export function buildTaskLifecycleView(
   return {
     stateLabel: lang === "zh" ? stateCopy.zh : stateCopy.en,
     detail,
+    recommendedAction: buildRecommendedAction(lifecycle, state, lang),
     tone: stateCopy.tone,
     meta,
+  };
+}
+
+function buildRecommendedAction(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+  state: string,
+  lang: TaskLifecycleLang,
+): TaskRecommendedActionView {
+  const actionKind = lifecycle?.next_action_kind?.trim() || state || "unknown";
+  if (state === "needs_user") {
+    return {
+      actionKind,
+      label: t(lang, "需要确认", "Input needed"),
+      detail: t(lang, "补充确认内容后，任务才能继续。", "Add the requested input before this task can continue."),
+    };
+  }
+  if (state === "waiting" || state === "background") {
+    if (lifecycle?.resume_due === true) {
+      return {
+        actionKind,
+        label: t(lang, "可以继续", "Ready to resume"),
+        detail: t(lang, "恢复窗口已到，可以刷新或恢复任务。", "The resume window is due; refresh or resume the task."),
+      };
+    }
+    if (actionKind === "poll_async_job" || actionKind === "poll_later") {
+      return {
+        actionKind,
+        label: t(lang, "等待后台结果", "Waiting for background result"),
+        detail: t(lang, "系统会按轮询时间继续检查结果。", "The system can keep checking on the polling schedule."),
+      };
+    }
+    return {
+      actionKind,
+      label: t(lang, "保持等待", "Keep waiting"),
+      detail: t(lang, "任务已保存进度，可以稍后继续。", "Progress is saved and the task can continue later."),
+    };
+  }
+  if (state === "queued" || state === "running") {
+    return {
+      actionKind,
+      label: t(lang, "继续观察", "Keep monitoring"),
+      detail: t(lang, "任务正在排队或执行，可以刷新查看进度。", "The task is queued or running; refresh to check progress."),
+    };
+  }
+  if (state === "succeeded") {
+    return {
+      actionKind,
+      label: t(lang, "查看结果", "Review result"),
+      detail: t(lang, "任务已完成，可以打开报告查看输出。", "The task is complete; open the report to review output."),
+    };
+  }
+  if (state === "failed" || state === "timeout") {
+    return {
+      actionKind,
+      label: t(lang, "查看原因", "Review reason"),
+      detail: t(lang, "查看报告中的结束原因和可恢复信息。", "Review the report for terminal reason and recovery fields."),
+    };
+  }
+  if (state === "cancelled" || state === "canceled") {
+    return {
+      actionKind,
+      label: t(lang, "已停止", "Stopped"),
+      detail: t(lang, "任务已取消，不会继续执行。", "The task was cancelled and will not continue."),
+    };
+  }
+  return {
+    actionKind,
+    label: t(lang, "查看状态", "Review status"),
+    detail: t(lang, "刷新或打开报告查看当前任务状态。", "Refresh or open the report to inspect the current task state."),
   };
 }
 
