@@ -375,11 +375,12 @@ pub(crate) fn update_task_failure(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let result_json = worker_failure_result_json(task_id);
     let changed = db.execute(
         "UPDATE tasks
-         SET status = 'failed', result_json = NULL, error_text = ?2, updated_at = ?3
+         SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
          WHERE task_id = ?1 AND status = 'running'",
-        params![task_id, error_text, now_ts()],
+        params![task_id, result_json, error_text, now_ts()],
     )?;
     if changed == 0 {
         warn!(
@@ -463,6 +464,34 @@ fn worker_timeout_result_json(task_id: &str) -> String {
                     "task_id": task_id,
                     "state_from": "running",
                     "state_to": "timeout",
+                    "reason_code": reason_code,
+                }
+            ]
+        }
+    })
+    .to_string()
+}
+
+fn worker_failure_result_json(task_id: &str) -> String {
+    let reason_code = "worker_runtime_error";
+    json!({
+        "schema_version": 1,
+        "status_code": "worker_task_failed",
+        "reason_code": reason_code,
+        "message_key": "clawd.task.worker_failed",
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "failed",
+            "source": "worker_failure",
+            "terminal_reason": reason_code,
+            "reason_code": reason_code,
+            "worker_events": [
+                {
+                    "event_type": "worker_failure",
+                    "owner_layer": "worker_runtime",
+                    "task_id": task_id,
+                    "state_from": "running",
+                    "state_to": "failed",
                     "reason_code": reason_code,
                 }
             ]
