@@ -45,6 +45,7 @@ pub(crate) struct RepairSignal {
     pub(crate) provider_status: Option<Value>,
     pub(crate) checkpoint_id: Option<String>,
     pub(crate) resume_entrypoint: Option<String>,
+    pub(crate) stop_reason_code: Option<String>,
     pub(crate) detail: Option<String>,
 }
 
@@ -79,6 +80,7 @@ impl RepairSignal {
             provider_status: None,
             checkpoint_id: None,
             resume_entrypoint: None,
+            stop_reason_code: None,
             detail: (!detail.trim().is_empty()).then(|| crate::truncate_for_log(detail)),
         }
     }
@@ -122,6 +124,7 @@ impl RepairSignal {
             provider_status: None,
             checkpoint_id: None,
             resume_entrypoint: None,
+            stop_reason_code: None,
             detail: Some(format!("confidence={:.3}", confidence.clamp(0.0, 1.0))),
         }
     }
@@ -157,6 +160,7 @@ impl RepairSignal {
             checkpoint_id: (!checkpoint_id.trim().is_empty())
                 .then(|| checkpoint_id.trim().to_string()),
             resume_entrypoint: Some(resume_entrypoint.as_str().to_string()),
+            stop_reason_code: machine_stop_reason_token(signal),
             detail: (!signal.trim().is_empty()).then(|| signal.trim().to_string()),
         }
     }
@@ -199,6 +203,7 @@ impl RepairSignal {
             "provider_status": self.provider_status.as_ref(),
             "checkpoint_id": self.checkpoint_id.as_deref(),
             "resume_entrypoint": self.resume_entrypoint.as_deref(),
+            "stop_reason_code": self.stop_reason_code.as_deref(),
             "signal": self.detail.as_deref(),
             "detail": self.detail.as_deref(),
         })
@@ -246,6 +251,7 @@ impl RepairSignal {
             "budget_exhausted": self.budget_exhausted,
             "checkpoint_id": self.checkpoint_id.as_deref(),
             "resume_entrypoint": self.resume_entrypoint.as_deref(),
+            "stop_reason_code": self.stop_reason_code.as_deref(),
             "next_recovery_kind": next_recovery_kind,
             "message_key": self.message_key,
             "error_code": self.status_code,
@@ -329,6 +335,19 @@ impl RepairSignal {
         self.provider_status = provider_status;
         self
     }
+}
+
+fn machine_stop_reason_token(signal: &str) -> Option<String> {
+    let token = signal.trim();
+    if token.is_empty()
+        || token.len() > 96
+        || !token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
+    {
+        return None;
+    }
+    Some(token.to_string())
 }
 
 fn envelope_machine_field(source: Option<&Value>, key: &str) -> Value {
@@ -667,5 +686,26 @@ mod tests {
                 .and_then(Value::as_str),
             Some("next_planner_round")
         );
+        assert_eq!(
+            value
+                .pointer("/repair_envelope/stop_reason_code")
+                .and_then(Value::as_str),
+            Some("max_rounds")
+        );
+    }
+
+    #[test]
+    fn checkpoint_stop_reason_rejects_non_machine_text() {
+        let invalid_stop_reason = ["invalid", "token"].join(" ");
+        let signal = RepairSignal::from_checkpoint_resume_parts(
+            "ckpt-123",
+            crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+            &invalid_stop_reason,
+        );
+        let value = signal.to_json();
+
+        assert!(value
+            .pointer("/repair_envelope/stop_reason_code")
+            .is_some_and(Value::is_null));
     }
 }

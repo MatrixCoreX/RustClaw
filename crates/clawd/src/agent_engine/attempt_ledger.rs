@@ -325,6 +325,7 @@ fn executor_repair_signal_json(
         provider_status: None,
         checkpoint_id: None,
         resume_entrypoint: None,
+        stop_reason_code: None,
         detail: (!why_not_satisfied.trim().is_empty())
             .then(|| crate::truncate_for_agent_trace(why_not_satisfied.trim())),
     };
