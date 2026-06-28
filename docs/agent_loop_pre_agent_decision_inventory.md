@@ -43,7 +43,11 @@ decisions that should continue moving into the agent loop.
 - Boundary context already records machine-readable roles:
   - `normalizer_role = "initial_hint"`
   - `post_route_role = "boundary_machine_gate"`
-  - `direct_answer_gate_role = "fallback_safety_check"`
+  - `direct_answer_gate_role = "fallback_safety_check"` for the top-level
+    semantic routing role; detailed
+    `pre_agent_gates.direct_answer_gate.ownership_class` may be
+    `fallback_safety_check`, `contract_boundary`, `evidence_projection`,
+    `agent_loop_activation`, or `semantic_policy_candidate`.
   - `agent_loop_authority_enabled`
   - `chosen_authority`
   - `selected_migration_class`
