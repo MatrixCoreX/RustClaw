@@ -240,6 +240,7 @@ struct CodingReportSignals {
     changed_files: BTreeSet<String>,
     commands: BTreeSet<String>,
     tests: BTreeSet<String>,
+    diff_summaries: Vec<Value>,
     failures: Vec<Value>,
     retry_count: u64,
 }
@@ -260,6 +261,8 @@ fn coding_report_json(data: &Value) -> Value {
         "commands": signals.commands.into_iter().collect::<Vec<_>>(),
         "test_count": signals.tests.len(),
         "tests": signals.tests.into_iter().collect::<Vec<_>>(),
+        "diff_summary_count": signals.diff_summaries.len(),
+        "diff_summaries": signals.diff_summaries,
         "failure_count": signals.failures.len(),
         "failures": signals.failures,
         "retry_count": signals.retry_count,
@@ -275,6 +278,7 @@ fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignal
         Value::Object(map) => {
             collect_changed_file_fields(map, signals);
             collect_command_fields(map, signals);
+            collect_diff_summary_fields(map, signals);
             collect_failure_fields(map, signals);
             collect_retry_fields(map, signals);
             for value in map.values() {
@@ -329,6 +333,49 @@ fn is_report_path_token(value: &str) -> bool {
     !trimmed.is_empty()
         && trimmed.len() <= 300
         && !trimmed.chars().any(|ch| matches!(ch, '\n' | '\r'))
+}
+
+fn collect_diff_summary_fields(map: &Map<String, Value>, signals: &mut CodingReportSignals) {
+    if signals.diff_summaries.len() >= 16 {
+        return;
+    }
+    for key in [
+        "diff_summary",
+        "final_diff_summary",
+        "change_summary",
+        "patch_summary",
+        "git_diff_summary",
+    ] {
+        let Some(value) = map.get(key).and_then(bounded_diff_summary_value) else {
+            continue;
+        };
+        signals.diff_summaries.push(json!({
+            "field": key,
+            "value": value,
+        }));
+        if signals.diff_summaries.len() >= 16 {
+            return;
+        }
+    }
+}
+
+fn bounded_diff_summary_value(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() || trimmed.len() > 2_000 {
+                None
+            } else {
+                Some(Value::String(trimmed.to_string()))
+            }
+        }
+        Value::Object(_) | Value::Array(_) => serde_json::to_string(value)
+            .ok()
+            .filter(|serialized| serialized.len() <= 4_000)
+            .map(|_| value.clone()),
+        Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::Null => None,
+    }
 }
 
 fn collect_command_fields(map: &Map<String, Value>, signals: &mut CodingReportSignals) {

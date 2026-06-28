@@ -82,6 +82,10 @@ fn task_report_json_exposes_stable_machine_fields() {
                     }
                 ],
                 "changed_files": ["src/lib.rs"],
+                "final_diff_summary": {
+                    "file_count": 1,
+                    "summary_code": "update_lib_api"
+                },
                 "step_results": [
                     {
                         "step_id": "step_1",
@@ -118,6 +122,15 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
     assert_eq!(report["coding"]["test_count"], 1);
     assert_eq!(report["coding"]["tests"][0], "cargo test -p clawd");
+    assert_eq!(report["coding"]["diff_summary_count"], 1);
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["field"],
+        "final_diff_summary"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["value"]["summary_code"],
+        "update_lib_api"
+    );
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
