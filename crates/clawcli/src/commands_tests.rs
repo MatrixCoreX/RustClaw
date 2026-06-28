@@ -1,7 +1,7 @@
 use super::{
     automation_runs_request_payload, exec_exit_class, exec_failure_class_from_machine_tokens,
-    exec_summary_json, run_exec, task_event_output_lines, task_report_json, write_exec_artifacts,
-    ExecExitClass, ExecWaitOutcome,
+    exec_summary_json, run_exec, task_event_output_lines, task_report_json, task_report_text_lines,
+    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -139,6 +139,47 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
+}
+
+#[test]
+fn task_report_text_lines_expose_coding_verification_status() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-report-text".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "task_lifecycle": {
+                "state": "completed",
+                "reason_code": "succeeded"
+            },
+            "result_json": {
+                "changed_files": ["src/lib.rs"],
+                "step_results": [
+                    {
+                        "step_id": "step_1",
+                        "status": "ok",
+                        "skill": "run_cmd",
+                        "command": "cargo check -p clawd --all-targets"
+                    }
+                ]
+            }
+        }),
+        result_text: Some("result-token".to_string()),
+        error_text: None,
+        events: Vec::new(),
+    };
+    let report = task_report_json(&task, false);
+
+    let lines = task_report_text_lines(&task, &report);
+
+    assert!(lines.contains(&"coding_changed_file_count: 1".to_string()));
+    assert!(lines.contains(&"changed_file: src/lib.rs".to_string()));
+    assert!(lines.contains(&"coding_verification_command_count: 1".to_string()));
+    assert!(lines.contains(&"verification_command: cargo check -p clawd --all-targets".to_string()));
+    assert!(lines.contains(&"coding_test_count: 0".to_string()));
+    assert!(lines.contains(&"coding_failure_count: 0".to_string()));
+    assert!(lines.contains(&"coding_verification_status: verified".to_string()));
+    assert!(!lines.iter().any(|line| line.contains("task_journal")));
 }
 
 #[test]
