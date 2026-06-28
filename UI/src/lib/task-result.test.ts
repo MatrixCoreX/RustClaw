@@ -220,6 +220,10 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
   assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
   assert.equal(buildTaskTraceEventView(events[3], "zh").title, "工具执行结束");
+  assert.equal(
+    buildTaskTraceEventView(events[4], "en").detail,
+    "1 changed file(s), 2 verification command(s), 1 test record(s).",
+  );
   assert.equal(buildTaskTraceEventView(events[4], "en").tone, "failed");
 });
 

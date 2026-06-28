@@ -317,11 +317,15 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
 
   if (eventType === "coding_evidence") {
     const changed = field("changed_file_count") || "0";
+    const verificationCommands = field("verification_command_count") || "0";
     const tests = field("test_count") || "0";
     return {
       eventType,
       title: tLocal("代码执行证据", "Coding evidence"),
-      detail: tLocal(`变更文件 ${changed} 个，测试记录 ${tests} 条。`, `${changed} changed file(s), ${tests} test record(s).`),
+      detail: tLocal(
+        `变更文件 ${changed} 个，验证命令 ${verificationCommands} 条，测试记录 ${tests} 条。`,
+        `${changed} changed file(s), ${verificationCommands} verification command(s), ${tests} test record(s).`,
+      ),
       tone,
       meta,
     };
