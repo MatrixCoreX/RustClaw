@@ -1330,6 +1330,11 @@ pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
     if plan_action.is_empty() {
         return Ok(false);
     }
+    let completed_side_effect_refs =
+        crate::task_lifecycle::task_checkpoint_from_result_json(&result_json)
+            .map(|checkpoint| checkpoint.completed_side_effect_refs)
+            .unwrap_or_default();
+    let completed_side_effect_count = completed_side_effect_refs.len();
     let mut plan_payload = execution_plan.clone();
     if let Some(plan_obj) = plan_payload.as_object_mut() {
         plan_obj.insert("planned_at".to_string(), serde_json::json!(now_ts));
@@ -1340,6 +1345,18 @@ pub(crate) fn record_paused_checkpoint_resume_execution_plan_internal(
         plan_obj.insert(
             "executor_state".to_string(),
             serde_json::json!(executor_state),
+        );
+        plan_obj.insert(
+            "completed_side_effect_count".to_string(),
+            serde_json::json!(completed_side_effect_count),
+        );
+        plan_obj.insert(
+            "completed_side_effect_refs".to_string(),
+            serde_json::json!(completed_side_effect_refs),
+        );
+        plan_obj.insert(
+            "requires_idempotency_guard".to_string(),
+            serde_json::json!(completed_side_effect_count > 0),
         );
     }
     obj.insert("resume_execution_plan".to_string(), plan_payload);

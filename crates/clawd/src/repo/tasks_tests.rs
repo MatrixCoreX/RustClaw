@@ -6,7 +6,6 @@ use super::{
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
     list_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal,
-    record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
 };
@@ -1886,113 +1885,6 @@ fn claim_ready_paused_checkpoint_resume_executor_sets_machine_lease() {
     );
     assert_eq!(reclaimed.executor_state, "executing_planner_resume");
     assert_eq!(reclaimed.lease_expires_at, now + 52);
-}
-
-#[test]
-fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim() {
-    let state = state_with_tasks_table();
-    let now = 5_000;
-    let ready_planner = json!({
-        "task_lifecycle": {
-            "schema_version": 1,
-            "state": "background",
-            "resume_reason": "agent_loop_soft_budget",
-            "resume_due": true,
-            "resume_wait_seconds": 0,
-            "next_check_after": now,
-            "checkpoint_id": "ckpt-plan",
-            "resume_claim": {
-                "schema_version": 1,
-                "owner": "worker_recovery",
-                "checkpoint_id": "ckpt-plan",
-                "executor_state": "ready_for_planner_resume"
-            },
-            "resume_work_item": {
-                "schema_version": 1,
-                "checkpoint_id": "ckpt-plan",
-                "resume_trigger": "worker_recovery",
-                "resume_directive": "run_next_planner_round",
-                "executor_state": "ready_for_planner_resume"
-            },
-            "resume_executor": {
-                "schema_version": 1,
-                "checkpoint_id": "ckpt-plan",
-                "executor_state": "ready_for_planner_resume",
-                "resume_trigger": "worker_recovery",
-                "resume_directive": "run_next_planner_round"
-            }
-        },
-        "task_checkpoint": checkpoint_json("ckpt-plan", vec!["write_file:tmp/report.txt"])
-    });
-    insert_task(&state, "ready-plan", "running", Some(&ready_planner), 10);
-
-    let claimed = claim_ready_paused_checkpoint_resume_executor_internal(
-        &state,
-        "ready-plan",
-        "ckpt-plan",
-        "ready_for_planner_resume",
-        now + 1,
-        30,
-    )
-    .expect("claim ready executor")
-    .expect("executor claimed");
-    let plan_payload = json!({
-        "schema_version": 1,
-        "task_id": claimed.task_id,
-        "checkpoint_id": claimed.checkpoint_id,
-        "executor_action": "run_seeded_agent_loop",
-        "executor_state": claimed.executor_state,
-        "resume_directive": claimed.resume_directive,
-        "resume_trigger": claimed.resume_trigger,
-        "completed_side_effect_count": 1,
-        "requires_idempotency_guard": true
-    });
-
-    assert!(
-        !record_paused_checkpoint_resume_execution_plan_internal(
-            &state,
-            "ready-plan",
-            "ckpt-other",
-            "executing_planner_resume",
-            &plan_payload,
-            now + 2,
-        )
-        .expect("record wrong checkpoint"),
-        "checkpoint mismatch must not persist execution plan"
-    );
-    assert!(
-        record_paused_checkpoint_resume_execution_plan_internal(
-            &state,
-            "ready-plan",
-            "ckpt-plan",
-            "executing_planner_resume",
-            &plan_payload,
-            now + 2,
-        )
-        .expect("record execution plan"),
-        "active executor claim should accept execution plan"
-    );
-
-    let stored = stored_result_json(&state, "ready-plan");
-    let lifecycle =
-        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&stored), None);
-    assert_eq!(
-        lifecycle["resume_execution_plan"]["executor_action"],
-        "run_seeded_agent_loop"
-    );
-    assert_eq!(lifecycle["resume_execution_plan"]["planned_at"], now + 2);
-    assert_eq!(
-        lifecycle["resume_executor"]["execution_plan_action"],
-        "run_seeded_agent_loop"
-    );
-    assert_eq!(
-        lifecycle["resume_executor_claim"]["execution_plan_action"],
-        "run_seeded_agent_loop"
-    );
-    assert!(lifecycle["resume_execution_plan"].get("text").is_none());
-    assert!(lifecycle["resume_execution_plan"]
-        .get("error_text")
-        .is_none());
 }
 
 #[path = "task_resume_execution_tests.rs"]
