@@ -626,7 +626,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
 - NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` keeps only current NNI state and legacy record fallback.
-- The standalone `nni_server` writes runtime events to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) instead of `claw.log`; enable `NNI_SERVER_LOG_STDOUT=1` only when an external supervisor intentionally captures those logs.
+- The standalone `nni_server` writes runtime events to `NNI_SERVER_LOG_PATH` (`logs/nni-server.log` by default) instead of `clawd.log`; enable `NNI_SERVER_LOG_STDOUT=1` only when an external supervisor intentionally captures those logs.
 
 Quick example:
 

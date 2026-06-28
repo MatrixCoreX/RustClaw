@@ -31,6 +31,7 @@
   - `clawd_health_port_open`
   - `clawd_log`
   - `nni_log`
+  - `nni_server_log`
   - `telegramd_log`
 - Host OS diagnostics are grouped under `system_health`:
   - `os_family`, `arch`, `kernel_release`, `hostname`, `service_manager`
@@ -47,7 +48,7 @@
   - `log_dir`: string path; evidence role `path`.
   - `clawd_process_count`, `telegramd_process_count`: integer counts; evidence role `count`.
   - `clawd_health_port_open`: boolean; evidence role `status`.
-  - `clawd_log`, `nni_log`, `telegramd_log`: object or scalar log observations; evidence role `field_value`.
+  - `clawd_log`, `nni_log`, `nni_server_log`, `telegramd_log`: object or scalar log observations; evidence role `field_value`.
   - `system_health`: object containing OS, CPU, uptime, load, memory, disk, and warning fields; evidence roles `field_value`, `count`, and `status`.
 - Sensitive fields: log observations can include user data. Provider-facing traces should prefer warnings, counts, selected keys, excerpts, or hashes.
 - Error responses include readable `error_text`; `extra.error_kind` should be used when implementation-specific context is available.
