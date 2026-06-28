@@ -1,4 +1,4 @@
-import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, X } from "lucide-react";
+import { Activity, CircleAlert, Clock3, Copy, Loader2, MessageCircle, Pause, Play, RefreshCw, X } from "lucide-react";
 
 import { formatDuration } from "../lib/display-format";
 import {
@@ -204,7 +204,16 @@ export function ActiveTasksPanel({
                       onClick={() => void onViewTask(item.task_id)}
                       className="theme-secondary-btn px-3 py-2 text-xs"
                     >
-                      {t("查看详情", "View details")}
+                      {t("打开报告", "Open report")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyTaskId(item.task_id)}
+                      className="theme-secondary-btn px-3 py-2 text-xs"
+                      title={t("复制任务 ID", "Copy task ID")}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {t("复制 ID", "Copy ID")}
                     </button>
                     {canPause ? (
                       <button
@@ -297,6 +306,12 @@ export function ActiveTasksPanel({
       </div>
     </section>
   );
+}
+
+async function copyTaskId(taskId: string): Promise<void> {
+  const value = taskId.trim();
+  if (!value || !navigator.clipboard?.writeText) return;
+  await navigator.clipboard.writeText(value);
 }
 
 function canPauseTask(item: ActiveTaskItem): boolean {
