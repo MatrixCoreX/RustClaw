@@ -69,7 +69,7 @@ flowchart TD
     Y --> Z[Output-contract guard + task result]
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
-    AB --> AD[Task event stream<br/>transition + checkpoint + tool lifecycle + coding evidence]
+    AB --> AD[Task event stream<br/>transition + checkpoint + tool lifecycle + coding checkpoints/evidence]
     ASP --> AA
     ASP --> AB
     ASP --> AD
@@ -113,7 +113,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, and `task_final`. CLI and UI render these fields directly, including `evidence_ref`, `checkpoint_ref`, `pending_async_job_id`, coding counts, verification command counts/tokens, verification status/failure-kind tokens, unverified-risk tokens, and step timing, instead of reading raw logs or localized text.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, and `task_final`. CLI and UI render these fields directly, including `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, coding counts, verification command counts/tokens, verification status/failure-kind tokens, unverified-risk tokens, and step timing, instead of reading raw logs or localized text.
 
 ### Planner, LLM, And Capability Flow
 
@@ -156,7 +156,7 @@ flowchart TD
     V --> Z
     W --> Z
     Y --> Z
-    Z --> ZEV[Task journal event<br/>tool lifecycle + coding evidence + evidence refs]
+    Z --> ZEV[Task journal event<br/>tool lifecycle + coding checkpoints/evidence + evidence refs]
     Q -->|synthesize_answer| ZA[LLM: grounded synthesis]
     Q -->|respond| ZB[Terminal response]
     ZA --> ZC[Evidence coverage]
@@ -177,7 +177,7 @@ flowchart TD
 - `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
-- `Task journal event`: executor observations are projected into stable `tool_started`, `tool_step`, `tool_finished`, and optional `coding_evidence` events with step refs, evidence refs, artifact counts, coding counts, verification command counts/tokens, verification status/failure-kind tokens, verification-risk tokens, timing, and failure attribution for CLI/UI progress views.
+- `Task journal event`: executor observations are projected into stable `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, and optional `coding_evidence` events with step refs, evidence refs, artifact counts, coding counts, checkpoint kind, verification command counts/tokens, verification status/failure-kind tokens, verification-risk tokens, timing, and failure attribution for CLI/UI progress views.
 - `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`). It does not grant write or external-publish permission.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
@@ -379,7 +379,7 @@ flowchart TD
     ZE --> ZEE[checkpoint_created event<br/>checkpoint_ref + pending_async_job_id]
     ZD -->|needs user| S
     ZD -->|complete| ZB
-    ZC --> ZCE[tool_started / tool_finished / coding_evidence events]
+    ZC --> ZCE[tool_started / tool_finished / coding_checkpoint / coding_evidence events]
     ZB --> ZF[Channel delivery + session update]
     ZB --> ZG[Task journal trace + event_stream]
     ZG --> ZW[CLI / UI watch + report]
@@ -405,7 +405,7 @@ Important lifecycle details:
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
 - `clawcli exec` is the CI/script-oriented runner: it submits or resumes an ask task, waits by default, returns stable exit classes/codes, can stop on background checkpoints, and can write `summary.json`, `task.json`, and `events.jsonl` artifacts. See `docs/clawcli_exec_replay.md`.
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
-- Task event streams include transition, checkpoint, tool lifecycle, coding evidence, provider, hook, subagent, and final events. `clawcli events/watch`, `clawcli report`, and the browser task details render machine fields such as `evidence_ref`, `checkpoint_ref`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `unverified_risk`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
+- Task event streams include transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent, and final events. `clawcli events/watch`, `clawcli report`, and the browser task details render machine fields such as `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `unverified_risk`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` reads the flattened `/v1/capabilities` machine endpoint. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls. See `docs/clawcli_exec_replay.md`.

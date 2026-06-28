@@ -356,6 +356,58 @@ fn event_lines_include_coding_evidence_machine_fields() {
 }
 
 #[test]
+fn event_lines_include_coding_checkpoint_machine_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 6,
+                            "event_type": "coding_checkpoint",
+                            "payload": {
+                                "schema_version": 1,
+                                "checkpoint_kind": "verification_command",
+                                "checkpoint_ref": "coding_checkpoint:verification_command:1",
+                                "evidence_ref": "coding_checkpoint:verification_command:1",
+                                "command_index": 1,
+                                "verification_command": "cargo test -p clawd",
+                                "verification_command_count": 2,
+                                "verification_status": "failed",
+                                "verification_failure_kind_count": 1
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "coding_checkpoint");
+    assert_eq!(
+        events[0].fields.get("checkpoint_kind").map(String::as_str),
+        Some("verification_command")
+    );
+    assert_eq!(
+        events[0].fields.get("command_index").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("verification_command")
+            .map(String::as_str),
+        Some("cargo test -p clawd")
+    );
+    assert!(events[0]
+        .line
+        .contains("checkpoint_ref=coding_checkpoint:verification_command:1"));
+}
+
+#[test]
 fn event_filters_reject_mismatched_machine_fields() {
     let event = TaskEventLine {
         event_type: "checkpoint".to_string(),

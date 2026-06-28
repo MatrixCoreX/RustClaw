@@ -183,6 +183,20 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
             },
             {
               seq: 5,
+              event_type: "coding_checkpoint",
+              payload: {
+                checkpoint_kind: "verification_command",
+                checkpoint_ref: "coding_checkpoint:verification_command:1",
+                evidence_ref: "coding_checkpoint:verification_command:1",
+                command_index: 1,
+                verification_command: "cargo test -p clawd",
+                verification_command_count: 2,
+                verification_status: "failed",
+                verification_failure_kind_count: 1,
+              },
+            },
+            {
+              seq: 6,
               event_type: "coding_evidence",
               payload: {
                 evidence_ref: "coding_evidence:summary",
@@ -215,22 +229,30 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[2]).includes("started_at=1781800002000"));
   assert.ok(traceEventMeta(events[3]).includes("phase=finished"));
   assert.ok(traceEventMeta(events[3]).includes("finished_at=1781800003000"));
-  assert.ok(traceEventMeta(events[4]).includes("changed_file_count=1"));
-  assert.ok(traceEventMeta(events[4]).includes("verification_command_count=2"));
-  assert.ok(traceEventMeta(events[4]).includes("test_count=1"));
-  assert.ok(traceEventMeta(events[4]).includes("verification_status=failed"));
-  assert.ok(traceEventMeta(events[4]).includes("verification_failure_kind_count=1"));
-  assert.ok(traceEventMeta(events[4]).includes("retry_count=1"));
-  assert.ok(traceEventMeta(events[4]).includes("unverified_risk=tests_not_observed"));
+  assert.ok(traceEventMeta(events[4]).includes("checkpoint_kind=verification_command"));
+  assert.ok(traceEventMeta(events[4]).includes("command_index=1"));
+  assert.ok(traceEventMeta(events[4]).includes("verification_command=cargo test -p clawd"));
+  assert.ok(traceEventMeta(events[5]).includes("changed_file_count=1"));
+  assert.ok(traceEventMeta(events[5]).includes("verification_command_count=2"));
+  assert.ok(traceEventMeta(events[5]).includes("test_count=1"));
+  assert.ok(traceEventMeta(events[5]).includes("verification_status=failed"));
+  assert.ok(traceEventMeta(events[5]).includes("verification_failure_kind_count=1"));
+  assert.ok(traceEventMeta(events[5]).includes("retry_count=1"));
+  assert.ok(traceEventMeta(events[5]).includes("unverified_risk=tests_not_observed"));
   assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");
   assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
   assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
   assert.equal(buildTaskTraceEventView(events[3], "zh").title, "工具执行结束");
+  assert.equal(buildTaskTraceEventView(events[4], "en").title, "Verification checkpoint");
   assert.equal(
     buildTaskTraceEventView(events[4], "en").detail,
+    "Verification command: cargo test -p clawd",
+  );
+  assert.equal(
+    buildTaskTraceEventView(events[5], "en").detail,
     "1 changed file(s), 2 verification command(s), 1 test record(s).",
   );
-  assert.equal(buildTaskTraceEventView(events[4], "en").tone, "failed");
+  assert.equal(buildTaskTraceEventView(events[5], "en").tone, "failed");
 });
 
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {

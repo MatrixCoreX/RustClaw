@@ -194,6 +194,7 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "finished_at",
     "round_no",
     "checkpoint_id",
+    "checkpoint_kind",
     "checkpoint_ref",
     "completed_side_effect_count",
     "requires_idempotency_guard",
@@ -206,7 +207,9 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "provider_job_id",
     "changed_file_count",
     "command_count",
+    "command_index",
     "verification_command_count",
+    "verification_command",
     "test_count",
     "diff_summary_count",
     "failure_count",
@@ -261,7 +264,7 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       ? "failed"
       : unverifiedRisk
         ? "attention"
-        : eventType === "tool_finished" || eventType === "coding_evidence"
+        : eventType === "tool_finished" || eventType === "coding_evidence" || eventType === "coding_checkpoint"
           ? "ok"
           : "running";
 
@@ -329,6 +332,25 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
         `变更文件 ${changed} 个，验证命令 ${verificationCommands} 条，测试记录 ${tests} 条。`,
         `${changed} changed file(s), ${verificationCommands} verification command(s), ${tests} test record(s).`,
       ),
+      tone,
+      meta,
+    };
+  }
+
+  if (eventType === "coding_checkpoint") {
+    const kind = field("checkpoint_kind");
+    const command = field("verification_command");
+    const changed = field("changed_file_count");
+    return {
+      eventType,
+      title: kind === "verification_command"
+        ? tLocal("验证检查点", "Verification checkpoint")
+        : tLocal("代码检查点", "Coding checkpoint"),
+      detail: command
+        ? tLocal(`验证命令：${command}`, `Verification command: ${command}`)
+        : changed
+          ? tLocal(`记录了 ${changed} 个变更文件。`, `Recorded ${changed} changed file(s).`)
+          : tLocal("代码任务进度已记录。", "Coding task progress was recorded."),
       tone,
       meta,
     };
