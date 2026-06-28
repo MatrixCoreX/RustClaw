@@ -80,6 +80,7 @@ pub(crate) fn run_watch(
                     "status": &task.status,
                     "lifecycle_state": task.lifecycle_state(),
                     "lifecycle": task.lifecycle().cloned().unwrap_or(serde_json::Value::Null),
+                    "progress": watch_progress_json(&task),
                     "terminal": task.is_terminal(),
                     "event_count": task.events.len(),
                 }))?
@@ -112,6 +113,36 @@ pub(crate) fn run_watch(
         std::thread::sleep(interval);
     }
     Ok(())
+}
+
+pub(super) fn watch_progress_json(task: &task::TaskStatusView) -> serde_json::Value {
+    let lifecycle = task.lifecycle();
+    json!({
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "checkpoint_id": lifecycle_field(lifecycle, "checkpoint_id"),
+        "can_poll": lifecycle_field(lifecycle, "can_poll"),
+        "can_cancel": lifecycle_field(lifecycle, "can_cancel"),
+        "resume_due": lifecycle_field(lifecycle, "resume_due"),
+        "resume_wait_seconds": lifecycle_field(lifecycle, "resume_wait_seconds"),
+        "next_poll_after": lifecycle_field(lifecycle, "next_poll_after"),
+        "poll_after_seconds": lifecycle_field(lifecycle, "poll_after_seconds"),
+        "poll_ref": lifecycle_field(lifecycle, "poll_ref"),
+        "cancel_ref": lifecycle_field(lifecycle, "cancel_ref"),
+        "pending_async_job_id": lifecycle_field(lifecycle, "pending_async_job_id"),
+        "async_job_message_key": lifecycle_field(lifecycle, "async_job_message_key"),
+        "heartbeat_at": lifecycle_field(lifecycle, "heartbeat_at"),
+        "last_heartbeat_ts": lifecycle_field(lifecycle, "last_heartbeat_ts"),
+        "lease_owner": lifecycle_field(lifecycle, "lease_owner"),
+        "lease_expires_at": lifecycle_field(lifecycle, "lease_expires_at"),
+    })
+}
+
+fn lifecycle_field(lifecycle: Option<&serde_json::Value>, key: &str) -> serde_json::Value {
+    lifecycle
+        .and_then(|value| value.get(key))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
 }
 
 pub(crate) fn run_wait(

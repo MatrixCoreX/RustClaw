@@ -41,9 +41,9 @@ use report::{coding_review_json, subagent_report_json, task_report_json, task_re
 #[cfg(test)]
 use task_control::automation_runs_request_payload;
 #[cfg(test)]
-use task_query::task_event_output_lines;
-#[cfg(test)]
 use task_query::wait_until_matches;
+#[cfg(test)]
+use task_query::{task_event_output_lines, watch_progress_json};
 #[cfg(test)]
 use tui::tui_snapshot_json;
 
