@@ -80,10 +80,66 @@ fn dry_run_returns_machine_payload_without_writing_file() {
     assert_eq!(extra["model"], "image-01");
     assert_eq!(extra["model_kind"], "dry_run");
     assert_eq!(
+        extra["pending_async_job_contract"]["poll_adapter"]["kind"],
+        "media_job_poll"
+    );
+    assert_eq!(
         extra["planned_outputs"][0]["path"].as_str(),
         Some(out.to_string_lossy().as_ref())
     );
     assert!(extra["outputs"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn poll_dry_run_returns_structured_adapter_result() {
+    let root = unique_temp_root("image-generate-poll-dry-run");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "task-123",
+            "job_id": "job-123",
+            "output_path": "document/poll.png",
+            "dry_run": true,
+            "mock_status": "succeeded",
+            "vendor": "minimax",
+            "model": "image-01"
+        }),
+    )
+    .expect("poll dry-run should not require provider credentials");
+
+    assert_eq!(text, "IMAGE_TASK:task-123");
+    assert_eq!(extra["status"], "succeeded");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["final_result_json"]["outputs"][0]["type"],
+        "image_file"
+    );
+}
+
+#[test]
+fn cancel_dry_run_returns_structured_adapter_result() {
+    let root = unique_temp_root("image-generate-cancel-dry-run");
+    let (text, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "cancel",
+            "task_id": "task-456",
+            "job_id": "job-456",
+            "dry_run": true,
+            "vendor": "minimax",
+            "model": "image-01"
+        }),
+    )
+    .expect("cancel dry-run should not require provider credentials");
+
+    assert_eq!(text, "IMAGE_TASK_CANCELLED:task-456");
+    assert_eq!(extra["status"], "cancelled");
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["cancellation_result_json"]["status"],
+        "cancelled"
+    );
 }
 
 #[test]

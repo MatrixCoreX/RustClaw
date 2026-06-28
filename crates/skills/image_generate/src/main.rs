@@ -7,11 +7,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
+mod async_contract;
+mod async_projection;
 mod i18n;
+mod response_projection;
 
+use async_contract::{
+    execute_cancel, execute_poll, image_expires_at, image_poll_after_seconds,
+    provider_image_job_id,
+};
 use i18n::*;
+use response_projection::{build_dry_run_response, build_success_response};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -203,6 +211,25 @@ fn execute(
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("generate");
+    match action {
+        "generate" => execute_generate(cfg, workspace_root, obj),
+        "poll" => execute_poll(cfg, workspace_root, obj),
+        "cancel" => execute_cancel(cfg, obj),
+        _ => Err(format!("unsupported action: {action}")),
+    }
+}
+
+fn execute_generate(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+) -> Result<(String, Value), String> {
     let prompt = obj
         .get("prompt")
         .and_then(|v| v.as_str())
@@ -263,15 +290,22 @@ fn execute(
                 cfg.image_generation.models.as_ref(),
             ))
             .unwrap_or("default");
+        let provider = vendor_name(vendor);
+        let poll_after_seconds = image_poll_after_seconds(obj);
+        let expires_at = image_expires_at(obj);
+        let dry_run_job_id = provider_image_job_id(provider, "dry_run");
         return Ok(build_dry_run_response(
             &output_path,
-            vendor_name(vendor),
+            provider,
             model,
             prompt,
             size,
             style,
             quality,
             n,
+            poll_after_seconds,
+            expires_at,
+            &dry_run_job_id,
         ));
     }
 
@@ -328,73 +362,6 @@ fn execute(
             .cloned()
             .unwrap_or_else(|| "unknown error".to_string())
     ))
-}
-
-fn build_success_response(
-    i18n: &TextCatalog,
-    output_path: &Path,
-    provider: &str,
-    model: &str,
-    model_kind: &str,
-    fallback: Option<Value>,
-) -> (String, Value) {
-    let saved_path = output_path.to_string_lossy().to_string();
-    let preface = i18n.render(
-        "image_generate.msg.saved",
-        &[("path", saved_path.clone())],
-        "Generated successfully and saved: {path}",
-    );
-    let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
-    let mut extra = json!({
-        "provider": provider,
-        "model": model,
-        "model_kind": model_kind,
-        "latency_ms": 0,
-        "outputs": [{"type":"image_file","path": saved_path}]
-    });
-    if let Some(fallback) = fallback {
-        extra["fallback"] = fallback;
-    }
-    (text, extra)
-}
-
-fn build_dry_run_response(
-    output_path: &Path,
-    provider: &str,
-    model: &str,
-    prompt: &str,
-    size: &str,
-    style: Option<&str>,
-    quality: Option<&str>,
-    n: u64,
-) -> (String, Value) {
-    let saved_path = output_path.to_string_lossy().to_string();
-    let mut request = json!({
-        "prompt_chars": prompt.chars().count(),
-        "size": size,
-        "n": n,
-        "output_path": saved_path,
-    });
-    if let Some(style) = style {
-        request["style"] = json!(style);
-    }
-    if let Some(quality) = quality {
-        request["quality"] = json!(quality);
-    }
-    (
-        "IMAGE_GENERATE_DRY_RUN".to_string(),
-        json!({
-            "dry_run": true,
-            "provider": provider,
-            "model": model,
-            "model_kind": "dry_run",
-            "latency_ms": 0,
-            "output_path": saved_path,
-            "outputs": [],
-            "planned_outputs": [{"type":"image_file","path": saved_path}],
-            "request": request
-        }),
-    )
 }
 
 fn first_model_candidate<'a>(
