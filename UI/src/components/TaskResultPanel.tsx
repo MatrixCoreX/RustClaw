@@ -5,9 +5,9 @@ import {
   buildReplaySummary,
   buildTaskOutcome,
   buildTaskPermissionView,
+  buildTaskTraceEventView,
   taskArtifactRefs,
   taskTraceEvents,
-  traceEventMeta,
   type TaskOutcomeView,
   type TaskPermissionView,
 } from "../lib/task-result";
@@ -203,10 +203,20 @@ export function TaskResultPanel({
               </summary>
               <div className="mt-3 space-y-2">
                 {taskEvents.slice(0, 12).map((event, index) => {
-                  const meta = traceEventMeta(event);
+                  const eventView = buildTaskTraceEventView(event, lang);
+                  const meta = eventView.meta;
                   const eventType = typeof event.event_type === "string" ? event.event_type : `event_${index + 1}`;
                   return (
-                    <div key={`${eventType}-${index}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                    <div key={`${eventType}-${index}`} className={`rounded-lg border px-3 py-2 ${toneClassName(eventView.tone)}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold">{eventView.title}</p>
+                          <p className="mt-1 text-xs opacity-80">{eventView.detail}</p>
+                        </div>
+                        <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] opacity-75">
+                          {eventView.eventType}
+                        </span>
+                      </div>
                       <div className="flex flex-wrap items-center gap-2">
                         {meta.length > 0 ? (
                           meta.map((item) => (

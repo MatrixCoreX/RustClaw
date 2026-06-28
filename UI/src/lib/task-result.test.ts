@@ -5,6 +5,7 @@ import {
   buildReplaySummary,
   buildTaskOutcome,
   buildTaskPermissionView,
+  buildTaskTraceEventView,
   extractTaskText,
   taskArtifactRefs,
   taskTraceEvents,
@@ -213,6 +214,11 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[4]).includes("test_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("retry_count=1"));
   assert.ok(traceEventMeta(events[4]).includes("unverified_risk=tests_not_observed"));
+  assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");
+  assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
+  assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
+  assert.equal(buildTaskTraceEventView(events[3], "zh").title, "工具执行结束");
+  assert.equal(buildTaskTraceEventView(events[4], "en").tone, "failed");
 });
 
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {
