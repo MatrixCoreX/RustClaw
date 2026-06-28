@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -25,10 +26,14 @@ GENERIC_TAGS = {"aggregate", "client_like"}
 DEFAULT_EXCLUDED_TAGS = {
     "audio",
     "image",
+    "post_tweet",
+    "publish_tweet",
+    "skill:x",
     "tweet",
     "twitter",
     "voice",
     "x",
+    "x_api",
     "skill:audio_synthesize",
     "skill:image_edit",
     "skill:image_generate",
@@ -167,6 +172,11 @@ def excluded_by_tag(row: CaseRow, excluded_tags: set[str]) -> bool:
     return bool(lower_tags & excluded_tags)
 
 
+def excluded_tag_hits(row: CaseRow, excluded_tags: set[str]) -> list[str]:
+    lower_tags = {tag.lower() for tag in row.tags}
+    return sorted(lower_tags & excluded_tags)
+
+
 def coverage_categories(row: CaseRow) -> set[str]:
     categories = {f"suite:{row.suite}", f"source:{row.source}"}
     for tag in row.tags:
@@ -301,7 +311,7 @@ def write_subset(path: Path, rows: list[CaseRow], report: dict[str, object], inp
         f"# source={rel(input_path)}",
         f"# selected_rows={report['selected_rows']} coverage_categories={report['coverage_categories']} missing_categories={len(report['missing_categories'])}",
         "# Run:",
-        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {rel(path)} --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag image --exclude-case-tag audio --exclude-case-tag voice --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet",
+        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {rel(path)} --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag image --exclude-case-tag audio --exclude-case-tag voice --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet",
         "# Format: suite|name|tags|prompt|expect=optional substring",
         "",
     ]
@@ -314,6 +324,53 @@ def write_subset(path: Path, rows: list[CaseRow], report: dict[str, object], inp
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run_self_test() -> int:
+    tmp_parent = REPO_ROOT / "tmp"
+    tmp_parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tmp_parent) as tmp:
+        input_path = Path(tmp) / "aggregate.txt"
+        input_path.write_text(
+            "\n".join(
+                [
+                    "# source: self_test_safe.txt",
+                    "safe|keep_fs|client_like,fs_basic,zh|write a file safely",
+                    "safe|keep_chat|client_like,chat,en|answer a simple question",
+                    "# source: self_test_excluded.txt",
+                    "safe|block_x|client_like,x|dry run x publish",
+                    "safe|block_x_api|client_like,x_api|dry run x api",
+                    "safe|block_tweet|client_like,post_tweet|dry run tweet",
+                    "safe|block_skill_x|client_like,skill:x|dry run x skill",
+                    "safe|block_media|client_like,image|dry run image",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        rows_all = read_rows(input_path)
+        excluded_tags = {tag.lower() for tag in DEFAULT_EXCLUDED_TAGS}
+        excluded = [row.name for row in rows_all if excluded_by_tag(row, excluded_tags)]
+        assert excluded == [
+            "block_x",
+            "block_x_api",
+            "block_tweet",
+            "block_skill_x",
+            "block_media",
+        ], excluded
+
+        rows = [row for row in rows_all if not excluded_by_tag(row, excluded_tags)]
+        selected, report = build_subset(rows, target_cases=2)
+        assert report["missing_categories"] == [], report
+        assert [row.name for row in selected] == ["keep_fs", "keep_chat"], selected
+        unexpected = {
+            row.name: excluded_tag_hits(row, excluded_tags)
+            for row in selected
+            if excluded_tag_hits(row, excluded_tags)
+        }
+        assert not unexpected, unexpected
+    print("RELEASE_GATE_SUBSET_SELF_TEST_OK")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
@@ -321,7 +378,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--target-cases", type=int, default=285)
     parser.add_argument("--check", action="store_true", help="fail if generated outputs differ")
+    parser.add_argument("--self-test", action="store_true", help="run built-in metadata filter tests")
     args = parser.parse_args(argv)
+
+    if args.self_test:
+        return run_self_test()
 
     rows_all = read_rows(args.input)
     excluded_tags = {tag.lower() for tag in DEFAULT_EXCLUDED_TAGS}
@@ -335,6 +396,14 @@ def main(argv: list[str]) -> int:
 
     if report["missing_categories"]:
         print(json.dumps(report, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 1
+    selected_excluded = {
+        f"{row.suite}/{row.name}": excluded_tag_hits(row, excluded_tags)
+        for row in selected
+        if excluded_tag_hits(row, excluded_tags)
+    }
+    if selected_excluded:
+        print(json.dumps({"selected_excluded_rows": selected_excluded}, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1
 
     old_output = args.output.read_text(encoding="utf-8") if args.output.exists() else None

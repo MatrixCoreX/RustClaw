@@ -56,6 +56,7 @@ python3 -m py_compile \
   "${ROOT_DIR}/scripts/sync_skill_docs.py" \
   "${ROOT_DIR}/scripts/check_skill_prompts.py" \
   "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" \
+  "${ROOT_DIR}/scripts/nl_tests/build_release_gate_subset.py" \
   "${ROOT_DIR}/scripts/nl_tests/compare_contract_provider_runs.py" \
   "${ROOT_DIR}/scripts/nl_tests/compare_multilingual_contract_cells.py" \
   "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
@@ -100,7 +101,14 @@ echo "Checking layered skill prompt invariants"
 python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
 
 echo "Checking legacy client-like aggregate is current"
+python3 "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" --self-test
 python3 "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" --check
+
+echo "Checking release-gate equivalent subset self-test"
+python3 "${ROOT_DIR}/scripts/nl_tests/build_release_gate_subset.py" --self-test
+
+echo "Checking release-gate equivalent subset is current"
+python3 "${ROOT_DIR}/scripts/nl_tests/build_release_gate_subset.py" --check
 
 echo "Checking legacy client-like aggregate coverage tokens"
 python3 - <<'PY'
