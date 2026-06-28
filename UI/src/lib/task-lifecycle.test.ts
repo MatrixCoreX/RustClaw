@@ -72,7 +72,7 @@ test("surfaces due resume window without exposing checkpoint json", () => {
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-ready"));
 });
 
-test("prioritizes next action fields for active task summaries", () => {
+test("uses next action fields without exposing them as primary meta", () => {
   const view = buildTaskLifecycleView(
     {
       state: "background",
@@ -90,12 +90,9 @@ test("prioritizes next action fields for active task summaries", () => {
     "en",
   );
 
-  assert.deepEqual(view.meta.slice(0, 4), [
-    "Next action: poll_async_job",
-    "Next action ref: job-9",
-    "Wait reason: provider_backoff",
-    "Resume wait: 45s",
-  ]);
+  assert.deepEqual(view.meta.slice(0, 2), ["Wait reason: provider_backoff", "Resume wait: 45s"]);
+  assert.ok(view.meta.every((item) => !item.includes("poll_async_job")));
+  assert.ok(view.meta.every((item) => !item.includes("Next action ref")));
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-9"));
   assert.ok(view.meta.some((item) => item === "Pollable: Yes"));
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
