@@ -1,8 +1,8 @@
 use super::{
-    automation_runs_request_payload, exec_effective_options, exec_exit_class,
-    exec_failure_class_from_machine_tokens, exec_summary_json, run_exec, task_event_output_lines,
-    task_report_json, task_report_text_lines, wait_until_matches, write_exec_artifacts,
-    ExecExitClass, ExecWaitOutcome,
+    automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
+    exec_failure_class_from_machine_tokens, exec_summary_json, run_exec, subagent_report_json,
+    task_event_output_lines, task_report_json, task_report_text_lines, wait_until_matches,
+    write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -141,6 +141,90 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
+}
+
+#[test]
+fn coding_review_json_focuses_on_coding_evidence() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-review".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "result_json": {
+                "changed_files": ["crates/clawcli/src/main.rs"],
+                "step_results": [
+                    {
+                        "step_id": "step_1",
+                        "status": "ok",
+                        "skill": "run_cmd",
+                        "command": "cargo test -p clawcli"
+                    }
+                ]
+            }
+        }),
+        result_text: Some("visible fallback ignored by review".to_string()),
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let review = coding_review_json(&task, false);
+
+    assert_eq!(review["report_kind"], "rustclaw_coding_review");
+    assert_eq!(review["task_id"], "task-review");
+    assert_eq!(review["coding"]["changed_file_count"], 1);
+    assert_eq!(review["coding"]["verification_command_count"], 1);
+    assert_eq!(review["coding"]["tests"][0], "cargo test -p clawcli");
+    assert!(review.get("result_text").is_none());
+}
+
+#[test]
+fn subagent_report_json_collects_child_results_and_events() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-subagents".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "result_json": {
+                "child_results": [
+                    {
+                        "child_run_id": "subagent:1:2:explorer",
+                        "subagent_id": "explorer",
+                        "status": "succeeded",
+                        "finding_refs": ["finding:1"],
+                        "evidence_refs": ["evidence:1"]
+                    }
+                ]
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: vec![crate::events::TaskEventLine {
+            event_type: "subagent".to_string(),
+            line: "type=subagent child_run_id=subagent:1:2:verifier".to_string(),
+            fields: std::collections::BTreeMap::from([
+                (
+                    "child_run_id".to_string(),
+                    "subagent:1:2:verifier".to_string(),
+                ),
+                ("subagent_id".to_string(), "verifier".to_string()),
+                ("status".to_string(), "succeeded".to_string()),
+            ]),
+        }],
+    };
+
+    let report = subagent_report_json(&task);
+
+    assert_eq!(report["report_kind"], "rustclaw_subagent_report");
+    assert_eq!(report["task_id"], "task-subagents");
+    assert_eq!(report["subagent_count"], 2);
+    assert_eq!(
+        report["subagents"][0]["child_run_id"],
+        "subagent:1:2:explorer"
+    );
+    assert_eq!(report["subagents"][0]["finding_refs"][0], "finding:1");
+    assert_eq!(
+        report["subagents"][1]["child_run_id"],
+        "subagent:1:2:verifier"
+    );
 }
 
 #[test]
