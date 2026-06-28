@@ -219,13 +219,20 @@ async fn finalize_worker_timeout(
         "worker_once timeout: worker_id={} task_id={} kind={} timeout_seconds={}",
         state.worker.worker_id, task.task_id, task_kind_for_timeout_log, worker_timeout_secs
     );
-    crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
-    let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
+    let terminal_timeout = crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
+    if terminal_timeout {
+        let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
+    }
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
-        "task_call_end task_id={} kind={} status=timeout error={}",
+        "task_call_end task_id={} kind={} status={} error={}",
         task.task_id,
         task_kind_for_timeout_log,
+        if terminal_timeout {
+            "timeout"
+        } else {
+            "checkpoint_preserved"
+        },
         crate::truncate_for_log(&timeout_err)
     );
     info!("{}", crate::LOG_CALL_WRAP);

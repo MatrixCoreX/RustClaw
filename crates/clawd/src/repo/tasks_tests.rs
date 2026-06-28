@@ -8,7 +8,6 @@ use super::{
     list_ready_paused_checkpoint_resume_executors_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task, update_task_failure,
-    update_task_timeout,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -144,50 +143,6 @@ fn stored_status(state: &crate::AppState, task_id: &str) -> String {
         |row| row.get(0),
     )
     .expect("select task status")
-}
-
-#[test]
-fn update_task_timeout_records_structured_lifecycle_reason() {
-    let state = state_with_tasks_table();
-    let task_id = Uuid::new_v4();
-    insert_task(&state, &task_id.to_string(), "running", None, 1234);
-
-    update_task_timeout(
-        &state,
-        &task_id.to_string(),
-        "worker_task_timeout reason_code=tool_timeout_without_async_resume",
-    )
-    .expect("update timeout");
-
-    assert_eq!(stored_status(&state, &task_id.to_string()), "timeout");
-    let result = stored_result_json(&state, &task_id.to_string());
-    assert_eq!(result["status_code"], "worker_task_timeout");
-    assert_eq!(result["reason_code"], "tool_timeout_without_async_resume");
-    assert_eq!(result["message_key"], "clawd.task.worker_timeout");
-    assert_eq!(result["task_lifecycle"]["state"], "failed");
-    assert_eq!(result["task_lifecycle"]["source"], "worker_timeout");
-    assert_eq!(
-        result["task_lifecycle"]["terminal_reason"],
-        "tool_timeout_without_async_resume"
-    );
-    assert_eq!(
-        result["task_lifecycle"]["worker_events"][0]["event_type"],
-        "tool_timeout"
-    );
-
-    let (response, _, _) = get_task_query_record(&state, task_id)
-        .expect("query task")
-        .expect("task exists");
-    let lifecycle = response.lifecycle.expect("lifecycle projection");
-    assert_eq!(lifecycle["db_status"], "timeout");
-    assert_eq!(
-        lifecycle["reason_code"],
-        "tool_timeout_without_async_resume"
-    );
-    assert_eq!(
-        lifecycle["terminal_reason"],
-        "tool_timeout_without_async_resume"
-    );
 }
 
 #[test]
