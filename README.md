@@ -400,15 +400,29 @@ Important lifecycle details:
 - Foreground HTTP/channel waits are short by design. A caller that stops waiting should keep polling the same `task_id`; it should not create a duplicate task or treat the background task as failed.
 - `task_lifecycle` is machine-readable. Query APIs expose `state`, `db_status`, `can_poll`, `can_cancel`, `checkpoint_id`, `resume_due`, `resume_wait_seconds`, and heartbeat fields for UI rendering.
 - Source of truth: `crates/clawd/src/task_lifecycle.rs` owns lifecycle projection, and `repo::get_task_query_record()` attaches that projection to `GET /v1/tasks/{task_id}`. UI, CLI, and channels should render these structured fields instead of deriving status from `text` or `error_text`.
-- `clawcli get` and `clawcli watch` render lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
-- `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
+- `clawcli get`, `clawcli watch`, and `clawcli wait <task_id> --until terminal|completed|background|needs-user` render or wait on lifecycle machine fields; `clawcli cancel-task <task_id>` uses the direct task-id cancellation API, while `clawcli cancel-index` is kept only for active-list index compatibility.
+- `clawcli resume-task <task_id>` marks an existing checkpoint due for recovery; `clawcli continue <task_id> [message]` is a shorter structured resume entrypoint; `clawcli pause-task <task_id> --pause-seconds N` delays an existing waiting/background checkpoint. These commands do not restart tasks without checkpoint state.
 - `clawcli submit --detach` returns a `task_id` quickly; `clawcli submit --wait` polls until terminal state; `--json` keeps submit/watch output script-friendly.
-- `clawcli exec` is the CI/script-oriented runner: it submits or resumes an ask task, waits by default, returns stable exit classes/codes, can stop on background checkpoints, and can write `summary.json`, `task.json`, and `events.jsonl` artifacts. See `docs/clawcli_exec_replay.md`.
+- `clawcli exec` is the CI/script-oriented runner: it submits or resumes an ask task, waits by default, returns stable exit classes/codes, supports `--profile quick|coding|release-gate|long-tail`, can stop on background checkpoints, and can write `summary.json`, `task.json`, `events.jsonl`, and `resume.json` artifacts. See `docs/clawcli_exec_replay.md`.
 - `clawcli active` prints a compact task table by default and supports `--json`; `clawcli events <task_id>` prints filtered task event streams with optional `--jsonl` and machine filters such as `--event-type`, `--checkpoint-id`, `--policy-decision`, `--subagent-id`, and `--async-job-id`.
-- Task event streams include transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent, and final events. `clawcli events/watch`, `clawcli report`, and the browser task details render machine fields such as `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `unverified_risk`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
+- Task event streams include transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent, and final events. `clawcli events/watch`, `clawcli report`, `clawcli review`, `clawcli subagents`, `clawcli permission inspect`, and the browser task details render machine fields such as `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `unverified_risk`, `child_run_id`, `finding_refs`, `permission_decision`, `command_policy`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
-- `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` reads the flattened `/v1/capabilities` machine endpoint. Add `--json` when another script should consume the response.
-- `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls. See `docs/clawcli_exec_replay.md`.
+- `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
+- `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
+
+CLI task operation flow:
+
+```mermaid
+flowchart LR
+    A[clawcli exec / submit / run-skill] --> B[POST /v1/tasks]
+    B --> C[task_id]
+    C --> D[watch / wait / get]
+    D --> E{task_lifecycle}
+    E -->|terminal| F[report / review / replay export]
+    E -->|waiting/background| G[resume.json + resume_hint]
+    G --> H[continue / resume-task / pause-task / cancel-task]
+    D --> I[events / logs / subagents / permission inspect]
+```
 - Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
@@ -669,7 +683,7 @@ Focused long-tail closed-loop entries:
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
-- `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `RUSTCLAW_CLI_SMOKE_KEY` / `RUSTCLAW_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable.
+- `bash scripts/clawcli_smoke.sh`: compact CLI operator smoke for health, skills, submit, get, events, and watch. It uses `RUSTCLAW_CLI_SMOKE_KEY` / `RUSTCLAW_ADMIN_KEY` when provided, otherwise `clawcli` falls back to the local enabled admin key; optional env vars enable active/cancel/pause/resume/run-skill coverage. Set `RUSTCLAW_CLI_SMOKE_REQUIRE_CAPABILITIES=1` when the smoke must fail if `/v1/capabilities` is unavailable. New CLI-only logic is also covered by `cargo test -p clawcli`.
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
 

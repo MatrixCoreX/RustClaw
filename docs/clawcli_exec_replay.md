@@ -37,13 +37,38 @@ clawcli exec \
   "make the requested code change and run the focused tests"
 ```
 
+Inspect the effective machine config without submitting a task:
+
+```bash
+clawcli exec --profile long-tail --print-effective-config "audit current task state"
+```
+
 Artifact files:
 
 | File | Contents |
 | --- | --- |
-| `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, and artifact refs. |
+| `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, `effective_config`, `resume_hint`, and artifact refs. |
 | `task.json` | Full task query payload returned by `GET /v1/tasks/{task_id}`. |
 | `events.jsonl` | Raw task event lines for later filtering or replay export. |
+| `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, and `recommended_command_tokens`. |
+
+## Exec Profiles
+
+Profiles only set CLI machine parameters. They do not route natural language,
+choose skills, or change planner behavior.
+
+| Profile | Defaults |
+| --- | --- |
+| `quick` | `timeout_seconds=120` |
+| `coding` | `timeout_seconds=900`, `artifact_dir=artifacts/rustclaw-exec/coding` |
+| `release-gate` | `timeout_seconds=600`, `fail_on_background=true`, `artifact_dir=artifacts/rustclaw-exec/release-gate` |
+| `long-tail` | `timeout_seconds=3600`, `continue_on_background=true`, `artifact_dir=artifacts/rustclaw-exec/long-tail` |
+
+Explicit CLI flags override profile defaults where a value is provided:
+
+```bash
+clawcli exec --profile coding --timeout-seconds 1200 --json "make the focused change"
+```
 
 ## Exit Classes
 
@@ -74,6 +99,37 @@ clawcli exec --fail-on-background --json "start a release-gate dry run"
 Use `--continue-on-background` when a checkpointed async/background state is an
 acceptable script outcome. Use `--fail-on-background` when CI should stop unless
 the task fully reaches terminal success.
+
+## Task Control
+
+Wait for a lifecycle class:
+
+```bash
+clawcli wait "$TASK_ID" --until terminal --timeout-seconds 600 --json
+clawcli wait "$TASK_ID" --until background --json
+```
+
+Continue a checkpointed task:
+
+```bash
+clawcli continue "$TASK_ID" "use the existing checkpoint and continue"
+clawcli resume-task "$TASK_ID" --checkpoint-id "$CHECKPOINT_ID"
+```
+
+Review coding evidence without parsing visible prose:
+
+```bash
+clawcli review "$TASK_ID" --json
+clawcli subagents "$TASK_ID" --json
+```
+
+Inspect permission and capability policy machine fields:
+
+```bash
+clawcli permission inspect "$TASK_ID" --json
+clawcli permission explain "$TASK_ID" --json
+clawcli permission capability --capability image.generate --json
+```
 
 ## CI Examples
 
@@ -130,6 +186,7 @@ Inspect a bundle without live providers or tools:
 
 ```bash
 clawcli replay run artifacts/replay/task.json --json
+clawcli replay run artifacts/replay/task.json --coverage
 ```
 
 Compare two bundles:
@@ -142,6 +199,33 @@ Current replay mode is `recorded_only`: it validates and summarizes the stored
 bundle, compares stable machine fields, and does not replay live model/tool
 calls. Deep deterministic step replay can be added later using the same bundle
 format.
+
+`replay diff` emits `diff_classes` for release-gate automation:
+
+| Class | Meaning |
+| --- | --- |
+| `final_status_changed` | `status` or `lifecycle_state` changed. |
+| `route_changed` | Route authority or route fingerprint changed. |
+| `plan_changed` | Recorded action sequence changed. |
+| `verifier_changed` | Verifier or repair summary changed. |
+| `permission_changed` | Permission, policy, or command policy summary changed. |
+| `tool_result_changed` | Tool/skill/capability result summary changed. |
+
+## Flow
+
+```mermaid
+flowchart TD
+    A[exec / submit] --> B[task_id]
+    B --> C[watch / wait]
+    C --> D{lifecycle}
+    D -->|terminal| E[report / review]
+    D -->|background| F[resume_hint / resume.json]
+    F --> G[continue / resume-task]
+    E --> H[replay export]
+    H --> I[replay run --coverage]
+    H --> J[replay diff + diff_classes]
+    C --> K[permission inspect / subagents]
+```
 
 ## Shell Completion
 
@@ -160,7 +244,8 @@ admin key.
 
 - `clawcli exec` and `clawcli replay` must consume machine fields such as
   `status`, `lifecycle_state`, `exit_class`, `message_key`, `error_code`,
-  `event_type`, and artifact refs.
+  `event_type`, `permission_decision`, `command_policy`, `child_run_id`,
+  `finding_refs`, and artifact refs.
 - Scripts must not parse `result_text` or `error_text` to decide success,
   retry, routing, or policy.
 - Example natural-language prompts in this document are operator examples only;
