@@ -690,10 +690,15 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 "action": "async_start",
                 "pending_async_job": {
                     "job_id": job_id,
+                    "provider": "local_process",
                     "status": "accepted",
                     "poll_after_seconds": poll_after_seconds,
+                    "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
                     "expires_at": expires_at,
                     "cancel_ref": format!("local_process:{}", job_dir),
+                    "cancel_token": format!("local_process:{}", job_dir),
+                    "result_ref": job_id,
+                    "retryable": true,
                     "message_key": "clawd.task.async_job_pending"
                 }
             }))

@@ -150,6 +150,51 @@ fn cancel_task_by_id_records_provider_cancel_contract_without_text_fields() {
 }
 
 #[test]
+fn cancel_task_by_id_accepts_provider_cancel_token_alias() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_running_task(
+        &state,
+        &task_id,
+        &json!({
+            "task_checkpoint": {
+                "pending_async_job": {
+                    "job_id": "provider:video_generate:minimax:task-1",
+                    "status": "running",
+                    "poll_after_ms": 30_000,
+                    "expires_at": 9_999,
+                    "cancel_token": "provider:video_generate:minimax:task-1",
+                    "message_key": "clawd.task.async_job_pending",
+                    "poll_adapter": {
+                        "adapter_kind": "media_job_poll",
+                        "skill_name": "video_generate"
+                    }
+                }
+            }
+        }),
+    );
+
+    let canceled = cancel_task_by_id(&state, &task_id).expect("cancel task");
+
+    assert_eq!(canceled, 1);
+    let result = stored_result_json(&state, &task_id);
+    assert_eq!(
+        result["cancel_adapter_result"]["provider_cancel_contract"]["provider"],
+        "minimax"
+    );
+    assert_eq!(
+        result["cancel_adapter_result"]["provider_cancel_contract"]["job_id"],
+        "task-1"
+    );
+    assert_eq!(
+        result["cancel_adapter_result"]["adapter_kind"],
+        "media_job_poll"
+    );
+    assert!(result["cancel_adapter_result"].get("text").is_none());
+    assert!(result["cancel_adapter_result"].get("error_text").is_none());
+}
+
+#[test]
 fn resume_task_with_input_records_structured_resume_metadata() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();

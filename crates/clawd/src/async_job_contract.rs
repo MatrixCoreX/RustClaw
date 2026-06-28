@@ -91,7 +91,7 @@ pub(crate) fn async_job_protocol_hint_line() -> String {
         .join("|");
     let adapter_kinds = ASYNC_POLL_ADAPTER_KINDS.join("|");
     format!(
-        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;poll_adapter_kinds:{adapter_kinds};adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|expires_at|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key;user_text_fields_forbidden:text|error_text"
+        "async_job_protocol=version:1;phases:{phases};resume_entrypoint:poll_async_job;checkpoint_states:waiting|background;adapter_statuses:{statuses};required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key;canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|error_code|retryable;legacy_compat_fields:poll_after_seconds|cancel_ref;poll_adapter_kinds:{adapter_kinds};adapter_result_key:{ASYNC_POLL_ADAPTER_RESULT_KEY};adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable;user_text_fields_forbidden:text|error_text"
     )
 }
 
@@ -128,15 +128,13 @@ pub(crate) fn parse_pending_async_job_ref_from_extra(
     let job = AsyncJobRef {
         job_id: required_machine_string(candidate, "job_id").unwrap_or_default(),
         status,
-        poll_after_seconds: candidate
-            .get("poll_after_seconds")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+        poll_after_seconds: pending_job_poll_after_seconds(candidate).unwrap_or(0),
         expires_at: candidate
             .get("expires_at")
             .and_then(Value::as_i64)
             .unwrap_or(0),
-        cancel_ref: required_machine_string(candidate, "cancel_ref").unwrap_or_default(),
+        cancel_ref: required_machine_string_any(candidate, &["cancel_ref", "cancel_token"])
+            .unwrap_or_default(),
         message_key: required_machine_string(candidate, "message_key").unwrap_or_default(),
     };
     let missing = job.missing_required_fields();
@@ -163,14 +161,33 @@ pub(crate) fn pending_async_job_contract_summary(
     let poll_adapter_kind = poll_adapter
         .and_then(poll_adapter_kind)
         .unwrap_or("unspecified_poll");
+    let provider = required_machine_string(candidate, "provider")
+        .or_else(|| extra.and_then(|extra| required_machine_string(extra, "provider")))
+        .or_else(|| {
+            provider_token_from_job_id(required_machine_string(candidate, "job_id")?.as_str())
+        });
+    let poll_after_seconds = pending_job_poll_after_seconds(candidate);
+    let poll_after_ms = pending_job_poll_after_ms(candidate);
+    let cancel_token_present =
+        required_machine_string_any(candidate, &["cancel_token", "cancel_ref"]).is_some();
+    let result_ref = required_machine_string(candidate, "result_ref");
+    let retryable = candidate
+        .get("retryable")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     Ok(Some(json!({
         "schema_version": 1,
         "status": "valid",
         "job_id": required_machine_string(candidate, "job_id").unwrap_or_default(),
+        "provider": provider,
         "job_status": candidate.get("status").and_then(Value::as_str).map(str::trim),
-        "poll_after_seconds": candidate.get("poll_after_seconds").and_then(Value::as_u64),
+        "poll_after_seconds": poll_after_seconds,
+        "poll_after_ms": poll_after_ms,
         "expires_at": candidate.get("expires_at").and_then(Value::as_i64),
         "cancel_ref_present": required_machine_string(candidate, "cancel_ref").is_some(),
+        "cancel_token_present": cancel_token_present,
+        "result_ref": result_ref,
+        "retryable": retryable,
         "message_key": required_machine_string(candidate, "message_key").unwrap_or_default(),
         "required_job_fields_present": [
             "job_id",
@@ -179,6 +196,20 @@ pub(crate) fn pending_async_job_contract_summary(
             "expires_at",
             "cancel_ref",
             "message_key"
+        ],
+        "canonical_job_fields": [
+            "job_id",
+            "provider",
+            "status",
+            "poll_after_ms",
+            "cancel_token",
+            "result_ref",
+            "error_code",
+            "retryable"
+        ],
+        "legacy_compat_fields": [
+            "poll_after_seconds",
+            "cancel_ref"
         ],
         "forbidden_user_text_fields_absent": true,
         "poll_adapter_present": poll_adapter.is_some(),
@@ -325,17 +356,15 @@ fn validate_pending_async_job_contract(value: &Value, error_prefix: &str) -> Res
         return Err(machine_error(error_prefix, "non_pending_status"));
     }
     let mut missing = Vec::new();
-    for key in ["job_id", "cancel_ref", "message_key"] {
+    for key in ["job_id", "message_key"] {
         if required_machine_string(value, key).is_none() {
             missing.push(key);
         }
     }
-    if value
-        .get("poll_after_seconds")
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-        == 0
-    {
+    if required_machine_string_any(value, &["cancel_ref", "cancel_token"]).is_none() {
+        missing.push("cancel_ref");
+    }
+    if pending_job_poll_after_seconds(value).unwrap_or(0) == 0 {
         missing.push("poll_after_seconds");
     }
     if value.get("expires_at").and_then(Value::as_i64).unwrap_or(0) <= 0 {
@@ -370,6 +399,50 @@ fn required_machine_string(value: &Value, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn required_machine_string_any(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| required_machine_string(value, key))
+}
+
+fn pending_job_poll_after_seconds(value: &Value) -> Option<u64> {
+    value
+        .get("poll_after_seconds")
+        .and_then(Value::as_u64)
+        .filter(|seconds| *seconds > 0)
+        .or_else(|| {
+            value
+                .get("poll_after_ms")
+                .and_then(Value::as_u64)
+                .filter(|millis| *millis > 0)
+                .map(|millis| millis.saturating_add(999) / 1_000)
+        })
+}
+
+fn pending_job_poll_after_ms(value: &Value) -> Option<u64> {
+    value
+        .get("poll_after_ms")
+        .and_then(Value::as_u64)
+        .filter(|millis| *millis > 0)
+        .or_else(|| {
+            value
+                .get("poll_after_seconds")
+                .and_then(Value::as_u64)
+                .filter(|seconds| *seconds > 0)
+                .map(|seconds| seconds.saturating_mul(1_000))
+        })
+}
+
+fn provider_token_from_job_id(job_id: &str) -> Option<String> {
+    let mut parts = job_id
+        .split(':')
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("provider"), Some(_skill), Some(provider)) => Some(provider.to_string()),
+        _ => None,
+    }
+}
+
 fn machine_error(error_prefix: &str, reason: &str) -> String {
     format!("{error_prefix}: {reason}")
 }
@@ -396,18 +469,35 @@ pub(crate) fn async_job_contract_json() -> Value {
             "cancel_ref",
             "message_key"
         ],
+        "canonical_job_fields": [
+            "job_id",
+            "provider",
+            "status",
+            "poll_after_ms",
+            "cancel_token",
+            "result_ref",
+            "error_code",
+            "retryable"
+        ],
+        "legacy_compat_fields": [
+            "poll_after_seconds",
+            "cancel_ref"
+        ],
         "poll_adapter_kinds": ASYNC_POLL_ADAPTER_KINDS,
         "adapter_result_key": ASYNC_POLL_ADAPTER_RESULT_KEY,
         "adapter_result_fields": [
             "job_id",
             "status",
             "poll_after_seconds",
+            "poll_after_ms",
             "expires_at",
+            "result_ref",
             "final_result_json",
             "failure_result_json",
             "cancellation_result_json",
             "error_code",
-            "message_key"
+            "message_key",
+            "retryable"
         ],
         "timeout_policy_fields": [
             "adapter_kind",

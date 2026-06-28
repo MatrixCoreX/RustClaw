@@ -686,6 +686,11 @@ async fn builtin_run_cmd_async_start_outcome_exposes_pending_async_job_extra() {
         .expect("pending async job extra");
     assert_eq!(job["status"], "accepted");
     assert_eq!(job["poll_after_seconds"], 1);
+    assert_eq!(job["poll_after_ms"], 1_000);
+    assert_eq!(job["provider"], "local_process");
+    assert_eq!(job["result_ref"], job["job_id"]);
+    assert_eq!(job["cancel_token"], job["cancel_ref"]);
+    assert_eq!(job["retryable"], true);
     assert_eq!(job["message_key"], "clawd.task.async_job_pending");
     assert!(
         job["job_id"]
