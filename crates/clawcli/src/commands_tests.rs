@@ -120,6 +120,11 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["events"][0]["event_type"], "task_completed");
     assert_eq!(report["coding"]["changed_file_count"], 1);
     assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
+    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        report["coding"]["verification_commands"][0],
+        "cargo test -p clawd"
+    );
     assert_eq!(report["coding"]["test_count"], 1);
     assert_eq!(report["coding"]["tests"][0], "cargo test -p clawd");
     assert_eq!(report["coding"]["diff_summary_count"], 1);
@@ -219,6 +224,11 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     assert_eq!(report["coding"]["changed_file_count"], 2);
     assert_eq!(report["coding"]["command_count"], 1);
     assert_eq!(report["coding"]["commands"][0], "cargo fmt --all");
+    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        report["coding"]["verification_commands"][0],
+        "cargo fmt --all"
+    );
     assert_eq!(report["coding"]["test_count"], 0);
     assert_eq!(report["coding"]["failure_count"], 1);
     assert_eq!(report["coding"]["failures"][0]["step_id"], "step_2");

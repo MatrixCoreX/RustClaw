@@ -205,6 +205,7 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "provider_job_id",
     "changed_file_count",
     "command_count",
+    "verification_command_count",
     "test_count",
     "diff_summary_count",
     "failure_count",

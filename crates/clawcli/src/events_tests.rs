@@ -282,6 +282,7 @@ fn event_lines_include_coding_evidence_machine_fields() {
                                 "evidence_ref": "coding_evidence:summary",
                                 "changed_file_count": 1,
                                 "command_count": 2,
+                                "verification_command_count": 2,
                                 "test_count": 1,
                                 "diff_summary_count": 1,
                                 "failure_count": 1,
@@ -313,6 +314,13 @@ fn event_lines_include_coding_evidence_machine_fields() {
     assert_eq!(
         events[0].fields.get("test_count").map(String::as_str),
         Some("1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("verification_command_count")
+            .map(String::as_str),
+        Some("2")
     );
     assert_eq!(
         events[0].fields.get("retry_count").map(String::as_str),
