@@ -2,6 +2,7 @@ import { Activity, CircleAlert, Clock3, Copy, Loader2, MessageCircle, Pause, Pla
 
 import { formatDuration } from "../lib/display-format";
 import {
+  buildTaskKindLabel,
   buildTaskLifecycleView,
   buildTaskPollingView,
   buildTaskStatusSummary,
@@ -154,6 +155,7 @@ export function ActiveTasksPanel({
             const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
             const pollingView = buildTaskPollingView(item.lifecycle, lang);
             const childView = buildChildTaskView(item);
+            const taskKindLabel = buildTaskKindLabel(item.kind, lang);
             const canPause = canPauseTask(item);
             const canResume = canResumeTask(item);
             const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
@@ -170,7 +172,7 @@ export function ActiveTasksPanel({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">#{item.index}</span>
                       <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{lifecycleView.stateLabel}</span>
-                      <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">{item.kind}</span>
+                      <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">{taskKindLabel}</span>
                       {childView ? (
                         <span className="rounded-md border border-sky-300/20 bg-sky-400/10 px-2 py-1 text-xs font-medium text-sky-100">
                           {t("子任务", "Child task")}

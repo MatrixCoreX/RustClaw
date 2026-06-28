@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskLifecycleView, buildTaskPollingView, buildTaskStatusSummary } from "./task-lifecycle.ts";
+import { buildTaskKindLabel, buildTaskLifecycleView, buildTaskPollingView, buildTaskStatusSummary } from "./task-lifecycle.ts";
 
 test("builds a pollable running lifecycle view", () => {
   const view = buildTaskLifecycleView(
@@ -140,6 +140,12 @@ test("summarizes task states for dashboard cards", () => {
       ["failed", 2],
     ],
   );
+});
+
+test("projects task kind machine tokens to user-facing labels", () => {
+  assert.equal(buildTaskKindLabel("ask", "zh"), "智能任务");
+  assert.equal(buildTaskKindLabel("run_skill", "en"), "Direct skill");
+  assert.equal(buildTaskKindLabel("unexpected_kind", "en"), "Task");
 });
 
 test("builds async polling hints from machine lifecycle fields", () => {
