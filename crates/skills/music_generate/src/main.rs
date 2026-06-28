@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use toml::Value as TomlValue;
 
+mod async_contract;
+mod async_projection;
+
+use async_contract::{
+    execute_cancel, execute_poll, music_expires_at, music_poll_after_seconds, provider_music_job_id,
+};
+use async_projection::music_pending_async_job_contract;
+
 const DEFAULT_MODEL: &str = "music-2.6";
 const DEFAULT_FORMAT: &str = "mp3";
 
@@ -203,6 +211,25 @@ fn execute(
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("generate");
+    match action {
+        "generate" => execute_generate(cfg, workspace_root, obj),
+        "poll" => execute_poll(cfg, workspace_root, obj),
+        "cancel" => execute_cancel(cfg, obj),
+        _ => Err(format!("unsupported action: {action}")),
+    }
+}
+
+fn execute_generate(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+) -> Result<(String, Value), String> {
     let requested_vendor = obj.get("vendor").and_then(Value::as_str);
     let vendor = select_vendor(
         requested_vendor,
@@ -312,17 +339,30 @@ fn execute(
 
     if optional_bool(obj, "dry_run").unwrap_or(false) {
         let output = output_path.to_string_lossy().to_string();
+        let poll_after_seconds = music_poll_after_seconds(obj);
+        let expires_at = music_expires_at(obj);
+        let dry_run_job_id = provider_music_job_id(provider_name, "dry_run");
         return Ok((
             "MUSIC_GENERATE_DRY_RUN".to_string(),
             json!({
                 "provider": provider_name,
                 "model": model,
                 "model_kind": adapter_kind_name(adapter_kind_for(vendor, provider_cfg.as_ref())),
+                "adapter_kind": "media_job_poll",
                 "dry_run": true,
                 "request": payload,
                 "output_path": output,
                 "outputs": [],
                 "planned_outputs": [{"type":"audio_file","path": output}],
+                "pending_async_job_contract": music_pending_async_job_contract(
+                    provider_name,
+                    &model,
+                    &dry_run_job_id,
+                    "dry_run",
+                    &output,
+                    poll_after_seconds,
+                    expires_at,
+                ),
             }),
         ));
     }

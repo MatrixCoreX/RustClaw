@@ -22,6 +22,7 @@ fn dry_run_can_generate_with_prompt_only_by_enabling_lyrics_optimizer() {
     assert_eq!(text, "MUSIC_GENERATE_DRY_RUN");
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["adapter_kind"], "media_job_poll");
     assert_eq!(extra["request"]["lyrics_optimizer"], true);
     assert_eq!(extra["planned_outputs"][0]["type"], "audio_file");
     assert!(
@@ -30,6 +31,24 @@ fn dry_run_can_generate_with_prompt_only_by_enabling_lyrics_optimizer() {
             .is_some_and(|path| path.ends_with(".mp3")),
         "{extra}"
     );
+    assert_eq!(
+        extra["pending_async_job_contract"]["poll_adapter"]["kind"],
+        "media_job_poll"
+    );
+    assert_eq!(
+        extra["pending_async_job_contract"]["poll_adapter"]["skill_name"],
+        "music_generate"
+    );
+    assert_eq!(
+        extra["pending_async_job_contract"]["result_ref"],
+        extra["pending_async_job_contract"]["job_id"]
+    );
+    assert_eq!(
+        extra["pending_async_job_contract"]["cancel_token"],
+        extra["pending_async_job_contract"]["cancel_ref"]
+    );
+    assert_eq!(extra["pending_async_job_contract"]["retryable"], true);
+    assert!(extra.get("pending_async_job").is_none());
     assert!(extra["outputs"].as_array().unwrap().is_empty());
 }
 
@@ -94,6 +113,144 @@ fn resolve_output_path_uses_requested_workspace_path() {
     let out = resolve_output_path(&workspace, "music/download", Some("tmp/song.mp3"), "mp3")
         .expect("output path");
     assert_eq!(out, workspace.join("tmp/song.mp3"));
+}
+
+#[test]
+fn poll_dry_run_running_returns_adapter_reschedule_result() {
+    let root = unique_temp_root("music-poll-running");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-running",
+            "job_id": "provider:music_generate:minimax:provider-task-running",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "processing",
+            "poll_after_ms": 2500,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "running");
+    assert_eq!(extra["async_poll_adapter_result"]["poll_after_seconds"], 3);
+    assert_eq!(extra["async_poll_adapter_result"]["poll_after_ms"], 3_000);
+    assert_eq!(extra["async_poll_adapter_result"]["retryable"], true);
+    assert_eq!(
+        extra["async_poll_adapter_result"]["job_id"],
+        "provider:music_generate:minimax:provider-task-running"
+    );
+    assert!(extra["async_poll_adapter_result"].get("text").is_none());
+    assert!(extra["async_poll_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn poll_dry_run_success_returns_adapter_final_result() {
+    let root = unique_temp_root("music-poll-success");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "poll",
+            "task_id": "provider-task-success",
+            "job_id": "provider:music_generate:minimax:provider-task-success",
+            "vendor": "minimax",
+            "dry_run": true,
+            "mock_status": "succeeded",
+            "output_path": "music/success.mp3",
+            "poll_after_seconds": 3,
+            "expires_at": unix_ts() as i64 + 600
+        }),
+    )
+    .expect("poll dry run");
+
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "succeeded");
+    assert_eq!(
+        extra["async_poll_adapter_result"]["final_result_json"]["source"],
+        "music_generate_poll_adapter"
+    );
+    assert!(
+        extra["async_poll_adapter_result"]["final_result_json"]["output_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("music/success.mp3")),
+        "{extra}"
+    );
+    assert!(extra["async_poll_adapter_result"].get("text").is_none());
+    assert!(extra["async_poll_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn cancel_dry_run_returns_adapter_cancelled_result() {
+    let root = unique_temp_root("music-cancel-dry-run");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "cancel",
+            "task_id": "provider-task-cancel",
+            "job_id": "provider:music_generate:minimax:provider-task-cancel",
+            "vendor": "minimax",
+            "dry_run": true
+        }),
+    )
+    .expect("cancel dry run");
+
+    assert_eq!(extra["status"], "cancelled");
+    assert_eq!(extra["async_cancel_adapter_result"]["status"], "cancelled");
+    assert_eq!(extra["async_poll_adapter_result"]["status"], "cancelled");
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["cancellation_result_json"]["source"],
+        "music_generate_cancel_adapter"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["message_key"],
+        "clawd.task.cancelled"
+    );
+    assert_eq!(extra["async_cancel_adapter_result"]["retryable"], false);
+    assert!(extra["async_cancel_adapter_result"].get("text").is_none());
+    assert!(extra["async_cancel_adapter_result"]
+        .get("error_text")
+        .is_none());
+}
+
+#[test]
+fn cancel_live_without_provider_adapter_returns_structured_contract() {
+    let root = unique_temp_root("music-cancel-adapter-contract");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "action": "cancel",
+            "task_id": "provider-task-cancel",
+            "job_id": "provider:music_generate:minimax:provider-task-cancel",
+            "vendor": "minimax"
+        }),
+    )
+    .expect("cancel contract");
+
+    assert_eq!(extra["status"], "requires_provider_adapter");
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["status"],
+        "requires_provider_adapter"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["error_code"],
+        "provider_cancel_adapter_missing"
+    );
+    assert_eq!(
+        extra["async_cancel_adapter_result"]["provider_cancel_contract"]["provider"],
+        "minimax"
+    );
+    assert!(extra["async_cancel_adapter_result"].get("text").is_none());
+    assert!(extra["async_cancel_adapter_result"]
+        .get("error_text")
+        .is_none());
 }
 
 fn unique_temp_root(name: &str) -> PathBuf {
