@@ -5,9 +5,10 @@ use tracing::{debug, info, warn};
 
 use super::{
     build_resume_context_error, classify_skill_failure_recovery, ensure_task_running,
-    register_failed_step_output, register_file_path_output, register_step_output,
-    remember_written_file_alias, AgentLoopGuardPolicy, AppState, ClaimedTask, LoopState,
-    SkillActionOutcome, WriteFileEffectivePath, TASK_CANCELED_ERR,
+    register_failed_step_output, register_failed_step_structured_error_fields,
+    register_file_path_output, register_step_output, remember_written_file_alias,
+    AgentLoopGuardPolicy, AppState, ClaimedTask, LoopState, SkillActionOutcome,
+    WriteFileEffectivePath, TASK_CANCELED_ERR,
 };
 use crate::{repo, run_skill_with_runner_outcome};
 
@@ -1360,6 +1361,11 @@ async fn handle_skill_step_failure(
             &format!("skill.{normalized_skill}"),
             &format!("skill({normalized_skill})"),
             &user_visible_err,
+        );
+        register_failed_step_structured_error_fields(
+            loop_state,
+            &format!("skill.{normalized_skill}"),
+            err,
         );
         loop_state.history_compact.push(format!(
             "round={} step={} skill={} failed error={}",

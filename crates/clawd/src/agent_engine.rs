@@ -1222,6 +1222,7 @@ fn register_failed_step_output(
             .output_vars
             .insert(format!("{key_prefix}.content_status"), failed_status);
     }
+    register_structured_failed_step_fields(loop_state, key_prefix, trimmed);
     loop_state.output_vars.insert(
         "failed_step.action".to_string(),
         failed_action.trim().to_string(),
@@ -1229,6 +1230,52 @@ fn register_failed_step_output(
     loop_state
         .output_vars
         .insert("failed_step.index".to_string(), round_step.to_string());
+}
+
+fn register_structured_failed_step_fields(loop_state: &mut LoopState, key_prefix: &str, err: &str) {
+    let Some(structured) = crate::skills::parse_structured_skill_error(err) else {
+        return;
+    };
+    if !structured.skill.trim().is_empty() {
+        loop_state
+            .output_vars
+            .insert("failed_step.skill".to_string(), structured.skill.clone());
+    }
+    loop_state.output_vars.insert(
+        "failed_step.error_kind".to_string(),
+        structured.error_kind.clone(),
+    );
+    loop_state.output_vars.insert(
+        format!("{key_prefix}.error_kind"),
+        structured.error_kind.clone(),
+    );
+    if let Some(extra) = structured.extra.as_ref().and_then(Value::as_object) {
+        for field in ["error_code", "status_code"] {
+            if let Some(value) = extra
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
+                loop_state
+                    .output_vars
+                    .insert(format!("failed_step.{field}"), value.to_string());
+            }
+        }
+        if let Some(retryable) = extra.get("retryable").and_then(Value::as_bool) {
+            loop_state
+                .output_vars
+                .insert("failed_step.retryable".to_string(), retryable.to_string());
+        }
+    }
+}
+
+pub(crate) fn register_failed_step_structured_error_fields(
+    loop_state: &mut LoopState,
+    key_prefix: &str,
+    raw_err: &str,
+) {
+    register_structured_failed_step_fields(loop_state, key_prefix, raw_err);
 }
 
 type WriteFileEffectivePath = (String, String, String);

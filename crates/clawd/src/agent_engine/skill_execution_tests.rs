@@ -1531,7 +1531,12 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
         serde_json::json!({
             "skill": "system_basic",
             "error_kind": "unsupported_action",
-            "error_text": "unknown action: check_exists"
+            "error_text": "unknown action: check_exists",
+            "extra": {
+                "error_code": "unsupported_action",
+                "status_code": "unsupported_action",
+                "retryable": true
+            }
         })
     );
     let step = failed_step("step_1", "system_basic", &err);
@@ -1566,6 +1571,34 @@ async fn recoverable_protocol_failure_publishes_replan_progress() {
     assert!(loop_state.progress_messages[0].contains("telegram.progress.step_failed"));
     assert!(loop_state.progress_messages[0].contains("system_basic"));
     assert!(loop_state.progress_messages[1].contains("telegram.progress.retry_replan"));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("failed_step.skill")
+            .map(String::as_str),
+        Some("system_basic")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("failed_step.error_kind")
+            .map(String::as_str),
+        Some("unsupported_action")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("failed_step.retryable")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("skill.system_basic.error_kind")
+            .map(String::as_str),
+        Some("unsupported_action")
+    );
 }
 
 #[tokio::test]
