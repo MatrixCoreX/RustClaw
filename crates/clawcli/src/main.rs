@@ -177,6 +177,12 @@ enum Command {
         json: bool,
     },
 
+    /// Inspect structured permission and policy machine fields.
+    Permission {
+        #[command(subcommand)]
+        command: PermissionCommand,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -308,6 +314,31 @@ enum WaitUntil {
     Terminal,
     Background,
     NeedsUser,
+}
+
+#[derive(Subcommand)]
+enum PermissionCommand {
+    /// Summarize permission decisions recorded on a task.
+    Inspect {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Same machine summary as inspect, intended for scripts that want JSON evidence.
+    Explain {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize capability availability and policy metadata.
+    Capability {
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long)]
+        capability: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl WaitUntil {
@@ -551,6 +582,30 @@ fn main() -> Result<()> {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_subagents(base_url, k, task_id, *json)
         }
+        Command::Permission { command } => match command {
+            PermissionCommand::Inspect { task_id, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_permission_inspect(base_url, k, task_id, *json)
+            }
+            PermissionCommand::Explain { task_id, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_permission_explain(base_url, k, task_id, *json)
+            }
+            PermissionCommand::Capability {
+                skill,
+                capability,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_permission_capability(
+                    base_url,
+                    k,
+                    skill.as_deref(),
+                    capability.as_deref(),
+                    *json,
+                )
+            }
+        },
         Command::Active {
             user_id,
             chat_id,
