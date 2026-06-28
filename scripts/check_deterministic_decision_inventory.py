@@ -81,20 +81,6 @@ INVENTORY: tuple[InventoryEntry, ...] = (
         reads_skill_error_text_fields=False,
     ),
     InventoryEntry(
-        name="ask_flow_residual_semantic_debt",
-        patterns=(
-            "crates/clawd/src/ask_flow.rs",
-            "crates/clawd/src/ask_flow_gate_execution.rs",
-            "crates/clawd/src/ask_flow_pre_planner_exit.rs",
-        ),
-        categories=("semantic_rewrite",),
-        reads_user_prompt_text=True,
-        reads_model_answer_text=True,
-        reads_skill_text_fields=False,
-        reads_skill_error_text_fields=False,
-        migration_targets=("move_to_planner", "delete_after_gate"),
-    ),
-    InventoryEntry(
         name="planner_deterministic_helpers",
         patterns=(
             "crates/clawd/src/agent_engine/planning*.rs",
@@ -104,18 +90,11 @@ INVENTORY: tuple[InventoryEntry, ...] = (
             "contract_boundary",
             "evidence_projection",
             "recovery_boundary",
-            "semantic_rewrite",
         ),
         reads_user_prompt_text=True,
         reads_model_answer_text=True,
         reads_skill_text_fields=False,
         reads_skill_error_text_fields=False,
-        migration_targets=(
-            "move_to_registry",
-            "move_to_interface",
-            "move_to_prompt_patch",
-            "replace_with_schema",
-        ),
     ),
     InventoryEntry(
         name="observed_output_projection",
@@ -200,6 +179,7 @@ def validate_inventory_shape() -> list[str]:
         if "unknown" in entry.categories:
             findings.append(f"{entry.name}: unknown_category_not_allowed_in_final_inventory")
         if "semantic_rewrite" in entry.categories:
+            findings.append(f"{entry.name}: semantic_rewrite_not_allowed_in_current_inventory")
             missing_targets = sorted(
                 set(entry.migration_targets) - SEMANTIC_MIGRATION_TARGETS
             )
@@ -259,7 +239,7 @@ def run_self_test() -> int:
     )
     assert is_test_path(ROOT / "crates/clawd/src/answer_verifier_tests.rs")
     planning_entries = covering_entries("crates/clawd/src/agent_engine/planning.rs")
-    assert any("semantic_rewrite" in entry.categories for entry in planning_entries)
+    assert not any("semantic_rewrite" in entry.categories for entry in planning_entries)
     observed_entries = covering_entries(
         "crates/clawd/src/agent_engine/observed_output.rs"
     )
