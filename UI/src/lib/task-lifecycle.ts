@@ -82,6 +82,15 @@ function t(lang: TaskLifecycleLang, zh: string, en: string): string {
   return lang === "zh" ? zh : en;
 }
 
+export function buildTaskKindLabel(kind: string | null | undefined, lang: TaskLifecycleLang): string {
+  const token = (kind || "").trim().toLowerCase();
+  if (token === "ask") return t(lang, "智能任务", "Assistant task");
+  if (token === "run_skill") return t(lang, "指定技能", "Direct skill");
+  if (token === "run_tool") return t(lang, "工具任务", "Tool task");
+  if (token === "system") return t(lang, "系统任务", "System task");
+  return t(lang, "任务", "Task");
+}
+
 function stateToken(lifecycle: TaskLifecycleProjection | null | undefined, dbStatus: string): string {
   return (lifecycle?.state || dbStatus || "running").trim().toLowerCase();
 }
