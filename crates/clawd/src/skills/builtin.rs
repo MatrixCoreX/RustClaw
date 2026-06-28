@@ -161,7 +161,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() {
                 return Err(builtin_error(
@@ -217,7 +217,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 &effective_path,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             if let Some(parent) = real_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|err| {
@@ -300,7 +300,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let requested_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             let real_path = if requested_path.is_dir() {
                 requested_path
@@ -422,7 +422,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 cwd,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             let request_text = optional_string(map, "request_text")
                 .map(str::trim)
@@ -564,7 +564,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             std::fs::create_dir_all(&real_path).map_err(|err| {
                 io_builtin_error("make_dir", "create_dir", &err, Some(path), Some(&real_path))
@@ -581,7 +581,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                crate::skills::task_allows_path_outside_workspace(state, task),
+                builtin_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() {
                 if target_kind.eq_ignore_ascii_case("directory") && recursive {
@@ -851,6 +851,13 @@ fn resolve_workspace_path(
     }
 
     Ok(base)
+}
+
+fn builtin_allows_path_outside_workspace(state: &AppState, task: Option<&ClaimedTask>) -> bool {
+    if crate::execution_isolation::is_execution_isolation_root(&state.skill_rt.workspace_root) {
+        return false;
+    }
+    crate::skills::task_allows_path_outside_workspace(state, task)
 }
 
 #[derive(Debug, Clone, Copy)]
