@@ -1425,14 +1425,11 @@ fn direct_answer_fallback_gate_json(route: &RouteResult) -> Value {
     let boundary_class = direct_answer_gate_boundary_class(route);
     let observed = boundary_class != "not_observed_in_planner_shadow";
     let boundary_allowed = direct_answer_gate_boundary_class_is_boundary_owned(boundary_class);
+    let ownership_class = direct_answer_gate_ownership_class(boundary_class);
     json!({
         "owner_layer": "direct_answer_gate",
-        "authority_target": "fallback_safety_check",
-        "ownership_class": if boundary_allowed {
-            "fallback_safety_check"
-        } else {
-            "semantic_policy_candidate"
-        },
+        "authority_target": ownership_class,
+        "ownership_class": ownership_class,
         "boundary_allowed": boundary_allowed,
         "semantic_migration_target": if boundary_allowed {
             "none"
@@ -1451,7 +1448,9 @@ fn direct_answer_fallback_gate_json(route: &RouteResult) -> Value {
 }
 
 fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
-    if !route_reason_has_prefix(route, "direct_answer_gate_") {
+    if !route_reason_has_prefix(route, "direct_answer_gate_")
+        && !route_reason_has_prefix(route, "inline_structured_payload_context_execute")
+    {
         return "not_observed_in_planner_shadow";
     }
     if route_reason_has_marker(route, "direct_answer_gate_unbound_deictic_clarify") {
@@ -1492,21 +1491,44 @@ fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
     if route_reason_has_marker(route, "direct_answer_gate_contract_execute")
         || route_reason_has_marker(route, "direct_answer_gate_inline_transform_execute")
         || route_reason_has_marker(route, "direct_answer_gate_package_manager_detect_execute")
-        || route_reason_has_marker(route, "direct_answer_gate_recent_file_context_execute")
+        || route_reason_has_marker(route, "inline_structured_payload_context_execute")
+    {
+        return "contract_execution_boundary";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_recent_file_context_execute")
         || route_reason_has_marker(route, "direct_answer_gate_artifact_listing_execute")
         || route_reason_has_marker(route, "direct_answer_gate_workspace_child_context_execute")
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_direct_answer_deferred_to_agent_loop",
-        )
-        || route_reason_has_marker(route, "direct_answer_gate_execute")
     {
+        return "evidence_projection_execution";
+    }
+    if route_reason_has_marker(
+        route,
+        "direct_answer_gate_direct_answer_deferred_to_agent_loop",
+    ) {
+        return "agent_loop_activation_boundary";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_execute") {
         return "semantic_execution_promotion";
     }
     if route_reason_has_marker(route, "direct_answer_gate_clarify") {
-        return "semantic_clarify_candidate";
+        return "clarify_boundary";
     }
     "legacy_unclassified_gate_observed"
+}
+
+fn direct_answer_gate_ownership_class(boundary_class: &str) -> &'static str {
+    match boundary_class {
+        "contract_execution_boundary" => "contract_boundary",
+        "evidence_projection_execution" | "evidence_backed_direct_candidate" => {
+            "evidence_projection"
+        }
+        "agent_loop_activation_boundary" => "agent_loop_activation",
+        "clarify_boundary"
+        | "not_observed_in_planner_shadow"
+        | "locator_binding_fallback"
+        | "fallback_safety_filter" => "fallback_safety_check",
+        _ => "semantic_policy_candidate",
+    }
 }
 
 fn direct_answer_gate_boundary_class_is_boundary_owned(boundary_class: &str) -> bool {
@@ -1516,15 +1538,20 @@ fn direct_answer_gate_boundary_class_is_boundary_owned(boundary_class: &str) -> 
             | "locator_binding_fallback"
             | "evidence_backed_direct_candidate"
             | "fallback_safety_filter"
+            | "contract_execution_boundary"
+            | "evidence_projection_execution"
+            | "agent_loop_activation_boundary"
+            | "clarify_boundary"
     )
 }
 
 fn route_reason_has_marker(route: &RouteResult, marker: &str) -> bool {
-    route
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .any(|part| part == marker)
+    route.route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .strip_prefix(marker)
+                .is_some_and(|suffix| suffix.starts_with(':'))
+    })
 }
 
 fn route_reason_has_prefix(route: &RouteResult, prefix: &str) -> bool {

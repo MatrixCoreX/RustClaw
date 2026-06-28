@@ -78,10 +78,51 @@ fn boundary_context_classifies_pre_agent_gate_machine_summary() {
 }
 
 #[test]
-fn boundary_context_marks_direct_answer_execution_promotion_as_planner_migration_debt() {
+fn boundary_context_marks_direct_answer_contract_execute_as_boundary_owned() {
     let policy = test_policy();
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.route_reason = "direct_answer_gate_contract_execute".to_string();
+    route.route_reason = "direct_answer_gate_contract_execute:structured contract".to_string();
+    route.output_contract.requires_content_evidence = true;
+
+    let boundary = boundary_context_snapshot_json(
+        &test_task(),
+        &policy,
+        Some(&AgentRunContext::default()),
+        Some(&route),
+        LoopBudgetProfile::FastRead,
+    );
+
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
+            .and_then(serde_json::Value::as_str),
+        Some("contract_execution_boundary")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/ownership_class")
+            .and_then(serde_json::Value::as_str),
+        Some("contract_boundary")
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/boundary_allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        boundary
+            .pointer("/pre_agent_gates/direct_answer_gate/semantic_migration_target")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+}
+
+#[test]
+fn boundary_context_keeps_bare_direct_answer_execute_as_planner_migration_debt() {
+    let policy = test_policy();
+    let mut route = route_result(OutputResponseShape::Scalar);
+    route.route_reason = "direct_answer_gate_execute:legacy semantic promotion".to_string();
     route.output_contract.requires_content_evidence = true;
 
     let boundary = boundary_context_snapshot_json(
