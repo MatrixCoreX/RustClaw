@@ -30,11 +30,13 @@ KNOWN_KINDS = {
     "BoundarySafety",
     "MachineFactFastPath",
     "CompatTrace",
+    "AgentLoopActivation",
     "OrdinarySemantic",
 }
 KNOWN_DELETION_GATES = {
     "keep_boundary",
     "keep_machine_fact_fast_path",
+    "keep_structured_agent_loop_activation_gate",
     "delete_after_agent_loop_default",
     "delete_after_selected_class_release_gate",
     "test_fixture_only",
@@ -132,6 +134,19 @@ def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
             if not deletion_gate.startswith("delete_after_"):
                 findings.append(
                     f"{prefix}: ordinary_semantic_requires_delete_after_gate"
+                )
+        if kind == "AgentLoopActivation":
+            if deletion_gate != "keep_structured_agent_loop_activation_gate":
+                findings.append(
+                    f"{prefix}: agent_loop_activation_requires_structured_gate"
+                )
+            if target != "agent_loop_authority":
+                findings.append(
+                    f"{prefix}: agent_loop_activation_requires_agent_loop_authority"
+                )
+            if owner != "ask_flow_planner_promotion":
+                findings.append(
+                    f"{prefix}: agent_loop_activation_requires_planner_promotion_owner"
                 )
         for ref in refs:
             if not re.fullmatch(r"[a-z0-9_]+", str(ref)):
