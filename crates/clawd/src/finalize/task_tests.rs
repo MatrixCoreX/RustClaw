@@ -469,6 +469,43 @@ fn failed_task_lifecycle_payload_marks_provider_gap_terminal_reason() {
 }
 
 #[test]
+fn failed_task_lifecycle_payload_marks_structured_provider_unavailable_reason() {
+    let err = crate::skills::structured_skill_error_from_parts(
+        "llm",
+        "provider_unavailable",
+        "provider_unavailable",
+        None,
+        Some(json!({
+            "error_code": "provider_unavailable",
+            "message_key": "provider.unavailable"
+        })),
+    );
+    let payload = failed_task_lifecycle_payload(&err);
+
+    assert_eq!(payload["state"], "failed");
+    assert_eq!(payload["failure_attribution"], "provider_error");
+    assert_eq!(payload["terminal_reason"], "provider_window_exhausted");
+}
+
+#[test]
+fn failed_task_lifecycle_payload_marks_confirmation_timeout_reason() {
+    let err = crate::skills::structured_skill_error_from_parts(
+        "policy",
+        "confirmation_timeout",
+        "confirmation_timeout",
+        None,
+        Some(json!({
+            "error_code": "confirmation_timeout",
+            "message_key": "policy.confirmation_timeout"
+        })),
+    );
+    let payload = failed_task_lifecycle_payload(&err);
+
+    assert_eq!(payload["state"], "failed");
+    assert_eq!(payload["terminal_reason"], "confirmation_timeout");
+}
+
+#[test]
 fn failed_task_lifecycle_payload_marks_verifier_terminal_reason() {
     let payload = failed_task_lifecycle_payload(
         r#"answer_verifier_required_evidence_block missing_required_evidence"#,

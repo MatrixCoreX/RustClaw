@@ -933,6 +933,7 @@ pub(super) fn failure_attribution_for_structured_error_kind(
         | "provider_non_retryable_business"
         | "provider_response_invalid"
         | "provider_schema_error"
+        | "provider_unavailable"
         | "transport_retryable"
         | "rate_limited"
         | "quota_exhausted"

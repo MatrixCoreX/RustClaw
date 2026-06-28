@@ -31,6 +31,11 @@ fn terminal_failure_reason_for_error(
                     .status_code(),
             );
         }
+        if error_kind == "confirmation_timeout" {
+            return Some(
+                crate::task_lifecycle::TerminalFailureReason::ConfirmationTimeout.status_code(),
+            );
+        }
     }
     match failure_attribution {
         "provider_error" => Some(
