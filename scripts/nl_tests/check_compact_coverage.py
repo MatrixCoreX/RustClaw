@@ -66,6 +66,14 @@ REQUIRED_ROUTE_LIFECYCLE = {
     "dry_run",
 }
 
+REQUIRED_REPAIR_LOOP = {
+    "retryable_failure",
+    "missing_field",
+    "blocked_state",
+    "structured_observation",
+    "bounded_repair",
+}
+
 REQUIRED_MEDIA_DRY_RUN = {
     "image_generate",
     "audio_synthesize",
@@ -162,6 +170,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
     required_groups = {
         "basic": REQUIRED_BASIC,
         "route_lifecycle": REQUIRED_ROUTE_LIFECYCLE,
+        "repair_loop": REQUIRED_REPAIR_LOOP,
         "async_lifecycle": REQUIRED_ASYNC_LIFECYCLE,
         "media_dry_run": REQUIRED_MEDIA_DRY_RUN,
     }
@@ -210,6 +219,7 @@ def run_self_test() -> int:
     required_tags = (
         REQUIRED_BASIC
         | REQUIRED_ROUTE_LIFECYCLE
+        | REQUIRED_REPAIR_LOOP
         | REQUIRED_ASYNC_LIFECYCLE
         | REQUIRED_MEDIA_DRY_RUN
         | {"dry_run"}
