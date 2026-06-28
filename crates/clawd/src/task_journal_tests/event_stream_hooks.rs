@@ -149,10 +149,40 @@ fn trace_json_projects_ask_transitions_as_task_events() {
         Some("received_to_routing")
     );
     assert_eq!(
+        transitions[0]
+            .pointer("/payload/transition_index")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/transition_ref")
+            .and_then(Value::as_str),
+        Some("task_transition:1")
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/evidence_ref")
+            .and_then(Value::as_str),
+        Some("task_transition:1")
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/evidence_refs/0")
+            .and_then(Value::as_str),
+        Some("task_transition:1")
+    );
+    assert_eq!(
         transitions[1]
             .pointer("/payload/round_no")
             .and_then(Value::as_u64),
         Some(2)
+    );
+    assert_eq!(
+        transitions[1]
+            .pointer("/payload/evidence_ref")
+            .and_then(Value::as_str),
+        Some("task_transition:2")
     );
 }
 

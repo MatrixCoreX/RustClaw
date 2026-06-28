@@ -60,6 +60,9 @@ fn event_lines_include_task_transition_machine_fields() {
                             "event_type": "task_transition",
                             "payload": {
                                 "task_id": "task-transition",
+                                "transition_index": 0,
+                                "transition_ref": "task_transition:1",
+                                "evidence_ref": "task_transition:1",
                                 "state_from": "executing",
                                 "state_to": "finalizing",
                                 "reason_code": "agent_loop_ready_to_finalize",
@@ -93,9 +96,18 @@ fn event_lines_include_task_transition_machine_fields() {
         events[0].fields.get("reason_code").map(String::as_str),
         Some("agent_loop_ready_to_finalize")
     );
+    assert_eq!(
+        events[0].fields.get("transition_ref").map(String::as_str),
+        Some("task_transition:1")
+    );
+    assert_eq!(
+        events[0].fields.get("evidence_ref").map(String::as_str),
+        Some("task_transition:1")
+    );
     assert!(events[0]
         .line
         .contains("reason_code=agent_loop_ready_to_finalize"));
+    assert!(events[0].line.contains("evidence_ref=task_transition:1"));
 }
 
 #[test]
