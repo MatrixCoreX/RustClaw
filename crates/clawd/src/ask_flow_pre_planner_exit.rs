@@ -156,19 +156,6 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         owner_layer: "ask_flow_context_fast_path",
     },
     PrePlannerExitInventoryItem {
-        reason_code: "inline_json_transform_promoted_to_planner",
-        kind: PrePlannerExitKind::OrdinarySemantic,
-        migration_target: "planner_capability_transform_json",
-        migration_stage: "inline_transform_or_structured_repair",
-        migration_order: 30,
-        nl_gate_refs: &[
-            "nl_inline_json_transform_strict_zh",
-            "nl_inline_json_transform_table_en",
-        ],
-        deletion_gate: "delete_after_selected_class_release_gate",
-        owner_layer: "ask_flow_planner_promotion",
-    },
-    PrePlannerExitInventoryItem {
         reason_code: "contract_test_hint_promoted_to_planner",
         kind: PrePlannerExitKind::CompatTrace,
         migration_target: "planner_loop_contract_fixture",
@@ -292,13 +279,11 @@ mod tests {
     }
 
     #[test]
-    fn migration_order_prioritizes_observe_then_followup_then_transform() {
+    fn migration_order_prioritizes_observe_then_followup() {
         let selected_local =
             pre_planner_exit_for_reason("direct_answer_gate_promoted_to_planner").unwrap();
         let active_followup =
             pre_planner_exit_for_reason("direct_answer_gate_chat_fallback").unwrap();
-        let inline_transform =
-            pre_planner_exit_for_reason("inline_json_transform_promoted_to_planner").unwrap();
 
         assert_eq!(
             selected_local.migration_stage,
@@ -308,12 +293,7 @@ mod tests {
             active_followup.migration_stage,
             "active_task_followup_or_chat_rewrite"
         );
-        assert_eq!(
-            inline_transform.migration_stage,
-            "inline_transform_or_structured_repair"
-        );
         assert!(selected_local.migration_order < active_followup.migration_order);
-        assert!(active_followup.migration_order < inline_transform.migration_order);
     }
 
     #[test]
@@ -361,7 +341,7 @@ mod tests {
 
     #[test]
     fn trace_context_exposes_machine_fields() {
-        let item = pre_planner_exit_for_reason("inline_json_transform_promoted_to_planner")
+        let item = pre_planner_exit_for_reason("direct_answer_gate_promoted_to_planner")
             .expect("inventory item");
         let trace = item.trace_context();
         assert_eq!(
@@ -372,7 +352,7 @@ mod tests {
             trace
                 .get("pre_planner_exit_reason_code")
                 .and_then(Value::as_str),
-            Some("inline_json_transform_promoted_to_planner")
+            Some("direct_answer_gate_promoted_to_planner")
         );
         assert_eq!(
             trace.get("decision_source").and_then(Value::as_str),
@@ -380,7 +360,7 @@ mod tests {
         );
         assert_eq!(
             trace.get("rewrite_reason_code").and_then(Value::as_str),
-            Some("inline_json_transform_promoted_to_planner")
+            Some("direct_answer_gate_promoted_to_planner")
         );
         assert_eq!(
             trace.get("semantic_control_state").and_then(Value::as_str),
@@ -392,11 +372,11 @@ mod tests {
             .is_some());
         assert_eq!(
             trace.get("migration_stage").and_then(Value::as_str),
-            Some("inline_transform_or_structured_repair")
+            Some("selected_local_observe_or_direct_scalar")
         );
         assert_eq!(
             trace.get("migration_order").and_then(Value::as_u64),
-            Some(30)
+            Some(10)
         );
         assert!(trace
             .get("nl_gate_refs")
@@ -408,7 +388,7 @@ mod tests {
         );
         assert_eq!(
             trace.get("output_contract_ref").and_then(Value::as_str),
-            Some("planner_capability_transform_json")
+            Some("planner_loop_authority")
         );
     }
 

@@ -741,42 +741,6 @@ fn direct_answer_gate_marks_contextual_inline_payload_execution() {
 }
 
 #[test]
-fn inline_json_transform_context_promotion_uses_strict_execution_contract() {
-    let mut route = chat_route_for_gate();
-    route.route_reason = "executionless_route_downgraded_to_direct_answer".to_string();
-    route.resolved_intent =
-        "Transform inline JSON.\nanswer_candidate: [{\"city\":\"Tokyo\"},{\"city\":\"Osaka\"}]"
-            .to_string();
-    let request = r#"{"action":"transform_data","data":[{"city":"Tokyo","temp":22},{"city":"Osaka","temp":24}],"ops":[{"op":"project","fields":["city"]}]}"#;
-    let mut ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-
-    assert!(promote_inline_json_transform_context_to_planner(
-        &mut ctx, request
-    ));
-    let route = ctx.route_result.expect("route");
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Strict
-    );
-    assert!(route.output_contract.requires_content_evidence);
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    assert!(route
-        .route_reason
-        .contains("inline_json_transform_structured_execute"));
-    assert_eq!(
-        route.resolved_intent,
-        format!("{request}\nanswer_candidate: [{{\"city\":\"Tokyo\"}},{{\"city\":\"Osaka\"}}]")
-    );
-}
-
-#[test]
 fn direct_answer_gate_promotes_explicit_readme_summary_to_planner() {
     let root = TempDirGuard::new("gate_bare_readme_summary");
     std::fs::write(root.path.join("README.md"), "# Demo\n\nLocal readme body")

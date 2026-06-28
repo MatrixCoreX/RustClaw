@@ -482,46 +482,6 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &current_turn_user_request,
             );
-            if transform_skill_available_for_plan(state)
-                && crate::intent::surface_signals::inline_json_transform_request(
-                    &current_turn_user_request,
-                )
-            {
-                if let Some(mut promoted_ctx) = agent_run_context.clone() {
-                    if promote_inline_json_transform_context_to_planner(
-                        &mut promoted_ctx,
-                        &current_turn_user_request,
-                    ) {
-                        tracing::info!(
-                            "{} worker_once: ask inline_json_transform_promoted_to_planner task_id={}",
-                            crate::highlight_tag("routing"),
-                            task.task_id
-                        );
-                        let promoted_prompt_with_memory = format!(
-                            "{}\n\nStructured inline transform request:\n{}",
-                            prompt_with_memory.trim(),
-                            current_turn_user_request.trim()
-                        );
-                        let reply = execute_via_planner_loop(
-                            state,
-                            task,
-                            &promoted_prompt_with_memory,
-                            execution_user_request,
-                            &crate::AskMode::planner_execute_chat_wrapped(),
-                            Some(promoted_ctx.clone()),
-                        )
-                        .await?;
-                        return Ok(with_pre_planner_exit_snapshot(
-                            state,
-                            task,
-                            &current_turn_user_request,
-                            reply,
-                            Some(&promoted_ctx),
-                            "inline_json_transform_promoted_to_planner",
-                        ));
-                    }
-                }
-            }
             if let Some(reply) = structural_alias_binding_ack(
                 state,
                 agent_run_context.as_ref(),
