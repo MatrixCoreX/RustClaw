@@ -50,41 +50,6 @@ pub(super) fn promote_direct_answer_gate_to_planner(
     DirectAnswerPreflight::PlannerExecute(ctx.clone())
 }
 
-pub(super) fn promote_inline_json_transform_context_to_planner(
-    ctx: &mut crate::agent_engine::AgentRunContext,
-    current_user_request: &str,
-) -> bool {
-    let Some(route) = ctx.route_result.as_mut() else {
-        return false;
-    };
-    let answer_candidate = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent);
-    let mut contract = route.output_contract.clone();
-    contract.requires_content_evidence = true;
-    contract.delivery_required = false;
-    contract.locator_kind = crate::OutputLocatorKind::None;
-    contract.locator_hint.clear();
-    contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    contract.semantic_kind = crate::OutputSemanticKind::None;
-    if matches!(
-        contract.response_shape,
-        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-    ) {
-        contract.response_shape = crate::OutputResponseShape::Strict;
-    }
-    let finalize_style = planner_finalize_style_for_output_contract(&contract);
-    route.output_contract = contract;
-    route.set_planner_execute_finalize(finalize_style);
-    route.needs_clarify = false;
-    route.clarify_question.clear();
-    route.resolved_intent = current_user_request.trim().to_string();
-    if let Some(candidate) = answer_candidate {
-        route.resolved_intent.push_str("\nanswer_candidate: ");
-        route.resolved_intent.push_str(candidate.trim());
-    }
-    append_route_reason(route, "inline_json_transform_structured_execute");
-    true
-}
-
 pub(super) fn resolve_direct_answer_gate_contract_locator(
     state: &AppState,
     current_user_request: &str,
