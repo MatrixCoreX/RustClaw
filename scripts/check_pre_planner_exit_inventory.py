@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY_PATH = ROOT / "crates/clawd/src/ask_flow_pre_planner_exit.rs"
 LOOP_CONTROL_PATH = ROOT / "crates/clawd/src/agent_engine/loop_control.rs"
+GATE_EXECUTION_PATH = ROOT / "crates/clawd/src/ask_flow_gate_execution.rs"
 SRC_ROOT = ROOT / "crates/clawd/src"
 
 REASON_RE = re.compile(r'reason_code:\s*"([^"]+)"')
@@ -78,6 +79,10 @@ KNOWN_DIRECT_ANSWER_OWNERSHIP_CLASSES = {
     "evidence_projection",
     "agent_loop_activation",
     "semantic_policy_candidate",
+}
+DIRECT_ANSWER_PROMOTION_REASON_CODE_OUTPUTS = {
+    "direct_answer_gate_contract_boundary_execute",
+    "direct_answer_gate_evidence_projection_execute",
 }
 
 
@@ -293,6 +298,46 @@ def validate_direct_answer_boundary_classes() -> list[str]:
     return findings
 
 
+def promotion_reason_tag_literals(raw: str) -> set[str]:
+    tags: set[str] = set()
+    for value in rust_string_values(raw):
+        if value in DIRECT_ANSWER_PROMOTION_REASON_CODE_OUTPUTS:
+            continue
+        if not value.endswith("_execute"):
+            continue
+        if value.startswith("direct_answer_gate_") or value.startswith(
+            "inline_structured_payload_context"
+        ):
+            tags.add(value)
+    return tags
+
+
+def validate_direct_answer_promotion_reason_tags() -> list[str]:
+    findings: list[str] = []
+    raw = GATE_EXECUTION_PATH.read_text(encoding="utf-8")
+    body = function_body(
+        raw,
+        "direct_answer_gate_planner_promotion_reason_code",
+        "direct_answer_gate_structured_contract_execute",
+    )
+    if not body:
+        findings.append(
+            f"{GATE_EXECUTION_PATH.relative_to(ROOT)}: missing_promotion_reason_code_function"
+        )
+        return findings
+    used_tags = promotion_reason_tag_literals(raw)
+    classified_tags = promotion_reason_tag_literals(body)
+    missing = sorted(used_tags - classified_tags)
+    if missing:
+        findings.append(
+            "{}: unclassified_direct_answer_promotion_reason_tags={}".format(
+                GATE_EXECUTION_PATH.relative_to(ROOT),
+                ",".join(missing),
+            )
+        )
+    return findings
+
+
 def skip_rust_string(raw: str, index: int) -> int:
     quote = raw[index]
     index += 1
@@ -382,6 +427,7 @@ def main() -> int:
     items = parse_inventory_items()
     findings.extend(validate_inventory_items(items))
     findings.extend(validate_direct_answer_boundary_classes())
+    findings.extend(validate_direct_answer_promotion_reason_tags())
     observed = 0
     for path in rust_files():
         for line, reason in find_exit_reasons(path):
