@@ -224,19 +224,6 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
         owner_layer: "direct_answer_gate",
     },
     PrePlannerExitInventoryItem {
-        reason_code: "direct_answer_gate_promoted_to_planner",
-        kind: PrePlannerExitKind::OrdinarySemantic,
-        migration_target: "planner_loop_authority",
-        migration_stage: "selected_local_observe_or_direct_scalar",
-        migration_order: 10,
-        nl_gate_refs: &[
-            "nl_selected_local_observe_en",
-            "nl_direct_scalar_runtime_status_zh",
-        ],
-        deletion_gate: "delete_after_selected_class_release_gate",
-        owner_layer: "direct_answer_gate",
-    },
-    PrePlannerExitInventoryItem {
         reason_code: "direct_answer_gate_agent_loop_activation",
         kind: PrePlannerExitKind::AgentLoopActivation,
         migration_target: "agent_loop_authority",
@@ -327,21 +314,15 @@ mod tests {
     }
 
     #[test]
-    fn migration_order_prioritizes_observe_then_followup() {
-        let selected_local =
-            pre_planner_exit_for_reason("direct_answer_gate_promoted_to_planner").unwrap();
+    fn remaining_semantic_migration_debt_is_chat_fallback_only() {
         let active_followup =
             pre_planner_exit_for_reason("direct_answer_gate_chat_fallback").unwrap();
 
         assert_eq!(
-            selected_local.migration_stage,
-            "selected_local_observe_or_direct_scalar"
-        );
-        assert_eq!(
             active_followup.migration_stage,
             "active_task_followup_or_chat_rewrite"
         );
-        assert!(selected_local.migration_order < active_followup.migration_order);
+        assert_eq!(active_followup.kind, PrePlannerExitKind::OrdinarySemantic);
     }
 
     #[test]
@@ -426,30 +407,30 @@ mod tests {
 
     #[test]
     fn trace_context_exposes_machine_fields() {
-        let item = pre_planner_exit_for_reason("direct_answer_gate_promoted_to_planner")
+        let item = pre_planner_exit_for_reason("direct_answer_gate_agent_loop_activation")
             .expect("inventory item");
         let trace = item.trace_context();
         assert_eq!(
             trace.get("pre_planner_exit_kind").and_then(Value::as_str),
-            Some("ordinary_semantic")
+            Some("agent_loop_activation")
         );
         assert_eq!(
             trace
                 .get("pre_planner_exit_reason_code")
                 .and_then(Value::as_str),
-            Some("direct_answer_gate_promoted_to_planner")
+            Some("direct_answer_gate_agent_loop_activation")
         );
         assert_eq!(
             trace.get("decision_source").and_then(Value::as_str),
-            Some("semantic_rewrite")
+            Some("contract_boundary")
         );
         assert_eq!(
             trace.get("rewrite_reason_code").and_then(Value::as_str),
-            Some("direct_answer_gate_promoted_to_planner")
+            Some("direct_answer_gate_agent_loop_activation")
         );
         assert_eq!(
             trace.get("semantic_control_state").and_then(Value::as_str),
-            Some("legacy_migration_debt")
+            Some("none")
         );
         assert!(trace
             .get("migration_target")
@@ -457,11 +438,11 @@ mod tests {
             .is_some());
         assert_eq!(
             trace.get("migration_stage").and_then(Value::as_str),
-            Some("selected_local_observe_or_direct_scalar")
+            Some("selected_migration_class_agent_loop")
         );
         assert_eq!(
             trace.get("migration_order").and_then(Value::as_u64),
-            Some(10)
+            Some(20)
         );
         assert!(trace
             .get("nl_gate_refs")
@@ -473,7 +454,7 @@ mod tests {
         );
         assert_eq!(
             trace.get("output_contract_ref").and_then(Value::as_str),
-            Some("planner_loop_authority")
+            Some("agent_loop_authority")
         );
     }
 
@@ -497,10 +478,7 @@ mod tests {
             .filter(|item| item.kind == PrePlannerExitKind::OrdinarySemantic)
             .map(|item| item.reason_code)
             .collect();
-        let expected = BTreeSet::from([
-            "direct_answer_gate_promoted_to_planner",
-            "direct_answer_gate_chat_fallback",
-        ]);
+        let expected = BTreeSet::from(["direct_answer_gate_chat_fallback"]);
 
         assert_eq!(actual, expected);
     }

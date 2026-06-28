@@ -806,7 +806,7 @@ pub(crate) async fn execute_ask_routed(
                                     &current_turn_user_request,
                                     reply,
                                     Some(&promoted_ctx),
-                                    "direct_answer_gate_promoted_to_planner",
+                                    "direct_answer_gate_agent_loop_activation",
                                 ),
                             });
                         }

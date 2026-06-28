@@ -141,7 +141,7 @@ fn direct_answer_gate_keeps_observed_failure_explanation_direct() {
 }
 
 #[test]
-fn direct_answer_gate_still_promotes_locatorless_runtime_observation() {
+fn direct_answer_gate_hands_generic_execute_to_agent_loop_activation() {
     let route = chat_route_for_gate();
     let mut ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -157,7 +157,7 @@ fn direct_answer_gate_still_promotes_locatorless_runtime_observation() {
 
     let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "what is the hostname?", gate);
 
-    assert_planner_preflight_reason(outcome, "direct_answer_gate_promoted_to_planner");
+    assert_planner_preflight_reason(outcome, "direct_answer_gate_agent_loop_activation");
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn direct_answer_gate_promotion_reason_code_separates_machine_boundaries() {
     );
     assert_eq!(
         direct_answer_gate_planner_promotion_reason_code("direct_answer_gate_execute"),
-        "direct_answer_gate_promoted_to_planner"
+        "direct_answer_gate_agent_loop_activation"
     );
 }
 

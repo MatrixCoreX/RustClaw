@@ -48,7 +48,6 @@ KNOWN_DELETION_GATES = {
     "test_fixture_only",
 }
 KNOWN_ORDINARY_SEMANTIC_DEBT = {
-    "direct_answer_gate_promoted_to_planner",
     "direct_answer_gate_chat_fallback",
 }
 KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES = {
@@ -60,7 +59,6 @@ KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES = {
     "evidence_projection_execution",
     "agent_loop_activation_boundary",
     "clarify_boundary",
-    "semantic_execution_promotion",
     "legacy_unclassified_gate_observed",
 }
 DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES = {
