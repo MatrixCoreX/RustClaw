@@ -313,6 +313,7 @@ pub(super) fn apply_structured_field_selector_repair(
                 detail: format!(
                     "structured_field_selector `{selector}` was enforced on config_basic.{action}"
                 ),
+                missing_fields: Vec::new(),
             });
         }
         if let Some(target_path) = target_path.as_deref() {
@@ -329,6 +330,7 @@ pub(super) fn apply_structured_field_selector_repair(
                 detail: format!(
                     "structured_field_target_path was enforced on config_basic.{action}"
                 ),
+                missing_fields: Vec::new(),
             });
         }
     }

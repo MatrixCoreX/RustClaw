@@ -22,6 +22,7 @@ fn verify_result_with_issue(
             step_id: "step_1".to_string(),
             kind,
             detail: format!("test issue {}", kind.as_str()),
+            missing_fields: Vec::new(),
         }],
     }
 }

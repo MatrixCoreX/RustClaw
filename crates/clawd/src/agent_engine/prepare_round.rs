@@ -27,6 +27,7 @@ fn build_round_verify_summary(
                 step_id: issue.step_id.clone(),
                 kind: issue.kind,
                 detail: issue.detail.clone(),
+                missing_fields: issue.missing_fields.clone(),
             })
             .collect(),
     }

@@ -1206,6 +1206,7 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
             step_id: "step_1".to_string(),
             kind: crate::verifier::VerifyIssueKind::MissingRequiredArg,
             detail: "path".to_string(),
+            missing_fields: vec!["path".to_string()],
         }],
     };
     let mut journal = TaskJournal::for_task("task-round-source", "ask", "inspect");
@@ -1281,6 +1282,18 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
             .pointer("/repair_signals/0/repair_envelope/failed_action_ref")
             .and_then(Value::as_str),
         Some("fs.read_text_range")
+    );
+    assert_eq!(
+        round
+            .pointer("/repair_signals/0/missing_fields/0")
+            .and_then(Value::as_str),
+        Some("path")
+    );
+    assert_eq!(
+        round
+            .pointer("/repair_signals/0/repair_envelope/missing_evidence/0")
+            .and_then(Value::as_str),
+        Some("path")
     );
     let forbidden_repeat = round
         .pointer("/repair_signals/0/forbidden_repeat_fingerprint")
@@ -1552,6 +1565,7 @@ fn trace_json_includes_verifier_issue_failure_attribution() {
                 step_id: "step_1".to_string(),
                 kind: crate::verifier::VerifyIssueKind::ContractActionRejected,
                 detail: "action rejected".to_string(),
+                missing_fields: Vec::new(),
             }],
         }),
         ..Default::default()
