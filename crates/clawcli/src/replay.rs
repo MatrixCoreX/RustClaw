@@ -11,8 +11,8 @@ use crate::{output, task};
 mod replay_fingerprint;
 
 use replay_fingerprint::{
-    replay_action_sequence, replay_route_fingerprint, replay_tool_result_summary,
-    replay_verifier_summary,
+    replay_action_sequence, replay_permission_summary, replay_route_fingerprint,
+    replay_tool_result_summary, replay_verifier_summary,
 };
 
 const REPLAY_SCHEMA_VERSION: u64 = 1;
@@ -54,7 +54,7 @@ pub(crate) fn run_export(
     Ok(())
 }
 
-pub(crate) fn run_run(bundle_path: &Path, json_output: bool) -> Result<()> {
+pub(crate) fn run_run(bundle_path: &Path, json_output: bool, coverage_output: bool) -> Result<()> {
     let body = fs::read_to_string(bundle_path)
         .with_context(|| format!("read replay bundle {}", bundle_path.display()))?;
     let bundle: Value = serde_json::from_str(&body).context("parse replay bundle")?;
@@ -62,6 +62,9 @@ pub(crate) fn run_run(bundle_path: &Path, json_output: bool) -> Result<()> {
     let summary = replay_run_summary(&bundle);
     if json_output {
         output::print_json_pretty(&summary);
+    } else if coverage_output {
+        let coverage = summary.get("coverage").cloned().unwrap_or(Value::Null);
+        output::print_json_pretty(&coverage);
     } else {
         println!(
             "task_id: {}",
@@ -165,6 +168,20 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
     let left_verifier_summary = replay_verifier_summary(left);
     let right_verifier_summary = replay_verifier_summary(right);
     let verifier_changed = left_verifier_summary != right_verifier_summary;
+    let left_permission_summary = replay_permission_summary(left);
+    let right_permission_summary = replay_permission_summary(right);
+    let permission_changed = left_permission_summary != right_permission_summary;
+    let diff_classes = replay_diff_classes(ReplayDiffSignals {
+        status_changed,
+        lifecycle_changed,
+        event_count_changed,
+        artifact_count_changed,
+        route_changed,
+        action_sequence_changed,
+        tool_result_changed,
+        verifier_changed,
+        permission_changed,
+    });
     json!({
         "bundle_kind": "rustclaw_task_replay_diff",
         "schema_version": REPLAY_SCHEMA_VERSION,
@@ -177,7 +194,9 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
             || route_changed
             || action_sequence_changed
             || tool_result_changed
-            || verifier_changed,
+            || verifier_changed
+            || permission_changed,
+        "diff_classes": diff_classes,
         "left": {
             "task_id": left_summary.get("task_id").cloned().unwrap_or(Value::Null),
             "status": left_summary.get("status").cloned().unwrap_or(Value::Null),
@@ -188,6 +207,7 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
             "action_sequence": left_action_sequence,
             "tool_result_summary": left_tool_result_summary,
             "verifier_summary": left_verifier_summary,
+            "permission_summary": left_permission_summary,
         },
         "right": {
             "task_id": right_summary.get("task_id").cloned().unwrap_or(Value::Null),
@@ -199,6 +219,7 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
             "action_sequence": right_action_sequence,
             "tool_result_summary": right_tool_result_summary,
             "verifier_summary": right_verifier_summary,
+            "permission_summary": right_permission_summary,
         },
         "diff": {
             "status_changed": status_changed,
@@ -209,6 +230,7 @@ fn replay_diff_summary(left: &Value, right: &Value) -> Value {
             "action_sequence_changed": action_sequence_changed,
             "tool_result_changed": tool_result_changed,
             "verifier_changed": verifier_changed,
+            "permission_changed": permission_changed,
         }
     })
 }
@@ -224,11 +246,13 @@ fn replay_run_summary(bundle: &Value) -> Value {
     let action_sequence = replay_action_sequence(bundle);
     let tool_result_summary = replay_tool_result_summary(bundle);
     let verifier_summary = replay_verifier_summary(bundle);
+    let permission_summary = replay_permission_summary(bundle);
     let execution_replay = recorded_execution_replay(
         &route_fingerprint,
         &action_sequence,
         &tool_result_summary,
         &verifier_summary,
+        &permission_summary,
     );
     json!({
         "bundle_kind": REPLAY_BUNDLE_KIND,
@@ -249,6 +273,7 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "action_sequence": action_sequence,
         "tool_result_summary": tool_result_summary,
         "verifier_summary": verifier_summary,
+        "permission_summary": permission_summary,
     })
 }
 
@@ -257,12 +282,14 @@ fn recorded_execution_replay(
     action_sequence: &[Value],
     tool_result_summary: &[Value],
     verifier_summary: &[Value],
+    permission_summary: &[Value],
 ) -> Value {
     let mut steps = Vec::new();
     push_recorded_replay_steps(&mut steps, "route", route_fingerprint);
     push_recorded_replay_steps(&mut steps, "action", action_sequence);
     push_recorded_replay_steps(&mut steps, "tool_result", tool_result_summary);
     push_recorded_replay_steps(&mut steps, "verifier", verifier_summary);
+    push_recorded_replay_steps(&mut steps, "permission", permission_summary);
     json!({
         "strategy": "recorded_outputs_first",
         "deterministic": true,
@@ -273,6 +300,47 @@ fn recorded_execution_replay(
         "step_count": steps.len(),
         "steps": steps,
     })
+}
+
+struct ReplayDiffSignals {
+    status_changed: bool,
+    lifecycle_changed: bool,
+    event_count_changed: bool,
+    artifact_count_changed: bool,
+    route_changed: bool,
+    action_sequence_changed: bool,
+    tool_result_changed: bool,
+    verifier_changed: bool,
+    permission_changed: bool,
+}
+
+fn replay_diff_classes(signals: ReplayDiffSignals) -> Vec<&'static str> {
+    let mut classes = Vec::new();
+    if signals.status_changed || signals.lifecycle_changed {
+        classes.push("final_status_changed");
+    }
+    if signals.event_count_changed {
+        classes.push("event_count_changed");
+    }
+    if signals.artifact_count_changed {
+        classes.push("artifact_count_changed");
+    }
+    if signals.route_changed {
+        classes.push("route_changed");
+    }
+    if signals.action_sequence_changed {
+        classes.push("plan_changed");
+    }
+    if signals.verifier_changed {
+        classes.push("verifier_changed");
+    }
+    if signals.permission_changed {
+        classes.push("permission_changed");
+    }
+    if signals.tool_result_changed {
+        classes.push("tool_result_changed");
+    }
+    classes
 }
 
 fn push_recorded_replay_steps(steps: &mut Vec<Value>, stage: &str, items: &[Value]) {
