@@ -1477,48 +1477,6 @@ fn structured_dry_run_response_emits_task_cancel_machine_contract() {
 }
 
 #[test]
-fn structured_dry_run_response_emits_async_job_poll_contract() {
-    let mut route = base_route_result();
-    route.route_reason = "semantic=async_job_protocol mode=dry_run would_mutate=false".to_string();
-    route.resolved_intent =
-        "adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
-    let loop_state = LoopState::new(1);
-
-    let plan = structured_dry_run_response_deterministic_plan_result(
-        "dry-run async job protocol",
-        Some(&route),
-        &loop_state,
-    )
-    .expect("machine dry-run async tokens should produce structured response");
-
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = action else {
-        panic!("expected structured respond action, got {action:?}");
-    };
-    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
-    assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
-        Some("async_job_poll_contract_dry_run")
-    );
-    assert_eq!(
-        value.get("would_mutate").and_then(Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        value
-            .pointer("/adapter_result/type")
-            .and_then(Value::as_str),
-        Some("pending_async_job")
-    );
-    assert_eq!(
-        value
-            .pointer("/worker_loop/entrypoint")
-            .and_then(Value::as_str),
-        Some("poll_async_job")
-    );
-}
-
-#[test]
 fn archive_basic_unknown_readonly_action_normalizes_to_list_for_archive_contract() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();

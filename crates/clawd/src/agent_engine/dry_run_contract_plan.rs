@@ -172,6 +172,15 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
                         "cancel_ref": "optional_cancel_reference",
                         "message_key": "stable_i18n_message_key"
                     },
+                    "async_timeout_policy": {
+                        "schema_version": 1,
+                        "policy_source": "async_job_contract",
+                        "deadline_ts": "adapter_result.expires_at",
+                        "max_runtime_deadline_ts": "adapter_max_runtime_deadline",
+                        "effective_deadline_ts": "min(deadline_ts,max_runtime_deadline_ts)",
+                        "remaining_seconds": "max(effective_deadline_ts-now_ts,0)",
+                        "expired_terminal_status": "expired"
+                    },
                     "task_lifecycle": {
                         "state": "waiting",
                         "checkpoint_id": "opaque_checkpoint_id",
@@ -247,9 +256,14 @@ fn local_process_cancel_dry_run_tokens_present(text: &str) -> bool {
 
 fn async_job_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
+    let has_async_timeout_policy_tokens = normalized.contains("effective_deadline_ts")
+        && normalized.contains("expires_at")
+        && normalized.contains("remaining_seconds")
+        && normalized.contains("expired");
     (normalized.contains("pending_async_job")
         || normalized.contains("async_job_protocol")
-        || normalized.contains("poll_async_job"))
+        || normalized.contains("poll_async_job")
+        || has_async_timeout_policy_tokens)
         && has_dry_run_machine_token(&normalized)
 }
 

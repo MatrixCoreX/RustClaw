@@ -270,6 +270,36 @@ fn requested_machine_kv_summary_final_guard_replaces_raw_observation_answer() {
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_ignores_internal_route_tokens() {
+    let prompt = "Return async timeout policy fields.";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.route_reason = "current_workspace_scope_from_current_request=false".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-internal", "ask", prompt);
+    journal.record_context_bundle_summary(
+        "current_workspace_scope_from_current_request=false".to_string(),
+    );
+    journal.record_route_result(&route);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1", "respond", "false",
+        ));
+    let mut answer_text = "false".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, "false");
+    assert_eq!(answer_messages, vec!["false".to_string()]);
+}
+
+#[test]
 fn existing_file_delivery_token_answer_canonicalizes_workspace_relative_path() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

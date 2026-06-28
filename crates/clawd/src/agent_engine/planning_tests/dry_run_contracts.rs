@@ -67,6 +67,96 @@ fn async_job_contract_dry_run_exposes_lifecycle_checkpoint_fields() {
 }
 
 #[test]
+fn structured_dry_run_response_emits_async_job_poll_contract() {
+    let mut route = base_route_result();
+    route.route_reason = "semantic=async_job_protocol mode=dry_run would_mutate=false".to_string();
+    route.resolved_intent =
+        "adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run async job protocol",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("machine dry-run async tokens should produce structured response");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected structured respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("async_job_poll_contract_dry_run")
+    );
+    assert_eq!(
+        value.get("would_mutate").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .pointer("/adapter_result/type")
+            .and_then(Value::as_str),
+        Some("pending_async_job")
+    );
+    assert_eq!(
+        value
+            .pointer("/async_timeout_policy/effective_deadline_ts")
+            .and_then(Value::as_str),
+        Some("min(deadline_ts,max_runtime_deadline_ts)")
+    );
+    assert_eq!(
+        value
+            .pointer("/async_timeout_policy/expired_terminal_status")
+            .and_then(Value::as_str),
+        Some("expired")
+    );
+    assert_eq!(
+        value
+            .pointer("/worker_loop/entrypoint")
+            .and_then(Value::as_str),
+        Some("poll_async_job")
+    );
+}
+
+#[test]
+fn async_timeout_policy_field_tokens_trigger_deterministic_contract() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "mode=dry_run fields=effective_deadline_ts,expires_at,remaining_seconds,expired"
+            .to_string();
+    route.resolved_intent =
+        "effective_deadline_ts expires_at remaining_seconds expired dry_run".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry_run effective_deadline_ts expires_at remaining_seconds expired",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("async timeout machine fields should produce structured response");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected structured respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
+    assert_eq!(
+        value
+            .pointer("/async_timeout_policy/effective_deadline_ts")
+            .and_then(Value::as_str),
+        Some("min(deadline_ts,max_runtime_deadline_ts)")
+    );
+    assert_eq!(
+        value
+            .pointer("/async_timeout_policy/remaining_seconds")
+            .and_then(Value::as_str),
+        Some("max(effective_deadline_ts-now_ts,0)")
+    );
+}
+
+#[test]
 fn local_process_cancel_dry_run_prefers_local_process_adapter_contract() {
     let mut route = base_route_result();
     route.route_reason =
