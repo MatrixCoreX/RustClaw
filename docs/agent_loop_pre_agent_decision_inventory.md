@@ -10,8 +10,8 @@ decisions that should continue moving into the agent loop.
 ## Current Authority Model
 
 - Live config uses `semantic_route_authority = "agent_loop_default"`.
-- `agent_loop_default` selects any eligible low-risk bucket instead of requiring
-  a single configured canary class. Canary debug selection uses
+- `agent_loop_default` uses the current agent-loop authority path instead of
+  requiring a single configured canary class. Canary debug selection uses
   `agent_loop_canary_bucket`; legacy `agent_decides_migration_class` is an
   ignored historical config key.
 - The legacy selected-class fields remain for compatibility and are now derived
@@ -105,8 +105,8 @@ decisions that should continue moving into the agent loop.
 
 ## Move Into The Agent Loop
 
-- Ordinary “answer vs clarify vs execute” decisions for selected and future
-  eligible low-risk requests.
+- Ordinary “answer vs clarify vs execute” decisions for current and future
+  natural-language requests.
 - Direct-answer promotion/demotion for tool-backed requests.
 - Clarification need when it is semantic uncertainty rather than missing machine
   locator or safety state.
@@ -188,7 +188,8 @@ from runtime code.
   - 10-30 affected cases for small changes.
   - focused 100 for each new eligibility bucket.
   - compressed typical aggregate for default-range expansion.
-  - 500 canary plus 2100 safe aggregate before deleting old gates.
+  - compressed release-gate-equivalent coverage plus route-delta review before
+    deleting old gates.
 - 2026-06-15 `low_risk_tool_discovery` focused check:
   - `scripts/nl_suite_logs/client_like_continuous/run_20260615_101444`
   - `logs/agent_rollout_metrics/run_20260615_101444_rollout_metrics.json`
