@@ -433,6 +433,9 @@ async fn runtime_recovery_skips_current_worker_expired_lease() {
     let state = state_with_runtime_tasks_table();
     let now = crate::now_ts_u64() as i64;
     let worker_id = state.worker.worker_id.clone();
+    state
+        .worker
+        .register_active_task("runtime-current-worker-expired");
     {
         let db = state.core.db.get().expect("get db");
         db.execute(
@@ -491,6 +494,51 @@ async fn runtime_recovery_skips_current_worker_expired_lease() {
     assert_eq!(current_status, "running");
     assert_eq!(old_status, "timeout");
     assert_eq!(old_error.as_deref(), Some("worker_lease_expired"));
+    state
+        .worker
+        .unregister_active_task("runtime-current-worker-expired");
+}
+
+#[tokio::test]
+async fn runtime_recovery_times_out_current_worker_expired_lease_after_active_release() {
+    let state = state_with_runtime_tasks_table();
+    let now = crate::now_ts_u64() as i64;
+    let worker_id = state.worker.worker_id.clone();
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at,
+                lease_owner, lease_expires_at, claim_attempt, claimed_at
+            )
+            VALUES ('runtime-current-worker-released-expired', 42, 7, 'test-key', 'ui', 'ask', ?1,
+                    'running', NULL, NULL, ?2, ?2, ?3, ?4, 1, ?2)",
+            rusqlite::params![
+                json!({"text": "released current worker task"}).to_string(),
+                now.to_string(),
+                worker_id,
+                now.saturating_sub(1),
+            ],
+        )
+        .expect("insert released current worker task");
+    }
+
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&state)
+        .await
+        .expect("runtime recovery tick");
+
+    let db = state.core.db.get().expect("get db");
+    let (status, error): (String, Option<String>) = db
+        .query_row(
+            "SELECT status, error_text FROM tasks WHERE task_id = 'runtime-current-worker-released-expired'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query released current worker task");
+
+    assert_eq!(status, "timeout");
+    assert_eq!(error.as_deref(), Some("worker_lease_expired"));
 }
 
 #[tokio::test]

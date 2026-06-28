@@ -285,11 +285,30 @@ pub(crate) struct WorkerConfig {
     pub(crate) worker_running_no_progress_timeout_seconds: u64,
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
     pub(crate) last_running_recovery_check_ts: Arc<Mutex<u64>>,
+    pub(crate) active_running_task_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) database_busy_timeout_ms: u64,
     pub(crate) database_sqlite_path: PathBuf,
 }
 
 impl WorkerConfig {
+    pub(crate) fn register_active_task(&self, task_id: &str) {
+        if let Ok(mut active) = self.active_running_task_ids.lock() {
+            active.insert(task_id.to_string());
+        }
+    }
+
+    pub(crate) fn unregister_active_task(&self, task_id: &str) {
+        if let Ok(mut active) = self.active_running_task_ids.lock() {
+            active.remove(task_id);
+        }
+    }
+
+    pub(crate) fn is_task_active(&self, task_id: &str) -> bool {
+        self.active_running_task_ids
+            .lock()
+            .is_ok_and(|active| active.contains(task_id))
+    }
+
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         Self {
@@ -303,6 +322,7 @@ impl WorkerConfig {
             worker_running_no_progress_timeout_seconds: 300,
             worker_running_recovery_check_interval_seconds: 30,
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             database_busy_timeout_ms: 5_000,
             database_sqlite_path: PathBuf::new(),
         }
