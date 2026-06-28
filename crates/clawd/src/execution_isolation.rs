@@ -162,6 +162,10 @@ pub(crate) fn cleanup_execution_isolation(plan: &ExecutionIsolationPlan) -> Resu
     }
 }
 
+pub(crate) fn is_execution_isolation_root(path: &Path) -> bool {
+    read_isolation_marker(path).is_some()
+}
+
 pub(crate) fn cleanup_abandoned_isolation_workspaces(
     workspace_root: &Path,
     now_unix: u64,

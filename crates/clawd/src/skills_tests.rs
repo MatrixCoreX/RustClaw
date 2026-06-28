@@ -599,6 +599,119 @@ planner_capabilities = [
 }
 
 #[tokio::test]
+async fn builtin_write_file_local_worktree_preserves_dirty_primary_workspace() {
+    let root = TempDirGuard::new("builtin_write_file_local_worktree_dirty_primary");
+    init_git_fixture_repo(root.path());
+    fs::write(root.path().join("README.md"), "dirty primary\n").expect("dirty primary readme");
+    let mut state = test_state("en");
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    install_registry_from_toml(
+        &mut state,
+        root.path(),
+        r#"
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+]
+"#,
+        &["write_file"],
+    );
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let outcome = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": "README.md", "content": "isolated edit\n"}),
+    )
+    .await
+    .expect("isolated worktree write_file outcome");
+
+    assert_eq!(
+        fs::read_to_string(root.path().join("README.md")).expect("read primary README"),
+        "dirty primary\n",
+        "local_worktree must preserve pre-existing primary workspace edits"
+    );
+    let extra = outcome.extra.expect("write_file extra");
+    let refs = extra
+        .get("artifact_refs")
+        .and_then(serde_json::Value::as_array)
+        .expect("isolation artifact refs");
+    let execution_root = refs[0]
+        .get("execution_root")
+        .and_then(serde_json::Value::as_str)
+        .expect("execution root");
+    assert_eq!(refs[0]["profile"], "local_worktree");
+    let resolved_path = extra
+        .get("resolved_path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("<missing>");
+    assert!(
+        resolved_path.starts_with(execution_root),
+        "resolved path must stay under isolated worktree: {extra}"
+    );
+    assert_eq!(
+        fs::read_to_string(resolved_path).expect("read isolated worktree output"),
+        "isolated edit\n",
+        "execution_root={execution_root} resolved_path={resolved_path} extra={extra}"
+    );
+}
+
+#[tokio::test]
+async fn builtin_write_file_local_worktree_blocks_absolute_primary_workspace_path() {
+    let root = TempDirGuard::new("builtin_write_file_local_worktree_absolute_primary");
+    init_git_fixture_repo(root.path());
+    fs::write(root.path().join("README.md"), "dirty primary\n").expect("dirty primary readme");
+    let mut state = test_state("en");
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    install_registry_from_toml(
+        &mut state,
+        root.path(),
+        r#"
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "high"
+requires_confirmation = true
+side_effect = true
+planner_capabilities = [
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", isolation_profile = "local_worktree", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+]
+"#,
+        &["write_file"],
+    );
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let err = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": root.path().join("README.md"), "content": "escaped edit\n"}),
+    )
+    .await
+    .expect_err("absolute primary workspace path should be blocked in local_worktree isolation");
+
+    assert!(
+        err.contains("path_outside_workspace"),
+        "expected path_outside_workspace policy block, got: {err}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("README.md")).expect("read primary README"),
+        "dirty primary\n",
+        "local_worktree must not write absolute paths back into the primary workspace"
+    );
+}
+
+#[tokio::test]
 async fn builtin_run_cmd_local_temp_workspace_uses_isolated_cwd() {
     let root = TempDirGuard::new("builtin_run_cmd_local_temp_isolation");
     let mut state = test_state("en");
