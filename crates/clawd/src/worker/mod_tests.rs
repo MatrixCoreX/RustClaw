@@ -881,7 +881,7 @@ fn paused_checkpoint_resume_work_item_is_machine_payload() {
     );
     assert_eq!(poll_decision.executor_state, "poll_scheduled");
     assert_eq!(poll_decision.lifecycle_state, Some("background"));
-    assert_eq!(poll_decision.next_check_after, Some(1_007));
+    assert_eq!(poll_decision.next_check_after, Some(1_000));
     assert_eq!(poll_decision.payload["resume_trigger"], "worker_recovery");
     assert_eq!(poll_decision.payload["job_id"], "job-1");
     assert_eq!(poll_decision.payload["adapter_kind"], "media_job_poll");

@@ -133,6 +133,7 @@ fn exec_summary_json(
         "exit_code": exit_class.code(),
         "resume": exec_resume_summary(resume_task_id),
         "result_text": task.result_text,
+        "async_result": async_final_result_json(&task.raw_data).unwrap_or(Value::Null),
         "error_text": task.error_text,
         "events": exec_event_summary(task),
         "artifacts": {
@@ -182,6 +183,7 @@ pub(crate) fn task_report_json(task: &task::TaskStatusView, include_events: bool
         "lifecycle": task.lifecycle().cloned().unwrap_or(Value::Null),
         "terminal": task.is_terminal(),
         "result_text": task.result_text,
+        "async_result": async_final_result_json(&task.raw_data).unwrap_or(Value::Null),
         "error_text": task.error_text,
         "event_count": task.events.len(),
         "events": if include_events {
@@ -195,6 +197,12 @@ pub(crate) fn task_report_json(task: &task::TaskStatusView, include_events: bool
             "refs": artifact_refs,
         },
     })
+}
+
+fn async_final_result_json(data: &Value) -> Option<Value> {
+    data.get("result_json")
+        .and_then(task::async_final_result_value)
+        .cloned()
 }
 
 fn exec_artifact_refs(data: &Value) -> Vec<Value> {

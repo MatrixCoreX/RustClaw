@@ -32,7 +32,9 @@ impl TaskStatusView {
     }
 
     pub(crate) fn lifecycle(&self) -> Option<&Value> {
-        self.raw_data.get("task_lifecycle")
+        self.raw_data
+            .get("task_lifecycle")
+            .or_else(|| self.raw_data.get("lifecycle"))
     }
 
     pub(crate) fn lifecycle_state(&self) -> Option<&str> {
@@ -232,27 +234,7 @@ pub(crate) fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Resul
         .unwrap_or("")
         .to_string();
     let result_json = data.get("result_json");
-    let result_text = result_json
-        .and_then(|v| v.get("messages").and_then(|m| m.as_array()))
-        .and_then(|arr| {
-            let lines: Vec<String> = arr
-                .iter()
-                .filter_map(|m| {
-                    m.get("text")
-                        .and_then(|t| t.as_str())
-                        .map(String::from)
-                        .or_else(|| m.as_str().map(String::from))
-                })
-                .collect();
-            if lines.is_empty() {
-                None
-            } else {
-                Some(lines.join("\n\n"))
-            }
-        })
-        .or_else(|| {
-            result_json.and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
-        });
+    let result_text = result_json.and_then(result_text_from_result_json);
     let error_text = data
         .get("error_text")
         .and_then(|e| e.as_str())
@@ -266,6 +248,45 @@ pub(crate) fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Resul
         error_text,
         events,
     })
+}
+
+fn result_text_from_result_json(value: &Value) -> Option<String> {
+    value
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|arr| {
+            let lines: Vec<String> = arr
+                .iter()
+                .filter_map(|m| {
+                    m.get("text")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                        .or_else(|| m.as_str().map(String::from))
+                })
+                .collect();
+            (!lines.is_empty()).then(|| lines.join("\n\n"))
+        })
+        .or_else(|| value.get("text").and_then(Value::as_str).map(String::from))
+        .or_else(|| {
+            async_final_result_value(value)
+                .and_then(|final_result| {
+                    final_result
+                        .get("output")
+                        .or_else(|| final_result.get("stdout"))
+                        .and_then(Value::as_str)
+                })
+                .map(String::from)
+        })
+}
+
+pub(crate) fn async_final_result_value(value: &Value) -> Option<&Value> {
+    value
+        .pointer("/final_result_json")
+        .or_else(|| {
+            value.pointer("/task_lifecycle/resume_executor_result_projection/final_result_json")
+        })
+        .or_else(|| value.pointer("/lifecycle/resume_executor_result_projection/final_result_json"))
+        .filter(|value| value.is_object())
 }
 
 pub(crate) fn cancel_task_by_id(
