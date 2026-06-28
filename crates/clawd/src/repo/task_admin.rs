@@ -418,8 +418,11 @@ fn cancel_adapter_result_from_task_result(
 fn task_cancel_ref(result: &Value) -> Option<&str> {
     [
         "/task_checkpoint/pending_async_job/cancel_ref",
+        "/task_checkpoint/pending_async_job/cancel_token",
         "/task_lifecycle/cancel_ref",
+        "/task_lifecycle/cancel_token",
         "/cancel_ref",
+        "/cancel_token",
     ]
     .into_iter()
     .filter_map(|pointer| result.pointer(pointer))

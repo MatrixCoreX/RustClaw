@@ -21,9 +21,14 @@ fn async_job_protocol_hint_exposes_machine_contract() {
         "required_job_fields:job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
     ));
     assert!(hint.contains(
+        "canonical_job_fields:job_id|provider|status|poll_after_ms|cancel_token|result_ref|error_code|retryable"
+    ));
+    assert!(hint.contains("legacy_compat_fields:poll_after_seconds|cancel_ref"));
+    assert!(hint.contains(
         "poll_adapter_kinds:skill_poll|local_process_poll|http_job_poll|mcp_job_poll|media_job_poll|browser_job_poll|remote_job_poll"
     ));
     assert!(hint.contains("adapter_result_key:async_poll_adapter_result"));
+    assert!(hint.contains("adapter_result_fields:job_id|status|poll_after_seconds|poll_after_ms|expires_at|result_ref|final_result_json|failure_result_json|cancellation_result_json|error_code|message_key|retryable"));
     assert!(hint.contains("user_text_fields_forbidden:text|error_text"));
 }
 
@@ -42,6 +47,11 @@ fn async_job_contract_json_uses_only_machine_fields() {
     assert_eq!(contract["adapter_statuses"][5], "cancelled");
     assert_eq!(contract["poll_adapter_kinds"][1], "local_process_poll");
     assert_eq!(contract["poll_adapter_kinds"][4], "media_job_poll");
+    assert_eq!(contract["canonical_job_fields"][1], "provider");
+    assert_eq!(contract["canonical_job_fields"][3], "poll_after_ms");
+    assert_eq!(contract["legacy_compat_fields"][1], "cancel_ref");
+    assert_eq!(contract["adapter_result_fields"][3], "poll_after_ms");
+    assert_eq!(contract["adapter_result_fields"][5], "result_ref");
     assert_eq!(contract["timeout_policy_fields"][0], "adapter_kind");
     assert_eq!(contract["forbidden_user_text_fields"][0], "text");
 }
@@ -154,12 +164,60 @@ fn pending_async_job_contract_summary_validates_required_machine_fields() {
 
     assert_eq!(summary["status"], "valid");
     assert_eq!(summary["job_id"], "provider:video_generate:minimax:task-1");
+    assert_eq!(summary["provider"], "minimax");
     assert_eq!(summary["job_status"], "accepted");
+    assert_eq!(summary["poll_after_ms"], 5_000);
     assert_eq!(summary["poll_adapter_kind"], "media_job_poll");
     assert_eq!(summary["poll_adapter_supported"], true);
     assert_eq!(summary["cancel_ref_present"], true);
+    assert_eq!(summary["cancel_token_present"], true);
+    assert_eq!(summary["retryable"], true);
     assert_eq!(summary["forbidden_user_text_fields_absent"], true);
+    assert_eq!(summary["canonical_job_fields"][0], "job_id");
     assert_eq!(parsed.job_id, "provider:video_generate:minimax:task-1");
+}
+
+#[test]
+fn pending_async_job_contract_accepts_canonical_alias_fields() {
+    let extra = json!({
+        "provider": "minimax",
+        "pending_async_job": {
+            "job_id": "provider:video_generate:minimax:task-1",
+            "provider": "minimax",
+            "status": "running",
+            "poll_after_ms": 1500,
+            "expires_at": 2_000,
+            "cancel_token": "provider:video_generate:minimax:task-1",
+            "result_ref": "provider:video_generate:minimax:task-1",
+            "message_key": "clawd.task.async_job_pending",
+            "retryable": true,
+            "poll_adapter": {
+                "kind": "media_job_poll",
+                "skill_name": "video_generate",
+                "args": {"action": "poll", "task_id": "task-1"}
+            }
+        }
+    });
+
+    let summary = pending_async_job_contract_summary(Some(&extra), "test")
+        .expect("valid canonical contract")
+        .expect("summary");
+    let parsed = parse_pending_async_job_ref_from_extra(Some(&extra), "test")
+        .expect("valid pending job")
+        .expect("pending job");
+
+    assert_eq!(summary["provider"], "minimax");
+    assert_eq!(summary["poll_after_seconds"], 2);
+    assert_eq!(summary["poll_after_ms"], 1500);
+    assert_eq!(summary["cancel_ref_present"], false);
+    assert_eq!(summary["cancel_token_present"], true);
+    assert_eq!(
+        summary["result_ref"],
+        "provider:video_generate:minimax:task-1"
+    );
+    assert_eq!(summary["retryable"], true);
+    assert_eq!(parsed.poll_after_seconds, 2);
+    assert_eq!(parsed.cancel_ref, "provider:video_generate:minimax:task-1");
 }
 
 #[test]

@@ -38,6 +38,17 @@ fn dry_run_returns_request_payload_without_key() {
         extra["pending_async_job_contract"]["poll_adapter"]["kind"],
         "media_job_poll"
     );
+    assert_eq!(extra["pending_async_job_contract"]["provider"], "minimax");
+    assert_eq!(extra["pending_async_job_contract"]["poll_after_ms"], 5_000);
+    assert_eq!(
+        extra["pending_async_job_contract"]["cancel_token"],
+        extra["pending_async_job_contract"]["cancel_ref"]
+    );
+    assert_eq!(
+        extra["pending_async_job_contract"]["result_ref"],
+        extra["pending_async_job_contract"]["job_id"]
+    );
+    assert_eq!(extra["pending_async_job_contract"]["retryable"], true);
     assert_eq!(
         extra["pending_async_job_contract"]["poll_adapter"]["skill_name"],
         "video_generate"
@@ -117,7 +128,18 @@ fn pending_video_task_response_exposes_media_job_poll_adapter() {
         extra["pending_async_job"]["job_id"],
         "provider:video_generate:minimax:provider-task-1"
     );
+    assert_eq!(extra["pending_async_job"]["provider"], "minimax");
     assert_eq!(extra["pending_async_job"]["status"], "accepted");
+    assert_eq!(extra["pending_async_job"]["poll_after_ms"], 5_000);
+    assert_eq!(
+        extra["pending_async_job"]["cancel_token"],
+        extra["pending_async_job"]["cancel_ref"]
+    );
+    assert_eq!(
+        extra["pending_async_job"]["result_ref"],
+        extra["pending_async_job"]["job_id"]
+    );
+    assert_eq!(extra["pending_async_job"]["retryable"], true);
     assert_eq!(
         extra["pending_async_job"]["poll_adapter"]["kind"],
         "media_job_poll"
@@ -167,15 +189,22 @@ fn poll_dry_run_running_returns_adapter_reschedule_result() {
             "vendor": "minimax",
             "dry_run": true,
             "mock_status": "Processing",
-            "poll_after_seconds": 3,
+            "poll_after_ms": 2500,
             "expires_at": unix_ts() as i64 + 600
         }),
     )
     .expect("poll dry run");
 
     assert_eq!(extra["async_poll_adapter_result"]["status"], "running");
+    assert_eq!(extra["async_poll_adapter_result"]["poll_after_seconds"], 3);
+    assert_eq!(extra["async_poll_adapter_result"]["poll_after_ms"], 3_000);
+    assert_eq!(extra["async_poll_adapter_result"]["retryable"], true);
     assert_eq!(
         extra["async_poll_adapter_result"]["job_id"],
+        "provider:video_generate:minimax:provider-task-running"
+    );
+    assert_eq!(
+        extra["async_poll_adapter_result"]["result_ref"],
         "provider:video_generate:minimax:provider-task-running"
     );
     assert!(extra["async_poll_adapter_result"].get("text").is_none());

@@ -46,6 +46,7 @@
 | poll | `vendor` | no | string | config default | Provider key used to query the task. |
 | poll | `model` | no | string | config default | Model metadata preserved in final result. |
 | poll | `poll_after_seconds` | no | integer | config poll interval | Suggested next poll delay when the task is still pending. |
+| poll | `poll_after_ms` | no | integer | derived | Millisecond alias for `poll_after_seconds`; runtime rounds up to whole seconds. |
 | poll | `expires_at` | no | integer(epoch seconds) | derived | Expiry deadline for async resume. |
 | poll | `download` | no | boolean | config default | If true and the task succeeded, retrieve and save the video file. |
 | poll | `output_path` | no | string(path) | auto | Workspace output path for downloaded video. |
@@ -77,7 +78,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","adapter_kind":"media_job_poll","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"planned_outputs":[{"type":"video_file","path":"video/download/generated.mp4"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"VIDEO_GENERATE_DRY_RUN","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","adapter_kind":"media_job_poll","dry_run":true,"request":{"model":"MiniMax-Hailuo-2.3","prompt":"A logo slowly rotates"},"planned_outputs":[{"type":"video_file","path":"video/download/generated.mp4"}],"pending_async_job_contract":{"job_id":"provider:video_generate:minimax:dry_run","provider":"minimax","status":"accepted","poll_after_seconds":5,"poll_after_ms":5000,"expires_at":1999999999,"cancel_ref":"provider:video_generate:minimax:dry_run","cancel_token":"provider:video_generate:minimax:dry_run","result_ref":"provider:video_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","retryable":true,"poll_adapter":{"kind":"media_job_poll","skill_name":"video_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[]},"error_text":null}
 ```
 
 ### Example 3
@@ -87,7 +88,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"VIDEO_TASK:106916112212032","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","status":"Processing","async_poll_adapter_result":{"job_id":"provider:video_generate:minimax:106916112212032","status":"running","poll_after_seconds":5,"expires_at":1999999999,"message_key":"clawd.task.async_job_pending"}},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"VIDEO_TASK:106916112212032","extra":{"provider":"minimax","model":"MiniMax-Hailuo-2.3","model_kind":"minimax_native","task_id":"106916112212032","job_id":"provider:video_generate:minimax:106916112212032","status":"Processing","async_poll_adapter_result":{"job_id":"provider:video_generate:minimax:106916112212032","result_ref":"provider:video_generate:minimax:106916112212032","status":"running","poll_after_seconds":5,"poll_after_ms":5000,"expires_at":1999999999,"message_key":"clawd.task.async_job_pending","retryable":true}},"error_text":null}
 ```
 
 ## Output Contract

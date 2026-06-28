@@ -351,11 +351,16 @@ fn execute_generate(
                 "planned_outputs": [{"type":"video_file","path": output}],
                 "pending_async_job_contract": {
                     "job_id": dry_run_job_id,
+                    "provider": provider_name,
                     "status": "accepted",
                     "poll_after_seconds": poll_after_seconds,
+                    "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
                     "expires_at": expires_at,
                     "cancel_ref": dry_run_job_id,
+                    "cancel_token": dry_run_job_id,
+                    "result_ref": dry_run_job_id,
                     "message_key": "clawd.task.async_job_pending",
+                    "retryable": true,
                     "poll_adapter": {
                         "kind": "media_job_poll",
                         "skill_name": "video_generate",
@@ -558,11 +563,16 @@ fn video_pending_task_response(
             "outputs": [],
             "pending_async_job": {
                 "job_id": job_id,
+                "provider": provider,
                 "status": "accepted",
                 "poll_after_seconds": poll_after_seconds,
+                "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
                 "expires_at": expires_at,
                 "cancel_ref": job_id,
+                "cancel_token": job_id,
+                "result_ref": job_id,
                 "message_key": "clawd.task.async_job_pending",
+                "retryable": true,
                 "poll_adapter": {
                     "kind": "media_job_poll",
                     "skill_name": "video_generate",
@@ -624,6 +634,12 @@ fn execute_poll(
     let poll_after_seconds = obj
         .get("poll_after_seconds")
         .and_then(Value::as_u64)
+        .or_else(|| {
+            obj.get("poll_after_ms")
+                .and_then(Value::as_u64)
+                .filter(|millis| *millis > 0)
+                .map(|millis| millis.saturating_add(999) / 1_000)
+        })
         .unwrap_or_else(|| {
             poll_after_seconds_from_interval_ms(cfg_poll_interval_ms(&cfg.video_generation))
         })
@@ -894,10 +910,13 @@ fn video_poll_adapter_result(
 ) -> Value {
     let mut result = json!({
         "job_id": job_id,
+        "result_ref": job_id,
         "status": status,
         "poll_after_seconds": poll_after_seconds,
+        "poll_after_ms": poll_after_seconds.saturating_mul(1_000),
         "expires_at": expires_at,
         "message_key": message_key.unwrap_or("clawd.task.async_job_pending"),
+        "retryable": matches!(status, "accepted" | "running"),
     });
     if let Some(obj) = result.as_object_mut() {
         match status {
