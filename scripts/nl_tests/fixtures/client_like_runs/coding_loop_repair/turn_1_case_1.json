@@ -1,0 +1,187 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-coding-loop-repair",
+    "status": "succeeded",
+    "result_json": {
+      "text": "coding_loop_status=completed verification_status=verified retry_count=1 changed_files=src/lib.rs",
+      "messages": [
+        "coding_loop_status=completed verification_status=verified retry_count=1 changed_files=src/lib.rs"
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "Fix the fixture failing test, rerun verification, and report changed files.",
+          "final_status": "success",
+          "final_answer": "coding_loop_status=completed verification_status=verified retry_count=1 changed_files=src/lib.rs"
+        },
+        "trace": {
+          "rounds": [
+            {
+              "round_no": 1,
+              "plan_result": {
+                "steps": [
+                  {
+                    "step_id": "step_1",
+                    "action_ref": "run_cmd",
+                    "skill": "run_cmd"
+                  },
+                  {
+                    "step_id": "step_2",
+                    "action_ref": "fs_basic.write_file",
+                    "skill": "fs_basic"
+                  },
+                  {
+                    "step_id": "step_3",
+                    "action_ref": "run_cmd",
+                    "skill": "run_cmd"
+                  }
+                ]
+              }
+            }
+          ],
+          "step_results": [
+            {
+              "step_id": "step_1",
+              "requested_action_ref": "run_cmd",
+              "executed_skill": "run_cmd",
+              "skill": "run_cmd",
+              "status": "error",
+              "error_kind": "exit_status",
+              "failure_attribution": "tool_gap",
+              "command": "cargo test -p fixture",
+              "output_excerpt": "exit=101 command=cargo test -p fixture"
+            },
+            {
+              "step_id": "step_2",
+              "requested_action_ref": "fs_basic.write_file",
+              "executed_skill": "fs_basic",
+              "skill": "fs_basic",
+              "status": "ok",
+              "changed_files": [
+                "src/lib.rs"
+              ],
+              "diff_summary": {
+                "summary_code": "fixed_fixture_addition"
+              }
+            },
+            {
+              "step_id": "step_3",
+              "requested_action_ref": "run_cmd",
+              "executed_skill": "run_cmd",
+              "skill": "run_cmd",
+              "status": "ok",
+              "command": "cargo test -p fixture",
+              "output_excerpt": "exit=0 command=cargo test -p fixture"
+            }
+          ],
+          "task_observations": [
+            {
+              "owner_layer": "coding_loop",
+              "retry_count": 1
+            }
+          ],
+          "event_stream": [
+            {
+              "seq": 1,
+              "event_type": "coding_checkpoint",
+              "payload": {
+                "schema_version": 1,
+                "checkpoint_kind": "file_edit_group",
+                "checkpoint_ref": "coding_checkpoint:file_edit_group",
+                "evidence_ref": "coding_checkpoint:file_edit_group",
+                "evidence_refs": [
+                  "step_2"
+                ],
+                "changed_file_count": 1,
+                "changed_files": [
+                  "src/lib.rs"
+                ],
+                "verification_status": "verified"
+              }
+            },
+            {
+              "seq": 2,
+              "event_type": "coding_checkpoint",
+              "payload": {
+                "schema_version": 1,
+                "checkpoint_kind": "verification_command",
+                "checkpoint_ref": "coding_checkpoint:verification_command:1",
+                "evidence_ref": "coding_checkpoint:verification_command:1",
+                "evidence_refs": [
+                  "step_1",
+                  "step_3"
+                ],
+                "command_index": 1,
+                "verification_command": "cargo test -p fixture",
+                "verification_command_count": 1,
+                "verification_status": "verified",
+                "verification_failure_kind_count": 1,
+                "verification_failure_kinds": [
+                  "test"
+                ]
+              }
+            },
+            {
+              "seq": 3,
+              "event_type": "coding_evidence",
+              "payload": {
+                "schema_version": 1,
+                "evidence_ref": "coding_evidence:summary",
+                "evidence_refs": [
+                  "step_1",
+                  "step_2",
+                  "step_3"
+                ],
+                "changed_file_count": 1,
+                "changed_files": [
+                  "src/lib.rs"
+                ],
+                "command_count": 1,
+                "commands": [
+                  "cargo test -p fixture"
+                ],
+                "verification_command_count": 1,
+                "verification_commands": [
+                  "cargo test -p fixture"
+                ],
+                "test_count": 1,
+                "tests": [
+                  "cargo test -p fixture"
+                ],
+                "diff_summary_count": 1,
+                "diff_summaries": [
+                  {
+                    "field": "diff_summary",
+                    "value": {
+                      "summary_code": "fixed_fixture_addition"
+                    }
+                  }
+                ],
+                "failure_count": 1,
+                "failures": [
+                  {
+                    "step_id": "step_1",
+                    "status": "error",
+                    "skill": "run_cmd",
+                    "action_ref": "run_cmd",
+                    "error_code": "exit_status"
+                  }
+                ],
+                "verification_status": "verified",
+                "verification_failure_kind_count": 1,
+                "verification_failure_kinds": [
+                  "test"
+                ],
+                "retry_count": 1,
+                "unverified_risk": null
+              }
+            }
+          ],
+          "final_stop_signal": "coding_loop_completed",
+          "final_failure_attribution": null
+        }
+      }
+    }
+  },
+  "error": null
+}

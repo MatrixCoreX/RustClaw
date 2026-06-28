@@ -137,6 +137,12 @@ Client-like continuous regression:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/provider_error_attribution --expectations scripts/nl_tests/expectations/provider_error_attribution_fixture.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/delivery_error_attribution --expectations scripts/nl_tests/expectations/delivery_error_attribution_fixture.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/prompt_budget_error_attribution --expectations scripts/nl_tests/expectations/prompt_budget_error_attribution_fixture.jsonl`
+- Offline coding-loop repair fixture smoke:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/coding_loop_repair --expectations scripts/nl_tests/expectations/coding_loop_repair_fixture.jsonl`
+  This fixture is separate from user-facing NL evals. It checks the machine
+  event contract for a small coding task that records a failing verification
+  command, a file-edit checkpoint, a rerun verification checkpoint, and final
+  `coding_evidence` without requiring a live model or mutating the repository.
 
 ### Compact coverage tiers
 
