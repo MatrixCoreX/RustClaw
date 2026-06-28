@@ -549,6 +549,12 @@ fn direct_answer_gate_allows_locatorless_workspace_project_summary_semantic() {
 fn direct_answer_gate_promotion_reason_code_separates_machine_boundaries() {
     assert_eq!(
         direct_answer_gate_planner_promotion_reason_code(
+            "direct_answer_gate_contract_execute"
+        ),
+        "direct_answer_gate_contract_boundary_execute"
+    );
+    assert_eq!(
+        direct_answer_gate_planner_promotion_reason_code(
             "direct_answer_gate_package_manager_detect_execute"
         ),
         "direct_answer_gate_contract_boundary_execute"

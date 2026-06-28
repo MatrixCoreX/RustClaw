@@ -56,6 +56,7 @@ pub(super) fn promote_direct_answer_gate_to_planner(
 pub(super) fn direct_answer_gate_planner_promotion_reason_code(reason_tag: &str) -> &'static str {
     match reason_tag {
         "direct_answer_gate_inline_transform_execute"
+        | "direct_answer_gate_contract_execute"
         | "direct_answer_gate_package_manager_detect_execute"
         | "inline_structured_payload_context_execute" => {
             "direct_answer_gate_contract_boundary_execute"
