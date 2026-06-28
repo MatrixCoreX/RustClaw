@@ -770,6 +770,26 @@ pub(crate) async fn execute_ask_routed(
                                         "direct_answer_gate_agent_loop_activation",
                                     )
                                 }
+                                "direct_answer_gate_contract_boundary_execute" => {
+                                    with_pre_planner_exit_snapshot(
+                                        state,
+                                        task,
+                                        &current_turn_user_request,
+                                        reply,
+                                        Some(&promoted_ctx),
+                                        "direct_answer_gate_contract_boundary_execute",
+                                    )
+                                }
+                                "direct_answer_gate_evidence_projection_execute" => {
+                                    with_pre_planner_exit_snapshot(
+                                        state,
+                                        task,
+                                        &current_turn_user_request,
+                                        reply,
+                                        Some(&promoted_ctx),
+                                        "direct_answer_gate_evidence_projection_execute",
+                                    )
+                                }
                                 "contract_test_hint_promoted_to_planner" => {
                                     with_pre_planner_exit_snapshot(
                                         state,
