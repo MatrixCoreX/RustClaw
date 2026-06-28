@@ -1,7 +1,7 @@
 use super::{
     automation_runs_request_payload, exec_exit_class, exec_failure_class_from_machine_tokens,
-    exec_summary_json, run_exec, task_report_json, write_exec_artifacts, ExecExitClass,
-    ExecWaitOutcome,
+    exec_summary_json, run_exec, task_event_output_lines, task_report_json, write_exec_artifacts,
+    ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -107,6 +107,45 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["events"][0]["event_type"], "task_completed");
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
+}
+
+#[test]
+fn task_log_event_output_uses_task_events_not_raw_log_files() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-logs".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "debug_log_file": "clawd.log",
+            "task_lifecycle": {
+                "state": "background"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: vec![crate::events::TaskEventLine {
+            event_type: "checkpoint_created".to_string(),
+            line: "seq=7 type=checkpoint_created checkpoint_id=ckpt-logs".to_string(),
+            fields: std::collections::BTreeMap::from([(
+                "checkpoint_id".to_string(),
+                "ckpt-logs".to_string(),
+            )]),
+        }],
+    };
+    let events = task.events.iter().collect::<Vec<_>>();
+
+    let plain = task_event_output_lines(&task, events.clone(), false).expect("plain event output");
+    assert_eq!(
+        plain,
+        vec!["event: seq=7 type=checkpoint_created checkpoint_id=ckpt-logs"]
+    );
+    assert!(!plain.join("\n").contains("clawd.log"));
+
+    let jsonl = task_event_output_lines(&task, events, true).expect("jsonl event output");
+    let value: serde_json::Value = serde_json::from_str(&jsonl[0]).expect("parse jsonl line");
+    assert_eq!(value["task_id"], "task-logs");
+    assert_eq!(value["event_type"], "checkpoint_created");
+    assert_eq!(value["fields"]["checkpoint_id"], "ckpt-logs");
+    assert!(!jsonl[0].contains("clawd.log"));
 }
 
 #[test]
