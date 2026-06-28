@@ -1679,3 +1679,7 @@ pub(crate) fn check_task_view_access(
 #[cfg(test)]
 #[path = "tasks_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_cancel_resume_tests.rs"]
+mod task_cancel_resume_tests;
