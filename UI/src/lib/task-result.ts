@@ -27,6 +27,14 @@ export interface TaskReplaySummaryView {
   coverage: string[];
 }
 
+export interface TaskTraceEventView {
+  eventType: string;
+  title: string;
+  detail: string;
+  tone: "ok" | "running" | "attention" | "failed";
+  meta: string[];
+}
+
 export function extractTaskText(result: TaskQueryResponse): string {
   if (result.result_json && typeof result.result_json === "object") {
     const maybeText = (result.result_json as { text?: unknown }).text;
@@ -225,6 +233,106 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   const mergeStatus = stringAt(payload, ["merge_contract", "child_trace_merge_status"]);
   if (mergeStatus) meta.push(`merge_status=${mergeStatus}`);
   return meta;
+}
+
+export function buildTaskTraceEventView(event: Record<string, unknown>, lang: TaskLifecycleLang): TaskTraceEventView {
+  const payload = traceEventPayload(event);
+  const eventType = typeof event.event_type === "string" && event.event_type.trim()
+    ? event.event_type.trim()
+    : "task_event";
+  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const field = (key: string) => {
+    const value = payload?.[key];
+    if ((typeof value === "string" && value.trim()) || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return "";
+  };
+  const meta = traceEventMeta(event).slice(0, 8);
+  const status = field("status");
+  const failureCount = Number(field("failure_count") || "0");
+  const unverifiedRisk = field("unverified_risk");
+  const tone: TaskTraceEventView["tone"] =
+    field("error_kind") || status === "error" || failureCount > 0
+      ? "failed"
+      : unverifiedRisk
+        ? "attention"
+        : eventType === "tool_finished" || eventType === "coding_evidence"
+          ? "ok"
+          : "running";
+
+  if (eventType === "task_transition") {
+    const from = field("state_from");
+    const to = field("state_to");
+    return {
+      eventType,
+      title: tLocal("状态已更新", "State updated"),
+      detail: from && to
+        ? tLocal(`从 ${from} 进入 ${to}`, `Moved from ${from} to ${to}`)
+        : field("reason_code") || tLocal("任务状态发生变化。", "The task state changed."),
+      tone,
+      meta,
+    };
+  }
+
+  if (eventType === "checkpoint_created") {
+    const checkpointId = field("checkpoint_id");
+    return {
+      eventType,
+      title: tLocal("已保存续跑点", "Checkpoint saved"),
+      detail: checkpointId
+        ? tLocal(`可以从 ${checkpointId} 继续。`, `Can resume from ${checkpointId}.`)
+        : tLocal("任务已经保存可恢复进度。", "The task saved resumable progress."),
+      tone: "attention",
+      meta,
+    };
+  }
+
+  if (eventType === "tool_started") {
+    const tool = field("skill") || field("tool_or_skill") || field("resolved_tool_or_skill");
+    return {
+      eventType,
+      title: tLocal("工具开始执行", "Tool started"),
+      detail: tool
+        ? tLocal(`${tool} 正在执行。`, `${tool} is running.`)
+        : tLocal("任务正在调用工具。", "The task is calling a tool."),
+      tone: "running",
+      meta,
+    };
+  }
+
+  if (eventType === "tool_finished") {
+    const tool = field("skill") || field("tool_or_skill") || field("resolved_tool_or_skill");
+    return {
+      eventType,
+      title: tLocal("工具执行结束", "Tool finished"),
+      detail: tool
+        ? tLocal(`${tool} 已返回结果。`, `${tool} returned a result.`)
+        : tLocal("工具已经返回结果。", "The tool returned a result."),
+      tone,
+      meta,
+    };
+  }
+
+  if (eventType === "coding_evidence") {
+    const changed = field("changed_file_count") || "0";
+    const tests = field("test_count") || "0";
+    return {
+      eventType,
+      title: tLocal("代码执行证据", "Coding evidence"),
+      detail: tLocal(`变更文件 ${changed} 个，测试记录 ${tests} 条。`, `${changed} changed file(s), ${tests} test record(s).`),
+      tone,
+      meta,
+    };
+  }
+
+  return {
+    eventType,
+    title: tLocal("任务事件", "Task event"),
+    detail: field("reason_code") || field("message_key") || eventType,
+    tone,
+    meta,
+  };
 }
 
 export function taskArtifactRefs(result: TaskQueryResponse): TaskArtifactRefView[] {
