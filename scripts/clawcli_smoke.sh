@@ -46,6 +46,9 @@ if ! run_cli capabilities --json >/dev/null 2>"$capabilities_error"; then
 fi
 rm -f "$capabilities_error"
 
+echo "SMOKE exec-effective-config"
+run_cli exec --profile quick --print-effective-config "smoke effective config" >/dev/null
+
 echo "SMOKE submit"
 submit_json="$(run_cli submit --text "$SMOKE_TEXT" --detach --json)"
 task_id="$(printf '%s\n' "$submit_json" | extract_task_id)"
@@ -64,6 +67,24 @@ run_cli events "$task_id" --jsonl >/dev/null
 echo "SMOKE watch"
 timeout "$WATCH_TIMEOUT_SECONDS" \
   "${CLI_BASE[@]}" watch "$task_id" --until-terminal --jsonl >/dev/null
+
+echo "SMOKE wait"
+run_cli wait "$task_id" --until terminal --timeout-seconds "$WATCH_TIMEOUT_SECONDS" --json >/dev/null
+
+echo "SMOKE review"
+run_cli review "$task_id" --json >/dev/null
+
+echo "SMOKE subagents"
+run_cli subagents "$task_id" --json >/dev/null
+
+echo "SMOKE permission inspect"
+run_cli permission inspect "$task_id" --json >/dev/null
+
+echo "SMOKE replay"
+replay_file="$(mktemp)"
+run_cli replay export "$task_id" --output "$replay_file" --json >/dev/null
+run_cli replay run "$replay_file" --coverage >/dev/null
+rm -f "$replay_file"
 
 if [[ -n "${RUSTCLAW_CLI_SMOKE_USER_ID:-}" && -n "${RUSTCLAW_CLI_SMOKE_CHAT_ID:-}" ]]; then
   echo "SMOKE active"
