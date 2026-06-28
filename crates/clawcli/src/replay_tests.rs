@@ -85,6 +85,11 @@ fn replay_run_summary_is_recorded_only_machine_result() {
                     "answer_verifier": {
                         "status_code": "passed",
                         "verdict": "pass"
+                    },
+                    "permission_decision": {
+                        "decision": "allowed",
+                        "risk_level": "low",
+                        "action_effect": "read_only"
                     }
                 }
             ]
@@ -117,6 +122,10 @@ fn replay_run_summary_is_recorded_only_machine_result() {
     assert!(summary["execution_replay"]["step_count"]
         .as_u64()
         .is_some_and(|count| count >= 4));
+    assert_eq!(
+        summary["permission_summary"][0]["permission_decision"]["decision"],
+        "allowed"
+    );
 }
 
 #[test]
@@ -246,7 +255,11 @@ fn replay_diff_summary_reports_machine_field_changes() {
                                 "action_type": "call_capability",
                                 "capability": "fs.read",
                                 "action": "read_text_range",
-                                "status": "ok"
+                                "status": "ok",
+                                "permission_decision": {
+                                    "decision": "allowed",
+                                    "risk_level": "low"
+                                }
                             }
                         ]
                     },
@@ -290,7 +303,11 @@ fn replay_diff_summary_reports_machine_field_changes() {
                                 "capability": "fs.read",
                                 "action": "read_text_range",
                                 "status": "error",
-                                "error_code": "missing_required_argument"
+                                "error_code": "missing_required_argument",
+                                "permission_decision": {
+                                    "decision": "denied_by_policy",
+                                    "risk_level": "high"
+                                }
                             }
                         ]
                     },
@@ -319,6 +336,19 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(diff["diff"]["action_sequence_changed"], true);
     assert_eq!(diff["diff"]["tool_result_changed"], true);
     assert_eq!(diff["diff"]["verifier_changed"], true);
+    assert_eq!(diff["diff"]["permission_changed"], true);
+    assert!(diff["diff_classes"]
+        .as_array()
+        .expect("diff classes")
+        .contains(&serde_json::json!("final_status_changed")));
+    assert!(diff["diff_classes"]
+        .as_array()
+        .expect("diff classes")
+        .contains(&serde_json::json!("plan_changed")));
+    assert!(diff["diff_classes"]
+        .as_array()
+        .expect("diff classes")
+        .contains(&serde_json::json!("permission_changed")));
     assert_eq!(diff["left"]["artifact_ref_count"], 1);
     assert_eq!(diff["right"]["artifact_ref_count"], 0);
     assert_eq!(
@@ -332,6 +362,10 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(
         diff["right"]["verifier_summary"][0]["answer_verifier"]["status_code"],
         "missing_required_evidence"
+    );
+    assert_eq!(
+        diff["right"]["permission_summary"][0]["permission_decision"]["decision"],
+        "denied_by_policy"
     );
 }
 
@@ -376,7 +410,7 @@ fn replay_offline_smoke_runs_bundle_and_diff_without_providers() {
     )
     .expect("write right bundle");
 
-    run_run(&left_path, true).expect("run replay bundle");
+    run_run(&left_path, true, false).expect("run replay bundle");
     run_diff(&left_path, &right_path, true).expect("diff replay bundles");
 
     std::fs::remove_dir_all(base_dir).ok();

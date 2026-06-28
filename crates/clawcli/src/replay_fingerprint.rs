@@ -115,6 +115,34 @@ pub(crate) fn replay_verifier_summary(bundle: &Value) -> Vec<Value> {
     cap_summary_items(items)
 }
 
+pub(crate) fn replay_permission_summary(bundle: &Value) -> Vec<Value> {
+    let mut items = Vec::new();
+    collect_machine_summaries(
+        bundle,
+        &["permission_decision", "policy_decision", "command_policy"],
+        &[
+            "permission_decision",
+            "policy_decision",
+            "command_policy",
+            "decision",
+            "policy_authority",
+            "allowed",
+            "needs_confirmation",
+            "requires_confirmation",
+            "dry_run_required",
+            "risk_level",
+            "action_effect",
+            "effect",
+            "reason_code",
+            "error_code",
+            "isolation_profile",
+        ],
+        &mut items,
+        0,
+    );
+    cap_summary_items(items)
+}
+
 fn collect_replay_actions(
     value: &Value,
     parent_key: Option<&str>,

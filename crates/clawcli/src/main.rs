@@ -367,6 +367,8 @@ enum ReplayCommand {
         bundle: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        coverage: bool,
     },
     /// Compare two replay bundles using stable machine fields.
     Diff {
@@ -754,7 +756,11 @@ fn main() -> Result<()> {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 replay::run_export(base_url, k, task_id, output_path, *json)
             }
-            ReplayCommand::Run { bundle, json } => replay::run_run(bundle, *json),
+            ReplayCommand::Run {
+                bundle,
+                json,
+                coverage,
+            } => replay::run_run(bundle, *json, *coverage),
             ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
         Command::Completions { shell } => {
