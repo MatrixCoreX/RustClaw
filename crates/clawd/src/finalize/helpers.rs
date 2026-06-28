@@ -82,6 +82,53 @@ pub(crate) fn is_execution_summary_message(message: &str) -> bool {
             .is_some_and(|message_key| message_key == "clawd.msg.execution.summary")
 }
 
+pub(crate) fn is_non_answer_separator_message(message: &str) -> bool {
+    if is_wrapped_machine_separator_marker(message) {
+        return true;
+    }
+    let chars = message
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<Vec<_>>();
+    if chars.len() < 6 || chars.iter().any(|ch| ch.is_alphanumeric()) {
+        return false;
+    }
+    let first = chars[0];
+    chars.iter().all(|ch| *ch == first)
+        || chars
+            .iter()
+            .all(|ch| matches!(*ch, '=' | '-' | '_' | '*' | '#' | '~'))
+}
+
+fn is_wrapped_machine_separator_marker(message: &str) -> bool {
+    let trimmed = message.trim();
+    let chars = trimmed.chars().collect::<Vec<_>>();
+    if chars.len() < 8 || chars.len() > 96 {
+        return false;
+    }
+    let Some(first) = chars.first().copied() else {
+        return false;
+    };
+    if first.is_alphanumeric() || first.is_whitespace() {
+        return false;
+    }
+    let prefix_len = chars.iter().take_while(|ch| **ch == first).count();
+    let suffix_len = chars.iter().rev().take_while(|ch| **ch == first).count();
+    if prefix_len < 3 || suffix_len < 3 || prefix_len + suffix_len >= chars.len() {
+        return false;
+    }
+    let middle = chars[prefix_len..chars.len() - suffix_len]
+        .iter()
+        .collect::<String>();
+    let middle = middle.trim();
+    !middle.is_empty()
+        && middle.chars().any(|ch| ch.is_ascii_uppercase())
+        && middle.chars().all(|ch| {
+            ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.')
+        })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObservedOutputKind {
     Empty,

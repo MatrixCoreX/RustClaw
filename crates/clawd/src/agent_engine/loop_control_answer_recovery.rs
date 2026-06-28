@@ -1236,6 +1236,52 @@ pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
     true
 }
 
+pub(super) fn try_recover_machine_kv_summary_output_format_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.delivery_required || route.wants_file_delivery {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    let Some(verifier) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap()
+        || !verifier
+            .missing_evidence_fields
+            .iter()
+            .all(|field| field == "output_format")
+    {
+        return false;
+    }
+    let observed_texts =
+        crate::machine_kv_projection::observed_machine_text_fragments_from_journal(journal);
+    let Some(answer) = crate::machine_kv_projection::requested_machine_kv_summary_from_observations(
+        &journal.input_text,
+        &observed_texts,
+    ) else {
+        return false;
+    };
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer.clone();
+    reply.messages = vec![answer];
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_machine_kv_summary");
+    true
+}
+
 pub(super) fn try_recover_http_health_answer_verifier_gap(
     route_result: Option<&crate::RouteResult>,
     reply: &mut AskReply,

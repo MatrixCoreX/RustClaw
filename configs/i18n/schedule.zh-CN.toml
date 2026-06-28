@@ -41,6 +41,7 @@ locale = "zh-CN"
 "clawd.msg.crypto_trade_submit_requires_user_confirmation" = "已拦截直接下单。请先进行交易预览，然后点击确认或回复 `Y`/`YES` 后再发送交易。"
 "clawd.msg.clarify_question_fallback" = "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文，我立刻继续处理。"
 "clawd.msg.ask_runtime_failure" = "当前模型服务暂时无法完成这次请求。请稍后重试，或切换到其它可用模型继续。"
+"clawd.msg.answer_verifier_required_evidence_block" = "我还没能生成足够可靠的最终答案，缺少必要证据或输出格式未满足。请补充目标，或让我重新执行这一步。缺失字段：{missing_evidence_fields}"
 # §7.2 fallback 矩阵：按触发 source 拆分原"超级 fallback"，便于用户感知"我卡在哪/你能怎么帮我"。
 # 旧 key clawd.msg.clarify_question_fallback 仍保留用于历史 DB 兼容比对（写入端不再使用）。
 "clawd.msg.fallback.llm_unavailable" = "这次没有连上模型服务。请重试，或切换到其它可用模型继续。"

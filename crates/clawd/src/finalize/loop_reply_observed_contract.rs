@@ -25,6 +25,11 @@ pub(super) fn direct_scalar_observed_answer(
     if !route_allows_direct_scalar_observed_answer(route) {
         return None;
     }
+    if let Some((answer, summary)) =
+        latest_terminal_scalar_respond_answer_from_loop_contract(route, loop_state)
+    {
+        return Some((answer, summary));
+    }
     if let Some(answer) = state.and_then(|state| {
         let user_text = route.resolved_intent.trim();
         deterministic_missing_observed_target_answer(
@@ -130,6 +135,95 @@ pub(super) fn direct_scalar_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn latest_terminal_scalar_respond_answer_from_loop_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::CommandOutputSummary
+                | crate::OutputSemanticKind::ExecutionFailedStep
+        )
+    {
+        return None;
+    }
+    let answer = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "respond")
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|candidate| scalar_terminal_respond_candidate_matches_contract(route, candidate))?
+        .to_string();
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len().max(1),
+            ..Default::default()
+        },
+    ))
+}
+
+fn scalar_terminal_respond_candidate_matches_contract(
+    route: &crate::RouteResult,
+    candidate: &str,
+) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            != 1
+        || crate::finalize::parse_delivery_token(candidate).is_some()
+        || crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+        || crate::finalize::is_execution_summary_message(candidate)
+        || crate::finalize::is_non_answer_separator_message(candidate)
+        || looks_like_structured_machine_output(candidate)
+        || looks_like_raw_command_snapshot(candidate)
+        || machine_field_placeholder_delivery_for_scalar_contract(candidate, Some(route))
+    {
+        return false;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+        && !candidate_looks_like_path_scalar(candidate)
+    {
+        return false;
+    }
+    matches!(
+        crate::output_contract_verifier::verify_output_contract(
+            &route.output_contract,
+            candidate,
+            &route.resolved_intent,
+        ),
+        crate::output_contract_verifier::OutputContractVerdict::Pass
+    )
+}
+
+fn candidate_looks_like_path_scalar(candidate: &str) -> bool {
+    if candidate.contains('\0') || candidate.chars().any(char::is_control) {
+        return false;
+    }
+    let path = std::path::Path::new(candidate);
+    path.is_absolute()
+        || candidate.starts_with("./")
+        || candidate.starts_with("../")
+        || candidate.contains('/')
 }
 
 fn latest_scalar_observed_answer_from_loop_contract(
@@ -292,14 +386,19 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
     let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
         return false;
     };
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     if current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery)
         && planned_delivery_is_publishable_model_language_answer(current_delivery)
         && delivery_is_single_line_text(current_delivery)
+        && !machine_field_placeholder_delivery_for_scalar_contract(current_delivery, route)
     {
         return false;
     }
-    if !scalar_contract_delivery_should_be_replaced_with_observed_scalar(current_delivery, &answer)
-    {
+    if !scalar_contract_delivery_should_be_replaced_with_observed_scalar(
+        current_delivery,
+        &answer,
+        route,
+    ) {
         return false;
     }
     loop_state
@@ -325,13 +424,15 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
 fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
     delivery: &str,
     answer: &str,
+    route: Option<&crate::RouteResult>,
 ) -> bool {
     let delivery = delivery.trim();
     let answer = answer.trim();
     if delivery.is_empty() || answer.is_empty() || delivery == answer {
         return false;
     }
-    delivery_message_is_json_container(delivery)
+    machine_field_placeholder_delivery_for_scalar_contract(delivery, route)
+        || delivery_message_is_json_container(delivery)
         || looks_like_structured_machine_output(delivery)
         || delivery
             .lines()
@@ -339,6 +440,24 @@ fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
             .count()
             > 1
         || delivery.contains(answer)
+}
+
+fn machine_field_placeholder_delivery_for_scalar_contract(
+    delivery: &str,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    route.is_some_and(route_allows_direct_scalar_observed_answer)
+        && matches!(
+            delivery.trim(),
+            "field_value"
+                | "value"
+                | "value_text"
+                | "path"
+                | "resolved_path"
+                | "command_output"
+                | "count"
+                | "total"
+        )
 }
 
 pub(super) fn replace_delivery_with_direct_structured_observed_answer(

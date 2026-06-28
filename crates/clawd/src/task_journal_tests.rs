@@ -488,6 +488,18 @@ fn dispatch_boundary_attribution_records_owner_and_rollback_tokens() {
             .and_then(Value::as_str),
         Some("semantic_route_authority:legacy_pre_agent")
     );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/decision_source")
+            .and_then(Value::as_str),
+        Some("compat_trace")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/semantic_control_state")
+            .and_then(Value::as_str),
+        Some("none")
+    );
 }
 
 #[test]

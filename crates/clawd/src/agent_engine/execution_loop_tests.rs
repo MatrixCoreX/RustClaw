@@ -348,4 +348,12 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
         Some(fingerprint.as_str())
     );
     assert_eq!(attribution.repeat_count, Some(1));
+    assert_eq!(
+        attribution
+            .boundary_context
+            .as_ref()
+            .and_then(|value| value.pointer("/decision_source"))
+            .and_then(serde_json::Value::as_str),
+        Some("safety_policy")
+    );
 }

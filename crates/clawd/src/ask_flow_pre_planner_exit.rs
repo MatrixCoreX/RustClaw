@@ -5,6 +5,7 @@ pub(super) enum PrePlannerExitKind {
     BoundarySafety,
     MachineFactFastPath,
     CompatTrace,
+    AgentLoopActivation,
     OrdinarySemantic,
 }
 
@@ -14,7 +15,28 @@ impl PrePlannerExitKind {
             Self::BoundarySafety => "boundary_safety",
             Self::MachineFactFastPath => "machine_fact_fast_path",
             Self::CompatTrace => "compat_trace",
+            Self::AgentLoopActivation => "agent_loop_activation",
             Self::OrdinarySemantic => "ordinary_semantic",
+        }
+    }
+
+    pub(super) fn decision_source(self) -> &'static str {
+        match self {
+            Self::BoundarySafety => "safety_policy",
+            Self::MachineFactFastPath => "evidence_projection",
+            Self::CompatTrace => "compat_trace",
+            Self::AgentLoopActivation => "contract_boundary",
+            Self::OrdinarySemantic => "semantic_rewrite",
+        }
+    }
+
+    pub(super) fn semantic_control_state(self) -> &'static str {
+        match self {
+            Self::OrdinarySemantic => "legacy_migration_debt",
+            Self::BoundarySafety
+            | Self::MachineFactFastPath
+            | Self::CompatTrace
+            | Self::AgentLoopActivation => "none",
         }
     }
 }
@@ -37,12 +59,17 @@ impl PrePlannerExitInventoryItem {
             "schema_version": 1,
             "pre_planner_exit_kind": self.kind.as_str(),
             "pre_planner_exit_reason_code": self.reason_code,
+            "decision_source": self.kind.decision_source(),
+            "rewrite_reason_code": self.reason_code,
+            "semantic_control_state": self.kind.semantic_control_state(),
             "migration_target": self.migration_target,
             "migration_stage": self.migration_stage,
             "migration_order": self.migration_order,
             "nl_gate_refs": self.nl_gate_refs,
             "deletion_gate": self.deletion_gate,
             "owner_layer": self.owner_layer,
+            "input_contract_ref": "pre_planner_exit_inventory",
+            "output_contract_ref": self.migration_target,
         })
     }
 }
@@ -153,12 +180,12 @@ pub(super) const PRE_PLANNER_EXIT_INVENTORY: &[PrePlannerExitInventoryItem] = &[
     },
     PrePlannerExitInventoryItem {
         reason_code: "pure_chat_agent_loop_submode",
-        kind: PrePlannerExitKind::OrdinarySemantic,
+        kind: PrePlannerExitKind::AgentLoopActivation,
         migration_target: "agent_loop_authority",
         migration_stage: "chat_respond_agent_loop",
         migration_order: 20,
         nl_gate_refs: &["nl_chat_answer_general_en"],
-        deletion_gate: "delete_after_selected_class_release_gate",
+        deletion_gate: "keep_structured_agent_loop_activation_gate",
         owner_layer: "ask_flow_planner_promotion",
     },
     PrePlannerExitInventoryItem {
@@ -320,6 +347,19 @@ mod tests {
     }
 
     #[test]
+    fn pure_chat_agent_loop_submode_is_structured_activation_not_semantic_rewrite() {
+        let item = pre_planner_exit_for_reason("pure_chat_agent_loop_submode").unwrap();
+
+        assert_eq!(item.kind, PrePlannerExitKind::AgentLoopActivation);
+        assert_eq!(item.kind.decision_source(), "contract_boundary");
+        assert_eq!(item.kind.semantic_control_state(), "none");
+        assert_eq!(
+            item.deletion_gate,
+            "keep_structured_agent_loop_activation_gate"
+        );
+    }
+
+    #[test]
     fn trace_context_exposes_machine_fields() {
         let item = pre_planner_exit_for_reason("inline_json_transform_promoted_to_planner")
             .expect("inventory item");
@@ -333,6 +373,18 @@ mod tests {
                 .get("pre_planner_exit_reason_code")
                 .and_then(Value::as_str),
             Some("inline_json_transform_promoted_to_planner")
+        );
+        assert_eq!(
+            trace.get("decision_source").and_then(Value::as_str),
+            Some("semantic_rewrite")
+        );
+        assert_eq!(
+            trace.get("rewrite_reason_code").and_then(Value::as_str),
+            Some("inline_json_transform_promoted_to_planner")
+        );
+        assert_eq!(
+            trace.get("semantic_control_state").and_then(Value::as_str),
+            Some("legacy_migration_debt")
         );
         assert!(trace
             .get("migration_target")
@@ -350,5 +402,26 @@ mod tests {
             .get("nl_gate_refs")
             .and_then(Value::as_array)
             .is_some_and(|items| !items.is_empty()));
+        assert_eq!(
+            trace.get("input_contract_ref").and_then(Value::as_str),
+            Some("pre_planner_exit_inventory")
+        );
+        assert_eq!(
+            trace.get("output_contract_ref").and_then(Value::as_str),
+            Some("planner_capability_transform_json")
+        );
+    }
+
+    #[test]
+    fn ordinary_semantic_exits_are_explicit_semantic_rewrite_debt() {
+        for item in PRE_PLANNER_EXIT_INVENTORY {
+            if item.kind == PrePlannerExitKind::OrdinarySemantic {
+                assert_eq!(item.kind.decision_source(), "semantic_rewrite");
+                assert_eq!(item.kind.semantic_control_state(), "legacy_migration_debt");
+                continue;
+            }
+            assert_ne!(item.kind.decision_source(), "semantic_rewrite");
+            assert_eq!(item.kind.semantic_control_state(), "none");
+        }
     }
 }

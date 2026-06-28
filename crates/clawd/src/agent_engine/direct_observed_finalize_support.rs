@@ -1030,8 +1030,8 @@ fn route_allows_pure_chat_submode_terminal_respond(
     actions: &[AgentAction],
 ) -> bool {
     let chat_wrapped_text_loop = route_result.ask_mode.finalize_chat_wrapped();
-    let pure_chat_submode =
-        route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode");
+    let pure_chat_submode = route_result.is_planner_execute_chat_wrapped()
+        || route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode");
     if !(pure_chat_submode || chat_wrapped_text_loop)
         || route_result.needs_clarify
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None

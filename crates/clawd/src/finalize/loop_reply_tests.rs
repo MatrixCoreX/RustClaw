@@ -56,6 +56,8 @@ use super::{
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_observed_markdown_heading_scalar,
+    replace_delivery_with_requested_machine_kv_summary,
+    replace_git_repository_state_delivery_with_requested_machine_fields,
     replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
     route_prefers_language_rendered_execution_failed_step, route_structured_clarify_context,
     should_attach_execution_summary, should_drop_passthrough_delivery_for_content_evidence,
@@ -162,6 +164,122 @@ mod clarify_envelope_tests;
 
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
+
+#[test]
+fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
+    let task = claimed_task("task-machine-kv-summary-finalizer");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "system_basic",
+        &serde_json::json!({
+            "extra": {
+                "action": "read_range",
+                "path": "AGENTS.md",
+                "excerpt": "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+            },
+            "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes\"}"
+        })
+        .to_string(),
+    ));
+    let mut delivery_messages = vec![
+        "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+            .to_string(),
+    ];
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Use read_range only. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("required=yes script=check_runtime_semantic_rewrite_boundary.py")
+    );
+    assert_eq!(
+        finalizer_summary
+            .as_ref()
+            .and_then(|summary| summary.grounded_ok),
+        Some(true)
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_requires_observed_non_flag_value() {
+    let task = claimed_task("task-machine-kv-summary-finalizer-missing");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "system_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"248|must run another_guard.py"}}"#,
+    ));
+    let mut delivery_messages = vec!["248|must run another_guard.py".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Answer exactly as machine summary: required=yes script=missing_guard.py.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec!["248|must run another_guard.py"]);
+    assert!(finalizer_summary.is_none());
+}
+
+#[test]
+fn requested_machine_kv_summary_uses_state_patch_required_field() {
+    let task = claimed_task("task-machine-kv-summary-state-patch");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.last_user_visible_respond = Some(
+        "After boundary changes, run `python3 scripts/check_runtime_semantic_rewrite_boundary.py`."
+            .to_string(),
+    );
+    let mut delivery_messages = Vec::new();
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "output_format": "machine_summary",
+                "required_field": "required=yes script=check_runtime_semantic_rewrite_boundary.py"
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Read AGENTS.md lines 248-249.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+    );
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["required=yes script=check_runtime_semantic_rewrite_boundary.py"]
+    );
+}
 
 struct TempDirGuard {
     path: PathBuf,

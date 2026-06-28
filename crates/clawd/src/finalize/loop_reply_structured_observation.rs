@@ -417,19 +417,7 @@ fn latest_broad_structured_read_range(
 }
 
 pub(super) fn message_is_non_answer_separator(message: &str) -> bool {
-    let chars = message
-        .trim()
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect::<Vec<_>>();
-    if chars.len() < 6 || chars.iter().any(|ch| ch.is_alphanumeric()) {
-        return false;
-    }
-    let first = chars[0];
-    chars.iter().all(|ch| *ch == first)
-        || chars
-            .iter()
-            .all(|ch| matches!(*ch, '=' | '-' | '_' | '*' | '#' | '~'))
+    crate::finalize::is_non_answer_separator_message(message)
 }
 
 pub(super) fn discard_non_answer_separator_delivery_for_broad_structured_read(

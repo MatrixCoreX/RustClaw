@@ -1,9 +1,11 @@
 use super::{
-    answer_text_is_machine_json_payload, answer_verifier_failure_machine_line,
+    answer_text_is_machine_json_payload, answer_verifier_failure_default_payload,
+    answer_verifier_failure_machine_line, answer_verifier_failure_missing_fields_text,
     answer_verifier_failure_observed_facts, answer_verifier_forces_task_failure,
     answer_verifier_retry_applicable, answer_verifier_retry_observed_trace,
-    answer_verifier_should_force_task_failure, ask_runtime_failure_machine_payload,
-    assistant_memory_source_text, delivery_path_gap_should_finalize_as_clarify,
+    answer_verifier_should_force_task_failure, apply_requested_machine_kv_summary_to_final_answer,
+    ask_runtime_failure_machine_payload, assistant_memory_source_text,
+    compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
     deterministic_config_guard_candidates_recovery,
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
@@ -230,6 +232,41 @@ fn observed_tool_evidence_retry_ignores_failed_tool_step() {
     assert!(!answer_verifier_retry_applicable(
         &route, &journal, &verifier,
     ));
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_replaces_raw_observation_answer() {
+    let prompt = "Return exactly machine summary command=python3 scripts/sync_skill_docs.py";
+    let route = route_result(crate::AskMode::planner_execute_plain());
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-final", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"excerpt":"144| - `python3 scripts/sync_skill_docs.py`"}"#,
+        ));
+    let mut answer_text = "144| - `python3 scripts/sync_skill_docs.py`".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(answer_text, "command=python3 scripts/sync_skill_docs.py");
+    assert_eq!(
+        answer_messages,
+        vec!["command=python3 scripts/sync_skill_docs.py".to_string()]
+    );
+    assert_eq!(
+        journal.final_answer.as_deref(),
+        Some("command=python3 scripts/sync_skill_docs.py")
+    );
 }
 
 #[test]
@@ -489,6 +526,36 @@ fn answer_verifier_failure_err_json_triggers_user_message_path() {
 }
 
 #[test]
+fn answer_verifier_failure_uses_i18n_without_fallback_llm() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.policy.schedule.locale = "en-US".to_string();
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.answer_verifier_required_evidence_block".to_string(),
+        "verifier blocked: {missing_evidence_fields}".to_string(),
+    );
+    let task = crate::ClaimedTask {
+        task_id: "task-verifier-i18n".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+
+    let visible = compose_answer_verifier_failure_user_message(
+        &state,
+        &task,
+        "please answer in English",
+        r#"{"message_key":"answer_verifier_required_evidence_block","missing_evidence_fields":["output_format"]}"#,
+    );
+
+    assert_eq!(visible, "verifier blocked: output_format");
+}
+
+#[test]
 fn answer_verifier_failure_machine_line_triggers_user_message_path() {
     assert!(super::answer_verifier_failure_needs_user_message(
         "message_key=answer_verifier_required_evidence_block missing_evidence_fields=content_excerpt",
@@ -507,6 +574,28 @@ fn answer_verifier_failure_observed_facts_use_machine_fields() {
     assert!(facts.contains(&"retryable: false".to_string()));
     assert!(facts.contains(&"missing_evidence_fields: output_format".to_string()));
     assert!(facts.contains(&"answer_incomplete_reason: shape".to_string()));
+}
+
+#[test]
+fn answer_verifier_failure_default_payload_preserves_machine_fields() {
+    let payload = answer_verifier_failure_default_payload(
+        "message_key=answer_verifier_required_evidence_block missing_evidence_fields=content_excerpt,output_format",
+    );
+    let value: serde_json::Value = serde_json::from_str(&payload).expect("machine payload");
+    assert_eq!(
+        value.get("message_key").and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        value
+            .pointer("/missing_evidence_fields/0")
+            .and_then(serde_json::Value::as_str),
+        Some("content_excerpt")
+    );
+    assert_eq!(
+        answer_verifier_failure_missing_fields_text(&payload),
+        "content_excerpt,output_format"
+    );
 }
 
 #[test]

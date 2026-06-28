@@ -5,6 +5,8 @@ use tracing::{error, info, warn};
 
 use crate::{repo, AppState};
 
+#[path = "task_answer_verifier_failure.rs"]
+mod task_answer_verifier_failure;
 #[path = "task_config_guard_recovery.rs"]
 mod task_config_guard_recovery;
 #[path = "task_failure_lifecycle.rs"]
@@ -12,6 +14,16 @@ mod task_failure_lifecycle;
 #[path = "task_resume.rs"]
 mod task_resume;
 
+#[cfg(test)]
+use task_answer_verifier_failure::{
+    answer_text_is_machine_json_payload, answer_verifier_failure_default_payload,
+    answer_verifier_failure_machine_line, answer_verifier_failure_missing_fields_text,
+    answer_verifier_failure_observed_facts,
+};
+use task_answer_verifier_failure::{
+    answer_verifier_failure_needs_user_message, compose_answer_verifier_failure_user_message,
+    machine_payload_observed_facts,
+};
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_failure_lifecycle::failed_task_lifecycle_payload;
 use task_resume::{
@@ -109,6 +121,112 @@ fn answer_verifier_should_force_task_failure(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     enforce_required && answer_verifier_forces_task_failure(semantic_clarify, journal)
+}
+
+fn requested_machine_kv_summary_from_task_final_answer(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> Option<String> {
+    let mut observed_texts =
+        crate::machine_kv_projection::observed_machine_text_fragments_from_journal(journal);
+    crate::machine_kv_projection::collect_machine_text_fragments_from_output(
+        answer_text,
+        &mut observed_texts,
+    );
+    for message in answer_messages {
+        crate::machine_kv_projection::collect_machine_text_fragments_from_output(
+            message,
+            &mut observed_texts,
+        );
+    }
+    observed_texts.sort();
+    observed_texts.dedup();
+    let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
+    crate::machine_kv_projection::requested_machine_kv_summary_from_observation_inputs(
+        request_surfaces.iter().map(String::as_str),
+        &observed_texts,
+    )
+}
+
+fn task_machine_kv_request_surfaces(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<String> {
+    let mut surfaces = Vec::new();
+    for value in [
+        Some(prompt),
+        Some(journal.input_text.as_str()),
+        journal.context_bundle_summary.as_deref(),
+        Some(route_result.resolved_intent.as_str()),
+        Some(route_result.route_reason.as_str()),
+        journal
+            .route_result
+            .as_ref()
+            .map(|route| route.resolved_intent.as_str()),
+        journal
+            .route_result
+            .as_ref()
+            .map(|route| route.route_reason.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, value);
+    }
+    if let Some(state_patch) = journal
+        .turn_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.state_patch.as_ref())
+    {
+        crate::machine_kv_projection::collect_machine_kv_surfaces_from_json(
+            state_patch,
+            &mut surfaces,
+        );
+    }
+    surfaces
+}
+
+fn apply_requested_machine_kv_summary_to_final_answer(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &mut crate::task_journal::TaskJournal,
+    answer_text: &mut String,
+    answer_messages: &mut Vec<String>,
+) -> bool {
+    let Some(summary) = requested_machine_kv_summary_from_task_final_answer(
+        prompt,
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+    ) else {
+        return false;
+    };
+    if answer_text.trim() == summary {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
+    answer_messages.retain(|message| crate::finalize::is_execution_summary_message(message));
+    answer_messages.push(summary.clone());
+    *answer_text = summary;
+    journal.record_final_answer(answer_text.as_str());
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: journal.step_results.len(),
+        ..Default::default()
+    });
+    true
 }
 
 fn normalize_existing_file_delivery_token_answer(
@@ -922,197 +1040,6 @@ async fn compose_ask_failure_user_message(
     .await
 }
 
-async fn compose_answer_verifier_failure_user_message(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    user_request: &str,
-    err_text: &str,
-) -> String {
-    let language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
-    let observed_facts = answer_verifier_failure_observed_facts(err_text);
-    let contract = crate::fallback::UserResponseContract::tool_failure(
-        "answer_verifier_required_evidence_block",
-        user_request,
-        user_request,
-        observed_facts,
-        vec![
-            "expose_internal_details=false".to_string(),
-            "task_success_claim_allowed=false".to_string(),
-            "unobserved_action_completion_claim_allowed=false".to_string(),
-            "recovery_path_policy=one_concise_actionable".to_string(),
-        ],
-        "brief_failure_with_next_step",
-        &language_hint,
-    );
-    crate::fallback::compose_user_response_from_contract(
-        state,
-        task,
-        &contract,
-        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
-    )
-    .await
-}
-
-fn machine_payload_observed_facts(payload_text: &str) -> Vec<String> {
-    let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(payload_text.trim()) else {
-        return Vec::new();
-    };
-    let mut facts = Vec::new();
-    push_json_scalar_fact(&mut facts, &obj, "message_key");
-    push_json_scalar_fact(&mut facts, &obj, "reason_code");
-    push_json_scalar_fact(&mut facts, &obj, "status_code");
-    push_json_scalar_fact(&mut facts, &obj, "failure_attribution");
-    push_json_scalar_fact(&mut facts, &obj, "retryable");
-    push_json_scalar_fact(&mut facts, &obj, "provider_error_class");
-    push_json_scalar_fact(&mut facts, &obj, "raw_error_present");
-    push_json_array_fact(&mut facts, &obj, "missing_evidence_fields");
-    push_json_scalar_fact(&mut facts, &obj, "answer_incomplete_reason");
-    push_json_scalar_fact(&mut facts, &obj, "confidence");
-    facts
-}
-
-fn push_json_scalar_fact(facts: &mut Vec<String>, obj: &serde_json::Map<String, Value>, key: &str) {
-    let Some(value) = obj.get(key) else {
-        return;
-    };
-    let value = match value {
-        Value::String(value) => value.trim().to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::Bool(value) => value.to_string(),
-        _ => String::new(),
-    };
-    if !value.is_empty() {
-        facts.push(format!(
-            "{key}: {}",
-            crate::truncate_for_agent_trace(&value)
-        ));
-    }
-}
-
-fn push_json_array_fact(facts: &mut Vec<String>, obj: &serde_json::Map<String, Value>, key: &str) {
-    let Some(values) = obj.get(key).and_then(Value::as_array) else {
-        return;
-    };
-    let joined = values
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join(",");
-    if !joined.is_empty() {
-        facts.push(format!(
-            "{key}: {}",
-            crate::truncate_for_agent_trace(&joined)
-        ));
-    }
-}
-
-fn answer_verifier_failure_observed_facts(err_text: &str) -> Vec<String> {
-    let err = err_text.trim();
-    let mut facts = machine_payload_observed_facts(err);
-    if facts.is_empty() {
-        facts = answer_verifier_machine_line_observed_facts(err);
-    }
-    if !facts.iter().any(|fact| fact.starts_with("message_key: ")) {
-        facts.push("message_key: answer_verifier_required_evidence_block".to_string());
-    }
-    if !facts.iter().any(|fact| fact.starts_with("reason_code: ")) {
-        facts.push("reason_code: answer_verifier_required_evidence_block".to_string());
-    }
-    if !facts.iter().any(|fact| fact.starts_with("status_code: ")) {
-        facts.push("status_code: answer_verifier_required_evidence_block".to_string());
-    }
-    if !facts
-        .iter()
-        .any(|fact| fact.starts_with("failure_attribution: "))
-    {
-        facts.push("failure_attribution: answer_verifier_gap".to_string());
-    }
-    if !facts.iter().any(|fact| fact.starts_with("retryable: ")) {
-        facts.push("retryable: false".to_string());
-    }
-    facts
-}
-
-fn answer_verifier_machine_line_observed_facts(line: &str) -> Vec<String> {
-    line.split_whitespace()
-        .filter_map(|token| {
-            let (key, value) = token.split_once('=')?;
-            let key = key.trim();
-            let value = value.trim();
-            (!key.is_empty()
-                && !value.is_empty()
-                && matches!(
-                    key,
-                    "message_key"
-                        | "reason_code"
-                        | "status_code"
-                        | "failure_attribution"
-                        | "retryable"
-                        | "missing_evidence_fields"
-                ))
-            .then(|| format!("{key}: {}", crate::truncate_for_agent_trace(value)))
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn answer_verifier_failure_machine_line(err: &str) -> String {
-    let mut parts = vec![
-        "message_key=answer_verifier_required_evidence_block".to_string(),
-        "reason_code=answer_verifier_required_evidence_block".to_string(),
-    ];
-    if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(err.trim()) {
-        if let Some(fields) = obj
-            .get("missing_evidence_fields")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .filter(|items| !items.is_empty())
-        {
-            parts.push(format!("missing_evidence_fields={}", fields.join(",")));
-        }
-    }
-    parts.join(" ")
-}
-
-fn answer_text_is_machine_json_payload(answer_text: &str) -> bool {
-    let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(answer_text.trim()) else {
-        return false;
-    };
-    [
-        "message_key",
-        "reason_code",
-        "error_code",
-        "missing_evidence_fields",
-        "answer_incomplete_reason",
-    ]
-    .iter()
-    .any(|key| obj.contains_key(*key))
-}
-
-fn answer_text_is_answer_verifier_machine_line(answer_text: &str) -> bool {
-    let text = answer_text.trim();
-    !text.is_empty()
-        && (text.contains("message_key=answer_verifier_required_evidence_block")
-            || text.contains("reason_code=answer_verifier_required_evidence_block"))
-}
-
-fn answer_verifier_failure_needs_user_message(answer_text: &str, err_text: &str) -> bool {
-    answer_text_is_machine_json_payload(answer_text)
-        || answer_text_is_machine_json_payload(err_text)
-        || answer_text_is_answer_verifier_machine_line(answer_text)
-        || answer_text_is_answer_verifier_machine_line(err_text)
-}
-
 fn ask_runtime_failure_machine_payload(err: &str) -> String {
     let err = err.trim();
     let mut payload = serde_json::json!({
@@ -1563,6 +1490,24 @@ pub(crate) async fn finalize_ask_result(
                     crate::truncate_for_log(&answer_text)
                 );
             }
+            if !failure_reply
+                && !semantic_clarify
+                && apply_requested_machine_kv_summary_to_final_answer(
+                    prompt,
+                    route_result,
+                    &mut journal,
+                    &mut answer_text,
+                    &mut answer_messages,
+                )
+            {
+                journal.answer_verifier_summary = None;
+                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+                info!(
+                    "finalize_requested_machine_kv_summary_recovered task_id={} answer={}",
+                    task.task_id,
+                    crate::truncate_for_log(&answer_text)
+                );
+            }
             if delivery_path_gap_should_finalize_as_clarify(
                 route_result,
                 &answer_text,
@@ -1608,8 +1553,7 @@ pub(crate) async fn finalize_ask_result(
                         if answer_verifier_failure_needs_user_message(&answer_text, &err_text) {
                             let visible = compose_answer_verifier_failure_user_message(
                                 state, task, prompt, &err_text,
-                            )
-                            .await;
+                            );
                             (visible.clone(), vec![visible])
                         } else {
                             (answer_text.clone(), answer_messages.clone())
@@ -1656,8 +1600,7 @@ pub(crate) async fn finalize_ask_result(
                     if answer_verifier_failure_needs_user_message(&answer_text, &err_text) {
                         let visible = compose_answer_verifier_failure_user_message(
                             state, task, prompt, &err_text,
-                        )
-                        .await;
+                        );
                         (visible.clone(), vec![visible])
                     } else {
                         (answer_text.clone(), answer_messages.clone())

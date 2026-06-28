@@ -204,9 +204,7 @@ pub(super) fn answer_verifier_retry_applicable(
     if !verifier.high_confidence_gap() || !verifier.should_retry {
         return false;
     }
-    let pure_chat_agent_loop = route_result
-        .route_reason
-        .contains("pure_chat_agent_loop_submode")
+    let pure_chat_agent_loop = route_result.uses_pure_chat_agent_loop_submode()
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery

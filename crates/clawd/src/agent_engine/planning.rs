@@ -73,6 +73,8 @@ mod direct_observed_finalize_support;
 mod directory_entry_group_locator;
 #[path = "directory_unique_entry.rs"]
 mod directory_unique_entry;
+#[path = "dry_run_contract_plan.rs"]
+mod dry_run_contract_plan;
 #[path = "explicit_observed_paths.rs"]
 mod explicit_observed_paths;
 #[path = "filesystem_mutation_plan.rs"]
@@ -125,6 +127,7 @@ pub(in crate::agent_engine) use configured_command_prefix::{
 use direct_observed_finalize_support::*;
 use directory_entry_group_locator::*;
 use directory_unique_entry::*;
+use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
 use filesystem_mutation_plan::*;
 use inline_transform_contract::*;
@@ -1380,6 +1383,7 @@ fn plain_text_terminal_respond_fallback_actions(
         return None;
     }
     let chat_like_route = route.is_chat_gate()
+        || route.is_planner_execute_chat_wrapped()
         || route_reason_has_structural_marker(route, "pure_chat_agent_loop_submode");
     if !chat_like_route
         || route.needs_clarify

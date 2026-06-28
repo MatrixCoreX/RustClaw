@@ -462,6 +462,24 @@ impl RouteResult {
         matches!(self.gate_kind(), crate::RouteGateKind::Execute)
     }
 
+    pub(crate) fn is_planner_execute_chat_wrapped(&self) -> bool {
+        self.ask_mode.finalize_chat_wrapped()
+    }
+
+    pub(crate) fn uses_pure_chat_agent_loop_submode(&self) -> bool {
+        self.is_planner_execute_chat_wrapped()
+            || self.has_route_reason_machine_marker("pure_chat_agent_loop_submode")
+    }
+
+    pub(crate) fn has_route_reason_machine_marker(&self, marker: &str) -> bool {
+        self.route_reason.split(';').map(str::trim).any(|part| {
+            part == marker
+                || part
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        })
+    }
+
     pub(crate) fn is_clarify_gate(&self) -> bool {
         matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
     }

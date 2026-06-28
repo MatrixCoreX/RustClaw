@@ -313,8 +313,28 @@ pub(super) fn system_basic_path_batch_scalar_path_candidate(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     exists
-        .then(|| path_batch_fact_preferred_path(entry).map(ToString::to_string))
+        .then(|| path_batch_fact_preferred_path(entry).map(normalize_observed_scalar_path))
         .flatten()
+}
+
+fn normalize_observed_scalar_path(path: &str) -> String {
+    let path = path.trim();
+    if path.is_empty() {
+        return String::new();
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in std::path::Path::new(path).components() {
+        if matches!(component, std::path::Component::CurDir) {
+            continue;
+        }
+        normalized.push(component.as_os_str());
+    }
+    let normalized = normalized.to_string_lossy().to_string();
+    if normalized.is_empty() {
+        ".".to_string()
+    } else {
+        normalized
+    }
 }
 
 pub(super) fn system_basic_path_batch_file_basename_candidate(

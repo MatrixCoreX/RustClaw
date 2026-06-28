@@ -1813,6 +1813,12 @@ pub(super) async fn run_agent_with_loop_seeded(
             ) {
                 return Ok(reply);
             }
+            if try_recover_machine_kv_summary_output_format_answer_verifier_gap(
+                route_result,
+                &mut reply,
+            ) {
+                return Ok(reply);
+            }
             if try_recover_http_health_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }

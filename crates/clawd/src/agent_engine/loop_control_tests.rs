@@ -18,6 +18,7 @@ use super::{
     try_recover_generic_path_content_read_range_answer_verifier_gap,
     try_recover_http_health_answer_verifier_gap, try_recover_latest_synthesis_answer_verifier_gap,
     try_recover_local_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,
+    try_recover_machine_kv_summary_output_format_answer_verifier_gap,
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
@@ -792,6 +793,98 @@ fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
         Some(crate::task_journal::TaskJournalFinalStatus::Success)
     );
     assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
+fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token() {
+    let route = route_result(OutputResponseShape::Scalar);
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-kv-recovery",
+        "ask",
+        "Use read_range only. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate returned prose instead of requested machine shape"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "return required=yes script=check_runtime_semantic_rewrite_boundary.py"
+            .to_string(),
+        confidence: 0.96,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "system_basic",
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "AGENTS.md",
+                    "excerpt": "248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes"
+                },
+                "text": "{\"action\":\"read_range\",\"excerpt\":\"248|must run `python3 scripts/check_runtime_semantic_rewrite_boundary.py` after boundary changes\"}"
+            })
+            .to_string(),
+        ));
+    let mut reply = AskReply::non_llm("prose answer".to_string()).with_task_journal(journal);
+
+    assert!(
+        try_recover_machine_kv_summary_output_format_answer_verifier_gap(Some(&route), &mut reply)
+    );
+    assert_eq!(
+        reply.text,
+        "required=yes script=check_runtime_semantic_rewrite_boundary.py"
+    );
+    assert!(!reply.should_fail_task);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+}
+
+#[test]
+fn machine_kv_summary_output_format_gap_requires_observed_non_flag_value() {
+    let route = route_result(OutputResponseShape::Scalar);
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-kv-recovery-missing",
+        "ask",
+        "Answer exactly as machine summary: required=yes script=missing_guard.py.",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate returned prose instead of requested machine shape"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "return required=yes script=missing_guard.py".to_string(),
+        confidence: 0.96,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "system_basic",
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "AGENTS.md",
+                    "excerpt": "248|must run another_guard.py"
+                }
+            })
+            .to_string(),
+        ));
+    let mut reply = AskReply::non_llm("prose answer".to_string()).with_task_journal(journal);
+
+    assert!(
+        !try_recover_machine_kv_summary_output_format_answer_verifier_gap(Some(&route), &mut reply)
+    );
+    assert_eq!(reply.text, "prose answer");
 }
 
 #[test]

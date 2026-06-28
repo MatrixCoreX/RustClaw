@@ -115,10 +115,7 @@ fn pure_chat_agent_loop_submode_should_verify(
     route_result: &RouteResult,
     _journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if !route_result
-        .route_reason
-        .contains("pure_chat_agent_loop_submode")
-    {
+    if !route_result.uses_pure_chat_agent_loop_submode() {
         return false;
     }
     if route_reason_has_backend_identity_metadata_marker(route_result) {
@@ -131,9 +128,7 @@ fn pure_chat_agent_loop_submode_can_skip_answer_verifier(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    route_result
-        .route_reason
-        .contains("pure_chat_agent_loop_submode")
+    route_result.uses_pure_chat_agent_loop_submode()
         && !route_reason_has_backend_identity_metadata_marker(route_result)
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
