@@ -750,6 +750,74 @@ async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
     );
 }
 
+#[tokio::test]
+async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
+    let state = state_with_runtime_tasks_table();
+    let job_dir = TempDirGuard::new("runtime_poll_checkpoint_terminal");
+    std::fs::write(job_dir.path.join("exit_code"), "0\n").expect("write exit code");
+    std::fs::write(job_dir.path.join("stdout"), "RUSTCLAW_POLL_DONE\n").expect("write stdout");
+    std::fs::write(job_dir.path.join("stderr"), "").expect("write stderr");
+    let now = crate::now_ts_u64() as i64;
+    let mut checkpoint = valid_checkpoint_json("ckpt-runtime-poll", "poll_async_job");
+    checkpoint["pending_async_job"] = json!({
+        "job_id": "local_process:runtime-poll",
+        "status": "running",
+        "poll_after_seconds": 1,
+        "expires_at": now + 600,
+        "cancel_ref": format!("local_process:{}", job_dir.path.display()),
+        "message_key": "clawd.task.async_job_pending"
+    });
+    checkpoint["completed_side_effect_refs"] =
+        json!(["run_skill:run_cmd:async_job:local_process:runtime-poll"]);
+    let due = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "direct_run_skill_async_start_adapter",
+            "resume_reason": "pending_async_job",
+            "next_check_after": 1,
+            "checkpoint_id": "ckpt-runtime-poll"
+        },
+        "task_checkpoint": checkpoint
+    });
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at
+            )
+            VALUES ('runtime-poll-terminal', 42, 7, 'test-key', 'ui', 'run_skill', ?1, 'running', ?2, NULL, '1', '1')",
+            rusqlite::params![
+                json!({"skill_name": "run_cmd", "args": {"async_start": true}}).to_string(),
+                due.to_string()
+            ],
+        )
+        .expect("insert runtime poll task");
+    }
+
+    super::runtime_support::maybe_recover_stale_running_tasks_runtime(&state)
+        .await
+        .expect("runtime recovery poll projection");
+
+    let (status, result) = task_status_result_json(&state, "runtime-poll-terminal");
+    assert_eq!(status, "succeeded");
+    assert_eq!(
+        result["task_lifecycle"]["state"], "succeeded",
+        "result={result}"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["terminal_executor_action"],
+        "poll_async_job"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["terminal_executor_result_status"],
+        "async_poll_completed"
+    );
+    assert_eq!(result["output"], "RUSTCLAW_POLL_DONE\n", "result={result}");
+    assert_eq!(result["exit_code"], 0, "result={result}");
+}
+
 fn runtime_restart_result_json(state: &crate::AppState) -> serde_json::Value {
     let (status, result) = task_status_result_json(state, "runtime-restart");
     assert_eq!(status, "running");
