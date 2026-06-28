@@ -365,7 +365,58 @@ joined = "\n".join(texts)
 def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).replace("\u00a0", " ").replace("\u202f", " ")
 
-raise SystemExit(0 if normalize_text(expected) in normalize_text(joined) else 1)
+_MISSING = object()
+
+def json_pointer_get(value, pointer):
+    if not pointer.startswith("/"):
+        return _MISSING
+    current = value
+    for raw_part in pointer.split("/")[1:]:
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict):
+            if part not in current:
+                return _MISSING
+            current = current[part]
+        elif isinstance(current, list):
+            try:
+                index = int(part)
+            except ValueError:
+                return _MISSING
+            if index < 0 or index >= len(current):
+                return _MISSING
+            current = current[index]
+        else:
+            return _MISSING
+    return current
+
+def compare_text(value):
+    if value is _MISSING:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float, str)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+ok = True
+for raw in [part.strip() for part in expected.split(";") if part.strip()]:
+    if raw.startswith("contains:"):
+        needle = raw[len("contains:"):]
+        part_ok = normalize_text(needle) in normalize_text(joined)
+    elif raw.startswith("json_exists:"):
+        pointer = raw[len("json_exists:"):]
+        part_ok = json_pointer_get(obj, pointer) is not _MISSING
+    elif raw.startswith("json_eq:"):
+        expr = raw[len("json_eq:"):]
+        pointer, sep, wanted = expr.partition("=")
+        actual = compare_text(json_pointer_get(obj, pointer))
+        part_ok = bool(sep) and actual == wanted
+    else:
+        part_ok = normalize_text(raw) in normalize_text(joined)
+    ok = ok and part_ok
+raise SystemExit(0 if ok else 1)
 PY
 }
 

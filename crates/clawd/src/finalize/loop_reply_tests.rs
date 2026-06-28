@@ -281,6 +281,63 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
     );
 }
 
+#[test]
+fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
+    let task = claimed_task("task-machine-kv-context-token");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", "false"));
+    let mut delivery_messages = vec!["false".to_string()];
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        context_bundle_summary: Some(
+            "current_workspace_scope_from_current_request=false".to_string(),
+        ),
+        ..Default::default()
+    };
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "return the async timeout policy fields",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec!["false"]);
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
+    let task = claimed_task("task-machine-kv-structured-contract");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let contract = serde_json::json!({
+        "schema_version": 1,
+        "semantic_kind": "async_job_poll_contract_dry_run",
+        "adapter_result": {"type": "pending_async_job"},
+        "async_timeout_policy": {"effective_deadline_ts": "min(deadline_ts,max_runtime_deadline_ts)"}
+    })
+    .to_string();
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", &contract));
+    loop_state.delivery_messages.push(contract.clone());
+    loop_state.last_user_visible_respond = Some(contract.clone());
+    let mut delivery_messages = vec![contract.clone()];
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "current_workspace_scope_from_current_request=false",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![contract]);
+}
+
 struct TempDirGuard {
     path: PathBuf,
 }
