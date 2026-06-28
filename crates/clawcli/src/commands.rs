@@ -199,6 +199,100 @@ pub(crate) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     })
 }
 
+pub(crate) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value) -> Vec<String> {
+    let mut lines = vec![
+        format!("task_id: {}", task.task_id),
+        format!("status: {}", task.status),
+    ];
+    if let Some(state) = task.execution_state() {
+        lines.push(format!("execution_state: {state}"));
+    }
+    if let Some(state) = task.lifecycle_state() {
+        lines.push(format!("lifecycle_state: {state}"));
+    }
+    lines.push(format!("terminal: {}", task.is_terminal()));
+    lines.push(format!("event_count: {}", task.events.len()));
+    lines.push(format!(
+        "artifact_ref_count: {}",
+        report_u64(report, "/artifacts/ref_count")
+    ));
+
+    let verification_status = coding_verification_status(report);
+    lines.push(format!(
+        "coding_changed_file_count: {}",
+        report_u64(report, "/coding/changed_file_count")
+    ));
+    for path in report_string_array(report, "/coding/changed_files")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("changed_file: {path}"));
+    }
+    lines.push(format!(
+        "coding_verification_command_count: {}",
+        report_u64(report, "/coding/verification_command_count")
+    ));
+    for command in report_string_array(report, "/coding/verification_commands")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("verification_command: {command}"));
+    }
+    lines.push(format!(
+        "coding_test_count: {}",
+        report_u64(report, "/coding/test_count")
+    ));
+    lines.push(format!(
+        "coding_failure_count: {}",
+        report_u64(report, "/coding/failure_count")
+    ));
+    lines.push(format!("coding_verification_status: {verification_status}"));
+    if let Some(unverified_risk) = report
+        .pointer("/coding/unverified_risk")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("coding_unverified_risk: {unverified_risk}"));
+    }
+    if let Some(text) = task.result_text.as_deref() {
+        lines.push(text.to_string());
+    }
+    lines
+}
+
+fn report_u64(report: &Value, pointer: &str) -> u64 {
+    report.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn report_string_array(report: &Value, pointer: &str) -> Vec<String> {
+    report
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn coding_verification_status(report: &Value) -> &'static str {
+    let failure_count = report_u64(report, "/coding/failure_count");
+    let verification_count = report_u64(report, "/coding/verification_command_count");
+    let changed_file_count = report_u64(report, "/coding/changed_file_count");
+    if failure_count > 0 {
+        "failed"
+    } else if verification_count > 0 {
+        "verified"
+    } else if changed_file_count > 0 {
+        "unverified"
+    } else {
+        "not_applicable"
+    }
+}
+
 fn async_final_result_json(data: &Value) -> Option<Value> {
     data.get("result_json")
         .and_then(task::async_final_result_value)
@@ -1051,25 +1145,8 @@ pub(crate) fn run_report(
     if json_output {
         output::print_json_pretty(&report);
     } else {
-        println!("task_id: {}", task.task_id);
-        println!("status: {}", task.status);
-        if let Some(state) = task.execution_state() {
-            println!("execution_state: {state}");
-        }
-        if let Some(state) = task.lifecycle_state() {
-            println!("lifecycle_state: {state}");
-        }
-        println!("terminal: {}", task.is_terminal());
-        println!("event_count: {}", task.events.len());
-        println!(
-            "artifact_ref_count: {}",
-            report
-                .pointer("/artifacts/ref_count")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        );
-        if let Some(text) = task.result_text.as_deref() {
-            println!("{text}");
+        for line in task_report_text_lines(&task, &report) {
+            println!("{line}");
         }
         if let Some(error_text) = task.error_text.as_deref() {
             eprintln!("error: {error_text}");
