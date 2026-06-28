@@ -204,6 +204,10 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         payload["task_lifecycle"]["resume_reason"],
         "agent_loop_max_rounds"
     );
+    assert_eq!(
+        payload["task_lifecycle"]["message_key"],
+        "clawd.task.agent_loop_max_rounds"
+    );
     assert_eq!(payload["task_lifecycle"]["next_check_after"], 1_781_800_060);
     assert_eq!(
         payload["task_checkpoint"]["resume_entrypoint"],
@@ -353,10 +357,16 @@ fn no_progress_checkpoint_payload_records_repair_budget_state() {
         1_781_800_060,
     );
 
+    assert_eq!(payload["task_lifecycle"]["state"], "waiting");
     assert_eq!(
         payload["task_lifecycle"]["resume_reason"],
         "agent_loop_no_progress_limit"
     );
+    assert_eq!(
+        payload["task_lifecycle"]["message_key"],
+        "clawd.task.agent_loop_no_progress_limit"
+    );
+    assert_eq!(payload["task_lifecycle"]["next_check_after"], 1_781_800_060);
     assert_eq!(
         payload["task_checkpoint"]["repair_signal"]["repair_class"],
         "checkpoint_resume_repair"
