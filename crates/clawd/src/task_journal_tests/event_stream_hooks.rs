@@ -96,6 +96,67 @@ fn trace_json_includes_pollable_machine_event_stream() {
 }
 
 #[test]
+fn trace_json_projects_ask_transitions_as_task_events() {
+    let mut journal = TaskJournal::for_task("task-transition", "ask", "run");
+    journal.transitions.push(crate::AskTransition::new(
+        Some(crate::AskState::Received),
+        crate::AskState::Routing,
+        "received_to_routing",
+        1781800000000,
+        None,
+    ));
+    journal.transitions.push(crate::AskTransition::new(
+        Some(crate::AskState::Executing),
+        crate::AskState::Executing,
+        "next_agent_round",
+        1781800001000,
+        Some(2),
+    ));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let transitions = events
+        .iter()
+        .filter(|event| event.get("event_type").and_then(Value::as_str) == Some("task_transition"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(transitions.len(), 2);
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/task_id")
+            .and_then(Value::as_str),
+        Some("task-transition")
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/state_from")
+            .and_then(Value::as_str),
+        Some("received")
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/state_to")
+            .and_then(Value::as_str),
+        Some("routing")
+    );
+    assert_eq!(
+        transitions[0]
+            .pointer("/payload/reason_code")
+            .and_then(Value::as_str),
+        Some("received_to_routing")
+    );
+    assert_eq!(
+        transitions[1]
+            .pointer("/payload/round_no")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+}
+
+#[test]
 fn trace_json_projects_provider_prompt_metrics_as_provider_events() {
     let mut journal = TaskJournal::for_task("task-provider-events", "ask", "inspect");
     let mut by_prompt = std::collections::HashMap::new();

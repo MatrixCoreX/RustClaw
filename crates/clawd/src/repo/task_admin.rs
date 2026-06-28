@@ -37,6 +37,15 @@ pub(crate) struct TaskControlUpdate {
     pub(crate) lifecycle: Value,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TaskResumeControlInput {
+    pub(crate) task_id: String,
+    pub(crate) checkpoint_id: Option<String>,
+    pub(crate) resume_reason: Option<String>,
+    pub(crate) user_message: Option<String>,
+    pub(crate) new_constraints: Option<Value>,
+}
+
 pub(crate) fn cancel_tasks_for_user_chat(
     state: &AppState,
     user_id: i64,
@@ -157,12 +166,19 @@ pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Resu
     cancel_task_records(&db, records, &now)
 }
 
-pub(crate) fn resume_task_by_id(
+pub(crate) fn resume_task_with_input(
     state: &AppState,
-    task_id: &str,
+    input: TaskResumeControlInput,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
     let now_ts = crate::now_ts_u64() as i64;
-    update_paused_checkpoint_schedule(state, task_id, now_ts, now_ts, TASK_RESUMED_MESSAGE_KEY)
+    update_paused_checkpoint_schedule(
+        state,
+        &input.task_id,
+        now_ts,
+        now_ts,
+        TASK_RESUMED_MESSAGE_KEY,
+        Some(&input),
+    )
 }
 
 pub(crate) fn pause_task_by_id(
@@ -178,6 +194,7 @@ pub(crate) fn pause_task_by_id(
         now_ts,
         now_ts.saturating_add(pause_seconds),
         TASK_PAUSED_MESSAGE_KEY,
+        None,
     )
 }
 
@@ -619,6 +636,7 @@ fn update_paused_checkpoint_schedule(
     now_ts: i64,
     next_check_after: i64,
     message_key: &str,
+    resume_input: Option<&TaskResumeControlInput>,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
     let task_id = task_id.trim();
     if task_id.is_empty() {
@@ -670,6 +688,15 @@ fn update_paused_checkpoint_schedule(
         }
         _ => return Ok(None),
     };
+    if let Some(expected_checkpoint_id) = resume_input
+        .and_then(|input| input.checkpoint_id.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if expected_checkpoint_id != checkpoint_id {
+            return Ok(None);
+        }
+    }
     let mut lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result_json), None);
     let Some(obj) = lifecycle.as_object_mut() else {
@@ -687,6 +714,12 @@ fn update_paused_checkpoint_schedule(
     );
     obj.insert("message_key".to_string(), json!(message_key));
     obj.insert("manual_control_requested_at".to_string(), json!(now_ts));
+    if let Some(resume_input) = resume_input {
+        obj.insert(
+            "resume_input".to_string(),
+            task_resume_control_input_json(resume_input, &checkpoint_id),
+        );
+    }
     result_json["task_lifecycle"] = lifecycle.clone();
     let updated_result_json = result_json.to_string();
     let changed = db.execute(
@@ -711,6 +744,40 @@ fn update_paused_checkpoint_schedule(
         checkpoint_id,
         lifecycle,
     }))
+}
+
+fn task_resume_control_input_json(input: &TaskResumeControlInput, checkpoint_id: &str) -> Value {
+    let mut payload = json!({
+        "schema_version": 1,
+        "task_id": input.task_id.trim(),
+        "checkpoint_id": checkpoint_id,
+        "resume_trigger": "user_followup",
+        "user_message_present": input
+            .user_message
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty()),
+        "user_message_char_count": input
+            .user_message
+            .as_deref()
+            .map(str::trim)
+            .map(|value| value.chars().count())
+            .unwrap_or(0),
+    });
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(reason) = input
+            .resume_reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            obj.insert("resume_reason".to_string(), json!(reason));
+        }
+        if let Some(constraints) = input.new_constraints.as_ref() {
+            obj.insert("new_constraints".to_string(), constraints.clone());
+        }
+    }
+    payload
 }
 
 fn normalized_optional_task_id(value: Option<&str>) -> Option<String> {

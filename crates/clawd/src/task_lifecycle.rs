@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use claw_core::types::TaskExecutionState;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TaskLifecycleState {
@@ -115,6 +117,9 @@ pub(crate) fn task_query_lifecycle_projection(
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        let execution_state = task_execution_state_from_lifecycle_state(&state);
+        obj.entry("execution_state".to_string())
+            .or_insert(json!(execution_state));
         let active_state = lifecycle_state_token_is_active(&state);
         obj.entry("can_cancel".to_string())
             .or_insert(json!(active_state));
@@ -122,15 +127,41 @@ pub(crate) fn task_query_lifecycle_projection(
         if let Some(result_json) = result_json {
             append_lifecycle_product_contract_fields(obj, result_json, &state);
         }
+        append_lifecycle_reason_code_field(obj, &state);
         append_lifecycle_next_action_fields(obj, &state);
         if active_state {
             if let Some(updated_at_ts) = updated_at_ts.filter(|ts| *ts > 0) {
                 obj.entry("last_heartbeat_ts".to_string())
                     .or_insert(json!(updated_at_ts));
+                obj.entry("heartbeat_at".to_string())
+                    .or_insert(json!(updated_at_ts));
             }
         }
     }
     lifecycle
+}
+
+pub(crate) fn task_execution_state_from_lifecycle(lifecycle: &Value) -> TaskExecutionState {
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    task_execution_state_from_lifecycle_state(state)
+}
+
+fn task_execution_state_from_lifecycle_state(state: &str) -> TaskExecutionState {
+    match state.trim() {
+        "queued" => TaskExecutionState::Queued,
+        "running" => TaskExecutionState::Running,
+        "waiting" => TaskExecutionState::Waiting,
+        "background" => TaskExecutionState::Background,
+        "needs_confirmation" | "needs_user" => TaskExecutionState::NeedsConfirmation,
+        "blocked" => TaskExecutionState::Blocked,
+        "cancelled" | "canceled" => TaskExecutionState::Cancelled,
+        "succeeded" | "completed" => TaskExecutionState::Completed,
+        "failed" | "timeout" => TaskExecutionState::Failed,
+        _ => TaskExecutionState::Failed,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -776,6 +807,18 @@ fn append_lifecycle_product_contract_fields(
             .or_insert(json!(job.expires_at));
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
+    }
+}
+
+fn append_lifecycle_reason_code_field(obj: &mut serde_json::Map<String, Value>, state: &str) {
+    let reason_code = string_field(obj, "reason_code")
+        .or_else(|| string_field(obj, "resume_reason"))
+        .or_else(|| string_field(obj, "terminal_reason"))
+        .or_else(|| string_field(obj, "waiting_reason_code"))
+        .or_else(|| non_empty_state_token(state));
+    if let Some(reason_code) = reason_code {
+        obj.entry("reason_code".to_string())
+            .or_insert(json!(reason_code));
     }
 }
 

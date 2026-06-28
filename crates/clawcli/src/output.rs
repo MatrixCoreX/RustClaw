@@ -14,6 +14,9 @@ pub(crate) fn print_task_status(
 ) {
     println!("task_id: {}", task.task_id);
     println!("status: {}", task.status);
+    if let Some(state) = task.execution_state() {
+        println!("execution_state: {state}");
+    }
     if let Some(state) = task.lifecycle_state() {
         println!("lifecycle_state: {state}");
     }
@@ -61,13 +64,14 @@ pub(crate) fn print_active_task_table(body: &serde_json::Value) {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     println!(
-        "{:<5} {:<36} {:<10} {:<12} {:<8} summary",
-        "idx", "task_id", "status", "lifecycle", "age_s"
+        "{:<5} {:<36} {:<10} {:<18} {:<12} {:<8} summary",
+        "idx", "task_id", "status", "execution", "lifecycle", "age_s"
     );
     for task in tasks {
         let index = value_token(task.get("index"));
         let task_id = value_token(task.get("task_id"));
         let status = value_token(task.get("status"));
+        let execution_state = value_token(task.get("execution_state"));
         let lifecycle = task
             .get("lifecycle")
             .and_then(|value| value.get("state"))
@@ -76,8 +80,8 @@ pub(crate) fn print_active_task_table(body: &serde_json::Value) {
         let age_seconds = value_token(task.get("age_seconds"));
         let summary = truncate_display_token(&value_token(task.get("summary")), 80);
         println!(
-            "{:<5} {:<36} {:<10} {:<12} {:<8} {}",
-            index, task_id, status, lifecycle, age_seconds, summary
+            "{:<5} {:<36} {:<10} {:<18} {:<12} {:<8} {}",
+            index, task_id, status, execution_state, lifecycle, age_seconds, summary
         );
     }
 }

@@ -839,8 +839,28 @@ pub(crate) fn run_cancel_task(base_url: &str, key: &str, task_id: &str) -> Resul
     Ok(())
 }
 
-pub(crate) fn run_resume_task(base_url: &str, key: &str, task_id: &str) -> Result<()> {
-    let body = task::resume_task_by_id(base_url, key, task_id)?;
+pub(crate) fn run_resume_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    checkpoint_id: Option<&str>,
+    resume_reason: Option<&str>,
+    user_message: Option<&str>,
+    constraints_json: Option<&str>,
+) -> Result<()> {
+    let new_constraints = constraints_json
+        .map(|raw| serde_json::from_str::<serde_json::Value>(raw))
+        .transpose()
+        .context("parse resume constraints json")?;
+    let body = task::resume_task_by_id(
+        base_url,
+        key,
+        task_id,
+        checkpoint_id,
+        resume_reason,
+        user_message,
+        new_constraints,
+    )?;
     output::print_json_pretty(&body);
     Ok(())
 }

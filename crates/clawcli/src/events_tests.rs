@@ -49,6 +49,100 @@ fn event_filters_match_machine_fields() {
 }
 
 #[test]
+fn event_lines_include_task_transition_machine_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [
+                        {
+                            "seq": 1,
+                            "event_type": "task_transition",
+                            "payload": {
+                                "task_id": "task-transition",
+                                "state_from": "executing",
+                                "state_to": "finalizing",
+                                "reason_code": "agent_loop_ready_to_finalize",
+                                "round_no": 2,
+                                "at_ms": 1781800001000_i64
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "task_transition");
+    assert_eq!(
+        events[0].fields.get("task_id").map(String::as_str),
+        Some("task-transition")
+    );
+    assert_eq!(
+        events[0].fields.get("state_from").map(String::as_str),
+        Some("executing")
+    );
+    assert_eq!(
+        events[0].fields.get("state_to").map(String::as_str),
+        Some("finalizing")
+    );
+    assert_eq!(
+        events[0].fields.get("reason_code").map(String::as_str),
+        Some("agent_loop_ready_to_finalize")
+    );
+    assert!(events[0]
+        .line
+        .contains("reason_code=agent_loop_ready_to_finalize"));
+}
+
+#[test]
+fn event_lines_include_lifecycle_worker_events() {
+    let data = json!({
+        "result_json": {
+            "task_lifecycle": {
+                "state": "failed",
+                "worker_events": [
+                    {
+                        "event_type": "heartbeat_missed",
+                        "owner_layer": "worker_runtime",
+                        "task_id": "task-worker-stale",
+                        "state_from": "running",
+                        "state_to": "timeout",
+                        "reason_code": "worker_heartbeat_stale",
+                        "recovered_at": 1781800002_i64
+                    }
+                ]
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "heartbeat_missed");
+    assert_eq!(
+        events[0].fields.get("task_id").map(String::as_str),
+        Some("task-worker-stale")
+    );
+    assert_eq!(
+        events[0].fields.get("state_from").map(String::as_str),
+        Some("running")
+    );
+    assert_eq!(
+        events[0].fields.get("state_to").map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        events[0].fields.get("reason_code").map(String::as_str),
+        Some("worker_heartbeat_stale")
+    );
+    assert!(events[0].line.contains("recovered_at=1781800002"));
+}
+
+#[test]
 fn event_filters_reject_mismatched_machine_fields() {
     let event = TaskEventLine {
         event_type: "checkpoint".to_string(),

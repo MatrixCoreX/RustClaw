@@ -179,7 +179,17 @@ enum Command {
     CancelTask { task_id: String },
 
     /// POST /v1/tasks/resume-by-task-id
-    ResumeTask { task_id: String },
+    ResumeTask {
+        task_id: String,
+        #[arg(long = "checkpoint-id")]
+        checkpoint_id: Option<String>,
+        #[arg(long = "resume-reason")]
+        resume_reason: Option<String>,
+        #[arg(long = "message")]
+        user_message: Option<String>,
+        #[arg(long = "constraints-json")]
+        constraints_json: Option<String>,
+    },
 
     /// POST /v1/tasks/pause-by-task-id
     PauseTask {
@@ -464,9 +474,23 @@ fn main() -> Result<()> {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_cancel_task(base_url, k, task_id)
         }
-        Command::ResumeTask { task_id } => {
+        Command::ResumeTask {
+            task_id,
+            checkpoint_id,
+            resume_reason,
+            user_message,
+            constraints_json,
+        } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            commands::run_resume_task(base_url, k, task_id)
+            commands::run_resume_task(
+                base_url,
+                k,
+                task_id,
+                checkpoint_id.as_deref(),
+                resume_reason.as_deref(),
+                user_message.as_deref(),
+                constraints_json.as_deref(),
+            )
         }
         Command::PauseTask {
             task_id,

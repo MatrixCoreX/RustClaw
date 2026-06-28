@@ -208,10 +208,26 @@ pub enum TaskStatus {
     Timeout,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskExecutionState {
+    Queued,
+    Running,
+    Waiting,
+    Background,
+    NeedsConfirmation,
+    Blocked,
+    Cancelled,
+    Failed,
+    Completed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskQueryResponse {
     pub task_id: Uuid,
     pub status: TaskStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_state: Option<TaskExecutionState>,
     pub result_json: Option<Value>,
     pub error_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

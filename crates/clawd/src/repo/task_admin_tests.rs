@@ -63,6 +63,35 @@ fn stored_result_json(state: &crate::AppState, task_id: &str) -> Value {
     serde_json::from_str(&raw).expect("parse result_json")
 }
 
+fn paused_checkpoint_result(checkpoint_id: &str, next_check_after: i64) -> Value {
+    json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "resume_reason": "agent_loop_max_rounds",
+            "next_check_after": next_check_after,
+            "checkpoint_id": checkpoint_id
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": checkpoint_id,
+            "boundary_context": {"route_gate_kind": "execute"},
+            "observations": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": [],
+            "budget": {
+                "round": 1,
+                "step": 1,
+                "llm_calls": 1,
+                "tool_calls": 0,
+                "elapsed_ms": 100
+            },
+            "resume_entrypoint": "next_planner_round"
+        }
+    })
+}
+
 #[test]
 fn cancel_task_by_id_records_provider_cancel_contract_without_text_fields() {
     let state = state_with_tasks_table();
@@ -118,4 +147,67 @@ fn cancel_task_by_id_records_provider_cancel_contract_without_text_fields() {
     );
     assert!(result["cancel_adapter_result"].get("text").is_none());
     assert!(result["cancel_adapter_result"].get("error_text").is_none());
+}
+
+#[test]
+fn resume_task_with_input_records_structured_resume_metadata() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_running_task(
+        &state,
+        &task_id,
+        &paused_checkpoint_result("ckpt-resume", 1),
+    );
+
+    let update = resume_task_with_input(
+        &state,
+        TaskResumeControlInput {
+            task_id: task_id.clone(),
+            checkpoint_id: Some("ckpt-resume".to_string()),
+            resume_reason: Some("manual_resume".to_string()),
+            user_message: Some("continue with tighter budget".to_string()),
+            new_constraints: Some(json!({"budget_profile": "short"})),
+        },
+    )
+    .expect("resume task")
+    .expect("resume update");
+
+    assert_eq!(update.checkpoint_id, "ckpt-resume");
+    let result = stored_result_json(&state, &task_id);
+    let lifecycle = &result["task_lifecycle"];
+    assert_eq!(lifecycle["source"], "task_admin_control");
+    assert_eq!(lifecycle["message_key"], "clawd.task.resume_requested");
+    assert_eq!(lifecycle["resume_due"], true);
+    assert_eq!(lifecycle["resume_input"]["task_id"], task_id);
+    assert_eq!(lifecycle["resume_input"]["checkpoint_id"], "ckpt-resume");
+    assert_eq!(lifecycle["resume_input"]["resume_reason"], "manual_resume");
+    assert_eq!(lifecycle["resume_input"]["user_message_present"], true);
+    assert_eq!(lifecycle["resume_input"]["user_message_char_count"], 28);
+    assert_eq!(
+        lifecycle["resume_input"]["new_constraints"]["budget_profile"],
+        "short"
+    );
+    assert!(lifecycle["resume_input"].get("text").is_none());
+    assert!(lifecycle["resume_input"].get("error_text").is_none());
+}
+
+#[test]
+fn resume_task_with_input_rejects_checkpoint_mismatch() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_running_task(&state, &task_id, &paused_checkpoint_result("ckpt-real", 1));
+
+    let update = resume_task_with_input(
+        &state,
+        TaskResumeControlInput {
+            task_id,
+            checkpoint_id: Some("ckpt-other".to_string()),
+            resume_reason: Some("manual_resume".to_string()),
+            user_message: None,
+            new_constraints: None,
+        },
+    )
+    .expect("resume task");
+
+    assert!(update.is_none());
 }

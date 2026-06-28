@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use claw_core::types::{ApiResponse, AuthIdentity};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::{error, info};
 
 use crate::AppState;
@@ -46,6 +46,10 @@ pub(super) struct CancelTaskByIdRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct ResumeTaskByIdRequest {
     task_id: String,
+    checkpoint_id: Option<String>,
+    resume_reason: Option<String>,
+    user_message: Option<String>,
+    new_constraints: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,7 +294,14 @@ pub(super) async fn resume_task_by_id(
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable");
     }
-    match crate::repo::resume_task_by_id(&state, &target.task_id) {
+    let resume_input = crate::repo::TaskResumeControlInput {
+        task_id: target.task_id.clone(),
+        checkpoint_id: req.checkpoint_id,
+        resume_reason: req.resume_reason,
+        user_message: req.user_message,
+        new_constraints: req.new_constraints,
+    };
+    match crate::repo::resume_task_with_input(&state, resume_input) {
         Ok(Some(update)) => super::api_ok(json!({
             "status": "task_resume_requested",
             "task_id": update.task_id,

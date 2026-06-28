@@ -227,6 +227,8 @@ fn append_task_lease_lifecycle_fields(
             "claim_attempt".to_string(),
             serde_json::json!(claim_attempt),
         );
+        obj.entry("attempt_id".to_string())
+            .or_insert(serde_json::json!(claim_attempt));
     }
     if claimed_at > 0 {
         obj.insert("claimed_at".to_string(), serde_json::json!(claimed_at));
@@ -573,11 +575,17 @@ pub(crate) fn list_active_tasks_internal(
             claim_attempt,
             claimed_at,
         );
+        let execution_state =
+            crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
         out.push(ActiveTaskItem {
             index: idx + 1,
             task_id,
             kind,
             status,
+            execution_state: serde_json::to_value(execution_state)
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                .unwrap_or_else(|| "failed".to_string()),
             summary,
             age_seconds,
             lifecycle: Some(lifecycle),
@@ -1608,11 +1616,14 @@ pub(crate) fn get_task_query_record(
                 claim_attempt,
                 claimed_at,
             );
+            let execution_state =
+                crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
 
             Ok((
                 TaskQueryResponse {
                     task_id,
                     status,
+                    execution_state: Some(execution_state),
                     result_json,
                     error_text,
                     lifecycle: Some(lifecycle),

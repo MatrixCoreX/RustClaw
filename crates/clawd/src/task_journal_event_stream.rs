@@ -25,6 +25,20 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             lifecycle.clone(),
         ));
     }
+    for transition in &journal.transitions {
+        events.push(task_event_json(
+            &mut seq,
+            "task_transition",
+            json!({
+                "task_id": journal.task_id.as_deref(),
+                "state_from": transition.from.map(crate::AskState::as_str),
+                "state_to": transition.to.as_str(),
+                "reason_code": crate::truncate_for_log(&transition.reason),
+                "at_ms": transition.at_ms,
+                "round_no": transition.round_no,
+            }),
+        ));
+    }
     for round in &journal.rounds {
         events.push(task_event_json(
             &mut seq,
