@@ -7,6 +7,7 @@ import {
   nniActionLabel,
   nniJoinErrorMessage,
   nniPayloadHexField,
+  nniTimestampSignatureReady,
   parseNniRemoteNodeUrls,
   shortenHex,
   shortNniValue,
@@ -36,6 +37,36 @@ test("selects the first available NNI payload hex field", () => {
     label: "pubkey",
     value: "pubkey-value",
   });
+});
+
+test("recognizes completed timestamp signatures for NNI test join", () => {
+  assert.equal(
+    nniTimestampSignatureReady({
+      action: "sign_timestamp",
+      signature_chip_present: true,
+      message: "ok",
+      payload: { timestamp: 1_800_000_000, signature: "ab".repeat(64) },
+    }),
+    true,
+  );
+  assert.equal(
+    nniTimestampSignatureReady({
+      action: "sign_timestamp",
+      signature_chip_present: true,
+      message: "missing timestamp",
+      payload: { signature: "ab".repeat(64) },
+    }),
+    false,
+  );
+  assert.equal(
+    nniTimestampSignatureReady({
+      action: "sign_challenge",
+      signature_chip_present: true,
+      message: "different action",
+      payload: { timestamp: 1_800_000_000, signature: "ab".repeat(64) },
+    }),
+    false,
+  );
 });
 
 test("finds nested NNI join error codes", () => {

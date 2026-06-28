@@ -19,6 +19,7 @@ import {
   NNI_RUNTIME_TILES,
   nniActionLabel,
   nniPayloadHexField,
+  nniTimestampSignatureReady,
   shortenHex,
   shortNniValue,
 } from "../lib/nni-display";
@@ -98,11 +99,6 @@ const NNI_DEVICE_ACTIONS = [
 ];
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
-
-function nniDeviceActionHasSignature(value: unknown): value is NniDeviceActionResponse {
-  const payload = (value as NniDeviceActionResponse | null | undefined)?.payload;
-  return typeof payload?.signature === "string" && payload.signature.trim().length > 0;
-}
 
 export function NniPage({
   lang,
@@ -189,7 +185,7 @@ export function NniPage({
     let shouldHoldPulse = false;
     try {
       const result = await Promise.resolve(onTestJoin());
-      shouldHoldPulse = nniDeviceActionHasSignature(result);
+      shouldHoldPulse = nniTimestampSignatureReady(result as NniDeviceActionResponse | null);
     } finally {
       if (shouldHoldPulse) {
         nniTestJoinPulseTimer.current = window.setTimeout(() => {

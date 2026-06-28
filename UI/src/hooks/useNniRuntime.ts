@@ -4,6 +4,7 @@ import {
   nniJoinErrorMessage,
   parseNniRemoteNodeUrls,
   shortenHex,
+  nniTimestampSignatureReady,
   type UiLanguage,
 } from "../lib/nni-display";
 import type {
@@ -428,7 +429,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
 
   const testJoinNni = async () => {
     const result = await runNniDeviceAction("sign_timestamp");
-    if (result?.payload?.signature) {
+    if (nniTimestampSignatureReady(result)) {
       setNniActionMessage(
         t(
           "测试签名已完成：本机已生成时间戳签名。只有点击加入并通过服务端验签后，才会开启运行状态。",
