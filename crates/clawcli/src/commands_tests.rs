@@ -127,6 +127,7 @@ fn task_report_json_exposes_stable_machine_fields() {
     );
     assert_eq!(report["coding"]["test_count"], 1);
     assert_eq!(report["coding"]["tests"][0], "cargo test -p clawd");
+    assert_eq!(report["coding"]["verification_failure_kind_count"], 0);
     assert_eq!(report["coding"]["diff_summary_count"], 1);
     assert_eq!(
         report["coding"]["diff_summaries"][0]["field"],
@@ -179,6 +180,7 @@ fn task_report_text_lines_expose_coding_verification_status() {
     assert!(lines.contains(&"coding_test_count: 0".to_string()));
     assert!(lines.contains(&"coding_failure_count: 0".to_string()));
     assert!(lines.contains(&"coding_verification_status: verified".to_string()));
+    assert!(lines.contains(&"coding_verification_failure_kind_count: 0".to_string()));
     assert!(!lines.iter().any(|line| line.contains("task_journal")));
 }
 
@@ -248,6 +250,7 @@ fn task_report_json_summarizes_coding_verification_gaps() {
                                 "status": "error",
                                 "skill": "run_cmd",
                                 "requested_action_ref": "run_cmd",
+                                "command": "cargo test -p clawd",
                                 "error_code": "exit_status"
                             }
                         ]
@@ -263,19 +266,31 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     let report = task_report_json(&task, false);
 
     assert_eq!(report["coding"]["changed_file_count"], 2);
-    assert_eq!(report["coding"]["command_count"], 1);
+    assert_eq!(report["coding"]["command_count"], 2);
     assert_eq!(report["coding"]["commands"][0], "cargo fmt --all");
-    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(report["coding"]["commands"][1], "cargo test -p clawd");
+    assert_eq!(report["coding"]["verification_command_count"], 2);
     assert_eq!(
         report["coding"]["verification_commands"][0],
         "cargo fmt --all"
     );
-    assert_eq!(report["coding"]["test_count"], 0);
+    assert_eq!(
+        report["coding"]["verification_commands"][1],
+        "cargo test -p clawd"
+    );
+    assert_eq!(report["coding"]["test_count"], 1);
+    assert_eq!(report["coding"]["tests"][0], "cargo test -p clawd");
     assert_eq!(report["coding"]["failure_count"], 1);
     assert_eq!(report["coding"]["failures"][0]["step_id"], "step_2");
     assert_eq!(report["coding"]["failures"][0]["error_code"], "exit_status");
+    assert_eq!(report["coding"]["verification_failure_kind_count"], 1);
+    assert_eq!(report["coding"]["verification_failure_kinds"][0], "test");
     assert_eq!(report["coding"]["retry_count"], 2);
-    assert_eq!(report["coding"]["unverified_risk"], "tests_not_observed");
+    assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
+
+    let lines = task_report_text_lines(&task, &report);
+    assert!(lines.contains(&"coding_verification_failure_kind_count: 1".to_string()));
+    assert!(lines.contains(&"verification_failure_kind: test".to_string()));
 }
 
 #[test]

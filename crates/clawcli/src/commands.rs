@@ -247,6 +247,16 @@ pub(crate) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         report_u64(report, "/coding/failure_count")
     ));
     lines.push(format!("coding_verification_status: {verification_status}"));
+    lines.push(format!(
+        "coding_verification_failure_kind_count: {}",
+        report_u64(report, "/coding/verification_failure_kind_count")
+    ));
+    for kind in report_string_array(report, "/coding/verification_failure_kinds")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("verification_failure_kind: {kind}"));
+    }
     if let Some(unverified_risk) = report
         .pointer("/coding/unverified_risk")
         .and_then(Value::as_str)
@@ -335,6 +345,7 @@ struct CodingReportSignals {
     commands: BTreeSet<String>,
     verification_commands: BTreeSet<String>,
     tests: BTreeSet<String>,
+    verification_failure_kinds: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
     retry_count: u64,
@@ -358,6 +369,8 @@ fn coding_report_json(data: &Value) -> Value {
         "verification_commands": signals.verification_commands.into_iter().collect::<Vec<_>>(),
         "test_count": signals.tests.len(),
         "tests": signals.tests.into_iter().collect::<Vec<_>>(),
+        "verification_failure_kind_count": signals.verification_failure_kinds.len(),
+        "verification_failure_kinds": signals.verification_failure_kinds.into_iter().collect::<Vec<_>>(),
         "diff_summary_count": signals.diff_summaries.len(),
         "diff_summaries": signals.diff_summaries,
         "failure_count": signals.failures.len(),
@@ -376,6 +389,7 @@ fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignal
             collect_changed_file_fields(map, signals);
             collect_command_fields(map, signals);
             collect_diff_summary_fields(map, signals);
+            collect_verification_failure_kind_fields(map, signals);
             collect_failure_fields(map, signals);
             collect_retry_fields(map, signals);
             for value in map.values() {
@@ -530,6 +544,85 @@ fn is_verification_command_token(command: &str) -> bool {
         || command.starts_with("ruff check")
         || command.starts_with("go vet")
         || command.starts_with("go test")
+}
+
+fn collect_verification_failure_kind_fields(
+    map: &Map<String, Value>,
+    signals: &mut CodingReportSignals,
+) {
+    collect_string_tokens(
+        map.get("verification_failure_kinds"),
+        &mut signals.verification_failure_kinds,
+    );
+    if let Some(command) = map.get("command").and_then(Value::as_str) {
+        let Some(status) = map.get("status").and_then(Value::as_str) else {
+            return;
+        };
+        if is_failure_status_token(status) {
+            record_verification_failure_kind(command, signals);
+        }
+    }
+}
+
+fn collect_string_tokens(value: Option<&Value>, out: &mut BTreeSet<String>) {
+    match value {
+        Some(Value::String(token)) => {
+            let token = token.trim();
+            if is_report_machine_token(token) {
+                out.insert(token.to_string());
+            }
+        }
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_string_tokens(Some(item), out);
+            }
+        }
+        Some(Value::Object(_) | Value::Null | Value::Bool(_) | Value::Number(_)) | None => {}
+    }
+}
+
+fn record_verification_failure_kind(command: &str, signals: &mut CodingReportSignals) {
+    let Some(kind) = verification_failure_kind_for_command(command) else {
+        return;
+    };
+    signals.verification_failure_kinds.insert(kind.to_string());
+}
+
+fn verification_failure_kind_for_command(command: &str) -> Option<&'static str> {
+    let command = command.trim().to_ascii_lowercase();
+    if is_test_command_token(&command) {
+        Some("test")
+    } else if command.starts_with("cargo check") {
+        Some("compile")
+    } else if command.starts_with("cargo fmt") {
+        Some("formatter")
+    } else if command.starts_with("cargo clippy")
+        || command.starts_with("npm run lint")
+        || command.starts_with("pnpm lint")
+        || command.starts_with("yarn lint")
+        || command.starts_with("ruff check")
+        || command.starts_with("go vet")
+    {
+        Some("lint")
+    } else if command.starts_with("npm run build")
+        || command.starts_with("pnpm build")
+        || command.starts_with("yarn build")
+    {
+        Some("build")
+    } else if is_verification_command_token(&command) {
+        Some("other_verification")
+    } else {
+        None
+    }
+}
+
+fn is_report_machine_token(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 120
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | '.' | '/'))
 }
 
 fn collect_failure_fields(map: &Map<String, Value>, signals: &mut CodingReportSignals) {
