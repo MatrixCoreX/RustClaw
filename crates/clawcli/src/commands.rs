@@ -726,22 +726,31 @@ pub(crate) fn run_events(
         async_job_id,
     );
     let events = output::filtered_events(&task, &event_filters);
-    for event in events {
-        if jsonl_output {
-            println!(
-                "{}",
-                serde_json::to_string(&json!({
-                    "task_id": &task.task_id,
-                    "event_type": &event.event_type,
-                    "line": &event.line,
-                    "fields": &event.fields,
-                }))?
-            );
-        } else {
-            println!("event: {}", event.line);
-        }
+    for line in task_event_output_lines(&task, events, jsonl_output)? {
+        println!("{line}");
     }
     Ok(())
+}
+
+fn task_event_output_lines(
+    task: &task::TaskStatusView,
+    events: Vec<&crate::events::TaskEventLine>,
+    jsonl_output: bool,
+) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    for event in events {
+        if jsonl_output {
+            lines.push(serde_json::to_string(&json!({
+                "task_id": &task.task_id,
+                "event_type": &event.event_type,
+                "line": &event.line,
+                "fields": &event.fields,
+            }))?);
+        } else {
+            lines.push(format!("event: {}", event.line));
+        }
+    }
+    Ok(lines)
 }
 
 pub(crate) fn run_logs(
