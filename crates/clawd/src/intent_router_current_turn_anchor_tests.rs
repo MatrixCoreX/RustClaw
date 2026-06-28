@@ -108,6 +108,33 @@ fn current_turn_anchor_drift_repair_skips_generated_file_delivery_contract() {
 }
 
 #[test]
+fn current_turn_anchor_drift_repair_skips_tool_discovery_context_contract() {
+    let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::ToolDiscovery,
+        locator_hint: String::new(),
+        ..Default::default()
+    };
+
+    let repair = super::apply_current_turn_anchor_drift_repair(
+        &mut contract,
+        "List projection tokens including /tmp/rustclaw-anchor-test/old-context.md",
+        "/tmp/rustclaw-anchor-test/current.md",
+        workspace,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ToolDiscovery);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn current_turn_anchor_drift_repair_preserves_raw_command_contract() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
     let mut contract = IntentOutputContract {
@@ -348,6 +375,28 @@ fn current_turn_anchor_repair_stays_off_for_generated_file_delivery() {
         false,
         &contract,
         true,
+        crate::ScheduleKind::None,
+        None,
+        workspace,
+    ));
+}
+
+#[test]
+fn current_turn_anchor_repair_stays_off_for_tool_discovery_context_contract() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::ToolDiscovery,
+        ..IntentOutputContract::default()
+    };
+    let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+
+    assert!(!super::current_turn_anchor_drift_repair_allowed(
+        FirstLayerDecision::PlannerExecute,
+        false,
+        &contract,
+        false,
         crate::ScheduleKind::None,
         None,
         workspace,

@@ -54,6 +54,7 @@ mod intent_router;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
+mod machine_kv_projection;
 mod media_artifact_paths;
 mod memory;
 mod observed_facts;

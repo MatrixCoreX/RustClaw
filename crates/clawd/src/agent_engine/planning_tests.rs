@@ -509,6 +509,8 @@ mod contract_hints_and_selectors;
 mod delivery_archive_config_edit;
 #[path = "planning_tests/directory_locator_and_workspace_summary.rs"]
 mod directory_locator_and_workspace_summary;
+#[path = "planning_tests/dry_run_contracts.rs"]
+mod dry_run_contracts;
 #[path = "planning_tests/explicit_command_sequences.rs"]
 mod explicit_command_sequences;
 #[path = "planning_tests/file_paths_workspace_and_raw_command.rs"]

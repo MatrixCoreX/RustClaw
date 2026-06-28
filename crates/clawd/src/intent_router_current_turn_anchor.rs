@@ -169,6 +169,9 @@ pub(super) fn apply_current_turn_anchor_drift_repair(
     current_anchor_path: &str,
     workspace_root: &Path,
 ) -> Option<&'static str> {
+    if current_turn_anchor_repair_preserves_context_only_contract(output_contract.semantic_kind) {
+        return None;
+    }
     if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery {
         return None;
     }
@@ -289,6 +292,9 @@ pub(super) fn current_turn_anchor_drift_repair_allowed(
     if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery {
         return false;
     }
+    if current_turn_anchor_repair_preserves_context_only_contract(output_contract.semantic_kind) {
+        return false;
+    }
     if matches!(
         output_contract.semantic_kind,
         OutputSemanticKind::ConfigRiskAssessment
@@ -313,4 +319,10 @@ pub(super) fn current_turn_anchor_drift_repair_allowed(
         schedule_kind,
         execution_recipe_hint,
     )
+}
+
+fn current_turn_anchor_repair_preserves_context_only_contract(
+    semantic_kind: OutputSemanticKind,
+) -> bool {
+    matches!(semantic_kind, OutputSemanticKind::ToolDiscovery)
 }

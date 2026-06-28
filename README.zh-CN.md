@@ -33,7 +33,7 @@ flowchart TD
     D --> E0[worker_once 恢复 tick<br/>stale running + due checkpoint]
     E0 --> E1[认领下一个 queued 任务]
     E1 --> E{任务类型}
-    E -->|run_skill| RS[直接 run_skill 路径]
+    E -->|run_skill| RS[直接 run_skill 路径<br/>只接受显式 skill_name]
     E -->|ask| F[解析身份 + 会话 + 活跃任务]
     F --> G[意图归一化<br/>仅结构化提示]
     G --> H[Ask 上下文包<br/>记忆 + 附件 + 最近执行]
@@ -54,7 +54,8 @@ flowchart TD
     AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after]
     QP -->|call_tool| T[工具执行]
     QP -->|call_skill| U[共享技能调度]
-    RS --> U
+    RS --> RSG[不经过 normalizer / planner / resolver 选择<br/>不做 PlanVerifier 语义选择]
+    RSG --> U
     T --> V[观测结果]
     U --> V
     S --> V
@@ -77,6 +78,27 @@ flowchart TD
 - `task_id polling`：API/通道请求的等待超时只影响调用方等多久；后台任务仍可通过 `GET /v1/tasks/{task_id}` 查询，除非 worker 生命周期逻辑已经把它标记为终态。
 - `worker_once recovery tick`：worker 认领新 queued 任务前，会先检查 stale running、受保护 paused checkpoint、到期恢复任务、async poll 结果和结果投影。
 - `Task kind`：`kind=ask` 进入可使用 agent 的自然语言路径；`kind=run_skill` 绕过 intent normalizer、planner loop、capability resolver 和 plan verifier，只把显式提供的 `payload.skill_name` 交给共享 skill dispatcher / 协议执行。两种 task kind 都会把结果写回原始 `task_id`，调用方仍可通过 task 查询 API 查看最终状态。
+
+### Ask 与 Run Skill 边界
+
+这里需要明确区分，因为 `run_skill` 是 API 层任务类型，不是自然语言路由捷径。
+
+直接技能任务的关键点：
+
+- `kind=run_skill` 不运行 intent normalizer，也不进入 planner / agent loop；调用方已经提供了 `payload.skill_name` 和参数。
+- `kind=run_skill` 接受显式技能名后，仍使用共享 skill dispatcher 和技能协议。
+- `kind=run_skill` 仍创建和更新普通 task row，因此最终状态和结果仍可通过 `task_id` 查询。
+
+| 问题 | `kind=ask` | `kind=run_skill` |
+| --- | --- | --- |
+| 是否运行 intent normalizer？ | 是，作为结构化提示和兼容输入。 | 否。调用方已经提供目标技能。 |
+| 是否进入 planner / agent loop？ | eligible 普通工作会进入，并优先使用 `call_capability`。 | 否。不会让 planner 选择技能或 action。 |
+| 是否用 `CapabilityResolver` / `PlanVerifier` 做语义选择？ | 是，planner step 会先解析和验证再执行。 | 否，不做语义选择；显式 skill call 仍走调度和协议校验。 |
+| 是否使用共享 skill dispatcher？ | 是，planner 选择 `call_skill` 或 capability 解析到 skill 时使用。 | 是。把 `payload.skill_name` 派发到同一套 builtin / external / runner 技能协议。 |
+| 结果是否能用 `task_id` 查询？ | 是。 | 是。直接技能结果保存到原始 task row，可通过 `GET /v1/tasks/{task_id}` 或 `clawcli get` 读取。 |
+
+操作上：用户给自然语言请求时使用 `kind=ask`，让 RustClaw 自己判断回答、澄清、规划或执行。API 调用方已经知道明确技能和参数时使用 `kind=run_skill`，只把 RustClaw 当作任务队列、鉴权、生命周期和结果投影层来运行该技能。
+
 - `Intent normalizer`：产出结构化提示和兼容 trace 字段；对普通 eligible 工作，它不是最终语义权威。
 - `Boundary guards`：绑定身份/会话状态，并基于机器字段应用 locator、contract、safety、budget、confirmation、dry-run 和兼容检查。该层应保持轻量，不能继续增加按语言维护的短语逻辑。
 - `Agent-loop 语义权威`：普通 eligible 工作进入循环，由 planner/runtime 决定回复、调用能力、执行工具或技能、按证据合成、修复或停止。

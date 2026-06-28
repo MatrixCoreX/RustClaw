@@ -4,6 +4,7 @@ pub(super) fn final_answer_text_from_delivery(delivery_messages: &[String]) -> S
         .map(|message| message.trim())
         .filter(|message| !message.is_empty())
         .filter(|message| !crate::finalize::is_execution_summary_message(message))
+        .filter(|message| !crate::finalize::is_non_answer_separator_message(message))
         .filter(|message| !crate::finalize::looks_like_planner_artifact(message))
         .collect::<Vec<_>>();
     if !publishable_messages.is_empty() {
@@ -14,8 +15,10 @@ pub(super) fn final_answer_text_from_delivery(delivery_messages: &[String]) -> S
         .rev()
         .find_map(|message| {
             let trimmed = message.trim();
-            (!trimmed.is_empty() && !crate::finalize::looks_like_planner_artifact(trimmed))
-                .then_some(trimmed.to_string())
+            (!trimmed.is_empty()
+                && !crate::finalize::is_non_answer_separator_message(trimmed)
+                && !crate::finalize::looks_like_planner_artifact(trimmed))
+            .then_some(trimmed.to_string())
         })
         .unwrap_or_default()
 }
@@ -33,7 +36,8 @@ pub(super) fn single_publishable_delivery_message(delivery_messages: &[String]) 
         .iter()
         .map(|message| message.trim())
         .filter(|message| !message.is_empty())
-        .filter(|message| !crate::finalize::is_execution_summary_message(message));
+        .filter(|message| !crate::finalize::is_execution_summary_message(message))
+        .filter(|message| !crate::finalize::is_non_answer_separator_message(message));
     let first = publishable.next()?;
     publishable.next().is_none().then_some(first)
 }
@@ -67,5 +71,21 @@ mod tests {
             final_answer_text_from_delivery(&delivery),
             "Cargo.toml 是 Rust 项目的包清单。"
         );
+    }
+
+    #[test]
+    fn final_answer_text_from_delivery_ignores_non_answer_separator() {
+        assert_eq!(
+            final_answer_text_from_delivery(&["---SEPARATOR---".to_string()]),
+            ""
+        );
+        assert_eq!(
+            final_answer_text_from_delivery(&[
+                "---SEPARATOR---".to_string(),
+                "state=true can_poll=true".to_string(),
+            ]),
+            "state=true can_poll=true"
+        );
+        assert!(single_publishable_delivery_message(&["---SEPARATOR---".to_string()]).is_none());
     }
 }

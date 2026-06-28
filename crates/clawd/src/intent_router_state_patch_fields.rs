@@ -2,6 +2,10 @@ use serde_json::Value;
 
 use super::{normalize_schema_token, IntentOutputContract};
 
+#[cfg(test)]
+#[path = "intent_router_state_patch_fields_tests.rs"]
+mod tests;
+
 fn state_patch_slice_mode(state_patch: Option<&Value>) -> Option<String> {
     let value = state_patch?.get("slice_mode")?.as_str()?.trim();
     let normalized = value.to_ascii_lowercase();
@@ -155,5 +159,19 @@ pub(super) fn apply_state_patch_structured_field_selector(
     {
         output_contract.self_extension.structured_field_selector = Some(selector.clone());
     }
+    if structured_field_selector_targets_task_lifecycle(&selector) {
+        output_contract.response_shape = crate::OutputResponseShape::Free;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.locator_kind = crate::OutputLocatorKind::None;
+        output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+        output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        output_contract.locator_hint.clear();
+    }
     Some(selector)
+}
+
+fn structured_field_selector_targets_task_lifecycle(selector: &str) -> bool {
+    let selector = selector.trim();
+    selector == "task_lifecycle.*" || selector.starts_with("task_lifecycle.")
 }

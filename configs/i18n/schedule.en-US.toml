@@ -41,6 +41,7 @@ locale = "en-US"
 "clawd.msg.crypto_trade_submit_requires_user_confirmation" = "Blocked direct trade submit. Please run trade preview first, then click confirm or reply `Y`/`YES` to place the order."
 "clawd.msg.clarify_question_fallback" = "I need to clarify: what task is this message about? Please provide the target or context and I'll continue right away."
 "clawd.msg.ask_runtime_failure" = "The current model service could not complete this request. Please retry later, or switch to another available model."
+"clawd.msg.answer_verifier_required_evidence_block" = "I could not produce a reliable final answer because required evidence or the requested output format is still missing. Please add the missing target or ask me to rerun this step. Missing fields: {missing_evidence_fields}"
 # §7.2 fallback matrix: split the legacy "super fallback" by trigger source so the user can tell
 # "where I got stuck" and "how you can help". The legacy key above is kept for historical-DB
 # compare-side compatibility only (write side no longer uses it).

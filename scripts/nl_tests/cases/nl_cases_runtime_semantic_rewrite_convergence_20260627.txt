@@ -1,0 +1,72 @@
+# Runtime semantic rewrite convergence NL coverage.
+# Created: 2026-06-27
+#
+# Purpose:
+# - Exercise the boundary that planner/agent-loop owns ordinary semantics while
+#   runtime owns protocol, safety, evidence, lifecycle, and recovery.
+# - Keep cases safe for normal development: no X/Twitter publish/get API, no
+#   real image/audio/video generation, and no destructive filesystem mutation.
+# - Assertions target machine tokens or stable observed values, not fixed prose.
+#
+# Format:
+#   suite|name|tags|prompt|expect=<substring>
+
+runtime_semantic_rewrite_convergence|direct_answer_permission_status_zh|covers:direct_answer,boundary_safety,approval_wait,no_tool,multilingual;requires_tool_call=false;local_readonly|不要调用工具，只根据运行时结构化状态回答：当前是否有等待用户确认的任务？|expect=json_eq:/data/status=succeeded
+
+runtime_semantic_rewrite_convergence|direct_answer_permission_status_en|covers:direct_answer,boundary_safety,approval_wait,no_tool,multilingual;requires_tool_call=false;local_readonly|Do not call tools. From runtime structured state only, answer whether there is a task waiting for user approval.|expect=json_eq:/data/status=succeeded
+
+runtime_semantic_rewrite_convergence|clarify_missing_locator_en|covers:clarify,missing_locator,planner_boundary,no_write;requires_tool_call=false;local_readonly|Read the first line of that file and answer only the line. If the file target is missing, ask for the missing locator through structured clarification instead of guessing.|expect=json_eq:/data/status=succeeded
+
+runtime_semantic_rewrite_convergence|clarify_missing_target_zh|covers:clarify,missing_target,planner_boundary,no_write,multilingual;requires_tool_call=false;local_readonly|帮我读取那个文件的第一行，只输出第一行。如果“那个文件”没有明确目标，不要猜路径，用结构化缺失目标澄清。|expect=json_eq:/data/status=succeeded
+
+runtime_semantic_rewrite_convergence|readme_title_read_zh|covers:capability_call,fs_basic,observed_output,evidence_projection;requires_tool_call=true;local_readonly|用只读 read_range 读取 /home/guagua/rustclaw/README.md 第 1 行，只回答机器摘要：heading=RustClaw，不要用 shell cat 兜底。|expect=contains:heading=RustClaw
+
+runtime_semantic_rewrite_convergence|readme_first_lines_en|covers:capability_call,fs_basic,content_excerpt,verifier;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/README.md line 1. Answer exactly as machine summary: heading=RustClaw. Do not fall back to shell cat.|expect=contains:heading=RustClaw
+
+runtime_semantic_rewrite_convergence|workspace_path_scalar_zh|covers:scalar_path,evidence_projection,current_workspace;requires_tool_call=true;local_readonly|输出当前工作目录的绝对路径，只输出路径或结构化 field_value，不要解释。|expect=/home/guagua/rustclaw
+
+runtime_semantic_rewrite_convergence|git_status_brief_en|covers:git_basic,observed_output,contract_boundary;requires_tool_call=true;local_readonly|Check git status with the appropriate git capability and answer only the branch/status machine summary with branch and worktree_state fields. Do not use a natural-language hardcoded template.|expect=contains:branch=;contains:worktree_state=
+
+runtime_semantic_rewrite_convergence|task_lifecycle_fields_zh|covers:task_control,lifecycle_projection,task_id_polling;requires_tool_call=true;local_readonly|查看当前 active task 队列和最近任务生命周期字段，只汇总 state、can_poll、can_cancel、checkpoint_id 是否存在；不要取消任何任务。|expect=can_poll
+
+runtime_semantic_rewrite_convergence|direct_run_skill_boundary_zh|covers:run_skill_boundary,skill_dispatch,no_semantic_route;requires_tool_call=true;local_readonly|用 read_range 读取 /home/guagua/rustclaw/README.md 第 88 到 95 行，只回答机器摘要：run_skill=kind=run_skill planner=No。|expect=contains:run_skill=kind=run_skill;contains:planner=No
+
+runtime_semantic_rewrite_convergence|pre_planner_inventory_doc_zh|covers:pre_planner_exit,inventory,semantic_rewrite_debt;requires_tool_call=true;local_readonly|用只读 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 246 到 247 行，只回答机器摘要：required=yes script=check_pre_planner_exit_inventory.py。|expect=contains:required=yes;contains:check_pre_planner_exit_inventory.py
+
+runtime_semantic_rewrite_convergence|runtime_semantic_guard_doc_en|covers:semantic_rewrite_guard,agents_rules,no_hardmatch;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/AGENTS.md lines 248 to 249. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.|expect=contains:required=yes;contains:check_runtime_semantic_rewrite_boundary.py
+
+runtime_semantic_rewrite_convergence|no_nl_hardmatch_rule_zh|covers:no_hardmatch,multilingual,agents_rules;requires_tool_call=true;local_readonly|用只读 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 236 到 243 行，只回答机器摘要：forbidden=yes script=check_no_nl_hardmatch.py。|expect=contains:forbidden=yes;contains:check_no_nl_hardmatch.py
+
+runtime_semantic_rewrite_convergence|no_runtime_hard_reply_rule_en|covers:no_hard_reply,agents_rules,multilingual;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/AGENTS.md lines 238 to 253. Answer exactly as machine summary: forbidden=yes script=check_no_runtime_hard_reply.py.|expect=contains:forbidden=yes;contains:check_no_runtime_hard_reply.py
+
+runtime_semantic_rewrite_convergence|repair_envelope_dry_run_en|covers:repair_envelope,recovery_boundary,no_text_protocol,dry_run;requires_tool_call=false;dry_run,no_external_side_effect|Dry run only: name the machine fields a verifier missing-evidence recovery should pass through RepairEnvelope. Explicitly include RepairEnvelope, issue_codes, and checkpoint_id, and do not use skill text/error_text as protocol input.|expect=RepairEnvelope
+
+runtime_semantic_rewrite_convergence|answer_verifier_contract_dry_run_zh|covers:answer_verifier,contract_boundary,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|只做 dry-run：说明 answer verifier 应验证哪些机器合同字段，必须包含 required_evidence、missing_evidence_fields 和 contract_boundary，不要写固定用户回复模板。|expect=required_evidence
+
+runtime_semantic_rewrite_convergence|observed_output_projection_dry_run_en|covers:observed_output,evidence_projection,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|Dry run only: return the generic observed-output evidence families runtime may project. Include scalar, list, path, JSON field, status, and artifact_refs as machine tokens.|expect=artifact_refs
+
+runtime_semantic_rewrite_convergence|route_delta_metric_doc_zh|covers:route_delta,metrics,semantic_rewrite_count;requires_tool_call=true;local_readonly|用 read_range 分别读取 /home/guagua/rustclaw/scripts/summarize_agent_decides_route_delta.py 第 95 到 96 行和第 931 到 933 行，只回答机器摘要：field1=runtime_decision_source_counts field2=runtime_semantic_control_state_counts。|expect=contains:field1=runtime_decision_source_counts;contains:field2=runtime_semantic_control_state_counts
+
+runtime_semantic_rewrite_convergence|semantic_rewrite_inventory_doc_en|covers:inventory,semantic_rewrite,docs;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/docs/runtime_semantic_rewrite_inventory.md line 22. Answer exactly as machine summary: owner=semantic_rewrite status=Migration.|expect=contains:owner=semantic_rewrite;contains:status=Migration
+
+runtime_semantic_rewrite_convergence|async_lifecycle_dry_run_zh|covers:async_job,lifecycle_projection,checkpoint,dry_run;requires_tool_call=false;dry_run,no_external_side_effect|只做 dry-run，不启动真实任务：返回异步任务进入 background/waiting 时应包含的机器字段，必须有 checkpoint_id、poll_ref、next_check_after、can_cancel。|expect=checkpoint_id
+
+runtime_semantic_rewrite_convergence|local_process_cancel_contract_dry_run_en|covers:async_cancel,local_process_poll,terminal_projection,dry_run;requires_tool_call=false;dry_run,no_external_side_effect|Dry run only: return the local-process async cancellation contract. Include cancel_ref, adapter_kind=local_process_poll, status=cancelled, and terminal_projection.|expect=local_process_poll
+
+runtime_semantic_rewrite_convergence|subagent_readonly_boundary_zh|covers:subagent,readonly,boundary,no_write;requires_tool_call=true;local_readonly|只做只读检查：读取 /home/guagua/rustclaw/configs/agent_guard.toml 第 65 到 74 行，只回答机器摘要：max_parallel_readonly=4 default_timeout_ms=30000，不写文件、不发布外部内容。|expect=contains:max_parallel_readonly=4;contains:default_timeout_ms=30000
+
+runtime_semantic_rewrite_convergence|child_task_contract_dry_run_en|covers:child_task,subagent,lifecycle,dry_run;requires_tool_call=false;dry_run,no_external_side_effect|Dry run only: return the child task contract fields for an explicit subagent task. Include parent_task_id, child_task_id, role, permission_profile, required, and merge_policy.|expect=child_task_id
+
+runtime_semantic_rewrite_convergence|registry_metadata_fix_path_zh|covers:registry_metadata,planner_inputs,no_runtime_semantic_fix;requires_tool_call=true;local_readonly|用 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 218 到 221 行，只回答机器摘要：interface=INTERFACE.md registry=configs/skills_registry.toml。|expect=contains:interface=INTERFACE.md;contains:registry=configs/skills_registry.toml
+
+runtime_semantic_rewrite_convergence|skill_interface_sync_rule_en|covers:skill_docs,interface,prompt_sync;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/AGENTS.md lines 144 to 165. Answer exactly as machine summary: command=python3 scripts/sync_skill_docs.py.|expect=contains:command=python3 scripts/sync_skill_docs.py
+
+runtime_semantic_rewrite_convergence|policy_decision_token_rule_zh|covers:policy_decision,permission_policy,guard;requires_tool_call=true;local_readonly|用 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 224 到 225 行，只回答机器摘要：required=yes script=check_policy_decision_tokens.py。|expect=contains:required=yes;contains:check_policy_decision_tokens.py
+
+runtime_semantic_rewrite_convergence|long_file_guard_rule_en|covers:long_file_guard,maintenance;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/AGENTS.md lines 212 to 217. Answer exactly as machine summary: hard_ceiling_lines=2000 script=check_long_files.py.|expect=contains:hard_ceiling_lines=2000;contains:check_long_files.py
+
+runtime_semantic_rewrite_convergence|media_skill_dry_run_boundary_zh|covers:media,video,music,dry_run,no_external_side_effect;requires_tool_call=false;dry_run|只做 dry-run，不生成图片、语音、视频或音乐：说明媒体类长尾 skill 应如何返回 pending_async_job 和 adapter_kind=media_job_poll。|expect=media_job_poll
+
+runtime_semantic_rewrite_convergence|provider_blocker_attribution_en|covers:provider_blocker,external_blocker,no_code_failure;requires_tool_call=false;dry_run|Dry run only: if provider quota is unavailable, return the machine attribution token that should classify the test as external blocker rather than route/code failure. Include provider_blocker.|expect=provider_blocker
+
+runtime_semantic_rewrite_convergence|finalizer_language_policy_zh|covers:finalizer,i18n,no_hard_reply,multilingual;requires_tool_call=false;dry_run|只做 dry-run：说明最终自然语言应该由 finalizer/LLM/i18n 按用户语言生成，runtime 只能输出 message_key 或结构化 evidence。回答必须包含 message_key。|expect=message_key

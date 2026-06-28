@@ -113,3 +113,23 @@ fn route_result_set_execute_gate_updates_legacy_trace_label() {
     assert_eq!(route.legacy_route_label_for_trace(), "Act");
     assert!(route.is_execute_gate());
 }
+
+#[test]
+fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
+    let route = route_result_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+
+    assert!(route.is_execute_gate());
+    assert!(route.is_planner_execute_chat_wrapped());
+    assert!(route.uses_pure_chat_agent_loop_submode());
+    assert_eq!(route.legacy_route_label_for_trace(), "ChatAct");
+}
+
+#[test]
+fn route_result_legacy_pure_chat_marker_is_exact_machine_token_fallback() {
+    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+
+    route.route_reason = "some_reason; mode:pure_chat_agent_loop_submode".to_string();
+
+    assert!(route.has_route_reason_machine_marker("pure_chat_agent_loop_submode"));
+    assert!(route.uses_pure_chat_agent_loop_submode());
+}

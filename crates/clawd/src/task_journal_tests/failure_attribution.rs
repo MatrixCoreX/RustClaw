@@ -133,6 +133,31 @@ fn rollout_attribution_serializes_machine_fields() {
         Some("field_value")
     );
     assert_eq!(item.get("confidence").and_then(Value::as_f64), Some(0.91));
+    assert_eq!(
+        item.pointer("/boundary_context/decision_source")
+            .and_then(Value::as_str),
+        Some("contract_boundary")
+    );
+    assert_eq!(
+        item.pointer("/boundary_context/rewrite_reason_code")
+            .and_then(Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        item.pointer("/boundary_context/semantic_control_state")
+            .and_then(Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        item.pointer("/boundary_context/input_contract_ref")
+            .and_then(Value::as_str),
+        Some("answer_verifier_summary")
+    );
+    assert_eq!(
+        item.pointer("/boundary_context/output_contract_ref")
+            .and_then(Value::as_str),
+        Some("required_evidence_contract")
+    );
     assert!(
         serde_json::to_string(item)
             .expect("serialize attribution")

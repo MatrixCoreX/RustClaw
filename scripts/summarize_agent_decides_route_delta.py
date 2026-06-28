@@ -13,6 +13,7 @@ PRIMARY_SWITCH_NAME = "semantic_route_authority"
 LEGACY_SWITCH_NAME = "agent_decides_semantic_route"
 ROUTE_DELTA_SWITCH_NAMES = {PRIMARY_SWITCH_NAME, LEGACY_SWITCH_NAME}
 CASE_FILE_RE = re.compile(r"^turn_(?P<turn>\d+)_case_(?P<case>\d+)\.json$")
+FINAL_CASE_DIR_RE = re.compile(r"^case_(?P<case>\d+)_")
 PRE_PLANNER_PROMPTS = {
     "normalizer",
     "contract_repair",
@@ -92,6 +93,9 @@ COUNTER_FIELDS = (
     "pre_agent_direct_answer_ownership_class_counts",
     "pre_agent_direct_answer_boundary_allowed_counts",
     "pre_agent_direct_answer_semantic_migration_target_counts",
+    "runtime_decision_source_counts",
+    "runtime_semantic_control_state_counts",
+    "runtime_rewrite_reason_counts",
     "reason_code_counts",
     "mismatch_explanation_counts",
 )
@@ -153,28 +157,40 @@ def turn_json_paths(run_dir: Path) -> list[Path]:
         {
             *run_dir.glob("turn*_case_*.json"),
             *run_dir.glob("turn_*.json"),
+            *run_dir.glob("case_*/final.json"),
         }
     )
 
 
 def case_turn_json_paths(run_dir: Path) -> list[Path]:
-    return sorted(run_dir.glob("turn*_case_*.json"))
+    return sorted({*run_dir.glob("turn*_case_*.json"), *run_dir.glob("case_*/final.json")})
 
 
 def turn_case_id(path: Path) -> int | None:
     match = CASE_FILE_RE.match(path.name)
-    if not match:
-        return None
-    return int(match.group("case"))
+    if match:
+        return int(match.group("case"))
+    if path.name == "final.json":
+        match = FINAL_CASE_DIR_RE.match(path.parent.name)
+        if match:
+            return int(match.group("case"))
+    return None
 
 
 def turn_file_order(path: Path, run_order: dict[Path, int]) -> tuple[int, str, int, str]:
     match = CASE_FILE_RE.match(path.name)
-    turn_number = int(match.group("turn")) if match else 0
-    parent = path.parent.resolve()
+    if match:
+        turn_number = int(match.group("turn"))
+        parent = path.parent.resolve()
+    elif path.name == "final.json":
+        turn_number = turn_case_id(path) or 0
+        parent = path.parent.parent.resolve()
+    else:
+        turn_number = 0
+        parent = path.parent.resolve()
     return (
         run_order.get(parent, -1),
-        parent.name,
+        path.parent.name if path.name == "final.json" else parent.name,
         turn_number,
         path.name,
     )
@@ -566,6 +582,9 @@ def summarize_run(
     pre_agent_direct_answer_ownership_class_counts: Counter[str] = Counter()
     pre_agent_direct_answer_boundary_allowed_counts: Counter[str] = Counter()
     pre_agent_direct_answer_semantic_migration_target_counts: Counter[str] = Counter()
+    runtime_decision_source_counts: Counter[str] = Counter()
+    runtime_semantic_control_state_counts: Counter[str] = Counter()
+    runtime_rewrite_reason_counts: Counter[str] = Counter()
     reason_code_counts: Counter[str] = Counter()
     mismatch_explanation_counts: Counter[str] = Counter()
     attribution_items = 0
@@ -652,6 +671,20 @@ def summarize_run(
             ] += 1
         for item in rollout_items(obj):
             switch_name = str(item.get("switch_name") or "")
+            item_boundary_context = dict_value(item.get("boundary_context"))
+            runtime_decision_source_counts[
+                str(item_boundary_context.get("decision_source") or "not_recorded")
+            ] += 1
+            runtime_semantic_control_state_counts[
+                str(item_boundary_context.get("semantic_control_state") or "not_recorded")
+            ] += 1
+            runtime_rewrite_reason_counts[
+                str(
+                    item_boundary_context.get("rewrite_reason_code")
+                    or item.get("reason_code")
+                    or "not_recorded"
+                )
+            ] += 1
             if switch_name not in ROUTE_DELTA_SWITCH_NAMES:
                 continue
             attribution_items += 1
@@ -908,6 +941,11 @@ def summarize_run(
         "pre_agent_direct_answer_semantic_migration_target_counts": counter_json(
             pre_agent_direct_answer_semantic_migration_target_counts
         ),
+        "runtime_decision_source_counts": counter_json(runtime_decision_source_counts),
+        "runtime_semantic_control_state_counts": counter_json(
+            runtime_semantic_control_state_counts
+        ),
+        "runtime_rewrite_reason_counts": counter_json(runtime_rewrite_reason_counts),
         "reason_code_counts": counter_json(reason_code_counts),
         "mismatch_count": mismatch_count,
         "unexplained_mismatch_count": mismatch_explanation_json.get("unexplained", 0),

@@ -119,6 +119,125 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_observed_path() {
+    let state = test_state();
+    let task = claimed_task("task-recoverable-scalar-path-dot");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
+    let failure_candidate =
+        "observed candidate path: /home/guagua/rustclaw; checkpoint_state=waiting";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.has_recoverable_failure_context = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "fs_basic", observed));
+    loop_state
+        .delivery_messages
+        .push(failure_candidate.to_string());
+    loop_state.last_user_visible_respond = Some(failure_candidate.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "输出当前工作目录的绝对路径，只输出路径或结构化 field_value，不要解释。",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should prefer normalized observed scalar path");
+
+    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_path() {
+    let state = test_state();
+    let task = claimed_task("task-scalar-path-field-placeholder");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "fs_basic", observed));
+    loop_state.delivery_messages.push("field_value".to_string());
+    loop_state.last_user_visible_respond = Some("field_value".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "输出当前工作目录的绝对路径，只输出路径。",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should replace scalar field placeholder");
+
+    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_path_respond() {
+    let state = test_state();
+    let task = claimed_task("task-scalar-path-terminal-respond");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_name","count":0,"exact":false,"patterns":["field_value"],"results":[],"root":""},"text":"{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"field_value\"],\"results\":[],\"root\":\"\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "respond",
+        "/home/guagua/rustclaw",
+    ));
+    loop_state.delivery_messages.push("field_value".to_string());
+    loop_state.last_user_visible_respond = Some("field_value".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "输出当前工作目录的绝对路径，只输出路径或结构化 field_value，不要解释。",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should prefer terminal scalar path respond over field placeholder");
+
+    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
     let state = test_state();
     let task = claimed_task("task-file-basename-path-facts");

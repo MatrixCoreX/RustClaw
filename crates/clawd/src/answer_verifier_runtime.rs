@@ -473,7 +473,10 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     if finalizer_account_access_error_can_skip_missing_evidence_gap(route_result, journal) {
         return None;
     }
-    let missing = coverage.missing_evidence;
+    let missing = answer_verifier_blocking_missing_evidence(coverage.missing_evidence);
+    if missing.is_empty() {
+        return None;
+    }
     let missing_fields = missing.join(",");
     Some(AnswerVerifierOut {
         pass: false,
@@ -483,6 +486,13 @@ pub(crate) fn local_missing_evidence_verifier_gap(
         retry_instruction: format!("collect_required_evidence_fields:{missing_fields}"),
         confidence: coverage.confidence,
     })
+}
+
+fn answer_verifier_blocking_missing_evidence(missing_evidence: Vec<String>) -> Vec<String> {
+    missing_evidence
+        .into_iter()
+        .filter(|field| !field.trim().starts_with("negative_evidence("))
+        .collect()
 }
 
 pub(super) fn local_missing_evidence_verifier_gap_for_answer(

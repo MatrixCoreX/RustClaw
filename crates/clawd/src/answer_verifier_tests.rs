@@ -728,6 +728,47 @@ fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
 }
 
 #[test]
+fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-local-negative-evidence-only",
+        "ask",
+        "current workspace path",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "path_batch_facts",
+                "count": 1,
+                "facts": [{
+                    "path": ".",
+                    "exists": false,
+                    "kind": "missing"
+                }],
+                "include_missing": true
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = crate::task_journal::evidence_coverage_for_route(&route, &journal);
+    assert_eq!(
+        coverage.missing_evidence,
+        vec!["negative_evidence(exists_false)"]
+    );
+    assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
+}
+
+#[test]
 fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
