@@ -177,6 +177,24 @@ enum Command {
         json: bool,
     },
 
+    /// Read-only terminal task console.
+    Tui {
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long)]
+        chat_id: i64,
+        #[arg(long)]
+        task_id: Option<String>,
+        #[arg(long)]
+        events: bool,
+        #[arg(long)]
+        once: bool,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Inspect structured permission and policy machine fields.
     Permission {
         #[command(subcommand)]
@@ -583,6 +601,28 @@ fn main() -> Result<()> {
         Command::Subagents { task_id, json } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_subagents(base_url, k, task_id, *json)
+        }
+        Command::Tui {
+            user_id,
+            chat_id,
+            task_id,
+            events,
+            once,
+            interval_ms,
+            json,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_tui(
+                base_url,
+                k,
+                *user_id,
+                *chat_id,
+                task_id.as_deref(),
+                *events,
+                *once,
+                *interval_ms,
+                *json,
+            )
         }
         Command::Permission { command } => match command {
             PermissionCommand::Inspect { task_id, json } => {

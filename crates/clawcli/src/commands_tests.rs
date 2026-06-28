@@ -2,7 +2,7 @@ use super::{
     automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
-    wait_until_matches, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    tui_snapshot_json, wait_until_matches, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
 };
 
 #[test]
@@ -274,6 +274,49 @@ fn permission_report_json_collects_structured_decisions() {
         "contract_matrix"
     );
     assert!(report.get("result_text").is_none());
+}
+
+#[test]
+fn tui_snapshot_json_wraps_active_and_selected_task() {
+    let active = serde_json::json!({
+        "data": {
+            "tasks": [
+                {
+                    "task_id": "task-tui",
+                    "status": "running",
+                    "execution_state": "background"
+                }
+            ]
+        }
+    });
+    let selected = crate::task::TaskStatusView {
+        task_id: "task-tui".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "task_id": "task-tui",
+            "status": "running",
+            "task_lifecycle": {
+                "state": "background",
+                "checkpoint_id": "ckpt-tui"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let snapshot = tui_snapshot_json(&active, Some(&selected));
+
+    assert_eq!(snapshot["snapshot_kind"], "rustclaw_cli_tui");
+    assert_eq!(
+        snapshot["active"]["data"]["tasks"][0]["task_id"],
+        "task-tui"
+    );
+    assert_eq!(snapshot["selected_task"]["task_id"], "task-tui");
+    assert_eq!(
+        snapshot["selected_task"]["task_lifecycle"]["checkpoint_id"],
+        "ckpt-tui"
+    );
 }
 
 #[test]

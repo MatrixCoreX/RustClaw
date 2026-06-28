@@ -10,6 +10,7 @@ mod skills;
 mod submit;
 mod task_control;
 mod task_query;
+mod tui;
 
 pub(crate) use exec::run_exec;
 pub(crate) use health::run_health;
@@ -26,6 +27,7 @@ pub(crate) use task_control::{
 pub(crate) use task_query::{
     run_events, run_get, run_logs, run_report, run_review, run_subagents, run_wait, run_watch,
 };
+pub(crate) use tui::run_tui;
 
 #[cfg(test)]
 use exec::{
@@ -42,6 +44,8 @@ use task_control::automation_runs_request_payload;
 use task_query::task_event_output_lines;
 #[cfg(test)]
 use task_query::wait_until_matches;
+#[cfg(test)]
+use tui::tui_snapshot_json;
 
 #[cfg(test)]
 #[path = "commands_tests.rs"]
