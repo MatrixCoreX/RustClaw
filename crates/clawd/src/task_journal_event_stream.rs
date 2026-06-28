@@ -25,11 +25,16 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             lifecycle.clone(),
         ));
     }
-    for transition in &journal.transitions {
+    for (index, transition) in journal.transitions.iter().enumerate() {
+        let transition_ref = format!("task_transition:{}", index + 1);
         events.push(task_event_json(
             &mut seq,
             "task_transition",
             json!({
+                "transition_index": index,
+                "transition_ref": transition_ref.as_str(),
+                "evidence_ref": transition_ref.as_str(),
+                "evidence_refs": [transition_ref.as_str()],
                 "task_id": journal.task_id.as_deref(),
                 "state_from": transition.from.map(crate::AskState::as_str),
                 "state_to": transition.to.as_str(),
