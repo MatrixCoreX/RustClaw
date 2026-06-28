@@ -20,11 +20,13 @@ pub(crate) struct AttemptLedgerEntry {
     pub(super) verifier_reason_code: Option<String>,
     pub(super) retry_allowed: bool,
     pub(super) retryable: bool,
+    pub(super) recovery_action: String,
     pub(super) why_not_satisfied: String,
     pub(super) retry_instruction: Option<String>,
     pub(super) forbidden_repeat_signature: String,
     pub(super) avoid_repeating: String,
     pub(super) contract_policy: Option<Value>,
+    pub(super) provider_status: Option<Value>,
 }
 
 pub(super) fn record_attempt(
@@ -77,11 +79,21 @@ pub(super) fn record_attempt_with_retry_instruction(
         .map(crate::truncate_for_agent_trace);
     let contract_policy = contract_policy_from_structured_error(why_not_satisfied)
         .or_else(|| contract_policy_from_structured_error(observed_output));
+    let provider_status = provider_status_from_structured_error(why_not_satisfied)
+        .or_else(|| provider_status_from_structured_error(observed_output));
     let missing_evidence = missing_evidence_fields(
         args_summary,
         why_not_satisfied,
         observed_output,
         &contract_policy,
+    );
+    let recovery_action = recovery_action_token(
+        status,
+        error_kind.as_deref(),
+        retryable,
+        &missing_evidence,
+        &contract_policy,
+        provider_status.as_ref(),
     );
     let verifier_reason_code = verifier_reason_code(&action_ref, error_kind.as_deref());
     let forbidden_repeat_signature = forbidden_repeat_signature(&action_ref, &args_fingerprint);
@@ -104,6 +116,7 @@ pub(super) fn record_attempt_with_retry_instruction(
         verifier_reason_code,
         retry_allowed: retryable,
         retryable,
+        recovery_action: recovery_action.to_string(),
         why_not_satisfied: if why_not_satisfied.trim().is_empty() {
             why_not_satisfied_from_status(status, observed_output, "")
         } else {
@@ -113,6 +126,7 @@ pub(super) fn record_attempt_with_retry_instruction(
         forbidden_repeat_signature,
         avoid_repeating: avoid_repeating_hint(status, error_kind.as_deref()).to_string(),
         contract_policy,
+        provider_status,
     });
 }
 
@@ -163,6 +177,14 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 output_text,
                 &contract_policy,
             );
+            let recovery_action = recovery_action_token(
+                step.status,
+                error_kind.as_deref(),
+                retryable,
+                &missing_evidence,
+                &contract_policy,
+                provider_status.as_ref(),
+            );
             let why_not_satisfied = why_not_satisfied_from_status(step.status, output_text, error_text);
             let forbidden_repeat = forbidden_repeat_signature(&action_ref, &args_fingerprint);
             json!({
@@ -180,6 +202,7 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 "verifier_reason_code": verifier_reason_code(&action_ref, error_kind.as_deref()),
                 "retry_allowed": retryable,
                 "retryable": retryable,
+                "recovery_action": recovery_action,
                 "why_not_satisfied": why_not_satisfied.clone(),
                 "retry_instruction": null,
                 "forbidden_repeat_signature": forbidden_repeat.clone(),
@@ -221,6 +244,7 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
         "verifier_reason_code": entry.verifier_reason_code,
         "retry_allowed": entry.retry_allowed,
         "retryable": entry.retryable,
+        "recovery_action": entry.recovery_action,
         "why_not_satisfied": entry.why_not_satisfied,
         "retry_instruction": entry.retry_instruction,
         "forbidden_repeat_signature": entry.forbidden_repeat_signature,
@@ -235,9 +259,7 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
             &entry.missing_evidence,
             &entry.forbidden_repeat_signature,
             entry.contract_policy.as_ref(),
-            provider_status_from_structured_error(&entry.why_not_satisfied)
-                .or_else(|| provider_status_from_structured_error(&entry.observed_output))
-                .as_ref(),
+            entry.provider_status.as_ref(),
             &entry.why_not_satisfied,
             &entry.observed_output,
         ),
@@ -583,6 +605,72 @@ fn why_not_satisfied_from_status(
             }
         }
     }
+}
+
+fn recovery_action_token(
+    status: crate::executor::StepExecutionStatus,
+    error_kind: Option<&str>,
+    retryable: bool,
+    missing_evidence: &[String],
+    contract_policy: &Option<Value>,
+    provider_status: Option<&Value>,
+) -> &'static str {
+    if matches!(status, crate::executor::StepExecutionStatus::Ok) {
+        return "none";
+    }
+    if provider_status.is_some_and(provider_status_requires_background_wait) {
+        return "wait_background";
+    }
+    match error_kind.unwrap_or_default() {
+        "contract_action_rejected" => {
+            if contract_policy
+                .as_ref()
+                .and_then(|policy| policy.get("replacement_action_ref"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return "choose_contract_allowed_action";
+            }
+            return "needs_user";
+        }
+        "contract_arg_rejected" | "missing_input" => return "needs_user",
+        "policy_block" | "permission_denied" | "unsafe_sql" | "confirmation_required" => {
+            return "needs_user";
+        }
+        "invalid_credentials" | "credential_missing" | "auth_failed" => return "external_blocker",
+        "confirmed_not_found" | "unsupported_action" | "invalid_input" => {
+            return "terminal_failure";
+        }
+        _ => {}
+    }
+    if !missing_evidence.is_empty() {
+        return "collect_missing_evidence";
+    }
+    if retryable {
+        "replan_changed_action_or_args"
+    } else {
+        "terminal_failure"
+    }
+}
+
+fn provider_status_requires_background_wait(provider_status: &Value) -> bool {
+    provider_status
+        .get("external_provider_blocked")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || provider_status.get("retry_after_seconds").is_some()
+        || provider_status
+            .get("status_code")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                matches!(
+                    value.trim(),
+                    "rate_limited"
+                        | "quota_exhausted"
+                        | "quota_exceeded"
+                        | "provider_retryable_response"
+                )
+            })
 }
 
 fn avoid_repeating_hint(

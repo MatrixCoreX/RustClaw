@@ -55,6 +55,12 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
             .and_then(serde_json::Value::as_str),
         Some("wait_background")
     );
+    assert_eq!(
+        value
+            .pointer("/0/recovery_action")
+            .and_then(serde_json::Value::as_str),
+        Some("replan_changed_action_or_args")
+    );
     assert!(value
         .pointer("/0/repair_signal/forbidden_repeat_fingerprint")
         .and_then(serde_json::Value::as_str)
@@ -120,6 +126,12 @@ fn attempt_ledger_records_verifier_retry_instruction() {
             .pointer("/0/retry_allowed")
             .and_then(serde_json::Value::as_bool),
         Some(true)
+    );
+    assert_eq!(
+        value
+            .pointer("/0/recovery_action")
+            .and_then(serde_json::Value::as_str),
+        Some("collect_missing_evidence")
     );
     let args_fingerprint = value
         .pointer("/0/args_fingerprint")
@@ -286,6 +298,12 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
     );
     assert_eq!(
         value
+            .pointer("/0/recovery_action")
+            .and_then(serde_json::Value::as_str),
+        Some("choose_contract_allowed_action")
+    );
+    assert_eq!(
+        value
             .pointer("/0/repair_signal/failure_attribution")
             .and_then(serde_json::Value::as_str),
         Some("contract_gap")
@@ -375,6 +393,12 @@ fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
             .and_then(serde_json::Value::as_str),
         Some("command_output")
     );
+    assert_eq!(
+        value
+            .pointer("/0/recovery_action")
+            .and_then(serde_json::Value::as_str),
+        Some("collect_missing_evidence")
+    );
 }
 
 #[test]
@@ -434,6 +458,12 @@ fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
             .pointer("/0/repair_signal/repair_envelope/provider_status/retry_after_seconds")
             .and_then(serde_json::Value::as_i64),
         Some(60)
+    );
+    assert_eq!(
+        value
+            .pointer("/0/recovery_action")
+            .and_then(serde_json::Value::as_str),
+        Some("wait_background")
     );
 }
 
@@ -499,5 +529,17 @@ fn attempt_ledger_marks_terminal_failures_non_retryable() {
         let ledger = build_attempt_ledger_compact(&loop_state);
         assert!(ledger.contains(&format!("\"error_kind\": \"{kind}\"")));
         assert!(ledger.contains("\"retryable\": false"));
+        let value = ledger_value(&ledger);
+        let expected = match kind {
+            "invalid_credentials" | "credential_missing" | "auth_failed" => "external_blocker",
+            "missing_input" => "needs_user",
+            _ => "terminal_failure",
+        };
+        assert_eq!(
+            value
+                .pointer("/0/recovery_action")
+                .and_then(serde_json::Value::as_str),
+            Some(expected)
+        );
     }
 }
