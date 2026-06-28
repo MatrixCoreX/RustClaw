@@ -66,8 +66,8 @@ pub(super) fn direct_answer_gate_planner_promotion_reason_code(reason_tag: &str)
         | "direct_answer_gate_workspace_child_context_execute" => {
             "direct_answer_gate_evidence_projection_execute"
         }
-        "direct_answer_gate_execute" => "direct_answer_gate_promoted_to_planner",
-        _ => "direct_answer_gate_promoted_to_planner",
+        "direct_answer_gate_execute" => "direct_answer_gate_agent_loop_activation",
+        _ => "direct_answer_gate_agent_loop_activation",
     }
 }
 

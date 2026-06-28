@@ -1504,11 +1504,9 @@ fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
     if route_reason_has_marker(
         route,
         "direct_answer_gate_direct_answer_deferred_to_agent_loop",
-    ) {
+    ) || route_reason_has_marker(route, "direct_answer_gate_execute")
+    {
         return "agent_loop_activation_boundary";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_execute") {
-        return "semantic_execution_promotion";
     }
     if route_reason_has_marker(route, "direct_answer_gate_clarify") {
         return "clarify_boundary";
