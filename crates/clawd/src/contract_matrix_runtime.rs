@@ -757,6 +757,25 @@ pub(crate) fn arg_policy_decision(
     })
 }
 
+pub(crate) fn arg_policy_decision_for_route(
+    route: Option<&RouteResult>,
+    normalized_skill: &str,
+    resolved_args: &Value,
+) -> Option<ContractArgPolicy> {
+    let route = route?;
+    let output_contract = route.effective_output_contract();
+    let mut policy = arg_policy_decision(Some(&output_contract), normalized_skill, resolved_args)?;
+    if route_capability_ref_allows_action(route, normalized_skill, resolved_args)
+        && output_contract
+            .semantic_kind
+            .is_normalizer_schema_capability_bridge()
+    {
+        policy.contract_match = "capability_ref".to_string();
+        policy.required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    }
+    Some(policy)
+}
+
 pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
     let Some(action) = ActionRef::parse(action_key) else {
         return false;

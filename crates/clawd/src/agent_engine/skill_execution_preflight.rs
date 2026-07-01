@@ -807,11 +807,23 @@ pub(super) fn contract_matrix_arg_policy_error(
     normalized_skill: &str,
     exec_args: &Value,
 ) -> Option<String> {
-    let policy = crate::contract_matrix::arg_policy_decision(
-        loop_state.output_contract.as_ref(),
-        normalized_skill,
-        exec_args,
-    )?;
+    let policy = loop_state
+        .route_policy_context
+        .as_ref()
+        .and_then(|route| {
+            crate::contract_matrix::arg_policy_decision_for_route(
+                Some(route),
+                normalized_skill,
+                exec_args,
+            )
+        })
+        .or_else(|| {
+            crate::contract_matrix::arg_policy_decision(
+                loop_state.output_contract.as_ref(),
+                normalized_skill,
+                exec_args,
+            )
+        })?;
     if policy.is_allowed()
         || policy.decision == crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
     {
