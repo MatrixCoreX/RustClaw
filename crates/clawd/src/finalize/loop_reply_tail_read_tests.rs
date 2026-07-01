@@ -265,6 +265,52 @@ fn tail_read_range_backfill_reads_extra_wrapped_fs_basic_output() {
 }
 
 #[test]
+fn tail_read_range_observed_answer_ignores_json_hidden_in_visible_text() {
+    let state = test_state();
+    let task = claimed_task("task-tail-text-boundary");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs/clawd-dev.log".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .delivery_messages
+        .push("current synthesized summary".to_string());
+    loop_state.last_user_visible_respond = Some("current synthesized summary".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"text":"{\"action\":\"read_range\",\"mode\":\"tail\",\"requested_n\":1,\"excerpt\":\"99|hidden tail line\",\"path\":\"logs/clawd-dev.log\"}"}"#,
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "show the last log line",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("current synthesized summary")
+    );
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["current synthesized summary".to_string()]
+    );
+    assert!(finalizer_summary.is_none());
+}
+
+#[test]
 fn strict_raw_tail_read_replaces_synthesized_failure_from_log_contents() {
     let state = test_state();
     let task = claimed_task("task-tail-replace-log-failure-synthesis");
