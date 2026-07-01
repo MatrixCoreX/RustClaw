@@ -241,10 +241,8 @@ pub(super) fn runtime_status_query_route_can_plan_without_locator(
         && route_result.output_contract.locator_hint.trim().is_empty()
         && (turn_analysis.turn_type == Some(crate::intent_router::TurnType::StatusQuery)
             || turn_analysis_has_runtime_status_query(turn_analysis))
-        && crate::contract_matrix::final_answer_shape_for_output_contract(
-            &route_result.output_contract,
-        )
-        .is_some_and(|shape| shape.allows_model_language())
+        && crate::contract_matrix::final_answer_shape_for_route(route_result)
+            .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn current_workspace_route_can_skip_unbound_context_guard(

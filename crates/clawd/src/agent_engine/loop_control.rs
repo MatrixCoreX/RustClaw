@@ -241,10 +241,8 @@ fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
 
 fn route_requires_direct_candidate_for_observed_stop(route_result: &RouteResult) -> bool {
     route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        && crate::contract_matrix::final_answer_shape_for_output_contract(
-            &route_result.output_contract,
-        )
-        .is_some_and(|shape| shape.allows_model_language())
+        && crate::contract_matrix::final_answer_shape_for_route(route_result)
+            .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
@@ -694,10 +692,8 @@ fn quantity_comparison_one_sentence_needs_model_language_before_stop(
 ) -> bool {
     route_result.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         && route_result.output_contract.response_shape == crate::OutputResponseShape::OneSentence
-        && crate::contract_matrix::final_answer_shape_for_output_contract(
-            &route_result.output_contract,
-        )
-        .is_some_and(|shape| shape.allows_model_language())
+        && crate::contract_matrix::final_answer_shape_for_route(route_result)
+            .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn evaluate_round_outcome(
