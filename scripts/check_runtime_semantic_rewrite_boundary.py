@@ -303,6 +303,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_git_deterministic_user_text_action_selection())
     findings.extend(scan_sqlite_route_request_semantic_fallback())
     findings.extend(scan_service_status_identity_user_text_selection())
+    findings.extend(scan_service_status_process_user_text_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -882,6 +883,36 @@ def scan_service_status_identity_text(rel_path: str, text: str) -> list[Finding]
     return findings
 
 
+def scan_service_status_process_user_text_selection() -> list[Finding]:
+    return scan_service_status_process_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_service_status_process_text(rel_path: str, text: str) -> list[Finding]:
+    block = function_block(text, "service_status_deterministic_plan_result")
+    if block is None:
+        return []
+    findings: list[Finding] = []
+    block_start, block_text = block
+    for offset, line in enumerate(block_text.splitlines(), start=0):
+        if (
+            "first_port_filter_token(user_text)" not in line
+            and "process_status_filter_token(user_text)" not in line
+        ):
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                block_start + offset,
+                "service_status_process_user_text_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1339,6 +1370,20 @@ def run_self_test() -> int:
         == "service_status_identity_user_text_selection"
     )
     assert not scan_service_status_identity_user_text_selection()
+    blocked_service_status_process = scan_service_status_process_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn service_status_deterministic_plan_result(\n"
+        ") -> Option<PlanResult> {\n"
+        "    first_port_filter_token(user_text);\n"
+        "    process_status_filter_token(user_text);\n"
+        "}\n",
+    )
+    assert (
+        blocked_service_status_process
+        and blocked_service_status_process[0].kind
+        == "service_status_process_user_text_selection"
+    )
+    assert not scan_service_status_process_user_text_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",

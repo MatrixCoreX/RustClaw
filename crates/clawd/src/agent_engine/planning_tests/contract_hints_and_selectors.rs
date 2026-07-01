@@ -588,10 +588,10 @@ fn fs_basic_read_text_range_negative_start_line_count_becomes_tail_count() {
 fn service_status_process_request_uses_process_basic_filter_plan() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=process.ps filter=clawd".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "clawd".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = service_status_deterministic_plan_result(
@@ -599,7 +599,7 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
         "check clawd process",
         Some(&route),
         &loop_state,
-        "check whether the local clawd process is present",
+        "ordinary request text",
     )
     .expect("process status should use deterministic process_basic plan");
 
@@ -728,21 +728,19 @@ fn async_job_protocol_injects_async_start_into_planned_run_cmd() {
 fn service_status_process_request_without_machine_filter_does_not_use_ambient_process_table() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=process.ps".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_hint.clear();
     let loop_state = LoopState::new(1);
 
-    assert!(
-        process_status_filter_token("check whether the local clawd process is present").is_none()
-    );
     assert!(service_status_deterministic_plan_result(
         &state,
         "check clawd process",
         Some(&route),
         &loop_state,
-        "check whether the local clawd process is present",
+        "clawd",
     )
     .is_none());
 }
@@ -1170,6 +1168,7 @@ fn scalar_service_status_uses_health_check_plan() {
 fn scalar_service_status_named_process_uses_process_basic_filter_plan() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=process.ps filter=telegramd".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
@@ -1180,7 +1179,7 @@ fn scalar_service_status_named_process_uses_process_basic_filter_plan() {
         "check named service",
         Some(&route),
         &loop_state,
-        "telegramd",
+        "ordinary request text",
     )
     .expect("named service status should use process_basic");
 
@@ -1210,6 +1209,7 @@ fn structural_contracts_are_not_blocked_by_literal_command_guard() {
 fn service_status_port_request_uses_process_basic_port_filter_plan() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=process.port_list port=8787".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
@@ -1220,7 +1220,7 @@ fn service_status_port_request_uses_process_basic_port_filter_plan() {
         "check local port",
         Some(&route),
         &loop_state,
-        "show the process listening on local port 8787",
+        "ordinary request text",
     )
     .expect("port status should use deterministic process_basic plan");
 
