@@ -78,7 +78,8 @@ use super::{
     rewrite_pre_observation_concrete_respond_to_placeholder,
     rewrite_process_ps_run_cmd_to_process_basic,
     rewrite_readonly_runtime_status_run_cmd_to_system_basic,
-    rewrite_rustclaw_config_validation_to_guard, rewrite_service_status_plan_to_service_control,
+    rewrite_rustclaw_config_risk_assessment_to_guard, rewrite_rustclaw_config_validation_to_guard,
+    rewrite_service_status_plan_to_service_control,
     rewrite_session_alias_delivery_observations_to_route_locator,
     rewrite_sqlite_count_query_to_requested_schema_column,
     rewrite_sqlite_schema_version_plan_to_db_basic, rewrite_sqlite_table_listing_plan_to_db_basic,
@@ -482,6 +483,8 @@ mod archive_and_inline_transform;
 mod bounded_log_slice_registry;
 #[path = "planning_tests/capability_read_sqlite_existence.rs"]
 mod capability_read_sqlite_existence;
+#[path = "planning_tests/config_guard_capability_repair.rs"]
+mod config_guard_capability_repair;
 #[path = "planning_tests/config_structured_field_reads.rs"]
 mod config_structured_field_reads;
 #[path = "planning_tests/content_excerpt_and_log_synthesis.rs"]

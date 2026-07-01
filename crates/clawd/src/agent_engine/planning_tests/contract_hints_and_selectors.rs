@@ -1,13 +1,14 @@
 use super::*;
 
 #[test]
-fn contract_hint_matrix_config_risk_uses_deterministic_guard_action() {
+fn contract_hint_config_risk_capability_ref_uses_deterministic_guard_action() {
     let state = test_state_with_enabled_skills(&["config_basic", "config_edit"]);
     let mut route = base_route_result();
-    route.route_reason = "structured_contract_hint_fast_path; contract_hint_fast_path".into();
+    route.route_reason =
+        "structured_contract_hint_fast_path; contract_hint_fast_path; capability_ref=config.guard_config".into();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
 
@@ -231,16 +232,17 @@ fn contract_hint_directory_entry_groups_find_entries_defaults_to_any_kind() {
 }
 
 #[test]
-fn contract_hint_archive_read_uses_matrix_preferred_action_without_nl_matching() {
+fn contract_hint_archive_read_uses_capability_ref_without_nl_matching() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "contract_hint_fast_path; capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip|notes.txt".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=archive_read\ncandidate_wrong_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]";
+    let request = "[CONTRACT_TEST_HINT]\ncandidate_wrong_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]";
 
     let plan = contract_hint_preferred_action_deterministic_plan_result(
         &state,
@@ -250,7 +252,7 @@ fn contract_hint_archive_read_uses_matrix_preferred_action_without_nl_matching()
         request,
         None,
     )
-    .expect("archive read contract should use matrix preferred archive action");
+    .expect("archive read capability should use archive action");
 
     assert_eq!(plan.steps.len(), 1);
     assert_eq!(plan.steps[0].skill, "archive_basic");
@@ -1550,7 +1552,8 @@ fn preferred_route_allows_more_specific_structured_tool_action() {
         true,
         OutputResponseShape::Strict,
     );
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.route_reason = "capability_ref=archive.pack".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint = "tmp/nl_archive_case.zip".to_string();
     let actions = vec![
         AgentAction::CallSkill {

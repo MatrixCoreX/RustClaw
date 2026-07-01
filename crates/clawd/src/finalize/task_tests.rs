@@ -20,6 +20,9 @@ use super::{
 
 use serde_json::json;
 
+#[path = "task_tests/config_guard_recovery.rs"]
+mod config_guard_recovery;
+
 fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
     crate::RouteResult {
         ask_mode,

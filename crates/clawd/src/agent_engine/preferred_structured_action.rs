@@ -285,7 +285,12 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
         if let Some(preferred) = contract_hint_preferred_action_ref(original_user_text) {
             vec![preferred]
         } else {
-            crate::contract_matrix::preferred_action_refs_for_route(route)
+            let capability_actions = capability_ref_preferred_action_refs_for_route(route);
+            if capability_actions.is_empty() {
+                crate::contract_matrix::preferred_action_refs_for_route(route)
+            } else {
+                capability_actions
+            }
         };
     for preferred in preferred_actions {
         let Some(action) = preferred_structured_action_for_contract_hint(
@@ -318,10 +323,47 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
     None
 }
 
+fn capability_ref_preferred_action_refs_for_route(
+    route: &RouteResult,
+) -> Vec<crate::contract_matrix::ActionRef> {
+    if let Some(action) =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
+    {
+        let action = match action {
+            "guard_after_change" | "guard_config" | "guard_rustclaw_config" => {
+                "guard_rustclaw_config"
+            }
+            "validate" | "validate_after_change" | "validate_config" => "validate",
+            "list_keys" => "list_keys",
+            _ => return Vec::new(),
+        };
+        return vec![crate::contract_matrix::ActionRef {
+            skill: "config_basic".to_string(),
+            action: Some(action.to_string()),
+        }];
+    }
+    if let Some(action) =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["archive"])
+    {
+        let action = match action {
+            "list" | "read" | "pack" | "unpack" => action,
+            _ => return Vec::new(),
+        };
+        return vec![crate::contract_matrix::ActionRef {
+            skill: "archive_basic".to_string(),
+            action: Some(action.to_string()),
+        }];
+    }
+    Vec::new()
+}
+
 fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args: &Value) -> bool {
     if crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
     {
+        return true;
+    }
+    if route_capability_allows_preferred_action(route, skill, args) {
         return true;
     }
     if skill != "run_cmd"
@@ -336,6 +378,42 @@ fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args
         route,
         &["docker", "package", "package_manager"],
     )
+}
+
+fn route_capability_allows_preferred_action(
+    route: &RouteResult,
+    skill: &str,
+    args: &Value,
+) -> bool {
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|action| !action.is_empty());
+    match (skill, action) {
+        ("archive_basic", Some(action)) => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["archive"],
+                &[action],
+            )
+        }
+        ("config_basic", Some("guard_rustclaw_config")) => {
+            crate::machine_capability_ref::route_has_capability_action(
+                route,
+                &["config"],
+                &["guard"],
+            )
+        }
+        ("config_basic", Some("validate")) => {
+            crate::machine_capability_ref::route_has_capability_action(
+                route,
+                &["config"],
+                &["validate"],
+            )
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn planned_execution_action_ref<'a>(

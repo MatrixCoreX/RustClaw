@@ -22,11 +22,18 @@ struct ConfigGuardObservation {
 }
 
 fn config_guard_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    matches!(
-        route_result.output_contract.semantic_kind,
+    if route_result.output_contract.delivery_required {
+        return false;
+    }
+    crate::machine_capability_ref::route_has_capability_action(
+        route_result,
+        &["config"],
+        &["guard", "risk", "validate"],
+    ) || matches!(
+        route_result.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ConfigRiskAssessment
             | crate::OutputSemanticKind::ConfigValidation
-    ) && !route_result.output_contract.delivery_required
+    )
 }
 
 fn config_guard_action_matches(action: &str) -> bool {
@@ -88,19 +95,11 @@ fn config_guard_observation_from_flat_value(value: &Value) -> Option<ConfigGuard
 }
 
 fn config_guard_observation_from_value(value: &Value) -> Option<ConfigGuardObservation> {
-    config_guard_observation_from_flat_value(value)
-        .or_else(|| {
-            value
-                .get("extra")
-                .and_then(config_guard_observation_from_value)
-        })
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())
-                .and_then(|inner| config_guard_observation_from_value(&inner))
-        })
+    config_guard_observation_from_flat_value(value).or_else(|| {
+        value
+            .get("extra")
+            .and_then(config_guard_observation_from_value)
+    })
 }
 
 fn machine_json_string_array_after_key(output: &str, key: &str) -> Option<Vec<String>> {
