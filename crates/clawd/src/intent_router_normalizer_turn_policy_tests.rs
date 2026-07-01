@@ -271,7 +271,7 @@ fn normalizer_schema_normalization_treats_one_line_comparison_as_strict_shape() 
         value
             .pointer("/output_contract/semantic_kind")
             .and_then(|value| value.as_str()),
-        Some("recent_scalar_equality_check")
+        Some("none")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,

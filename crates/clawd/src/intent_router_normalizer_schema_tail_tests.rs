@@ -42,7 +42,7 @@ fn normalizer_schema_normalization_coerces_hidden_files_check_synonym() {
 }
 
 #[test]
-fn normalizer_schema_normalization_recovers_planner_decision_and_filename_listing_contract() {
+fn normalizer_schema_normalization_does_not_recover_filename_listing_from_string_contract() {
     let raw = r#"{
           "resolved_user_intent":"List first 10 filenames in logs directory without reading content",
           "answer_candidate":"",
@@ -60,7 +60,7 @@ fn normalizer_schema_normalization_recovers_planner_decision_and_filename_listin
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value.get("answer_candidate").and_then(|v| v.as_str()),
@@ -72,7 +72,7 @@ fn normalizer_schema_normalization_recovers_planner_decision_and_filename_listin
         .expect("output contract");
     assert_eq!(
         contract.get("semantic_kind").and_then(|v| v.as_str()),
-        Some("file_names")
+        Some("none")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
@@ -307,11 +307,11 @@ fn normalizer_schema_normalization_recovers_files_listing_contract_from_chat_dri
     .expect("schema validation")
     .value;
     let contract = super::parse_output_contract(validated.output_contract, false);
-    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FileNames);
-    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::None);
+    assert!(!contract.requires_content_evidence);
     assert_eq!(
         super::parse_first_layer_decision_text(&validated.decision),
-        Some(crate::FirstLayerDecision::PlannerExecute)
+        Some(crate::FirstLayerDecision::DirectAnswer)
     );
 }
 

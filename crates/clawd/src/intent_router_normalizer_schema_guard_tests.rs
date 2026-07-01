@@ -987,7 +987,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_find_recipe_text() {
 }
 
 #[test]
-fn normalizer_schema_normalization_recovers_file_names_only_contract() {
+fn normalizer_schema_normalization_does_not_recover_semantic_kind_from_string_contract() {
     let raw = r#"{
           "resolved_user_intent":"列出 document 目录下的文件名",
           "needs_clarify":false,
@@ -1004,25 +1004,25 @@ fn normalizer_schema_normalization_recovers_file_names_only_contract() {
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
             .and_then(|v| v.as_str()),
-        Some("strict")
+        Some("free")
     );
     assert_eq!(
         value
             .pointer("/output_contract/semantic_kind")
             .and_then(|v| v.as_str()),
-        Some("file_names")
+        Some("none")
     );
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
             .and_then(|v| v.as_bool()),
-        Some(true)
+        Some(false)
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
