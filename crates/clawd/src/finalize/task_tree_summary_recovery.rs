@@ -33,15 +33,7 @@ fn tree_summary_rows_answer_from_value(value: &Value) -> Option<String> {
             return tree_summary_rows_machine_lines(extra);
         }
     }
-    value
-        .get("text")
-        .and_then(Value::as_str)
-        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())
-        .and_then(|nested| {
-            (nested.get("action").and_then(Value::as_str) == Some("tree_summary"))
-                .then(|| tree_summary_rows_machine_lines(&nested))
-                .flatten()
-        })
+    None
 }
 
 fn tree_summary_rows_machine_lines(value: &Value) -> Option<String> {

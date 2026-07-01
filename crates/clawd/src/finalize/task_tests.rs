@@ -22,6 +22,8 @@ use serde_json::json;
 
 #[path = "task_tests/config_guard_recovery.rs"]
 mod config_guard_recovery;
+#[path = "task_tests/tree_summary_recovery.rs"]
+mod tree_summary_recovery;
 
 fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
     crate::RouteResult {
