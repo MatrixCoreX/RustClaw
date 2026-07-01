@@ -66,6 +66,15 @@ pub(crate) fn route_has_capability_action_name(
     })
 }
 
+pub(crate) fn route_capability_action_for_namespaces<'a>(
+    route: &'a crate::RouteResult,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    route_capability_refs(route)
+        .find(|capability| capability.namespace_matches(namespaces))
+        .map(|capability| capability.action)
+}
+
 fn route_capability_refs(route: &crate::RouteResult) -> impl Iterator<Item = CapabilityRef<'_>> {
     [&route.route_reason, &route.resolved_intent]
         .into_iter()

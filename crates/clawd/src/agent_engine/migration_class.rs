@@ -300,8 +300,11 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
 }
 
 fn route_has_package_detect_machine_signal(route: &RouteResult) -> bool {
-    route_capability_action_for_namespaces(route, &["package", "package_manager"])
-        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
+    crate::machine_capability_ref::route_capability_action_for_namespaces(
+        route,
+        &["package", "package_manager"],
+    )
+    .is_some_and(|action| action_has_any_segment(action, &["detect"]))
 }
 
 fn route_has_any_machine_marker(route: &RouteResult, markers: &[&str]) -> bool {
@@ -322,52 +325,15 @@ fn machine_context_has_marker(machine_context: &str, marker: &str) -> bool {
 }
 
 fn route_has_docker_status_machine_signal(route: &RouteResult) -> bool {
-    route_capability_action_for_namespaces(route, &["docker"]).is_some_and(|action| {
-        action_has_any_segment(action, &["image", "images", "inspect", "list", "version"])
-    })
+    crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["docker"])
+        .is_some_and(|action| {
+            action_has_any_segment(action, &["image", "images", "inspect", "list", "version"])
+        })
 }
 
 fn route_has_docker_log_machine_signal(route: &RouteResult) -> bool {
-    route_capability_action_for_namespaces(route, &["docker"])
+    crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["docker"])
         .is_some_and(|action| action_has_any_segment(action, &["log", "logs", "read"]))
-}
-
-fn route_capability_action_for_namespaces<'a>(
-    route: &'a RouteResult,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
-        .next()
-}
-
-fn machine_context_capability_action_for_namespaces<'a>(
-    machine_context: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
-        .next()
-}
-
-fn capability_action_for_namespace_token<'a>(
-    token: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    let capability = token.strip_prefix("capability_ref=")?;
-    let (namespace, action) = capability.split_once('.')?;
-    if namespace.is_empty()
-        || action.is_empty()
-        || !namespaces.iter().any(|candidate| namespace == *candidate)
-        || !capability.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-    {
-        return None;
-    }
-    Some(action)
 }
 
 fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {

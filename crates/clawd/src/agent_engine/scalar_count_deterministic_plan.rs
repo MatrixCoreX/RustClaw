@@ -840,11 +840,16 @@ pub(super) fn preferred_run_cmd_for_contract_hint(
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
     let cwd = state.skill_rt.workspace_root.display().to_string();
-    let command = if route_capability_action_for_namespaces(route, &["package", "package_manager"])
-        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
+    let command = if crate::machine_capability_ref::route_capability_action_for_namespaces(
+        route,
+        &["package", "package_manager"],
+    )
+    .is_some_and(|action| action_has_any_segment(action, &["detect"]))
     {
         r#"for m in apt-get apt dnf yum brew pacman zypper apk; do if command -v "$m" >/dev/null 2>&1; then printf 'manager=%s\nbasis=command_path:%s\n' "$m" "$m"; exit 0; fi; done; printf 'manager=unknown\nbasis=path_scan_none\n'"#.to_string()
-    } else if let Some(action) = route_capability_action_for_namespaces(route, &["docker"]) {
+    } else if let Some(action) =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["docker"])
+    {
         docker_readonly_probe_command_from_capability_action(action).to_string()
     } else {
         match route.effective_output_contract_semantic_kind() {
@@ -904,44 +909,6 @@ pub(super) fn preferred_run_cmd_for_contract_hint(
         skill: "run_cmd".to_string(),
         args,
     })
-}
-
-fn route_capability_action_for_namespaces<'a>(
-    route: &'a RouteResult,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
-        .next()
-}
-
-fn machine_context_capability_action_for_namespaces<'a>(
-    machine_context: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
-        .next()
-}
-
-fn capability_action_for_namespace_token<'a>(
-    token: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    let capability = token.strip_prefix("capability_ref=")?;
-    let (namespace, action) = capability.split_once('.')?;
-    if namespace.is_empty()
-        || action.is_empty()
-        || !namespaces.iter().any(|candidate| namespace == *candidate)
-        || !capability.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-    {
-        return None;
-    }
-    Some(action)
 }
 
 fn docker_readonly_probe_command_from_capability_action(action: &str) -> &'static str {
@@ -1144,8 +1111,9 @@ pub(super) fn preferred_config_basic_for_contract_hint(
     {
         return None;
     }
-    let capability_action = route_capability_action_for_namespaces(route, &["config"])
-        .and_then(config_basic_action_from_capability_action);
+    let capability_action =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
+            .and_then(config_basic_action_from_capability_action);
     let action = capability_action.or(action_name).unwrap_or(
         match route.effective_output_contract_semantic_kind() {
             crate::OutputSemanticKind::ConfigRiskAssessment => "guard_rustclaw_config",
@@ -1185,8 +1153,9 @@ pub(super) fn preferred_config_edit_for_contract_hint(
     action_name: Option<&str>,
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
-    let capability_action = route_capability_action_for_namespaces(route, &["config"])
-        .and_then(config_edit_action_from_capability_action);
+    let capability_action =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
+            .and_then(config_edit_action_from_capability_action);
     let action = capability_action.or(action_name).unwrap_or(
         match route.effective_output_contract_semantic_kind() {
             crate::OutputSemanticKind::ConfigRiskAssessment => "guard_config",
@@ -1241,8 +1210,9 @@ pub(super) fn preferred_archive_basic_for_contract_hint(
     if !archive_basic_enabled_for_planning(state) {
         return None;
     }
-    let capability_action = route_capability_action_for_namespaces(route, &["archive"])
-        .filter(|action| matches!(*action, "list" | "read" | "pack" | "unpack"));
+    let capability_action =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["archive"])
+            .filter(|action| matches!(*action, "list" | "read" | "pack" | "unpack"));
     let action = capability_action.or(action_name).unwrap_or(
         match route.effective_output_contract_semantic_kind() {
             crate::OutputSemanticKind::ArchiveRead => "read",
