@@ -1181,6 +1181,7 @@ fn service_status_health_check_recipe_marker_uses_health_check_plan() {
 fn scalar_service_status_uses_health_check_plan() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=system.health_check".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;

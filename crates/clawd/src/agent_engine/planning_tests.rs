@@ -522,6 +522,8 @@ mod scalar_count_and_hidden_entries;
 mod scalar_path_and_inventory_repair;
 #[path = "planning_tests/schema_and_template_aliases.rs"]
 mod schema_and_template_aliases;
+#[path = "planning_tests/service_status_capability_routes.rs"]
+mod service_status_capability_routes;
 #[path = "planning_tests/session_alias_and_content_evidence.rs"]
 mod session_alias_and_content_evidence;
 #[path = "planning_tests/structured_keys_and_scalar_fields.rs"]
