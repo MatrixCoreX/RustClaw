@@ -1,7 +1,5 @@
 use serde_json::Value;
 
-#[cfg(test)]
-use super::{parse_output_contract, IntentNormalizerOut};
 use super::{
     parse_output_semantic_kind, state_patch_deictic_reference_requires_clarify,
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
@@ -248,53 +246,6 @@ fn state_patch_has_ordered_entry_ref(state_patch: Option<&Value>) -> bool {
     state_patch.is_some_and(|patch| {
         patch.get("ordered_entry_ref").is_some() || patch.get("ordered_entry_reference").is_some()
     })
-}
-
-#[cfg(test)]
-pub(super) fn active_ordered_scalar_path_missing_state_patch_context(
-    out: &IntentNormalizerOut,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-) -> Option<String> {
-    if out.needs_clarify || state_patch_has_ordered_entry_ref(out.state_patch.as_ref()) {
-        return None;
-    }
-    let output_contract =
-        parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
-    if output_contract.response_shape != OutputResponseShape::Scalar
-        || !route_reason_has_contract_marker(&out.reason, "scalar_path_only")
-        || output_contract.locator_kind != OutputLocatorKind::None
-        || !output_contract.locator_hint.trim().is_empty()
-        || output_contract.delivery_required
-        || output_contract.delivery_intent != OutputDeliveryIntent::None
-    {
-        return None;
-    }
-    let snapshot = session_snapshot?;
-    let frame = snapshot.active_followup_frame.as_ref()?;
-    if frame.ordered_entries.is_empty() {
-        return None;
-    }
-    let entries = frame
-        .ordered_entries
-        .iter()
-        .take(crate::followup_frame::MAX_ORDERED_ENTRIES)
-        .enumerate()
-        .map(|(index, entry)| format!("{}:{}", index + 1, entry.trim()))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let bound_target = frame
-        .bound_target
-        .as_deref()
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-        .unwrap_or("<none>");
-    let selected_entry_index = frame
-        .selected_entry_index
-        .map(|index| (index + 1).to_string())
-        .unwrap_or_else(|| "<none>".to_string());
-    Some(format!(
-        "active_ordered_scalar_path_missing_ref: active_bound_target={bound_target}; active_selected_entry_index_base1={selected_entry_index}; active_ordered_entries={entries}; required_patch=state_patch.ordered_entry_ref"
-    ))
 }
 
 pub(super) fn active_ordered_scalar_path_loop_context_hint(
