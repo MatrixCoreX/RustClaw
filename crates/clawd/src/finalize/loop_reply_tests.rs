@@ -126,6 +126,9 @@ mod observed_contract_tests;
 #[path = "loop_reply_raw_command_tests.rs"]
 mod raw_command_tests;
 
+#[path = "loop_reply_raw_command_text_boundary_tests.rs"]
+mod raw_command_text_boundary_tests;
+
 #[path = "loop_reply_service_status_tests.rs"]
 mod service_status_tests;
 

@@ -211,11 +211,7 @@ fn read_range_action_value(value: &serde_json::Value) -> Option<()> {
     {
         return Some(());
     }
-    value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .and_then(|value| read_range_action_value(&value))
+    None
 }
 
 fn collapse_identical_raw_command_outputs(outputs: &[String]) -> Option<String> {
