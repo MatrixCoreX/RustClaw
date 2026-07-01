@@ -1,8 +1,8 @@
 use super::{
-    extract_ordered_entries_from_text, load_active_followup_frame,
-    ordered_entries_from_listing_json, persist_frame, replace_active_frame_from_ask_outcome,
-    synthesize_locator_reply_resolved_intent, FollowupFrame, FollowupOpKind, FollowupSliceKind,
-    FollowupSliceSpec, FollowupUnresolvedSlot,
+    derive_bound_target_from_journal, extract_ordered_entries_from_text,
+    load_active_followup_frame, ordered_entries_from_listing_json, persist_frame,
+    replace_active_frame_from_ask_outcome, synthesize_locator_reply_resolved_intent, FollowupFrame,
+    FollowupOpKind, FollowupSliceKind, FollowupSliceSpec, FollowupUnresolvedSlot,
 };
 use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind, RouteResult};
 
@@ -203,6 +203,76 @@ fn extracts_ordered_entries_from_search_result_json() {
     }));
 
     assert_eq!(entries, vec!["abcd_report.md", "my_abcd.txt"]);
+}
+
+#[test]
+fn ordered_entries_ignore_json_hidden_in_visible_text() {
+    let hidden = serde_json::json!({
+        "action": "find_name",
+        "results": ["alpha.log", "beta.log"]
+    })
+    .to_string();
+    let entries = ordered_entries_from_listing_json(&serde_json::json!({
+        "text": hidden
+    }));
+
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn ordered_entries_accept_extra_machine_payload() {
+    let entries = ordered_entries_from_listing_json(&serde_json::json!({
+        "extra": {
+            "action": "find_name",
+            "results": ["alpha.log", "beta.log"]
+        },
+        "text": "display only"
+    }));
+
+    assert_eq!(entries, vec!["alpha.log", "beta.log"]);
+}
+
+fn journal_with_single_output(output: serde_json::Value) -> crate::task_journal::TaskJournal {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-followup-boundary", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(output.to_string()),
+            ..Default::default()
+        });
+    journal
+}
+
+#[test]
+fn bound_target_ignores_json_hidden_in_visible_text() {
+    let hidden = serde_json::json!({
+        "resolved_path": "/tmp/hidden.log"
+    })
+    .to_string();
+    let journal = journal_with_single_output(serde_json::json!({
+        "text": hidden
+    }));
+
+    assert_eq!(derive_bound_target_from_journal(&journal), None);
+}
+
+#[test]
+fn bound_target_accepts_extra_machine_payload() {
+    let journal = journal_with_single_output(serde_json::json!({
+        "extra": {
+            "resolved_path": "/tmp/visible-machine.log"
+        },
+        "text": "display only"
+    }));
+
+    assert_eq!(
+        derive_bound_target_from_journal(&journal).as_deref(),
+        Some("/tmp/visible-machine.log")
+    );
 }
 
 #[test]
