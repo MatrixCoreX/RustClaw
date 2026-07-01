@@ -836,64 +836,6 @@ pub(super) fn config_basic_read_fields_action(
     }
 }
 
-pub(super) fn parse_config_change_value_after_field(
-    user_text: &str,
-    field_path: &str,
-) -> Option<Value> {
-    let lower = user_text.to_ascii_lowercase();
-    let field_lower = field_path.to_ascii_lowercase();
-    let field_idx = lower.find(&field_lower)?;
-    let suffix = user_text.get(field_idx + field_path.len()..)?;
-    let clause = suffix
-        .split(|ch: char| matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n' | '\r'))
-        .next()
-        .unwrap_or(suffix);
-    let mut string_value = None;
-    for token in config_value_candidate_tokens(clause) {
-        if let Some(value) = parse_config_value_token(token) {
-            if !value.is_string() {
-                return Some(value);
-            }
-            string_value = Some(value);
-        }
-    }
-    string_value
-}
-
-pub(super) fn config_value_candidate_tokens(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split(|ch: char| {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                ',' | '，'
-                    | '。'
-                    | ';'
-                    | '；'
-                    | ':'
-                    | '：'
-                    | '('
-                    | ')'
-                    | '（'
-                    | '）'
-                    | '['
-                    | ']'
-                    | '{'
-                    | '}'
-                    | '<'
-                    | '>'
-                    | '《'
-                    | '》'
-            )
-    })
-    .map(|token| {
-        token
-            .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '=' | '>' | '-' | '→'))
-            .trim()
-            .to_string()
-    })
-    .filter(|token| !token.is_empty())
-}
-
 pub(super) fn parse_config_value_token(token: String) -> Option<Value> {
     if token.eq_ignore_ascii_case("true") {
         return Some(Value::Bool(true));

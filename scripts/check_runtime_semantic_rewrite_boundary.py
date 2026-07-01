@@ -50,6 +50,7 @@ TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
+READ_RANGE_ACTION_FILE = SRC_ROOT / "agent_engine/read_range_action.rs"
 SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
     SRC_ROOT / "agent_engine/single_target_structured_field_rewrite.rs"
 )
@@ -313,6 +314,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_async_job_start_user_text_command_selection())
     findings.extend(scan_web_search_user_text_query_selection())
     findings.extend(scan_runtime_surface_user_text_token_selection())
+    findings.extend(scan_config_change_preview_user_text_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -1190,6 +1192,41 @@ def scan_runtime_surface_user_text_token_text(rel_path: str, text: str) -> list[
     return findings
 
 
+def scan_config_change_preview_user_text_selection() -> list[Finding]:
+    return scan_config_change_preview_user_text_selection_text(
+        rel(READ_RANGE_ACTION_FILE),
+        READ_RANGE_ACTION_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_config_change_preview_user_text_selection_text(
+    rel_path: str,
+    text: str,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for function_name in ("parse_config_change_preview", "config_change_preview_path"):
+        block = rust_private_or_pub_function_block(text, function_name)
+        if block is None:
+            continue
+        block_start, block_text = block
+        for offset, line in enumerate(block_text.splitlines(), start=0):
+            if (
+                "extract_dotted_field_selector" not in line
+                and "parse_config_change_value_after_field" not in line
+                and "extract_explicit_locator_for_fallback" not in line
+            ):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + offset,
+                    "config_change_preview_user_text_selection",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def rust_private_or_pub_function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(
         rf"^(?:pub\(super\)\s+)?fn\s+{re.escape(function_name)}\b", re.MULTILINE
@@ -1789,6 +1826,30 @@ def run_self_test() -> int:
         and blocked_runtime_surface[0].kind == "runtime_surface_user_text_token_selection"
     )
     assert not scan_runtime_surface_user_text_token_selection()
+    blocked_config_preview = scan_config_change_preview_user_text_selection_text(
+        rel(READ_RANGE_ACTION_FILE),
+        "pub(super) fn parse_config_change_preview(\n"
+        "    user_text: &str,\n"
+        "    route: &RouteResult,\n"
+        "    auto_locator_path: Option<&str>,\n"
+        ") -> Option<ParsedConfigChangePreview> {\n"
+        "    let field_path = crate::intent::surface_signals::extract_dotted_field_selector(user_text)?;\n"
+        "    let value = parse_config_change_value_after_field(user_text, &field_path)?;\n"
+        "    None\n"
+        "}\n"
+        "pub(super) fn config_change_preview_path(\n"
+        "    user_text: &str,\n"
+        "    route: &RouteResult,\n"
+        "    auto_locator_path: Option<&str>,\n"
+        ") -> Option<String> {\n"
+        "    crate::intent::locator_extractor::extract_explicit_locator_for_fallback(user_text).map(|locator| locator.locator_hint)\n"
+        "}\n",
+    )
+    assert (
+        blocked_config_preview
+        and blocked_config_preview[0].kind == "config_change_preview_user_text_selection"
+    )
+    assert not scan_config_change_preview_user_text_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
