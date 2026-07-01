@@ -1,10 +1,11 @@
 use serde_json::Value;
 
+#[cfg(test)]
+use super::{parse_output_contract, IntentNormalizerOut};
 use super::{
-    parse_output_contract, parse_output_semantic_kind,
-    state_patch_deictic_reference_requires_clarify, IntentNormalizerOut, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind,
-    TargetTaskPolicy, TurnType,
+    parse_output_semantic_kind, state_patch_deictic_reference_requires_clarify,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 
 const ACTIVE_OBSERVATION_CONTRACT_MARKERS: &[&str] = &[
@@ -249,6 +250,7 @@ fn state_patch_has_ordered_entry_ref(state_patch: Option<&Value>) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn active_ordered_scalar_path_missing_state_patch_context(
     out: &IntentNormalizerOut,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
