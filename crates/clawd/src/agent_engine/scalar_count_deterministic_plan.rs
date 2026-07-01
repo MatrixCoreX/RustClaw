@@ -1144,12 +1144,16 @@ pub(super) fn preferred_config_basic_for_contract_hint(
     {
         return None;
     }
-    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
-        crate::OutputSemanticKind::ConfigRiskAssessment => "guard_rustclaw_config",
-        crate::OutputSemanticKind::ConfigValidation => "validate",
-        crate::OutputSemanticKind::StructuredKeys => "list_keys",
-        _ => "validate",
-    });
+    let capability_action = route_capability_action_for_namespaces(route, &["config"])
+        .and_then(config_basic_action_from_capability_action);
+    let action = capability_action.or(action_name).unwrap_or(
+        match route.effective_output_contract_semantic_kind() {
+            crate::OutputSemanticKind::ConfigRiskAssessment => "guard_rustclaw_config",
+            crate::OutputSemanticKind::ConfigValidation => "validate",
+            crate::OutputSemanticKind::StructuredKeys => "list_keys",
+            _ => "validate",
+        },
+    );
     let path = config_path_for_contract_hint(route, auto_locator_path);
     if action == "validate" {
         return Some(config_basic_validate_action(path));
@@ -1181,11 +1185,15 @@ pub(super) fn preferred_config_edit_for_contract_hint(
     action_name: Option<&str>,
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
-    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
-        crate::OutputSemanticKind::ConfigRiskAssessment => "guard_config",
-        crate::OutputSemanticKind::ConfigValidation => "validate_config",
-        _ => "guard_config",
-    });
+    let capability_action = route_capability_action_for_namespaces(route, &["config"])
+        .and_then(config_edit_action_from_capability_action);
+    let action = capability_action.or(action_name).unwrap_or(
+        match route.effective_output_contract_semantic_kind() {
+            crate::OutputSemanticKind::ConfigRiskAssessment => "guard_config",
+            crate::OutputSemanticKind::ConfigValidation => "validate_config",
+            _ => "guard_config",
+        },
+    );
     let path = config_path_for_contract_hint(route, auto_locator_path);
     let args = match action {
         "guard_config" => serde_json::json!({
@@ -1202,6 +1210,25 @@ pub(super) fn preferred_config_edit_for_contract_hint(
         tool: "config_edit".to_string(),
         args,
     })
+}
+
+fn config_basic_action_from_capability_action(action: &str) -> Option<&'static str> {
+    match action {
+        "guard_rustclaw_config" => Some("guard_rustclaw_config"),
+        "list_keys" => Some("list_keys"),
+        "read_field" => Some("read_field"),
+        "read_fields" => Some("read_fields"),
+        "validate" => Some("validate"),
+        _ => None,
+    }
+}
+
+fn config_edit_action_from_capability_action(action: &str) -> Option<&'static str> {
+    match action {
+        "guard_after_change" | "guard_config" => Some("guard_config"),
+        "validate_after_change" | "validate_config" => Some("validate_config"),
+        _ => None,
+    }
 }
 
 pub(super) fn preferred_archive_basic_for_contract_hint(
