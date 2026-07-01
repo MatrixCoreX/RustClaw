@@ -26,6 +26,10 @@
     "reason": {
       "type": "string"
     },
+    "repair_target": {
+      "type": "string",
+      "description": "Optional canonical machine semantic target for the repair, such as directory_purpose_summary. Empty when no repair target is needed."
+    },
     "confidence": {
       "type": "number",
       "minimum": 0.0,
@@ -95,12 +99,6 @@
             "directory_purpose_summary",
             "content_excerpt_summary",
             "document_heading",
-            "web_page_summary",
-            "web_search_summary",
-            "weather_query",
-            "market_quote",
-            "image_understanding",
-            "publishing_preview",
             "content_excerpt_with_summary",
             "content_presence_check",
             "excerpt_kind_judgment",
@@ -120,24 +118,11 @@
             "git_commit_subject",
             "git_repository_state",
             "structured_keys",
-            "config_validation",
-            "config_mutation",
-            "config_risk_assessment",
-            "package_manager_detection",
             "tool_discovery",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",
-            "sqlite_schema_version",
-            "rss_news_fetch",
-            "archive_list",
-            "archive_read",
-            "archive_pack",
-            "archive_unpack",
-            "docker_ps",
-            "docker_images",
-            "docker_logs",
-            "docker_container_lifecycle"
+            "sqlite_schema_version"
           ]
         },
         "locator_hint": {
