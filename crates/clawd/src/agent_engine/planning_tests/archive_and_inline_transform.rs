@@ -70,6 +70,40 @@ fn archive_read_contract_prefers_complete_request_path_over_basename_locator_hin
 }
 
 #[test]
+fn archive_read_capability_ref_splits_archive_member_locator_without_semantic_kind() {
+    let state = test_state_with_enabled_skills(&["archive_basic"]);
+    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent = "capability_ref=archive.read".to_string();
+    route.route_reason = "capability_ref=archive.read".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_hint = format!("{archive} | notes.txt");
+    let loop_state = LoopState::new(1);
+
+    let plan = archive_read_deterministic_plan_result(
+        "read archive member",
+        &state,
+        Some(&route),
+        &loop_state,
+        Some(archive),
+        "read archive member",
+    )
+    .expect("archive read capability ref should split archive/member locator");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "archive_basic", "read");
+    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+    assert_eq!(
+        args.get("member").and_then(Value::as_str),
+        Some("notes.txt")
+    );
+}
+
+#[test]
 fn archive_read_structural_member_target_plans_direct_read_without_semantic_label() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";

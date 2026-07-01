@@ -232,7 +232,7 @@ pub(super) fn file_paths_locator_observation_plan(
     let route = route_result?;
     if route.needs_clarify
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
     {
         return None;
     }
@@ -458,13 +458,9 @@ pub(super) fn contract_allows_log_analyze_for_path(route: &RouteResult, path: &s
         "path": path,
         "max_matches": 50,
     });
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        "log_analyze",
-        &args,
-    )
-    .map(|policy| policy.is_allowed())
-    .unwrap_or(true)
+    crate::contract_matrix::action_policy_for_route(Some(route), "log_analyze", &args)
+        .map(|policy| policy.is_allowed())
+        .unwrap_or(true)
 }
 
 pub(super) fn generic_path_content_log_analyze_target_path(
@@ -475,12 +471,10 @@ pub(super) fn generic_path_content_log_analyze_target_path(
     if route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-        )
+        || !(route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
+            || route
+                .output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptWithSummary))
         || !matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -490,7 +484,7 @@ pub(super) fn generic_path_content_log_analyze_target_path(
     {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptWithSummary
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptWithSummary)
         && route_content_slice_spec(route).is_some()
     {
         return None;
@@ -783,12 +777,15 @@ pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
 }
 
 pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::DocumentHeading
-            | crate::OutputSemanticKind::ExcerptKindJudgment
-    ) && !route.output_contract.delivery_required
+    [
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::DocumentHeading,
+        crate::OutputSemanticKind::ExcerptKindJudgment,
+    ]
+    .iter()
+    .any(|kind| route.output_contract_marker_is(*kind))
+        && !route.output_contract.delivery_required
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -840,7 +837,7 @@ pub(super) fn content_excerpt_summary_auto_locator_observation_plan(
     auto_locator_path: Option<&str>,
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
-    let semantic_kind = route.output_contract.semantic_kind;
+    let semantic_kind = route.effective_output_contract_semantic_kind();
     let path =
         single_file_content_understanding_target_path(state, route_result, auto_locator_path)?;
     let mut actions = Vec::new();
@@ -923,14 +920,16 @@ pub(super) fn content_excerpt_summary_auto_locator_deterministic_plan_result(
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
 ) -> Option<PlanResult> {
-    if !matches!(
-        route_result.map(|route| route.output_contract.semantic_kind),
-        Some(
-            crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::DocumentHeading
-                | crate::OutputSemanticKind::ExcerptKindJudgment
-        )
-    ) {
+    if !route_result.is_some_and(|route| {
+        [
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ContentExcerptWithSummary,
+            crate::OutputSemanticKind::DocumentHeading,
+            crate::OutputSemanticKind::ExcerptKindJudgment,
+        ]
+        .iter()
+        .any(|kind| route.output_contract_marker_is(*kind))
+    }) {
         return None;
     }
     if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
@@ -948,10 +947,9 @@ pub(super) fn content_excerpt_summary_auto_locator_deterministic_plan_result(
         auto_locator_path,
         actions,
     );
-    if matches!(
-        route_result.map(|route| route.output_contract.semantic_kind),
-        Some(crate::OutputSemanticKind::ExcerptKindJudgment)
-    ) && !actions
+    if route_result.is_some_and(|route| {
+        route.output_contract_marker_is(crate::OutputSemanticKind::ExcerptKindJudgment)
+    }) && !actions
         .iter()
         .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
     {
@@ -1021,16 +1019,16 @@ pub(super) fn archive_read_locator_parts(
         return None;
     }
 
+    let route_requests_archive_read = route_requests_archive_read(route);
     let hint = route.output_contract.locator_hint.trim();
-    let hint_parts =
-        if route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveRead {
-            hint.split('|')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+    let hint_parts = if route_requests_archive_read {
+        hint.split('|')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let auto_archive = auto_locator_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -1046,7 +1044,7 @@ pub(super) fn archive_read_locator_parts(
         .or_else(|| choose_archive_path_candidate(hint_archive, text_archive))
         .filter(|path| is_supported_archive_path(path))?;
 
-    let member = if route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveRead {
+    let member = if route_requests_archive_read {
         let mut parts = hint_parts;
         if parts.len() >= 2 {
             if parts
@@ -1059,12 +1057,10 @@ pub(super) fn archive_read_locator_parts(
         } else {
             archive_entry_target_for_route_or_text(route, current_user_text, &archive)
         }
-    } else if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-    ) {
+    } else if route.output_contract_is_unclassified()
+        || route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
+        || route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptWithSummary)
+    {
         archive_entry_target_for_route_or_text(route, current_user_text, &archive)
     } else {
         return None;
@@ -1326,7 +1322,19 @@ pub(super) fn route_allows_archive_list_auto_locator(
     route: &RouteResult,
     archive_path: &str,
 ) -> bool {
-    match route.output_contract.semantic_kind {
+    if route_requests_archive_read(route) {
+        return false;
+    }
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath) {
+        return archive_entry_target_for_route_or_text(route, &route.resolved_intent, archive_path)
+            .is_some();
+    }
+    if route_requests_archive_list(route)
+        || route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+    {
+        return true;
+    }
+    match route.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::ArchiveRead => false,
         crate::OutputSemanticKind::ExistenceWithPath => {
             archive_entry_target_for_route_or_text(route, &route.resolved_intent, archive_path)
@@ -1335,6 +1343,24 @@ pub(super) fn route_allows_archive_list_auto_locator(
         crate::OutputSemanticKind::ArchiveList | crate::OutputSemanticKind::ScalarCount => true,
         _ => route_expects_terminal_user_answer(route),
     }
+}
+
+fn route_requests_archive_read(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveRead)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["read"],
+        )
+}
+
+fn route_requests_archive_list(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["list"],
+        )
 }
 
 pub(super) fn archive_list_auto_locator_deterministic_plan_result(
