@@ -93,13 +93,6 @@ pub(super) fn collect_embedded_http_json_body_evidence(
     if collected_preview {
         return;
     }
-    let Some(text) = value.get("text").and_then(Value::as_str) else {
-        return;
-    };
-    let Some(body) = status_prefixed_json_body(text) else {
-        return;
-    };
-    collect_embedded_json_body_string_evidence(collector, "json_output.text.body_json", &body);
 }
 
 pub(super) fn collect_embedded_json_body_string_evidence(
@@ -117,19 +110,6 @@ pub(super) fn collect_embedded_json_body_string_evidence(
     collect_priority_json_status_scalar_evidence(collector, source, "body", &value, 0);
     collect_json_observed_evidence(collector, source, "body", &value, 0);
     true
-}
-
-pub(super) fn status_prefixed_json_body(output: &str) -> Option<String> {
-    let mut non_empty_lines = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty());
-    let first_line = non_empty_lines.next()?;
-    if !first_line.starts_with("status=") {
-        return None;
-    }
-    let body = non_empty_lines.collect::<Vec<_>>().join("\n");
-    (!body.is_empty()).then_some(body)
 }
 
 pub(super) fn collect_priority_json_status_scalar_evidence(
