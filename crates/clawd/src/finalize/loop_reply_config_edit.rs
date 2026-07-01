@@ -49,13 +49,6 @@ fn config_edit_observed_value_candidate(value: &serde_json::Value) -> Option<ser
     value
         .get("extra")
         .and_then(config_edit_observed_value_candidate)
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-                .and_then(|text_value| config_edit_observed_value_candidate(&text_value))
-        })
 }
 
 fn step_may_contain_config_edit_observation(step: &crate::executor::StepExecutionResult) -> bool {
