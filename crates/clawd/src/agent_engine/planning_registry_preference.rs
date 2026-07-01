@@ -5,7 +5,77 @@ use std::path::Path;
 use super::planning_actions::planned_action_skill_name;
 use crate::{AgentAction, AppState, RouteResult};
 
-fn route_semantic_tags(route_result: &RouteResult) -> Vec<&'static str> {
+fn route_registry_preference_tags(route_result: &RouteResult) -> Vec<String> {
+    let capability_tags = route_capability_registry_tags(route_result);
+    if !capability_tags.is_empty() {
+        return capability_tags;
+    }
+    route_semantic_fallback_tags(route_result)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn route_capability_registry_tags(route_result: &RouteResult) -> Vec<String> {
+    let mut tags = Vec::new();
+    for token in crate::machine_capability_ref::route_capability_ref_tokens(route_result) {
+        tags.push(token.clone());
+        if let Some((namespace, action)) = token.split_once('.') {
+            tags.push(format!("{namespace}_{action}"));
+            append_capability_alias_tags(&mut tags, namespace, action);
+        }
+    }
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+fn append_capability_alias_tags(tags: &mut Vec<String>, namespace: &str, action: &str) {
+    match namespace {
+        "archive" if matches!(action, "list" | "read" | "pack" | "unpack") => {
+            tags.push(format!("archive_{action}"));
+        }
+        "config" => append_config_capability_alias_tags(tags, action),
+        "docker" => append_docker_capability_alias_tags(tags, action),
+        "package" | "package_manager" if action == "detect" => {
+            tags.push("package.detect_manager".to_string());
+        }
+        _ => {}
+    }
+}
+
+fn append_config_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
+    match action {
+        "validate" | "validate_config" | "validate_after_change" => {
+            tags.push("config_validation".to_string());
+        }
+        "guard_config" | "guard_after_change" | "guard_rustclaw_config" => {
+            tags.push("config_guard".to_string());
+            tags.push("config_risk_assessment".to_string());
+        }
+        "list_keys" => tags.push("structured_keys".to_string()),
+        "read_field" | "read_fields" | "read_back" => tags.push("field_read".to_string()),
+        "plan_change"
+        | "plan_config_change"
+        | "apply_change"
+        | "apply_config_change"
+        | "write_field"
+        | "set_field" => tags.push("config_mutation".to_string()),
+        _ => {}
+    }
+}
+
+fn append_docker_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
+    match action {
+        "ps" | "list" | "list_containers" => tags.push("docker.list_containers".to_string()),
+        "image" | "images" | "list_images" => tags.push("docker.list_images".to_string()),
+        "log" | "logs" | "read" | "read_logs" => tags.push("docker.read_logs".to_string()),
+        "inspect" | "restart" | "start" | "stop" => tags.push("docker.lifecycle".to_string()),
+        _ => {}
+    }
+}
+
+fn route_semantic_fallback_tags(route_result: &RouteResult) -> Vec<&'static str> {
     match route_result.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::None | crate::OutputSemanticKind::RawCommandOutput => Vec::new(),
         crate::OutputSemanticKind::DockerPs => vec!["docker.list_containers"],
@@ -24,7 +94,7 @@ pub(super) fn registry_preferred_skill_names_for_route(
         return Vec::new();
     };
     let enabled_skills = state.get_skills_list();
-    let route_tags = route_semantic_tags(route_result);
+    let route_tags = route_registry_preference_tags(route_result);
     let mut preferred = if route_tags.is_empty() {
         Vec::new()
     } else {
@@ -39,7 +109,7 @@ pub(super) fn registry_preferred_skill_names_for_route(
                             let tag = tag.trim();
                             route_tags
                                 .iter()
-                                .any(|route_tag| tag.eq_ignore_ascii_case(route_tag))
+                                .any(|route_tag| tag.eq_ignore_ascii_case(route_tag.as_str()))
                         })
                 })
             })
