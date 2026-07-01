@@ -242,17 +242,36 @@ pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
 }
 
 pub(crate) fn runtime_contract_snapshot_for_route(route: &RouteResult) -> Option<Value> {
-    let output_contract = route.effective_output_contract();
-    runtime_contract_snapshot_for_output_contract(&output_contract)
+    let matrix = bundled_contract_matrix()?;
+    let contract_snapshot = trace_snapshot_for_route(route)?;
+    let compact_line = compact_prompt_line_for_route(route);
+    Some(runtime_contract_snapshot_value(
+        matrix,
+        contract_snapshot,
+        compact_line,
+    ))
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_contract_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let contract_snapshot = trace_snapshot_for_output_contract(output_contract)?;
     let compact_line = compact_prompt_line_for_output_contract(output_contract);
-    Some(json!({
+    Some(runtime_contract_snapshot_value(
+        matrix,
+        contract_snapshot,
+        compact_line,
+    ))
+}
+
+fn runtime_contract_snapshot_value(
+    matrix: &ContractMatrix,
+    contract_snapshot: Value,
+    compact_line: Option<String>,
+) -> Value {
+    json!({
         "schema_version": 1,
         "matrix": {
             "version": matrix.matrix_version,
@@ -275,9 +294,10 @@ pub(crate) fn runtime_contract_snapshot_for_output_contract(
             })
         }),
         "contract": contract_snapshot,
-    }))
+    })
 }
 
+#[cfg(test)]
 pub(crate) fn trace_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
