@@ -430,13 +430,6 @@ fn raw_tail_read_answer_from_value(value: &Value, prefer_english: bool) -> Optio
     value
         .get("extra")
         .and_then(|extra| raw_tail_read_answer_from_value(extra, prefer_english))
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .and_then(|inner| raw_tail_read_answer_from_value(&inner, prefer_english))
-        })
 }
 
 fn raw_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> Option<String> {
