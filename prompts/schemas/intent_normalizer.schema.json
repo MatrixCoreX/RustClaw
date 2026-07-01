@@ -244,18 +244,6 @@
             "database_kind_judgment",
             "sqlite_schema_version",
             "sqlite_db_schema_version",
-            "archive_list",
-            "archive_listing",
-            "archive_contents",
-            "archive_read",
-            "archive_member_read",
-            "archive_file_read",
-            "archive_pack",
-            "archive_create",
-            "archive_compress",
-            "archive_unpack",
-            "archive_extract",
-            "archive_decompress",
             ""
           ]
         },
