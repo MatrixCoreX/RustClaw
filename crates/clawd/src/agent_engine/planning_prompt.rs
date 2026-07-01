@@ -235,7 +235,7 @@ pub(super) fn build_lightweight_tool_spec(
             "- route_gate_kind={} response_shape={} semantic_kind={} locator_kind={}",
             route.gate_kind().as_str(),
             route.output_contract.response_shape.as_str(),
-            route.output_contract.semantic_kind.as_str(),
+            route.effective_output_contract_semantic_kind().as_str(),
             route.output_contract.locator_kind.as_str(),
         ));
         if !route.output_contract.locator_hint.trim().is_empty() {
@@ -381,6 +381,10 @@ fn registry_planner_metadata_hint(state: &AppState, skill: &str) -> Option<Strin
             manifest.validation_actions.join(", ")
         ));
     }
+    if let Some(capabilities) = super::quick_index_planner_capabilities_metadata(&manifest) {
+        parts.push(capabilities);
+    }
+    parts.push(super::quick_index_output_contract_metadata(&manifest));
     if let Some(retryable) = manifest.retryable {
         parts.push(format!("retryable: {retryable}"));
     }
@@ -533,16 +537,15 @@ pub(super) fn contract_scoped_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
     let route = route_result?;
-    if route.needs_clarify || route.output_contract.semantic_kind == crate::OutputSemanticKind::None
-    {
+    if route.needs_clarify || route.output_contract_is_unclassified() {
         return None;
     }
-    let skills =
-        crate::contract_matrix::allowed_action_refs_for_output_contract(&route.output_contract)
-            .into_iter()
-            .map(|action| action.skill)
-            .filter(|skill| !skill.trim().is_empty())
-            .collect::<BTreeSet<_>>();
+    let output_contract = route.effective_output_contract();
+    let skills = crate::contract_matrix::allowed_action_refs_for_output_contract(&output_contract)
+        .into_iter()
+        .map(|action| action.skill)
+        .filter(|skill| !skill.trim().is_empty())
+        .collect::<BTreeSet<_>>();
     if skills.is_empty() || skills.len() > 10 {
         None
     } else {
@@ -554,15 +557,15 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
     let route = route_result?;
-    if route.needs_clarify || route.output_contract.semantic_kind == crate::OutputSemanticKind::None
-    {
+    if route.needs_clarify || route.output_contract_is_unclassified() {
         return None;
     }
     if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
         return Some(scope);
     }
+    let output_contract = route.effective_output_contract();
     let skills = skills_from_action_refs_capped(
-        crate::contract_matrix::preferred_action_refs_for_output_contract(&route.output_contract),
+        crate::contract_matrix::preferred_action_refs_for_output_contract(&output_contract),
         8,
     );
     if skills.is_empty() {

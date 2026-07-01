@@ -11,6 +11,7 @@ mod dispatch_support;
 mod execution_loop;
 mod filesystem_lifecycle_contract;
 pub(crate) mod loop_control;
+mod loop_state_contract_evidence;
 pub(crate) mod migration_class;
 pub(crate) mod observed_output;
 mod planning;
@@ -25,6 +26,7 @@ mod planning_route_markers;
 mod planning_structured_field_exact;
 mod prepare_round;
 mod skill_execution;
+mod skill_quick_index;
 mod subagent_runtime;
 mod support;
 
@@ -50,7 +52,19 @@ use self::arg_resolver::{
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
+use self::loop_state_contract_evidence::{
+    contract_repair_candidate_evidence_for_loop_seed,
+    default_main_config_contract_evidence_for_loop_seed, first_string_field,
+    pre_loop_clarify_candidates_for_loop_seed, registry_capability_contract_evidence_for_loop_seed,
+    registry_capability_contract_refs,
+};
 use self::prepare_round::{prepare_round_actions, push_round_trace};
+use self::skill_quick_index::{
+    output_contract as quick_index_output_contract,
+    output_contract_metadata as quick_index_output_contract_metadata,
+    planner_capabilities as quick_index_planner_capabilities,
+    planner_capabilities_metadata as quick_index_planner_capabilities_metadata,
+};
 
 pub(crate) use self::filesystem_lifecycle_contract::{
     effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
@@ -77,66 +91,6 @@ pub(crate) fn answer_verifier_enforce_required_enabled_for_route(
 ) -> bool {
     load_agent_loop_guard_policy(state)
         .answer_verifier_required_evidence_enabled_for_route(route_result)
-}
-
-pub(crate) fn agent_loop_semantic_authority_enabled(state: &AppState) -> bool {
-    load_agent_loop_guard_policy(state).uses_agent_loop_semantic_authority()
-}
-
-pub(crate) fn agent_loop_authority_selected_migration_class(
-    state: &AppState,
-    route: &crate::RouteResult,
-) -> Option<&'static str> {
-    let policy = load_agent_loop_guard_policy(state);
-    agent_loop_authority_selected_migration_class_for_policy(&policy, route)
-}
-
-pub(in crate::agent_engine) fn agent_loop_authority_selected_migration_class_for_policy(
-    policy: &AgentLoopGuardPolicy,
-    route: &crate::RouteResult,
-) -> Option<&'static str> {
-    if !policy.uses_agent_loop_semantic_authority()
-        || route.risk_ceiling == crate::RiskCeiling::High
-        || route.schedule_kind != crate::ScheduleKind::None
-    {
-        return None;
-    }
-    let eligible = migration_class::agent_decides_eligible_migration_class(route);
-    let selected = policy.selected_migration_class_for_eligible(eligible);
-    if selected != "none" {
-        Some(selected)
-    } else {
-        None
-    }
-}
-
-pub(crate) fn agent_decides_shadow_snapshot_for_route(
-    state: &AppState,
-    task: &ClaimedTask,
-    agent_run_context: Option<&AgentRunContext>,
-    route: &crate::RouteResult,
-) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
-    let policy = load_agent_loop_guard_policy(state);
-    if !policy.records_agent_decides_attribution() {
-        return None;
-    }
-    let budget_profile = AgentLoopGuardPolicy::budget_profile_for_context(
-        crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
-        Some(route),
-    );
-    Some(
-        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
-            route,
-            budget_profile.as_str(),
-            Some(loop_control::boundary_context_snapshot_json(
-                task,
-                &policy,
-                agent_run_context,
-                Some(route),
-                budget_profile,
-            )),
-        ),
-    )
 }
 
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
@@ -331,6 +285,10 @@ fn build_skill_playbooks_text_scoped(
                 parts.extend(crate::skill_availability::availability_metadata_parts(
                     &crate::skill_availability::evaluate_manifest_availability(&manifest),
                 ));
+                if let Some(capabilities) = quick_index_planner_capabilities_metadata(&manifest) {
+                    parts.push(capabilities);
+                }
+                parts.push(quick_index_output_contract_metadata(&manifest));
                 format!("Registry metadata: {}", parts.join("; "))
             })
             .unwrap_or_default();
@@ -382,65 +340,6 @@ fn first_non_heading_line(text: &str) -> Option<String> {
         })
 }
 
-fn quick_index_planner_capabilities(manifest: &claw_core::skill_registry::SkillManifest) -> String {
-    let tokens = manifest
-        .planner_capabilities
-        .iter()
-        .take(6)
-        .map(|capability| {
-            let name = capability.name.trim();
-            let mut attrs = Vec::new();
-            if let Some(action) = capability.action.as_deref() {
-                if !action.trim().is_empty() {
-                    attrs.push(format!("action={}", action.trim()));
-                }
-            }
-            if let Some(effect) = capability.effect {
-                attrs.push(format!("effect={}", effect.as_token()));
-            }
-            if !capability.required.is_empty() {
-                attrs.push(format!("required={}", capability.required.join("|")));
-            }
-            if let Some(execution_mode) = capability.execution_mode {
-                attrs.push(format!("execution_mode={}", execution_mode.as_token()));
-            }
-            if let Some(async_adapter_kind) = capability.async_adapter_kind.as_deref() {
-                if !async_adapter_kind.trim().is_empty() {
-                    attrs.push(format!("async_adapter_kind={}", async_adapter_kind.trim()));
-                }
-            }
-            if let Some(isolation_profile) = capability.isolation_profile {
-                attrs.push(format!(
-                    "isolation_profile={}",
-                    isolation_profile.as_token()
-                ));
-            }
-            if let Some(network_access) = capability.network_access {
-                attrs.push(format!("network_access={network_access}"));
-            }
-            if let Some(filesystem_write) = capability.filesystem_write {
-                attrs.push(format!("filesystem_write={filesystem_write}"));
-            }
-            if let Some(external_publish) = capability.external_publish {
-                attrs.push(format!("external_publish={external_publish}"));
-            }
-            if let Some(credential_access) = capability.credential_access {
-                attrs.push(format!("credential_access={credential_access}"));
-            }
-            if attrs.is_empty() {
-                name.to_string()
-            } else {
-                format!("{name}({})", attrs.join(","))
-            }
-        })
-        .collect::<Vec<_>>();
-    if tokens.is_empty() {
-        String::new()
-    } else {
-        format!("; planner_capabilities: {}", tokens.join("; "))
-    }
-}
-
 /// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
 fn build_skill_quick_index_text_scoped(
     state: &AppState,
@@ -465,9 +364,10 @@ fn build_skill_quick_index_text_scoped(
             };
         if let Some(manifest) = state.skill_manifest(skill) {
             lines.push(format!(
-                "- {skill}: {summary}; planner_kind: {}{}",
+                "- skill={skill}; summary={summary}; planner_kind={}{}{}",
                 manifest.planner_kind.as_token(),
-                quick_index_planner_capabilities(&manifest)
+                quick_index_planner_capabilities(&manifest),
+                quick_index_output_contract(&manifest)
             ));
         } else {
             lines.push(format!("- {skill}: {summary}"));
@@ -612,11 +512,10 @@ pub(crate) struct LoopState {
     pub(crate) last_recipe_progress_scope:
         Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
     pub(crate) recipe_scope_ready_hint_sent: bool,
-    /// §7.1 output_contract 贯穿全链：normalizer 已经在 RouteResult.output_contract
-    /// 里给出了 response_shape / semantic_kind / locator_hint 等 answer-shape spec；
-    /// 下游 synthesis/finalize 必须看见这些字段，否则容易把 normalizer 标出的
-    /// existence_with_path / scalar / file_token 契约答成自由段落。把契约挂到
-    /// LoopState 上，由 runtime synthesis 和 finalize verifier 共同使用。
+    /// §7.1 output_contract 贯穿全链：RouteResult 里的 output_contract 与 route marker
+    /// 合并成 effective machine contract 后挂到 LoopState 上。下游 synthesis/finalize
+    /// 和无 RouteResult 入参的 preflight 必须看见这些字段，否则容易把结构化
+    /// existence_with_path / scalar / file_token 契约答成自由段落。
     /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
 }
@@ -757,10 +656,10 @@ fn seed_loop_state_from_agent_context(
             "route_locator_kind".to_string(),
             route.output_contract.locator_kind.as_str().to_string(),
         );
-        // §7.1: 把 normalizer 算出的 output_contract 挂到 loop 上，让 synthesis/finalize
-        // 能拿到判定依据。
+        // §7.1: 把合并 route marker 后的 output_contract 挂到 loop 上，让 synthesis/finalize
+        // 和无 RouteResult 入参的 preflight 都能拿到统一机器合同。
         // clone 因为 RouteResult 跨 await 共享，loop 内部要独立可写。
-        loop_state.output_contract = Some(route.output_contract.clone());
+        loop_state.output_contract = Some(route.effective_output_contract());
     }
     if let Some(cross_turn_ctx) = ctx
         .cross_turn_recent_execution_context
@@ -801,6 +700,110 @@ fn seed_loop_state_from_agent_context(
             loop_state
                 .output_vars
                 .insert("required_session_alias_targets".to_string(), encoded);
+        }
+    }
+    let active_bound_targets = active_bound_targets_for_loop_seed(ctx);
+    if !active_bound_targets.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&active_bound_targets) {
+            loop_state
+                .output_vars
+                .insert("active_bound_targets".to_string(), encoded);
+        }
+    }
+    let active_listing_bound_targets = active_listing_bound_targets_for_loop_seed(ctx);
+    if !active_listing_bound_targets.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&active_listing_bound_targets) {
+            loop_state
+                .output_vars
+                .insert("active_listing_bound_targets".to_string(), encoded);
+        }
+    }
+    let current_workspace_scalar_count_targets =
+        current_workspace_scalar_count_targets_for_loop_seed(ctx);
+    if !current_workspace_scalar_count_targets.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&current_workspace_scalar_count_targets) {
+            loop_state.output_vars.insert(
+                "current_workspace_scalar_count_targets".to_string(),
+                encoded,
+            );
+        }
+    }
+    let current_request_locator_evidence = current_request_locator_evidence_for_loop_seed(ctx);
+    if !current_request_locator_evidence.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&current_request_locator_evidence) {
+            loop_state
+                .output_vars
+                .insert("current_request_locator_evidence".to_string(), encoded);
+        }
+    }
+    let current_request_resolved_workspace_child_targets =
+        current_request_resolved_workspace_child_targets(&current_request_locator_evidence);
+    if !current_request_resolved_workspace_child_targets.is_empty() {
+        if let Ok(encoded) =
+            serde_json::to_string(&current_request_resolved_workspace_child_targets)
+        {
+            loop_state.output_vars.insert(
+                "current_request_resolved_workspace_child_targets".to_string(),
+                encoded,
+            );
+        }
+    }
+    let default_main_config_contract_evidence =
+        default_main_config_contract_evidence_for_loop_seed(ctx);
+    if !default_main_config_contract_evidence.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&default_main_config_contract_evidence) {
+            loop_state
+                .output_vars
+                .insert("default_main_config_contract_evidence".to_string(), encoded);
+        }
+        if let Some(logical_path) =
+            first_string_field(&default_main_config_contract_evidence, "logical_path")
+        {
+            loop_state.output_vars.insert(
+                "default_main_config_contract_logical_path".to_string(),
+                logical_path,
+            );
+        }
+        if let Some(workspace_path) =
+            first_string_field(&default_main_config_contract_evidence, "workspace_path")
+        {
+            loop_state.output_vars.insert(
+                "default_main_config_contract_workspace_path".to_string(),
+                workspace_path,
+            );
+        }
+    }
+    let registry_capability_contract_evidence =
+        registry_capability_contract_evidence_for_loop_seed(ctx);
+    if !registry_capability_contract_evidence.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&registry_capability_contract_evidence) {
+            loop_state
+                .output_vars
+                .insert("registry_capability_contract_evidence".to_string(), encoded);
+        }
+        let refs = registry_capability_contract_refs(&registry_capability_contract_evidence);
+        if !refs.is_empty() {
+            if let Ok(encoded) = serde_json::to_string(&refs) {
+                loop_state
+                    .output_vars
+                    .insert("registry_capability_contract_refs".to_string(), encoded);
+            }
+        }
+    }
+    let contract_repair_candidate_evidence = contract_repair_candidate_evidence_for_loop_seed(ctx);
+    if !contract_repair_candidate_evidence.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&contract_repair_candidate_evidence) {
+            loop_state
+                .output_vars
+                .insert("contract_repair_candidate_evidence".to_string(), encoded);
+        }
+    }
+    let pre_loop_clarify_candidates = pre_loop_clarify_candidates_for_loop_seed(ctx);
+    if !pre_loop_clarify_candidates.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&pre_loop_clarify_candidates) {
+            loop_state
+                .output_vars
+                .insert("pre_loop_clarify_candidates".to_string(), encoded);
         }
     }
     if let Some(spec) = ctx.execution_recipe_hint {
@@ -899,6 +902,16 @@ fn session_alias_bindings_for_loop_seed(
 fn session_alias_bindings_from_context_summary(
     summary: &str,
 ) -> Vec<crate::conversation_state::SessionAliasBinding> {
+    let mut out = session_alias_bindings_from_context_alias_block(summary);
+    out.extend(session_alias_bindings_from_boundary_observation_blocks(
+        summary,
+    ));
+    out
+}
+
+fn session_alias_bindings_from_context_alias_block(
+    summary: &str,
+) -> Vec<crate::conversation_state::SessionAliasBinding> {
     let marker = "### SESSION_ALIAS_BINDINGS";
     let Some((_, tail)) = summary.split_once(marker) else {
         return Vec::new();
@@ -932,6 +945,298 @@ fn session_alias_bindings_from_context_summary(
     out
 }
 
+fn session_alias_bindings_from_boundary_observation_blocks(
+    summary: &str,
+) -> Vec<crate::conversation_state::SessionAliasBinding> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(bindings) = value
+            .get("session_alias_bindings")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for binding in bindings {
+            let alias = binding
+                .get("alias")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let target = binding
+                .get("target")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let (Some(alias), Some(target)) = (alias, target) {
+                out.push(crate::conversation_state::SessionAliasBinding {
+                    alias: alias.to_string(),
+                    target: target.to_string(),
+                    updated_at_ts: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn active_bound_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
+    let mut targets = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        targets.extend(active_bound_targets_from_boundary_observation_blocks(
+            summary,
+        ));
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn active_listing_bound_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
+    let mut targets = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        targets.extend(active_listing_bound_targets_from_boundary_observation_blocks(summary));
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn current_workspace_scalar_count_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
+    let mut targets = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        targets.extend(
+            current_workspace_scalar_count_targets_from_boundary_observation_blocks(summary),
+        );
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn current_request_locator_evidence_for_loop_seed(ctx: &AgentRunContext) -> Vec<Value> {
+    let mut evidence = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        evidence.extend(current_request_locator_evidence_from_boundary_observation_blocks(summary));
+    }
+    evidence.sort_by_key(|value| serde_json::to_string(value).unwrap_or_default());
+    evidence.dedup_by(|left, right| left == right);
+    evidence
+}
+
+fn current_request_locator_evidence_from_boundary_observation_blocks(summary: &str) -> Vec<Value> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(locator) = value
+            .get("current_request_locator")
+            .and_then(Value::as_object)
+        else {
+            continue;
+        };
+        let has_concrete_surface = locator
+            .get("has_concrete_surface")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let has_resolved_workspace_child = locator
+            .get("resolved_workspace_child")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|target| !target.is_empty());
+        let has_explicit_locator_hints = locator
+            .get("explicit_locator_hints")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty());
+        if has_concrete_surface || has_resolved_workspace_child || has_explicit_locator_hints {
+            out.push(Value::Object(locator.clone()));
+        }
+    }
+    out
+}
+
+fn current_request_resolved_workspace_child_targets(evidence: &[Value]) -> Vec<String> {
+    let mut targets = evidence
+        .iter()
+        .filter_map(|value| {
+            value
+                .get("resolved_workspace_child")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn active_bound_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(targets) = value.get("active_bound_targets").and_then(Value::as_array) else {
+            continue;
+        };
+        for target_value in targets {
+            let Some(target) = target_value
+                .get("target")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                if let Some(ordered_targets) = target_value
+                    .get("ordered_targets")
+                    .and_then(Value::as_array)
+                {
+                    out.extend(
+                        ordered_targets
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string),
+                    );
+                }
+                continue;
+            };
+            out.push(target.to_string());
+            if let Some(ordered_targets) = target_value
+                .get("ordered_targets")
+                .and_then(Value::as_array)
+            {
+                out.extend(
+                    ordered_targets
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn current_workspace_scalar_count_targets_from_boundary_observation_blocks(
+    summary: &str,
+) -> Vec<String> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(scope) = value.get("current_workspace_scope") else {
+            continue;
+        };
+        let semantic_kind = scope
+            .get("semantic_kind")
+            .and_then(Value::as_str)
+            .map(str::trim);
+        if semantic_kind != Some(crate::OutputSemanticKind::ScalarCount.as_str()) {
+            continue;
+        }
+        let Some(target) = scope
+            .get("target")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        out.push(target.to_string());
+    }
+    out
+}
+
+fn active_listing_bound_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(targets) = value.get("active_bound_targets").and_then(Value::as_array) else {
+            continue;
+        };
+        for target in targets {
+            if !active_target_observation_has_listing_evidence(target) {
+                continue;
+            }
+            let Some(target) = target
+                .get("target")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            out.push(target.to_string());
+        }
+    }
+    out
+}
+
+fn active_target_observation_has_listing_evidence(value: &Value) -> bool {
+    value
+        .get("op_kind")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind == "list")
+        || value
+            .get("ordered_entry_count")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count > 0)
+        || value
+            .get("observed_entry_count")
+            .and_then(Value::as_u64)
+            .is_some()
+}
+
 #[derive(Debug, Clone)]
 struct RoundOutcome {
     executed_actions: usize,
@@ -950,15 +1255,8 @@ pub(crate) struct AgentRunContext {
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
     pub(crate) auto_locator_path: Option<String>,
-    pub(crate) has_authoritative_deictic_anchor: bool,
-    pub(crate) fuzzy_locator_suggestions: Vec<String>,
     pub(crate) original_user_request: Option<String>,
     pub(crate) user_request: Option<String>,
-    pub(crate) semantic_answer_candidate_draft: Option<String>,
-    /// Memory context rendered before the current request is appended.
-    /// This is used only for runtime-bound scalar checks; it must not include
-    /// model-produced answer candidates from the current turn.
-    pub(crate) memory_context_for_execution: Option<String>,
     /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
     /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
     /// list_dir results, alias bindings, etc.) when the current turn references "上一个文件 / 上上个 /
