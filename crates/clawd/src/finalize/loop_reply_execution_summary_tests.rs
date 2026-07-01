@@ -7,7 +7,7 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"read_range","excerpt":"1|{\n2|  \"type\": \"object\",\n3|  \"additionalProperties\": false\n4|}","path":"prompts/schemas/direct_answer_gate.schema.json"}"#,
+        r#"{"action":"read_range","excerpt":"1|{\n2|  \"type\": \"object\",\n3|  \"additionalProperties\": false\n4|}","path":"prompts/schemas/agent_loop_decision_envelope.schema.json"}"#,
     ));
     loop_state.delivery_messages.push(
         "`additionalProperties: false` makes future schema extension more brittle.".to_string(),
@@ -17,7 +17,7 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
-        "prompts/schemas/direct_answer_gate.schema.json".to_string();
+        "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..crate::agent_engine::AgentRunContext::default()
@@ -37,7 +37,7 @@ fn execution_summary_suppressed_for_grounded_content_answer() {
 }
 
 #[test]
-fn execution_summary_attaches_before_final_delivery_without_changing_final_text() {
+fn execution_summary_is_not_attached_before_final_delivery() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -68,15 +68,14 @@ fn execution_summary_attaches_before_final_delivery_without_changing_final_text(
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 2);
-    assert!(delivery[0].contains("**执行过程**"));
-    assert!(delivery[0].contains("命令 `ls -t logs | head -2`"));
-    assert!(delivery[0].contains("model_io.log"));
-    assert!(delivery[0].contains("act_plan.log"));
+    assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
         Some("这更像运行日志。")
     );
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert!(crate::task_journal::delivery_payload_consistent(
         "这更像运行日志。",
         &delivery
@@ -186,7 +185,7 @@ fn evidence_contract_delivery_suppresses_execution_summary_for_status_answer() {
 }
 
 #[test]
-fn execution_summary_uses_japanese_labels_for_japanese_request() {
+fn execution_summary_is_not_attached_for_japanese_request() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -223,11 +222,10 @@ fn execution_summary_uses_japanese_labels_for_japanese_request() {
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 2);
-    assert!(delivery[0].contains("**実行過程**"));
-    assert!(delivery[0].contains("スキル `system_basic`"));
-    assert!(delivery[0].contains("出力："));
-    assert!(crate::finalize::is_execution_summary_message(&delivery[0]));
+    assert_eq!(delivery, vec!["act_plan.log\nclawd.log\nclawd.run.log"]);
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[test]
@@ -511,7 +509,7 @@ fn execution_summary_suppressed_for_scalar_content_synthesis() {
 }
 
 #[test]
-fn execution_summary_attaches_each_execution_step_as_separate_delivery() {
+fn execution_summary_is_not_attached_for_multiple_execution_steps() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -555,19 +553,18 @@ fn execution_summary_attaches_each_execution_step_as_separate_delivery() {
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 3);
-    assert!(delivery[0].contains("命令 `pwd`"));
-    assert!(delivery[0].contains("/home/guagua/rustclaw"));
-    assert!(delivery[1].contains("命令 `date`"));
-    assert!(delivery[1].contains("Sun May 3"));
+    assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
         Some("为什么程序员喜欢黑夜？因为 bug 比较容易显现。")
     );
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[test]
-fn execution_summary_uses_english_labels_for_english_requests() {
+fn execution_summary_message_builder_returns_none_for_english_requests() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -595,21 +592,16 @@ fn execution_summary_uses_english_labels_for_english_requests() {
         ..Default::default()
     };
 
-    let summary = build_execution_summary_message(
+    assert!(build_execution_summary_message(
         &loop_state,
         Some(&ctx),
         Some("List the two most recently modified files in logs, then tell me what they are."),
     )
-    .expect("execution summary");
-
-    assert!(summary.starts_with("**Execution**"));
-    assert!(summary.contains("1. Called command `ls -t logs | head -2`"));
-    assert!(summary.contains("   Output:"));
-    assert!(crate::finalize::is_execution_summary_message(&summary));
+    .is_none());
 }
 
 #[test]
-fn execution_summary_does_not_reuse_same_step_id_from_wrong_round() {
+fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -676,20 +668,16 @@ fn execution_summary_does_not_reuse_same_step_id_from_wrong_round() {
         ..Default::default()
     };
 
-    let summary = build_execution_summary_message(
+    assert!(build_execution_summary_message(
         &loop_state,
         Some(&ctx),
         Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip, then tell me briefly whether it succeeded."),
     )
-    .expect("execution summary");
-
-    assert!(summary.contains("Called skill `archive_basic`"));
-    assert!(summary.contains("Called skill `system_basic`"));
-    assert!(!summary.contains("Called skill `respond`"));
+    .is_none());
 }
 
 #[test]
-fn execution_summary_uses_output_action_when_global_step_ids_shift() {
+fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -756,16 +744,13 @@ fn execution_summary_uses_output_action_when_global_step_ids_shift() {
         route_result: Some(free_route_result()),
         ..Default::default()
     };
-    let summary = build_execution_summary_message(&loop_state, Some(&ctx), Some("把配置项打开"))
-        .expect("execution summary");
-
-    assert!(summary.contains("action=plan_config_change"));
-    assert!(summary.contains("action=apply_config_change"));
-    assert!(!summary.contains("action=validate_config"));
+    assert!(
+        build_execution_summary_message(&loop_state, Some(&ctx), Some("把配置项打开")).is_none()
+    );
 }
 
 #[test]
-fn virtual_tool_execution_summary_uses_tool_label_without_plan_step() {
+fn virtual_tool_execution_summary_builder_stays_disabled_without_plan_step() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -777,19 +762,16 @@ fn virtual_tool_execution_summary_uses_tool_label_without_plan_step() {
         ..Default::default()
     };
 
-    let summary = build_execution_summary_message(
+    assert!(build_execution_summary_message(
         &loop_state,
         Some(&ctx),
         Some("列出当前目录最近修改的文件"),
     )
-    .expect("execution summary");
-
-    assert!(summary.contains("调用工具 `fs_basic`"));
-    assert!(!summary.contains("调用技能 `fs_basic`"));
+    .is_none());
 }
 
 #[test]
-fn virtual_tool_execution_summary_uses_tool_label_even_when_plan_used_call_skill() {
+fn virtual_tool_execution_summary_builder_stays_disabled_when_plan_used_call_skill() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -817,16 +799,14 @@ fn virtual_tool_execution_summary_uses_tool_label_even_when_plan_used_call_skill
         ..Default::default()
     };
 
-    let summary =
+    assert!(
         build_execution_summary_message(&loop_state, Some(&ctx), Some("Compare file sizes."))
-            .expect("execution summary");
-
-    assert!(summary.contains("Called tool `fs_basic`"));
-    assert!(!summary.contains("Called skill `fs_basic`"));
+            .is_none()
+    );
 }
 
 #[test]
-fn observed_synthesis_unavailable_fails_loud_and_keeps_execution_summary() {
+fn observed_synthesis_unavailable_fails_loud_without_execution_summary() {
     let state = test_state();
     let task = claimed_task("task-observed-llm-unavailable");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -852,8 +832,11 @@ fn observed_synthesis_unavailable_fails_loud_and_keeps_execution_summary() {
     assert!(reply.should_fail_task);
     assert!(!reply.text.trim().is_empty());
     assert_eq!(reply.messages.last(), Some(&reply.text));
-    assert!(reply.messages[0].contains("**执行过程**"));
-    assert!(reply.messages[0].contains("Cargo.toml"));
+    assert_eq!(reply.messages.len(), 1);
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert_eq!(
         reply
             .task_journal
@@ -864,7 +847,7 @@ fn observed_synthesis_unavailable_fails_loud_and_keeps_execution_summary() {
 }
 
 #[test]
-fn execution_summary_attaches_for_exact_observed_passthrough_delivery() {
+fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state
         .round_traces
@@ -895,13 +878,14 @@ fn execution_summary_attaches_for_exact_observed_passthrough_delivery() {
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 2);
-    assert!(delivery[0].contains("**执行过程**"));
-    assert!(delivery[0].contains("命令 `pwd`"));
+    assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
         Some("/home/guagua/rustclaw")
     );
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[test]
@@ -1162,7 +1146,7 @@ fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_
 }
 
 #[test]
-fn execution_summary_attaches_for_failed_file_token_delivery() {
+fn execution_summary_is_not_attached_for_failed_file_token_delivery() {
     let mut route = free_route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route.output_contract.delivery_required = true;
@@ -1196,14 +1180,14 @@ fn execution_summary_attaches_for_failed_file_token_delivery() {
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 2);
-    assert!(delivery[0].contains("**执行过程**"));
-    assert!(delivery[0].contains("read_file"));
-    assert!(delivery[0].contains("file not found"));
+    assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
         Some("File not found at the provided path.")
     );
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[test]
@@ -1332,14 +1316,14 @@ fn execution_summary_includes_direct_fs_search_structured_observation() {
 
     attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-    assert_eq!(delivery.len(), 2);
-    assert!(crate::finalize::is_execution_summary_message(&delivery[0]));
-    assert!(delivery[0].contains("fs_search"));
-    assert!(delivery[0].contains("rustclaw.service"));
+    assert_eq!(delivery.len(), 1);
     assert_eq!(
         delivery.last().map(String::as_str),
         Some("有，路径：rustclaw.service")
     );
+    assert!(delivery
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[test]
@@ -1377,7 +1361,7 @@ fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() 
 }
 
 #[test]
-fn execution_summary_truncates_long_outputs_with_ascii_ellipsis() {
+fn execution_summary_builder_stays_disabled_for_long_outputs() {
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(free_route_result()),
         ..Default::default()
@@ -1388,20 +1372,11 @@ fn execution_summary_truncates_long_outputs_with_ascii_ellipsis() {
         .executed_step_results
         .push(ok_step_result("step_1", "system_basic", &long_output));
 
-    let summary =
-        build_execution_summary_message(&loop_state, Some(&ctx), None).expect("execution summary");
-
-    assert!(summary.contains("..."));
-    assert!(!summary.contains("END"));
-    assert!(
-        summary.len() < 700,
-        "summary should stay compact, got {} chars",
-        summary.len()
-    );
+    assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
 }
 
 #[test]
-fn execution_summary_normalizes_recoverable_crypto_account_error() {
+fn execution_summary_builder_stays_disabled_for_recoverable_crypto_account_error() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_recoverable_failure_context = true;
     let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
@@ -1416,11 +1391,7 @@ fn execution_summary_normalizes_recoverable_crypto_account_error() {
     let summaries =
         build_execution_summary_messages(&loop_state, Some(&agent_run_context), Some("查一下持仓"));
 
-    assert_eq!(summaries.len(), 1);
-    assert!(summaries[0].contains("message_key=crypto.err.account_access_failed"));
-    assert!(summaries[0].contains("error_kind=account_access_failed"));
-    assert!(summaries[0].contains("exchange=binance"));
-    assert!(!summaries[0].contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
+    assert!(summaries.is_empty());
 }
 
 #[test]

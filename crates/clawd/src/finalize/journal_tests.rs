@@ -79,7 +79,7 @@ fn build_from_loop_state_records_rollout_switches() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
         "rollout_switches_enabled".to_string(),
-        "registry_idempotency_guard_scope,semantic_route_authority".to_string(),
+        "registry_idempotency_guard_scope,answer_verifier_enforce_required_scope".to_string(),
     );
 
     let journal = build_from_loop_state(
@@ -96,8 +96,8 @@ fn build_from_loop_state_records_rollout_switches() {
     assert_eq!(
         journal.rollout_switches_enabled,
         vec![
-            "registry_idempotency_guard_scope".to_string(),
-            "semantic_route_authority".to_string()
+            "answer_verifier_enforce_required_scope".to_string(),
+            "registry_idempotency_guard_scope".to_string()
         ]
     );
     assert_eq!(
@@ -105,14 +105,14 @@ fn build_from_loop_state_records_rollout_switches() {
             .to_summary_json()
             .pointer("/rollout_switches_enabled/0")
             .and_then(serde_json::Value::as_str),
-        Some("registry_idempotency_guard_scope")
+        Some("answer_verifier_enforce_required_scope")
     );
     assert_eq!(
         journal
             .to_trace_json()
             .pointer("/rollout_switches_enabled/1")
             .and_then(serde_json::Value::as_str),
-        Some("semantic_route_authority")
+        Some("registry_idempotency_guard_scope")
     );
 }
 

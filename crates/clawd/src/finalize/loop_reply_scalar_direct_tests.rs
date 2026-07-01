@@ -1,4 +1,5 @@
 use super::*;
+use crate::finalize::loop_reply::replace_delivery_with_direct_scalar_observed_answer;
 
 #[tokio::test]
 async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error() {
@@ -160,6 +161,169 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_replaces_partial_recent_scalar_delivery_with_observed_fields() {
+    let state = test_state();
+    let task = claimed_task("task-recent-scalar-compare-paths-fields");
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true,"kind":"file","path":"service_notes.md"},"right":{"exists":true,"kind":"file","path":"release_checklist.md"}},"text":"{}"}"#,
+    ));
+    loop_state
+        .delivery_messages
+        .push("same_path=false".to_string());
+    loop_state.last_user_visible_respond = Some("same_path=false".to_string());
+    let (direct_answer, _) =
+        direct_scalar_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
+            .expect("direct scalar answer should use compare_paths field_value");
+    assert_eq!(
+        direct_answer,
+        "same_path=false\nleft_exists=true\nright_exists=true"
+    );
+    let mut replacement_state = loop_state.clone();
+    let mut finalizer_summary = None;
+    assert!(replace_delivery_with_direct_scalar_observed_answer(
+        &state,
+        &task,
+        &mut replacement_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary
+    ));
+    assert_eq!(
+        replacement_state.last_user_visible_respond.as_deref(),
+        Some("same_path=false\nleft_exists=true\nright_exists=true")
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return same_path and existence fields",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve observed fields");
+
+    assert_eq!(
+        reply.text,
+        "same_path=false\nleft_exists=true\nright_exists=true"
+    );
+    assert_eq!(
+        reply.messages,
+        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()]
+    );
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_restores_recent_scalar_existence_fields_after_late_compression() {
+    let state = test_state();
+    let task = claimed_task("task-recent-scalar-late-existence-restore");
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let richer_answer = "same_path=false\nleft_exists=true\nright_exists=true";
+    let mut loop_state = crate::agent_engine::LoopState::new(5);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true,"kind":"file","path":"service_notes.md"},"right":{"exists":true,"kind":"file","path":"release_checklist.md"}},"text":"{}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        richer_answer,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", richer_answer));
+    loop_state.delivery_messages.push(richer_answer.to_string());
+    loop_state.last_publishable_synthesis_output = Some(richer_answer.to_string());
+    loop_state.last_user_visible_respond = Some(richer_answer.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return same_path and both exist fields",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should restore compare_paths existence fields");
+
+    assert_eq!(reply.text, richer_answer);
+    assert_eq!(reply.messages, vec![richer_answer.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_preserves_richer_existence_summary_delivery_with_same_path_marker() {
+    let state = test_state();
+    let task = claimed_task("task-existence-summary-same-path-richer");
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPathSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let richer_answer =
+        "same_path=false\nservice_notes.md exists=true\nrelease_checklist.md exists=true";
+    let mut loop_state = crate::agent_engine::LoopState::new(5);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"path_batch_facts","facts":[{"path":"service_notes.md","exists":true},{"path":"release_checklist.md","exists":true}]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        richer_answer,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", richer_answer));
+    loop_state.delivery_messages.push(richer_answer.to_string());
+    loop_state.last_publishable_synthesis_output = Some(richer_answer.to_string());
+    loop_state.last_user_visible_respond = Some(richer_answer.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return same_path and both exist fields",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve required evidence fields");
+
+    assert_eq!(reply.text, richer_answer);
+    assert_eq!(reply.messages, vec![richer_answer.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_path() {
     let state = test_state();
     let task = claimed_task("task-scalar-path-field-placeholder");
@@ -289,9 +453,10 @@ async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
     );
     let task = claimed_task("task-wrapped-market-quote-scalar");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
+    route.resolved_intent = "capability_ref=crypto.quote symbol=BTCUSDT".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -440,7 +605,7 @@ fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sent
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -472,7 +637,7 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -777,6 +942,34 @@ fn direct_scalar_finalize_uses_total_count_without_component_plan() {
     let (answer, summary) =
         direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
             .expect("total count should be usable directly");
+
+    assert_eq!(answer.trim(), "66");
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
+fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26},"path":"logs"},"text":"{\"action\":\"count_inventory\",\"counts\":{\"total\":66,\"files\":40,\"dirs\":26},\"path\":\"logs\"}"}"#,
+    ));
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.locator_hint = "logs".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        original_user_request: Some("count direct entries".to_string()),
+        ..Default::default()
+    };
+
+    let (answer, summary) =
+        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+            .expect("wrapped count inventory total should be usable directly");
 
     assert_eq!(answer.trim(), "66");
     assert_eq!(
