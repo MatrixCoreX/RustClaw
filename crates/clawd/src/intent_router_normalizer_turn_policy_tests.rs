@@ -600,8 +600,8 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(
-        super::should_downgrade_orphan_output_shape_clarify_to_direct_answer(
+    assert_eq!(
+        super::orphan_output_shape_loop_context_hint(
             Some(&snapshot_without_primary),
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -610,7 +610,8 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
             None,
             false,
             false,
-        )
+        ),
+        Some("orphan_output_shape_loop_context")
     );
 
     let snapshot_with_primary = crate::conversation_state::ActiveSessionSnapshot {
@@ -622,8 +623,8 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(
-        !super::should_downgrade_orphan_output_shape_clarify_to_direct_answer(
+    assert_eq!(
+        super::orphan_output_shape_loop_context_hint(
             Some(&snapshot_with_primary),
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -632,7 +633,8 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
             None,
             false,
             false,
-        )
+        ),
+        None
     );
 }
 
@@ -705,7 +707,7 @@ fn missing_turn_type_with_active_task_policy_infers_mutation_type() {
 }
 
 #[test]
-fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
+fn standalone_freeform_clarify_emits_loop_context_hint() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Free,
@@ -718,8 +720,8 @@ fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
         self_extension: crate::SelfExtensionContract::default(),
     };
 
-    assert!(
-        super::should_downgrade_standalone_freeform_clarify_to_direct_answer(
+    assert_eq!(
+        super::standalone_freeform_clarify_loop_context_hint(
             None,
             Some(TurnType::TaskRequest),
             None,
@@ -730,10 +732,11 @@ fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
             false,
             false,
             crate::ScheduleKind::None,
-        )
+        ),
+        Some("standalone_freeform_clarify_loop_context")
     );
-    assert!(
-        super::should_downgrade_standalone_freeform_clarify_to_direct_answer(
+    assert_eq!(
+        super::standalone_freeform_clarify_loop_context_hint(
             None,
             Some(TurnType::TaskRequest),
             Some(TargetTaskPolicy::ReuseActive),
@@ -744,12 +747,13 @@ fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
             false,
             false,
             crate::ScheduleKind::None,
-        )
+        ),
+        Some("standalone_freeform_clarify_loop_context")
     );
 }
 
 #[test]
-fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks() {
+fn standalone_freeform_clarify_loop_context_preserves_observable_and_active_tasks() {
     let observable_contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::Free,
@@ -761,8 +765,8 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
         locator_hint: String::new(),
         self_extension: crate::SelfExtensionContract::default(),
     };
-    assert!(
-        !super::should_downgrade_standalone_freeform_clarify_to_direct_answer(
+    assert_eq!(
+        super::standalone_freeform_clarify_loop_context_hint(
             None,
             Some(TurnType::TaskRequest),
             None,
@@ -773,7 +777,8 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
             false,
             false,
             crate::ScheduleKind::None,
-        )
+        ),
+        None
     );
 
     let snapshot_with_primary = crate::conversation_state::ActiveSessionSnapshot {
@@ -796,8 +801,8 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
         locator_hint: String::new(),
         self_extension: crate::SelfExtensionContract::default(),
     };
-    assert!(
-        !super::should_downgrade_standalone_freeform_clarify_to_direct_answer(
+    assert_eq!(
+        super::standalone_freeform_clarify_loop_context_hint(
             Some(&snapshot_with_primary),
             Some(TurnType::TaskRequest),
             None,
@@ -808,7 +813,8 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
             false,
             false,
             crate::ScheduleKind::None,
-        )
+        ),
+        None
     );
 }
 

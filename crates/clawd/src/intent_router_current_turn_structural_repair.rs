@@ -98,7 +98,7 @@ pub(super) fn should_detach_bare_acknowledgement_from_active_task(
         && state_patch.is_none()
 }
 
-pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
+pub(super) fn orphan_output_shape_loop_context_hint(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -107,8 +107,8 @@ pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
     attachment_processing_required: bool,
-) -> bool {
-    needs_clarify
+) -> Option<&'static str> {
+    (needs_clarify
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(
             turn_type,
@@ -128,10 +128,11 @@ pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
             OutputResponseShape::Free
                 | OutputResponseShape::OneSentence
                 | OutputResponseShape::Strict
-        )
+        ))
+    .then_some("orphan_output_shape_loop_context")
 }
 
-pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
+pub(super) fn standalone_freeform_clarify_loop_context_hint(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -142,8 +143,8 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
     attachment_processing_required: bool,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
-) -> bool {
-    needs_clarify
+) -> Option<&'static str> {
+    (needs_clarify
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(turn_type, None | Some(TurnType::TaskRequest))
         && matches!(
@@ -160,7 +161,8 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && output_contract.semantic_kind_is_unclassified()
-        && matches!(output_contract.response_shape, OutputResponseShape::Free)
+        && matches!(output_contract.response_shape, OutputResponseShape::Free))
+    .then_some("standalone_freeform_clarify_loop_context")
 }
 
 pub(super) fn infer_missing_target_policy_from_contract(

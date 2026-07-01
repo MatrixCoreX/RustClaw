@@ -640,7 +640,7 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(&scope_hint)
             );
         }
-        if should_downgrade_orphan_output_shape_clarify_to_direct_answer(
+        if let Some(loop_context_reason) = orphan_output_shape_loop_context_hint(
             session_snapshot,
             turn_type,
             target_task_policy,
@@ -650,21 +650,15 @@ pub(crate) async fn run_intent_normalizer(
             out.should_refresh_long_term_memory,
             attachment_processing_required,
         ) {
-            needs_clarify = false;
-            clarify_question.clear();
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            turn_type = None;
-            target_task_policy = None;
-            force_current_request_resolved_intent = true;
-            append_route_reason(&mut reason, "orphan_output_shape_ack_chat");
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} orphan_output_shape_ack_chat input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=orphan_output_shape_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
             );
         }
-        if should_downgrade_standalone_freeform_clarify_to_direct_answer(
+        if let Some(loop_context_reason) = standalone_freeform_clarify_loop_context_hint(
             session_snapshot,
             turn_type,
             target_task_policy,
@@ -676,15 +670,9 @@ pub(crate) async fn run_intent_normalizer(
             wants_file_delivery,
             schedule_kind,
         ) {
-            needs_clarify = false;
-            clarify_question.clear();
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            turn_type = Some(TurnType::TaskRequest);
-            target_task_policy = Some(TargetTaskPolicy::Standalone);
-            force_current_request_resolved_intent = true;
-            reason = "standalone_freeform_clarify_downgraded_to_direct_answer".to_string();
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} standalone_freeform_clarify_downgraded_to_direct_answer input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=standalone_freeform_clarify_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
