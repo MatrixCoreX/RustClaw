@@ -76,21 +76,6 @@ pub(super) fn runtime_status_scalar_info_fallback_plan_result(
     None
 }
 
-pub(super) fn request_mentions_workspace_product(state: &AppState, text: &str) -> bool {
-    let Some(product) = state
-        .skill_rt
-        .workspace_root
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
-    };
-    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
-        .any(|token| token.eq_ignore_ascii_case(product))
-}
-
 pub(super) fn first_port_filter_token(text: &str) -> Option<String> {
     text.split_whitespace()
         .find_map(port_filter_from_structural_token)
