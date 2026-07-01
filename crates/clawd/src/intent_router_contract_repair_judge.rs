@@ -3,12 +3,12 @@ use serde_json::{json, Value};
 use tracing::info;
 
 use super::{
-    append_route_reason, is_meaningful_state_patch, normalize_schema_token,
-    output_contract_structured_config_path, parse_output_contract, parse_output_delivery_intent,
-    parse_output_response_shape, parse_output_semantic_kind, parse_target_task_policy,
-    parse_turn_type, ContractRepairReport, FirstLayerDecision, IntentExecutionRecipeOut,
-    IntentNormalizerOut, IntentOutputContract, IntentOutputContractOut, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, TargetTaskPolicy, TurnType,
+    append_route_reason, is_meaningful_state_patch, normalize_schema_token, parse_output_contract,
+    parse_output_delivery_intent, parse_output_response_shape, parse_output_semantic_kind,
+    parse_target_task_policy, parse_turn_type, ContractRepairReport, FirstLayerDecision,
+    IntentExecutionRecipeOut, IntentNormalizerOut, IntentOutputContract, IntentOutputContractOut,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    TargetTaskPolicy, TurnType,
 };
 use crate::{llm_gateway, AppState, ClaimedTask};
 
@@ -170,14 +170,6 @@ pub(super) fn apply_contract_repair_judge_output(
     if !contract_repair_reason_has_boundary_machine_authority(&repair.reason) {
         return false;
     }
-    let preserved_structured_config_keys = preserve_structured_config_key_contract_during_repair(
-        out.output_contract.as_ref(),
-        &mut output_contract,
-    );
-    let preserved_structured_scalar_field = preserve_structured_scalar_field_contract_during_repair(
-        out.output_contract.as_ref(),
-        &mut output_contract,
-    );
     let missing_turn_binding_for_content_read =
         contract_repair_reason_requires_missing_locator_clarify(&repair.reason);
     let repaired_active_continuation = repair_reason_has_machine_marker(
@@ -296,15 +288,6 @@ pub(super) fn apply_contract_repair_judge_output(
     append_route_reason(&mut out.reason, "contract_repair_applied");
     if !repair.reason.trim().is_empty() {
         append_route_reason(&mut out.reason, "contract_repair_note_present");
-    }
-    if preserved_structured_config_keys {
-        append_route_reason(&mut out.reason, "structured_config_key_contract_preserved");
-    }
-    if preserved_structured_scalar_field {
-        append_route_reason(
-            &mut out.reason,
-            "structured_scalar_field_contract_preserved",
-        );
     }
     if repaired_active_continuation {
         out.turn_type = TurnType::StatusQuery.as_str().to_string();
@@ -479,87 +462,6 @@ fn repair_reason_has_machine_marker(reason: &str, marker: &str) -> bool {
     reason
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
         .any(|token| token == marker)
-}
-
-fn preserve_structured_config_key_contract_during_repair(
-    current: Option<&IntentOutputContractOut>,
-    repair: &mut IntentOutputContractOut,
-) -> bool {
-    let Some(current) = current else {
-        return false;
-    };
-    let current_contract = parse_output_contract(Some(current.clone()), false);
-    let repaired_contract = parse_output_contract(Some(repair.clone()), false);
-    if !current_contract.semantic_kind_is(OutputSemanticKind::StructuredKeys)
-        || !repaired_contract.semantic_kind_is_unclassified()
-        || current_contract.delivery_required
-        || repaired_contract.delivery_required
-        || !matches!(current_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(
-            repaired_contract.delivery_intent,
-            OutputDeliveryIntent::None
-        )
-        || output_contract_structured_config_path(&current_contract).is_none()
-        || output_contract_structured_config_path(&repaired_contract).is_none()
-    {
-        return false;
-    }
-    repair.semantic_kind = OutputSemanticKind::StructuredKeys.as_str().to_string();
-    repair.requires_content_evidence = true;
-    repair.delivery_required = false;
-    repair.delivery_intent = OutputDeliveryIntent::None.as_str().to_string();
-    if matches!(
-        repaired_contract.response_shape,
-        OutputResponseShape::Free | OutputResponseShape::OneSentence
-    ) {
-        repair.response_shape = OutputResponseShape::Strict.as_str().to_string();
-    }
-    true
-}
-
-fn preserve_structured_scalar_field_contract_during_repair(
-    current: Option<&IntentOutputContractOut>,
-    repair: &mut IntentOutputContractOut,
-) -> bool {
-    let Some(current) = current else {
-        return false;
-    };
-    let current_contract = parse_output_contract(Some(current.clone()), false);
-    let repaired_contract = parse_output_contract(Some(repair.clone()), false);
-    if !current_contract.semantic_kind_is_unclassified()
-        || !repaired_contract.semantic_kind_is(OutputSemanticKind::ContentExcerptSummary)
-        || !matches!(
-            current_contract.response_shape,
-            OutputResponseShape::Scalar | OutputResponseShape::Strict
-        )
-        || !matches!(
-            repaired_contract.response_shape,
-            OutputResponseShape::Scalar | OutputResponseShape::Strict
-        )
-        || !current_contract.requires_content_evidence
-        || current_contract.delivery_required
-        || repaired_contract.delivery_required
-        || !matches!(current_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(
-            repaired_contract.delivery_intent,
-            OutputDeliveryIntent::None
-        )
-        || output_contract_structured_config_path(&current_contract).is_none()
-        || output_contract_structured_config_path(&repaired_contract).is_none()
-    {
-        return false;
-    }
-    repair.semantic_kind = OutputSemanticKind::None.as_str().to_string();
-    repair.requires_content_evidence = true;
-    repair.delivery_required = false;
-    repair.delivery_intent = OutputDeliveryIntent::None.as_str().to_string();
-    if matches!(
-        repaired_contract.response_shape,
-        OutputResponseShape::Free | OutputResponseShape::OneSentence
-    ) {
-        repair.response_shape = current_contract.response_shape.as_str().to_string();
-    }
-    true
 }
 
 fn contract_repair_reason_requires_missing_locator_clarify(reason: &str) -> bool {
