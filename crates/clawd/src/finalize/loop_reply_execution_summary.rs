@@ -2,15 +2,18 @@ use std::path::Path;
 
 use crate::agent_engine::{AgentRunContext, LoopState};
 
+#[cfg(test)]
 use super::{
     delivery_matches_config_guard_answer, delivery_message_is_json_container,
     first_markdown_heading_from_read_output, last_respond_matches_single_line_observation,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    markdown_heading_from_line, message_is_non_answer_separator,
+    looks_like_raw_command_snapshot, markdown_heading_from_line, message_is_non_answer_separator,
     output_contract_requests_exact_delivery,
     route_allows_observed_markdown_heading_scalar_delivery, route_has_contract_matrix_final_shape,
     route_requires_matrix_deterministic_final_answer, single_publishable_delivery_message,
-    step_output_is_read_range, valid_publishable_synthesis_output,
+};
+use super::{
+    looks_like_structured_machine_output, step_output_is_read_range,
+    valid_publishable_synthesis_output,
 };
 
 #[cfg(test)]
@@ -22,6 +25,7 @@ pub(super) fn should_attach_execution_summary(
     false
 }
 
+#[cfg(test)]
 pub(super) fn route_requires_content_excerpt_evidence(route: &crate::RouteResult) -> bool {
     crate::task_contract::required_evidence_fields_for_route(route)
         .iter()
@@ -334,6 +338,7 @@ pub(super) fn output_text_from_execution_result(
     Some(crate::visible_text::sanitize_user_visible_text(trimmed))
 }
 
+#[cfg(test)]
 pub(super) fn build_execution_summary_messages(
     _loop_state: &LoopState,
     _agent_run_context: Option<&AgentRunContext>,
@@ -365,6 +370,7 @@ pub(super) fn attach_execution_summary_to_delivery(
     delivery_messages.retain(|message| !crate::finalize::is_execution_summary_message(message));
 }
 
+#[cfg(test)]
 pub(super) fn delivery_contract_suppresses_execution_summary(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -449,6 +455,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     })
 }
 
+#[cfg(test)]
 fn delivery_token_contract_suppresses_execution_summary(
     route: &crate::RouteResult,
     delivery_messages: &[String],
@@ -475,12 +482,14 @@ pub(super) fn delivery_messages_include_delivery_token(delivery_messages: &[Stri
     })
 }
 
+#[cfg(test)]
 fn delivery_messages_have_execution_summary(delivery_messages: &[String]) -> bool {
     delivery_messages
         .iter()
         .any(|message| crate::finalize::is_execution_summary_message(message))
 }
 
+#[cfg(test)]
 fn delivery_keeps_execution_summary_for_context(
     route: &crate::RouteResult,
     loop_state: &LoopState,
@@ -555,6 +564,7 @@ pub(super) fn latest_publishable_synthesis_matches_written_file_path(
         .is_some_and(|path| same_observed_or_display_path(synthesis, path))
 }
 
+#[cfg(test)]
 fn delivery_matches_observed_markdown_heading_delivery(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -597,6 +607,7 @@ fn delivery_matches_observed_markdown_heading_delivery(
         .is_some_and(|observed_heading| observed_heading.trim() == delivery_heading.trim())
 }
 
+#[cfg(test)]
 fn delivery_matches_latest_read_range_synthesis(
     loop_state: &LoopState,
     route: &crate::RouteResult,
@@ -625,6 +636,7 @@ fn delivery_matches_latest_read_range_synthesis(
         .any(step_output_is_read_range)
 }
 
+#[cfg(test)]
 fn delivery_matches_latest_structured_scalar_observation(
     loop_state: &LoopState,
     route: &crate::RouteResult,
@@ -640,6 +652,7 @@ fn delivery_matches_latest_structured_scalar_observation(
         .is_some_and(|observed_text| delivery_text == observed_text.trim())
 }
 
+#[cfg(test)]
 fn delivery_matches_synthesized_content_answer(
     loop_state: &LoopState,
     route: &crate::RouteResult,
@@ -683,6 +696,7 @@ fn delivery_matches_synthesized_content_answer(
     })
 }
 
+#[cfg(test)]
 fn delivery_matches_grounded_content_answer(
     loop_state: &LoopState,
     route: &crate::RouteResult,
@@ -743,6 +757,7 @@ fn delivery_matches_grounded_content_answer(
     })
 }
 
+#[cfg(test)]
 fn delivery_has_synthesized_answer_result(
     loop_state: &LoopState,
     route: &crate::RouteResult,
@@ -771,6 +786,7 @@ fn delivery_has_synthesized_answer_result(
     })
 }
 
+#[cfg(test)]
 fn delivery_matches_latest_transform_observation(
     loop_state: &LoopState,
     delivery_messages: &[String],

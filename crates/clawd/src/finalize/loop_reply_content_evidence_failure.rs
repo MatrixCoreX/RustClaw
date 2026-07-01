@@ -3,11 +3,10 @@ use crate::finalize::build_from_loop_state as build_loop_journal;
 use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
-    build_execution_summary_messages, direct_scalar_observed_answer,
-    execution_summary_arg_is_sensitive, latest_tail_read_range_observed_answer,
-    plan_step_for_execution, prefer_english_for_agent_contextual_user_text,
-    route_prefers_observed_answer, route_requires_content_evidence, route_resolved_intent,
-    truncate_with_ellipsis,
+    direct_scalar_observed_answer, execution_summary_arg_is_sensitive,
+    latest_tail_read_range_observed_answer, plan_step_for_execution,
+    prefer_english_for_agent_contextual_user_text, route_prefers_observed_answer,
+    route_requires_content_evidence, route_resolved_intent, truncate_with_ellipsis,
 };
 
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
@@ -32,7 +31,7 @@ fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool 
     matches!(
         agent_run_context
             .and_then(|ctx| ctx.route_result.as_ref())
-            .map(|route| route.output_contract.semantic_kind),
+            .map(|route| route.effective_output_contract_semantic_kind()),
         Some(crate::OutputSemanticKind::ServiceStatus)
     )
 }
@@ -598,13 +597,7 @@ pub(super) async fn content_evidence_step_failure_reply_from_loop(
     let (error_answer, summary) =
         content_evidence_step_failure_answer(state, task, user_text, loop_state, agent_run_context)
             .await?;
-    let mut delivery_messages = if content_evidence_failure_suppresses_execution_summary(loop_state)
-    {
-        Vec::new()
-    } else {
-        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text))
-    };
-    delivery_messages.push(error_answer.clone());
+    let delivery_messages = vec![error_answer.clone()];
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&error_answer, &delivery_messages);
     let should_fail = !matches!(
@@ -636,6 +629,7 @@ pub(super) async fn content_evidence_step_failure_reply_from_loop(
     })
 }
 
+#[cfg(test)]
 pub(super) fn content_evidence_failure_suppresses_execution_summary(
     loop_state: &LoopState,
 ) -> bool {

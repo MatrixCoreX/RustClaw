@@ -131,14 +131,15 @@ pub(crate) use output_read_range::{
 #[path = "observed_output_structured_scalar.rs"]
 mod output_structured_scalar;
 #[cfg(test)]
+pub(crate) use output_structured_scalar::latest_structured_scalar_observation_text;
+#[cfg(test)]
 use output_structured_scalar::structured_scalar_observation_from_extract_item;
-pub(crate) use output_structured_scalar::{
-    latest_structured_scalar_observation_text, recent_structured_scalar_observation_count,
-    structured_scalar_equality_direct_answer,
-};
 use output_structured_scalar::{
     multiple_structured_scalar_observations_need_synthesis,
     route_needs_structured_scalar_pair_synthesis, structured_scalar_observation_from_value,
+};
+pub(crate) use output_structured_scalar::{
+    recent_structured_scalar_observation_count, structured_scalar_equality_direct_answer,
 };
 
 #[path = "observed_output_structured_fields.rs"]

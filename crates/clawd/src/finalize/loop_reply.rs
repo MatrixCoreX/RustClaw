@@ -13,10 +13,9 @@ use delivery_record::log_deterministic_delivery_record;
 
 #[path = "loop_reply_delivery_text.rs"]
 mod delivery_text;
-use delivery_text::{
-    delivery_is_single_line_text, final_answer_text_from_delivery,
-    single_publishable_delivery_message,
-};
+#[cfg(test)]
+use delivery_text::single_publishable_delivery_message;
+use delivery_text::{delivery_is_single_line_text, final_answer_text_from_delivery};
 
 #[path = "loop_reply_service_status.rs"]
 mod service_status;
@@ -48,8 +47,10 @@ use directory_purpose::{
 
 #[path = "loop_reply_config_edit.rs"]
 mod config_edit;
+#[cfg(test)]
+use config_edit::delivery_matches_config_guard_answer;
 pub(crate) use config_edit::direct_config_edit_observed_answer;
-use config_edit::{delivery_matches_config_guard_answer, direct_rustclaw_config_risk_answer};
+use config_edit::direct_rustclaw_config_risk_answer;
 
 #[path = "loop_reply_structured_observation.rs"]
 mod structured_observation;
@@ -83,16 +84,19 @@ mod markdown_scalar;
 use markdown_scalar::markdown_heading_from_read_output;
 use markdown_scalar::{
     deterministic_scalar_markdown_heading_answer_from_loop,
-    first_markdown_heading_from_read_output, markdown_heading_from_line,
     replace_delivery_with_observed_markdown_heading_scalar,
+};
+
+#[cfg(test)]
+use markdown_scalar::{
+    first_markdown_heading_from_read_output, markdown_heading_from_line,
     route_allows_observed_markdown_heading_scalar_delivery,
 };
 
 #[path = "loop_reply_execution_summary.rs"]
 mod execution_summary;
 use execution_summary::{
-    attach_execution_summary_to_delivery, build_execution_summary_messages,
-    delivery_contract_suppresses_execution_summary, delivery_matches_latest_publishable_synthesis,
+    attach_execution_summary_to_delivery, delivery_matches_latest_publishable_synthesis,
     delivery_messages_include_delivery_token, directory_entry_groups_prefers_observed_groups,
     execution_summary_arg_is_sensitive, execution_summary_value_to_string,
     latest_grounded_synthesis_for_mixed_listing_contract,
@@ -101,7 +105,10 @@ use execution_summary::{
     plan_step_for_execution, raw_command_arg_from_plan_step, truncate_with_ellipsis,
 };
 #[cfg(test)]
-use execution_summary::{build_execution_summary_message, should_attach_execution_summary};
+use execution_summary::{
+    build_execution_summary_message, build_execution_summary_messages,
+    delivery_contract_suppresses_execution_summary, should_attach_execution_summary,
+};
 
 #[path = "loop_reply_raw_command.rs"]
 mod raw_command;
@@ -163,11 +170,13 @@ pub(crate) use matrix_shape::deterministic_matrix_observed_shape_answer;
 use matrix_shape::{
     agent_context_allows_observed_output_language_fallback, matrix_strict_list_observed_answer,
 };
+#[cfg(test)]
+use matrix_shape::route_has_contract_matrix_final_shape;
 use matrix_shape::{
     current_synthesis_satisfies_matrix_shape,
     finalizer_summary_requires_matrix_observed_replacement, matrix_candidate_satisfies_final_shape,
     matrix_grouped_name_list_observed_answer, matrix_observed_shape_summary,
-    replace_delivery_with_matrix_observed_shape_answer, route_has_contract_matrix_final_shape,
+    replace_delivery_with_matrix_observed_shape_answer,
     route_requires_matrix_deterministic_final_answer, route_requires_observed_semantic_projection,
     should_try_observed_output_language_fallback, synthetic_task_for_matrix_shape_check,
 };

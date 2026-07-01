@@ -1,11 +1,14 @@
 use std::path::Path;
 
+#[cfg(test)]
 use crate::agent_engine::LoopState;
 use crate::AppState;
 
+#[cfg(test)]
+use super::single_publishable_delivery_message;
 use super::{
     deterministic_observed_execution_status_summary, execution_summary_value_to_string,
-    prefer_english_for_user_text, single_publishable_delivery_message,
+    prefer_english_for_user_text,
 };
 
 #[derive(Debug)]
@@ -669,6 +672,7 @@ pub(super) fn direct_rustclaw_config_risk_answer(
         .or_else(|| direct_rustclaw_config_field_risk_answer(state, user_text, loop_state))
 }
 
+#[cfg(test)]
 pub(super) fn delivery_matches_config_guard_answer(
     loop_state: &LoopState,
     delivery_messages: &[String],
