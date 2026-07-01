@@ -803,7 +803,8 @@ fn service_status_url_request_uses_http_basic_plan() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route.resolved_intent = "访问 http://127.0.0.1:8787/v1/health，简短告诉我结果".to_string();
+    route.resolved_intent =
+        "capability_ref=http_basic.get url=http://127.0.0.1:8787/v1/health".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = service_status_deterministic_plan_result(
@@ -811,7 +812,7 @@ fn service_status_url_request_uses_http_basic_plan() {
         "observe local health URL",
         Some(&route),
         &loop_state,
-        "访问 http://127.0.0.1:8787/v1/health，简短告诉我结果",
+        "health request",
     )
     .expect("URL status request should use http_basic");
 
@@ -821,6 +822,30 @@ fn service_status_url_request_uses_http_basic_plan() {
     assert_eq!(
         args.get("url").and_then(Value::as_str),
         Some("http://127.0.0.1:8787/v1/health")
+    );
+}
+
+#[test]
+fn service_status_url_request_ignores_user_text_without_machine_capability() {
+    let state = test_state_with_enabled_skills(&["process_basic", "http_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "local health request".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "observe local health URL",
+        Some(&route),
+        &loop_state,
+        "check http://127.0.0.1:8787/v1/health",
+    );
+
+    assert!(
+        plan.is_none(),
+        "user-visible URL text must not act as deterministic route authority"
     );
 }
 

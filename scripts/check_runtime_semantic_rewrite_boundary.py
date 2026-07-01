@@ -304,6 +304,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_sqlite_route_request_semantic_fallback())
     findings.extend(scan_service_status_identity_user_text_selection())
     findings.extend(scan_service_status_process_user_text_selection())
+    findings.extend(scan_service_status_url_user_text_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -913,6 +914,37 @@ def scan_service_status_process_text(rel_path: str, text: str) -> list[Finding]:
     return findings
 
 
+def scan_service_status_url_user_text_selection() -> list[Finding]:
+    return scan_service_status_url_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_service_status_url_text(rel_path: str, text: str) -> list[Finding]:
+    block = function_block(text, "service_status_url_locator")
+    if block is None:
+        return []
+    findings: list[Finding] = []
+    block_start, block_text = block
+    for offset, line in enumerate(block_text.splitlines(), start=0):
+        if (
+            "extract_explicit_locator_for_fallback" not in line
+            and "[user_text" not in line
+            and "user_text," not in line
+        ):
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                block_start + offset,
+                "service_status_url_user_text_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1384,6 +1416,20 @@ def run_self_test() -> int:
         == "service_status_process_user_text_selection"
     )
     assert not scan_service_status_process_user_text_selection()
+    blocked_service_status_url = scan_service_status_url_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn service_status_url_locator(\n"
+        ") -> Option<String> {\n"
+        "    [user_text, route.resolved_intent.as_str()]\n"
+        "        .into_iter()\n"
+        "        .filter_map(crate::intent::locator_extractor::extract_explicit_locator_for_fallback)\n"
+        "}\n",
+    )
+    assert (
+        blocked_service_status_url
+        and blocked_service_status_url[0].kind == "service_status_url_user_text_selection"
+    )
+    assert not scan_service_status_url_user_text_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
