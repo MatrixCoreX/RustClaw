@@ -41,7 +41,7 @@ fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
         .push(ok_step_result("step_1", "run_cmd", observed));
     let mut route = free_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -99,7 +99,7 @@ fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
     let mut route = free_route_result();
     route.output_contract.delivery_required = false;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -109,6 +109,40 @@ fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
     backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
 
     assert!(loop_state.delivery_messages.is_empty());
+}
+
+#[test]
+fn backfill_delivery_prefers_content_evidence_synthesis_over_locator_respond() {
+    let task = claimed_task("task-content-evidence-synthesis-over-locator");
+    let synthesis = "The query returned rows from the orders table.";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some("test_contract.sqlite".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"extra":{"action":"sqlite_query","db_path":"/tmp/test_contract.sqlite","result":{"columns":["id"],"rows":[{"id":1}]}},"text":"test_contract.sqlite"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    let mut route = free_route_result();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert_eq!(loop_state.delivery_messages, vec![synthesis.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(synthesis)
+    );
 }
 
 #[tokio::test]
@@ -153,8 +187,11 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
         reply.messages.last().map(String::as_str),
         Some("/home/guagua/rustclaw")
     );
-    assert!(reply.messages[0].contains("**执行过程**"));
-    assert!(reply.messages[0].contains("run_cmd"));
+    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[tokio::test]
@@ -323,7 +360,7 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
         .push(ok_step_result("step_4", "respond", partial_table));
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -339,6 +376,151 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
     )
     .await
     .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-content-excerpt-title-delivery");
+    let synthesis = "文件存在；读取到 20 行；标题中出现 RustClaw。";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push("README.md".to_string());
+    loop_state.last_user_visible_respond = Some("README.md".to_string());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "doc_parse",
+        r##"{"extra":{"action":"parse_doc","content_excerpt":"# RustClaw\n\nRustClaw runtime.","path":"README.md","metadata":{"title":"README.md"}},"text":"README.md"}"##,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::finalize::loop_reply::valid_publishable_synthesis_output(&loop_state),
+        Some(synthesis)
+    );
+    assert!(
+        crate::finalize::loop_reply::route_expects_synthesis_over_raw_observation(
+            ctx.route_result.as_ref().expect("route")
+        )
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "读取 README.md 前 20 行并回答标题是否包含 RustClaw",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should keep content excerpt synthesis");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_title_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-content-excerpt-respond-title-delivery");
+    let synthesis =
+        "1. 文件是否存在：是。\n2. 读取到的行数：20 行。\n3. 标题中是否出现 RustClaw：是。";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push("README.md".to_string());
+    loop_state.last_user_visible_respond = Some("README.md".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","end_line":20,"excerpt":"1|# RustClaw\n2|\n3|body","path":"/home/guagua/rustclaw/README.md","resolved_path":"/home/guagua/rustclaw/README.md","start_line":1,"total_lines":806},"text":"{\"action\":\"read_range\"}"}"##,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", synthesis));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "读取 README.md 前 20 行并回答标题是否包含 RustClaw",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should keep respond-form content excerpt synthesis");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-db-rows-synthesis-over-locator-title");
+    let synthesis = "对 test_contract.sqlite 执行的只读查询结果如下：\n\n- 被查询表：按名称排序的第一个表 `orders`\n- SQL：`SELECT * FROM orders LIMIT 5;`（仅 SELECT，未执行写入语句）\n- 共返回 2 行，列结构为 `id, user_id, amount, status`\n\n具体行内容：\n\n| id | user_id | amount | status |\n|----|---------|--------|--------|\n| 1  | 1       | 19.9   | paid   |\n| 2  | 2       | 42.5   | pending |\n\n表不为空，行数已少于 5 行上限，因此无需截断。整个过程仅使用只读 SELECT，未触发任何写入 SQL。";
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .delivery_messages
+        .push("test_contract.sqlite".to_string());
+    loop_state.last_user_visible_respond = Some("test_contract.sqlite".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"extra":{"action":"list_tables","db_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","field_value":{"table_count":3,"tables":["orders","service_logs","users"]},"result":{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]},"table_count":3,"tables":["orders","service_logs","users"]},"text":"{\"columns\":[\"name\"],\"rows\":[{\"name\":\"orders\"},{\"name\":\"service_logs\"},{\"name\":\"users\"}]}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "db_basic",
+        r#"{"extra":{"action":"sqlite_query","db_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","result":{"columns":["id","user_id","amount","status"],"rows":[{"amount":19.9,"id":1,"status":"paid","user_id":1},{"amount":42.5,"id":2,"status":"pending","user_id":2}]},"sql":"SELECT * FROM orders LIMIT 5;"},"text":"{\"columns\":[\"id\",\"user_id\",\"amount\",\"status\"],\"rows\":[{\"amount\":19.9,\"id\":1,\"status\":\"paid\",\"user_id\":1},{\"amount\":42.5,\"id\":2,\"status\":\"pending\",\"user_id\":2}]}"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", synthesis));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_4", "respond", synthesis));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+            .to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(&state, &task, "query database rows", loop_state, Some(&ctx))
+        .await
+        .expect("finalize should keep db rows synthesis");
 
     assert_eq!(reply.text, synthesis);
     assert_eq!(reply.messages, vec![synthesis.to_string()]);
@@ -565,7 +747,7 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "查看 configs 目录下最后一个条目的路径和类型信息".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -650,12 +832,14 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
     .expect("finalize should succeed");
 
     assert_eq!(reply.text, "RustClaw 的部署可按项目文档和安装脚本完成。");
-    assert!(reply.messages[0].contains("**执行过程**"));
-    assert!(reply.messages[0].contains("git_basic"));
     assert_eq!(
         reply.messages.last().map(String::as_str),
         Some("RustClaw 的部署可按项目文档和安装脚本完成。")
     );
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[tokio::test]

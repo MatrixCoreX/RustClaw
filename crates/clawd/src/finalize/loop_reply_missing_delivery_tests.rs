@@ -30,7 +30,7 @@ fn pending_user_input_clarify_reason_prefers_structured_machine_fields() {
 }
 
 #[tokio::test]
-async fn observed_execution_without_delivery_reply_attaches_raw_summary() {
+async fn observed_execution_without_delivery_reply_omits_raw_summary() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-observed");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -73,11 +73,11 @@ async fn observed_execution_without_delivery_reply_attaches_raw_summary() {
     .expect("observed execution reply");
 
     assert!(reply.should_fail_task);
-    assert_eq!(reply.messages.len(), 2);
-    assert!(reply.messages[0].contains("**执行过程**"));
-    assert!(reply.messages[0].contains("命令 `ls -t logs | head -2`"));
-    assert!(reply.messages[0].contains("model_io.log"));
-    assert!(reply.messages[0].contains("act_plan.log"));
+    assert_eq!(reply.messages.len(), 1);
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert!(!reply.text.contains("你最想看的是哪一项"));
 }
 
@@ -315,9 +315,11 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
     .await
     .expect("observed execution reply");
 
-    assert_eq!(reply.messages.len(), 2);
-    assert!(reply.messages[0].contains("**执行过程**"));
-    assert!(reply.messages[0].contains("system_basic"));
+    assert_eq!(reply.messages.len(), 1);
+    assert!(reply
+        .messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
 }
 
 #[tokio::test]
@@ -471,7 +473,8 @@ async fn observed_execution_without_delivery_uses_docker_image_observation() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerImages;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=docker.list_images".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
