@@ -358,8 +358,26 @@ fn trace_snapshot_for_output_contract_with_route_reason(
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn action_trace_for_output_contract(
     output_contract: &IntentOutputContract,
+    action_ref: &str,
+) -> Option<Value> {
+    action_trace_for_output_contract_with_route_reason(output_contract, None, action_ref)
+}
+
+pub(crate) fn action_trace_for_route(route: &RouteResult, action_ref: &str) -> Option<Value> {
+    let output_contract = route.effective_output_contract();
+    action_trace_for_output_contract_with_route_reason(
+        &output_contract,
+        Some(route.route_reason.as_str()),
+        action_ref,
+    )
+}
+
+fn action_trace_for_output_contract_with_route_reason(
+    output_contract: &IntentOutputContract,
+    route_reason: Option<&str>,
     action_ref: &str,
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
@@ -377,7 +395,10 @@ pub(crate) fn action_trace_for_output_contract(
         "policy_mode": matched.policy_mode(),
         "evidence_profile": matched.evidence_profile(),
         "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
-        "required_evidence": required_evidence_for_output_contract(output_contract)
+        "required_evidence": required_evidence_for_output_contract_with_route_reason(
+            output_contract,
+            route_reason,
+        )
             .unwrap_or_else(|| matched.required_evidence()),
         "evidence_expression": matched
             .evidence_expression()
@@ -395,7 +416,15 @@ pub(crate) fn action_trace_for_output_contract(
     }))
 }
 
-pub(crate) fn contract_trace_action_key_for_output_contract(
+pub(crate) fn contract_trace_action_key_for_route(
+    route: &RouteResult,
+    action_ref: &str,
+) -> Option<String> {
+    let output_contract = route.effective_output_contract();
+    contract_trace_action_key_for_contract(&output_contract, action_ref)
+}
+
+fn contract_trace_action_key_for_contract(
     output_contract: &IntentOutputContract,
     action_ref: &str,
 ) -> Option<String> {
