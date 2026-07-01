@@ -1274,7 +1274,6 @@ impl AppState {
             .cloned()
             .or_else(|| self.core.agents_by_id.get(crate::DEFAULT_AGENT_ID).cloned())
             .unwrap_or_else(|| AgentRuntimeConfig {
-                persona_prompt: String::new(),
                 restrict_skills: false,
                 allowed_skills: Arc::new(HashSet::new()),
                 llm_providers: Vec::new(),
@@ -1283,39 +1282,6 @@ impl AppState {
 
     pub(crate) fn agent_runtime_identity_label(&self) -> &'static str {
         DEFAULT_AGENT_RUNTIME_IDENTITY
-    }
-
-    pub(crate) fn task_persona_prompt(&self, task: &ClaimedTask) -> String {
-        let agent = self.task_agent(task);
-        let base_prompt = if !agent.persona_prompt.trim().is_empty() {
-            agent.persona_prompt
-        } else {
-            self.policy.persona_prompt_string()
-        };
-        let auth_role = task
-            .user_key
-            .as_deref()
-            .and_then(|user_key| {
-                crate::resolve_auth_identity_by_key(self, user_key)
-                    .ok()
-                    .flatten()
-            })
-            .map(|identity| identity.role)
-            .unwrap_or_else(|| "unknown".to_string());
-        let permission_hint = if auth_role.eq_ignore_ascii_case("admin") {
-            format!(
-                "Current auth role for this task: {auth_role}. Only admin may modify files under configs/, and this task is admin-authenticated."
-            )
-        } else {
-            format!(
-                "Current auth role for this task: {auth_role}. Only admin may modify files under configs/. If the request is to change config files, reply that there is no permission and do not attempt the modification."
-            )
-        };
-        if base_prompt.trim().is_empty() {
-            permission_hint
-        } else {
-            format!("{base_prompt}\n\n{permission_hint}")
-        }
     }
 
     pub(crate) fn task_allows_skill(&self, task: &ClaimedTask, canonical_skill: &str) -> bool {

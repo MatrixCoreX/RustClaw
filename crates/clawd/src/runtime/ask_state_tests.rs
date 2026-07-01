@@ -1,13 +1,9 @@
 use super::*;
 
-fn all_states() -> [AskState; 11] {
+fn all_states() -> [AskState; 7] {
     [
         AskState::Received,
         AskState::Routing,
-        AskState::Clarifying,
-        AskState::Chatting,
-        AskState::ResumeExecuting,
-        AskState::ResumeDiscussing,
         AskState::ScheduleDirect,
         AskState::Executing,
         AskState::Finalizing,
@@ -77,28 +73,6 @@ fn happy_path_act_is_legal() {
 }
 
 #[test]
-fn happy_path_chat_is_legal() {
-    for next in [AskState::Finalizing, AskState::Completed] {
-        assert!(AskState::Chatting.can_transition_to(next));
-    }
-}
-
-#[test]
-fn happy_path_clarify_is_legal() {
-    assert!(AskState::Received.can_transition_to(AskState::Routing));
-    assert!(AskState::Routing.can_transition_to(AskState::Clarifying));
-    assert!(AskState::Clarifying.can_transition_to(AskState::Completed));
-}
-
-#[test]
-fn resume_execution_path_is_legal() {
-    assert!(AskState::Routing.can_transition_to(AskState::ResumeExecuting));
-    assert!(AskState::ResumeExecuting.can_transition_to(AskState::Executing));
-    assert!(AskState::ResumeExecuting.can_transition_to(AskState::Finalizing));
-    assert!(AskState::ResumeExecuting.can_transition_to(AskState::Completed));
-}
-
-#[test]
 fn schedule_direct_path_is_legal() {
     assert!(AskState::Routing.can_transition_to(AskState::ScheduleDirect));
     assert!(AskState::ScheduleDirect.can_transition_to(AskState::Completed));
@@ -111,10 +85,6 @@ fn illegal_transitions_are_rejected() {
     assert!(!AskState::Received.can_transition_to(AskState::Executing));
     // 不能从 Routing 直接到 Completed（必须经过分支状态）
     assert!(!AskState::Routing.can_transition_to(AskState::Completed));
-    // Chatting 不能进 Executing
-    assert!(!AskState::Chatting.can_transition_to(AskState::Executing));
-    // Clarifying 不能进 Finalizing
-    assert!(!AskState::Clarifying.can_transition_to(AskState::Finalizing));
     // Executing 不能直接到 Completed（必须经过 Finalizing）
     assert!(!AskState::Executing.can_transition_to(AskState::Completed));
     // 不能自循环（除 Executing 外）

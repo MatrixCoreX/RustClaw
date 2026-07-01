@@ -102,7 +102,6 @@ impl LlmProviderRuntime {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentRuntimeConfig {
-    pub(crate) persona_prompt: String,
     pub(crate) restrict_skills: bool,
     pub(crate) allowed_skills: Arc<HashSet<String>>,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
@@ -119,7 +118,6 @@ impl AgentRuntimeConfig {
             .map(|skill| crate::canonical_skill_name(skill).to_string())
             .collect::<HashSet<_>>();
         Self {
-            persona_prompt: config.persona_prompt.trim().to_string(),
             restrict_skills: !allowed_skills.is_empty(),
             allowed_skills: Arc::new(allowed_skills),
             llm_providers,
