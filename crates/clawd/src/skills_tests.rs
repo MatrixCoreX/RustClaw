@@ -4,9 +4,9 @@ use super::{
     normalize_skill_error_for_user, parse_policy_block_error, parse_structured_skill_error,
     policy_block_default_text, policy_block_error, request_reply_language,
     skill_runner_env_strict_enabled, structured_skill_error_from_parts,
-    task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
-    RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
-    SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
+    structured_skill_error_string, task_allows_path_outside_workspace, task_allows_sudo,
+    task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
+    READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
 };
 use crate::{
     runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -1136,6 +1136,55 @@ fn system_basic_read_failures_are_recoverable() {
         n4,
         "read operation failed: target is a directory, not a regular file"
     );
+}
+
+#[test]
+fn structured_skill_error_ignores_json_hidden_in_visible_text() {
+    let encoded = structured_skill_error_string(
+        "system_basic",
+        &json!({
+            "status": "error",
+            "error_text": "skill failed",
+            "text": "{\"error_kind\":\"not_found\",\"failure_reason\":\"path was not found\",\"platform\":\"linux\",\"manager_type\":\"systemd\",\"service_name\":\"clawd\"}"
+        }),
+    );
+
+    let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
+
+    assert_eq!(parsed.error_kind, "unknown");
+    assert_eq!(parsed.error_text, "skill failed");
+    assert_eq!(parsed.platform, None);
+    assert_eq!(parsed.manager_type, None);
+    assert_eq!(parsed.service_name, None);
+    assert!(!is_recoverable_skill_error("system_basic", &encoded));
+}
+
+#[test]
+fn structured_skill_error_accepts_extra_machine_fields() {
+    let encoded = structured_skill_error_string(
+        "system_basic",
+        &json!({
+            "status": "error",
+            "error_text": "skill failed",
+            "extra": {
+                "error_kind": "not_found",
+                "failure_reason": "path was not found",
+                "platform": "linux",
+                "manager_type": "systemd",
+                "service_name": "clawd"
+            },
+            "text": "display only"
+        }),
+    );
+
+    let parsed = parse_structured_skill_error(&encoded).expect("structured skill error");
+
+    assert_eq!(parsed.error_kind, "not_found");
+    assert_eq!(parsed.error_text, "skill failed");
+    assert_eq!(parsed.platform.as_deref(), Some("linux"));
+    assert_eq!(parsed.manager_type.as_deref(), Some("systemd"));
+    assert_eq!(parsed.service_name.as_deref(), Some("clawd"));
+    assert!(is_recoverable_skill_error("system_basic", &encoded));
 }
 
 #[test]
