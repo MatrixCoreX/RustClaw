@@ -65,13 +65,6 @@ pub(super) fn coerce_output_contract_value_for_schema(value: &mut Value) {
                 Value::String(response_shape.to_string()),
             );
         }
-        let semantic_kind = normalize_output_semantic_kind_for_schema(raw);
-        if semantic_kind != "none" {
-            contract.insert(
-                "semantic_kind".to_string(),
-                Value::String(semantic_kind.to_string()),
-            );
-        }
     }
     *value = Value::Object(contract);
 }

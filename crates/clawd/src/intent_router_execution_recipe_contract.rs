@@ -83,6 +83,8 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
     scalar_extraction: bool,
     request_declares_filename_only_schema_token: bool,
 ) {
+    let recipe_declares_filename_only_output =
+        execution_recipe_declares_filename_only_output(obj.get("execution_recipe"));
     let value = obj
         .entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
@@ -100,12 +102,13 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
         Value::String("none".to_string()),
     );
     let model_only_filename_semantic = !request_declares_filename_only_schema_token
-        && contract
-            .get("semantic_kind")
-            .and_then(scalar_json_value_text)
-            .is_some_and(|value| {
-                parse_output_semantic_kind(&value) == OutputSemanticKind::FileNames
-            });
+        && (recipe_declares_filename_only_output
+            || contract
+                .get("semantic_kind")
+                .and_then(scalar_json_value_text)
+                .is_some_and(|value| {
+                    parse_output_semantic_kind(&value) == OutputSemanticKind::FileNames
+                }));
 
     if scalar_extraction || model_only_filename_semantic {
         contract.insert(
@@ -119,6 +122,16 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
             Value::String(OutputSemanticKind::None.as_str().to_string()),
         );
     }
+    if request_declares_filename_only_schema_token && recipe_declares_filename_only_output {
+        contract.insert(
+            "response_shape".to_string(),
+            Value::String("strict".to_string()),
+        );
+        contract.insert(
+            "semantic_kind".to_string(),
+            Value::String(OutputSemanticKind::FileNames.as_str().to_string()),
+        );
+    }
     if let Some(hint) = locator_hint_from_recipe
         .map(str::trim)
         .filter(|hint| !hint.is_empty())
@@ -129,6 +142,19 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
         );
         contract.insert("locator_hint".to_string(), Value::String(hint.to_string()));
     }
+}
+
+fn execution_recipe_declares_filename_only_output(recipe: Option<&Value>) -> bool {
+    recipe
+        .and_then(Value::as_object)
+        .and_then(|recipe| recipe.get("output"))
+        .and_then(scalar_json_value_text)
+        .is_some_and(|value| {
+            matches!(
+                parse_output_semantic_kind(&value),
+                OutputSemanticKind::FileNames
+            )
+        })
 }
 
 pub(super) fn normalize_output_contract_for_package_detect_manager_capability(

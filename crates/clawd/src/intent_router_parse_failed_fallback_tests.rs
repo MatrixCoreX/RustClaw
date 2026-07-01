@@ -184,7 +184,7 @@ fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() 
         .expect("output contract");
     assert_eq!(
         contract.get("semantic_kind").and_then(|v| v.as_str()),
-        Some("file_names")
+        Some("none")
     );
 
     let raw = r#"{
