@@ -61,17 +61,14 @@ pub(super) fn hook_permission_surface_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !runtime_surface_skill_available_for_plan(state, "config_basic")
-        || !runtime_surface_mentions_any_machine_token(
-            route,
-            user_text,
-            &["pretooluse", "pre_tool_use", "agent_hooks", "agent.hooks"],
-        )
+        || !runtime_surface_mentions_any_machine_token(route, &["pretooluse", "pre_tool_use"])
+        || !runtime_surface_mentions_any_machine_token(route, &["agent_hooks", "agent.hooks"])
     {
         return None;
     }
@@ -145,14 +142,14 @@ pub(super) fn clawcli_resume_surface_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !runtime_surface_skill_available_for_plan(state, "run_cmd")
-        || !runtime_surface_mentions_any_machine_token(route, user_text, &["clawcli"])
-        || !runtime_surface_mentions_any_machine_token(route, user_text, &["resume"])
+        || !runtime_surface_mentions_any_machine_token(route, &["clawcli"])
+        || !runtime_surface_mentions_any_machine_token(route, &["resume"])
     {
         return None;
     }
@@ -193,18 +190,14 @@ pub(super) fn subagent_review_boundary_surface_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     let plan_path = current_top_level_plan_markdown_path(state)?;
     if loop_state.has_tool_or_skill_output
         || !subagent_review_boundary_surface_gate_allows(route)
         || !runtime_surface_skill_available_for_plan(state, "fs_basic")
-        || !runtime_surface_mentions_all_machine_token_groups(
-            route,
-            user_text,
-            &[&["agents.md"], &["review"]],
-        )
+        || !runtime_surface_mentions_all_machine_token_groups(route, &[&["agents.md"], &["review"]])
     {
         return None;
     }
@@ -277,7 +270,7 @@ pub(super) fn subagent_bounded_batch_surface_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     let plan_path = current_top_level_plan_markdown_path(state)?;
@@ -286,7 +279,6 @@ pub(super) fn subagent_bounded_batch_surface_deterministic_plan_result(
         || !runtime_surface_skill_available_for_plan(state, "fs_basic")
         || !runtime_surface_mentions_all_exact_machine_token_groups(
             route,
-            user_text,
             &[
                 &["subagent"],
                 &["agents.md"],
@@ -471,57 +463,47 @@ fn runtime_surface_action_call_ref<'a>(action: &'a AgentAction) -> Option<(&'a s
     }
 }
 
-fn runtime_surface_mentions_any_machine_token(
-    route: &RouteResult,
-    user_text: &str,
-    tokens: &[&str],
-) -> bool {
+fn runtime_surface_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> bool {
     tokens.iter().any(|token| {
-        [
-            user_text,
-            route.route_reason.as_str(),
-            route.resolved_intent.as_str(),
-        ]
-        .into_iter()
-        .any(|text| text.to_ascii_lowercase().contains(token))
+        runtime_surface_machine_texts(route)
+            .into_iter()
+            .any(|text| text.to_ascii_lowercase().contains(token))
     })
 }
 
 fn runtime_surface_mentions_all_machine_token_groups(
     route: &RouteResult,
-    user_text: &str,
     token_groups: &[&[&str]],
 ) -> bool {
     token_groups
         .iter()
-        .all(|tokens| runtime_surface_mentions_any_machine_token(route, user_text, tokens))
+        .all(|tokens| runtime_surface_mentions_any_machine_token(route, tokens))
 }
 
 fn runtime_surface_mentions_all_exact_machine_token_groups(
     route: &RouteResult,
-    user_text: &str,
     token_groups: &[&[&str]],
 ) -> bool {
     token_groups
         .iter()
-        .all(|tokens| runtime_surface_mentions_any_exact_machine_token(route, user_text, tokens))
+        .all(|tokens| runtime_surface_mentions_any_exact_machine_token(route, tokens))
 }
 
-fn runtime_surface_mentions_any_exact_machine_token(
-    route: &RouteResult,
-    user_text: &str,
-    tokens: &[&str],
-) -> bool {
+fn runtime_surface_mentions_any_exact_machine_token(route: &RouteResult, tokens: &[&str]) -> bool {
     tokens.iter().any(|expected| {
-        [
-            user_text,
-            route.route_reason.as_str(),
-            route.resolved_intent.as_str(),
-            route.agent_display_name_hint.as_str(),
-        ]
-        .into_iter()
-        .any(|text| runtime_surface_text_has_exact_machine_token(text, expected))
+        runtime_surface_machine_texts(route)
+            .into_iter()
+            .any(|text| runtime_surface_text_has_exact_machine_token(text, expected))
     })
+}
+
+fn runtime_surface_machine_texts(route: &RouteResult) -> [&str; 4] {
+    [
+        route.route_reason.as_str(),
+        route.resolved_intent.as_str(),
+        route.output_contract.locator_hint.as_str(),
+        route.agent_display_name_hint.as_str(),
+    ]
 }
 
 fn runtime_surface_text_has_exact_machine_token(text: &str, expected: &str) -> bool {

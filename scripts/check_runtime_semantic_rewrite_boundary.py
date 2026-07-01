@@ -49,6 +49,7 @@ CONTRACT_MATRIX_FILE = SRC_ROOT / "contract_matrix.rs"
 TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
+RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
 SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
     SRC_ROOT / "agent_engine/single_target_structured_field_rewrite.rs"
 )
@@ -311,6 +312,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_task_control_legacy_token_fallback())
     findings.extend(scan_async_job_start_user_text_command_selection())
     findings.extend(scan_web_search_user_text_query_selection())
+    findings.extend(scan_runtime_surface_user_text_token_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -835,7 +837,7 @@ def scan_sqlite_route_request_text(rel_path: str, text: str) -> list[Finding]:
         "route_requests_sqlite_table_listing",
         "route_requests_sqlite_schema_version",
     ):
-        block = function_block(text, function_name)
+        block = rust_private_or_pub_function_block(text, function_name)
         if block is None:
             continue
         block_start, block_text = block
@@ -1120,7 +1122,7 @@ def scan_web_search_user_text_query_text(rel_path: str, text: str) -> list[Findi
         "web_search_summary_deterministic_plan_result",
         "web_search_query_from_route",
     ):
-        block = function_block(text, function_name)
+        block = rust_private_or_pub_function_block(text, function_name)
         if block is None:
             continue
         block_start, block_text = block
@@ -1152,6 +1154,39 @@ def scan_web_search_user_text_query_text(rel_path: str, text: str) -> list[Findi
                 line.strip(),
             )
         )
+    return findings
+
+
+def scan_runtime_surface_user_text_token_selection() -> list[Finding]:
+    return scan_runtime_surface_user_text_token_text(
+        rel(RUNTIME_SURFACE_PLAN_FILE),
+        RUNTIME_SURFACE_PLAN_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_runtime_surface_user_text_token_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for function_name in (
+        "runtime_surface_mentions_any_machine_token",
+        "runtime_surface_mentions_all_machine_token_groups",
+        "runtime_surface_mentions_all_exact_machine_token_groups",
+        "runtime_surface_mentions_any_exact_machine_token",
+    ):
+        block = rust_private_or_pub_function_block(text, function_name)
+        if block is None:
+            continue
+        block_start, block_text = block
+        for offset, line in enumerate(block_text.splitlines(), start=0):
+            if "user_text" not in line:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + offset,
+                    "runtime_surface_user_text_token_selection",
+                    line.strip(),
+                )
+            )
     return findings
 
 
@@ -1737,6 +1772,23 @@ def run_self_test() -> int:
         and blocked_web_search_query[0].kind == "web_search_user_text_query_selection"
     )
     assert not scan_web_search_user_text_query_selection()
+    blocked_runtime_surface = scan_runtime_surface_user_text_token_text(
+        rel(RUNTIME_SURFACE_PLAN_FILE),
+        "fn runtime_surface_mentions_any_machine_token(\n"
+        "    route: &RouteResult,\n"
+        "    user_text: &str,\n"
+        "    tokens: &[&str],\n"
+        ") -> bool {\n"
+        "    [user_text, route.route_reason.as_str()]\n"
+        "        .into_iter()\n"
+        "        .any(|text| text.contains(tokens[0]))\n"
+        "}\n",
+    )
+    assert (
+        blocked_runtime_surface
+        and blocked_runtime_surface[0].kind == "runtime_surface_user_text_token_selection"
+    )
+    assert not scan_runtime_surface_user_text_token_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
