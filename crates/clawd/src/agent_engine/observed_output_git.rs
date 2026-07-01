@@ -94,7 +94,10 @@ pub(super) fn git_basic_direct_answer_candidate(
     _prefer_english: bool,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::GitRepositoryState,
+    ) {
         return None;
     }
     let effective_response_shape = if route.output_contract.exact_sentence_count == Some(1) {
@@ -133,7 +136,10 @@ pub(super) fn latest_git_repository_state_direct_answer(
     allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::GitRepositoryState,
+    ) {
         return None;
     }
     let idx = latest_successful_step_index(loop_state, |step| step.skill == "git_basic")?;

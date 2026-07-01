@@ -19,9 +19,27 @@ pub(super) fn route_should_synthesize_non_bilingual_existence_with_path(
     let Some(route) = route else {
         return false;
     };
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
-        && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    route_contract_marker_is(route, crate::OutputSemanticKind::ExistenceWithPath)
+        && crate::contract_matrix::final_answer_shape_for_route(route)
             .is_some_and(|shape| shape.allows_model_language())
+}
+
+pub(super) fn route_contract_marker_is(
+    route: &crate::RouteResult,
+    semantic_kind: crate::OutputSemanticKind,
+) -> bool {
+    route.output_contract_marker_is(semantic_kind)
+}
+
+pub(super) fn route_contract_marker_is_any(
+    route: &crate::RouteResult,
+    semantic_kinds: &[crate::OutputSemanticKind],
+) -> bool {
+    route.output_contract_marker_is_any(semantic_kinds)
+}
+
+pub(super) fn route_is_unclassified_contract(route: &crate::RouteResult) -> bool {
+    route.output_contract_is_unclassified()
 }
 
 pub(super) fn observed_request_prefers_english_template(
@@ -89,7 +107,7 @@ pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
     route: &crate::RouteResult,
 ) -> bool {
     !route.needs_clarify
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && route_contract_marker_is(route, crate::OutputSemanticKind::QuantityComparison)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && (route.output_contract.response_shape == crate::OutputResponseShape::Free
@@ -97,24 +115,22 @@ pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
 }
 
 pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
-    let response_shape = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.response_shape);
-    let semantic_kind = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.semantic_kind);
-    if semantic_kind == Some(crate::OutputSemanticKind::RawCommandOutput)
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let response_shape = route.map(|route| route.output_contract.response_shape);
+    let route_has_marker =
+        |semantic_kind| route.is_some_and(|route| route_contract_marker_is(route, semantic_kind));
+    if route_has_marker(crate::OutputSemanticKind::RawCommandOutput)
         && response_shape == Some(crate::OutputResponseShape::Strict)
     {
         return "Use the observed command output as the value for the exact format requested by the user. If the user asked for a prefix, suffix, template, or key=value shape, apply that formatting instead of returning the raw command output unchanged.".to_string();
     }
-    if semantic_kind == Some(crate::OutputSemanticKind::DirectoryPurposeSummary) {
+    if route_has_marker(crate::OutputSemanticKind::DirectoryPurposeSummary) {
         return "For a listing-grounded directory purpose summary, use observed entry names, paths, counts, metadata, and file extensions as sufficient evidence for a cautious directory-level purpose or role. Include the requested selected entries plus the purpose/role summary; do not refuse only because file contents were not read unless the user asked for exact per-file contents or concrete setup steps.".to_string();
     }
-    if semantic_kind == Some(crate::OutputSemanticKind::ExcerptKindJudgment) {
+    if route_has_marker(crate::OutputSemanticKind::ExcerptKindJudgment) {
         return "For an excerpt-kind judgment, base the category judgment on the observed excerpt. If the same current task also observed listing names or candidates, include those observed names/candidates and the excerpt-based judgment in the final answer; for one_sentence shape, combine both deliverables into one compact sentence.".to_string();
     }
-    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+    if let Some(route) = route {
         if route_disallows_direct_observation_passthrough(route) {
             if route_quantity_comparison_requires_model_language_synthesis(route) {
                 return "Use the observed comparison values as evidence, and include the requested concise model-language synthesis. Do not answer with only the raw comparison verdict; that would be incomplete for this contract.".to_string();
@@ -140,13 +156,13 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
             "Return exactly {count} {sentence_label}. Do not compress the answer into fewer sentences or expand beyond that count."
         );
     }
-    if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPathSummary) {
+    if route_has_marker(crate::OutputSemanticKind::ExistenceWithPathSummary) {
         return "Return whether the target exists, the resolved path when found, and the requested brief content-grounded purpose or summary. Do not answer from path evidence alone if content evidence is available.".to_string();
     }
-    if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPath) {
+    if route_has_marker(crate::OutputSemanticKind::ExistenceWithPath) {
         return "Return a concise existence verdict and include the target path or observed path. This path requirement overrides response_shape=scalar unless the original user explicitly requested one bare boolean/scalar. Do not reduce the answer to only yes/no/exists/missing.".to_string();
     }
-    if semantic_kind == Some(crate::OutputSemanticKind::ScalarCount)
+    if route_has_marker(crate::OutputSemanticKind::ScalarCount)
         && response_shape != Some(crate::OutputResponseShape::Scalar)
     {
         return "Use observed numeric fields to answer the requested count dimensions. Do not collapse component counts into only an aggregate total unless the user explicitly asked for only the aggregate.".to_string();
@@ -188,7 +204,7 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) ->
     route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route_is_unclassified_contract(route)
         && constrained_sentence_delivery
 }
 
@@ -202,25 +218,27 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
     {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary {
+    if route_contract_marker_is(route, crate::OutputSemanticKind::CommandOutputSummary) {
         return true;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep {
+    if route_contract_marker_is(route, crate::OutputSemanticKind::ExecutionFailedStep) {
         return true;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    if route_contract_marker_is(route, crate::OutputSemanticKind::RawCommandOutput)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && route.output_contract.locator_kind == crate::OutputLocatorKind::None
-        && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        && crate::contract_matrix::final_answer_shape_for_route(route)
             .is_some_and(|shape| shape.allows_model_language())
     {
         return true;
     }
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-            | crate::OutputSemanticKind::ExcerptKindJudgment
+    if !route_contract_marker_is_any(
+        route,
+        &[
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ContentExcerptWithSummary,
+            crate::OutputSemanticKind::ExcerptKindJudgment,
+        ],
     ) {
         return false;
     }
@@ -233,7 +251,7 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
 pub(super) fn route_git_repository_state_requires_language_synthesis(
     route: &crate::RouteResult,
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::GitRepositoryState
+    route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && (matches!(

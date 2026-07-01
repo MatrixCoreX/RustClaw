@@ -150,10 +150,12 @@ pub(super) fn multiple_structured_scalar_observations_need_synthesis(
         return false;
     }
     !route.is_some_and(|route| {
-        matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::RecentScalarEqualityCheck
-                | crate::OutputSemanticKind::QuantityComparison
+        super::output_route_policy::route_contract_marker_is_any(
+            route,
+            &[
+                crate::OutputSemanticKind::RecentScalarEqualityCheck,
+                crate::OutputSemanticKind::QuantityComparison,
+            ],
         )
     })
 }
@@ -164,10 +166,15 @@ pub(crate) fn structured_scalar_equality_direct_answer(
     loop_state: &LoopState,
     _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentScalarEqualityCheck
-        || route.output_contract.delivery_required
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::RecentScalarEqualityCheck,
+    ) || route.output_contract.delivery_required
     {
         return None;
+    }
+    if let Some(answer) = latest_compare_paths_scalar_equality_answer(loop_state) {
+        return Some(answer);
     }
     let observations = recent_structured_scalar_observations(loop_state, 2);
     if observations.len() < 2 {
@@ -187,6 +194,53 @@ pub(crate) fn structured_scalar_equality_direct_answer(
     Some(format!("{left} {} {right}", if same { "==" } else { "!=" }))
 }
 
+fn latest_compare_paths_scalar_equality_answer(loop_state: &LoopState) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "system_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .find_map(compare_paths_scalar_equality_answer_from_body)
+}
+
+fn compare_paths_scalar_equality_answer_from_body(body: &str) -> Option<String> {
+    let raw = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
+    let value = raw
+        .get("extra")
+        .filter(|extra| {
+            extra.is_object()
+                && extra
+                    .get("action")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+        })
+        .unwrap_or(&raw);
+    if value.get("action").and_then(serde_json::Value::as_str) != Some("compare_paths") {
+        return None;
+    }
+    let field_value = value.get("field_value").filter(|value| value.is_object());
+    let same_path = field_value
+        .and_then(|item| item.get("same_path"))
+        .or_else(|| {
+            value
+                .get("comparison")
+                .and_then(|item| item.get("same_path"))
+        })
+        .and_then(serde_json::Value::as_bool)?;
+    let left_exists = field_value
+        .and_then(|item| item.get("left_exists"))
+        .or_else(|| value.get("left").and_then(|item| item.get("exists")))
+        .and_then(serde_json::Value::as_bool)?;
+    let right_exists = field_value
+        .and_then(|item| item.get("right_exists"))
+        .or_else(|| value.get("right").and_then(|item| item.get("exists")))
+        .and_then(serde_json::Value::as_bool)?;
+    Some(format!(
+        "same_path={same_path}\nleft_exists={left_exists}\nright_exists={right_exists}"
+    ))
+}
+
 pub(super) fn route_needs_structured_scalar_pair_synthesis(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -195,10 +249,12 @@ pub(super) fn route_needs_structured_scalar_pair_synthesis(
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
             recent_structured_scalar_observation_count(loop_state) > 1
-                && matches!(
-                    route.output_contract.semantic_kind,
-                    crate::OutputSemanticKind::RecentScalarEqualityCheck
-                        | crate::OutputSemanticKind::QuantityComparison
+                && super::output_route_policy::route_contract_marker_is_any(
+                    route,
+                    &[
+                        crate::OutputSemanticKind::RecentScalarEqualityCheck,
+                        crate::OutputSemanticKind::QuantityComparison,
+                    ],
                 )
         })
 }

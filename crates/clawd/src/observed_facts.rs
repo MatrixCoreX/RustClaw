@@ -254,15 +254,12 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
 fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
-        || matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-                | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::SqliteTableListing
-                | crate::OutputSemanticKind::SqliteTableNamesOnly
-        )
+        || route_result.has_route_reason_machine_marker("file_names")
+        || route_result.has_route_reason_machine_marker("directory_names")
+        || route_result.has_route_reason_machine_marker("directory_entry_groups")
+        || route_result.has_route_reason_machine_marker("file_paths")
+        || route_result.has_route_reason_machine_marker("sqlite_table_listing")
+        || route_result.has_route_reason_machine_marker("sqlite_table_names_only")
         || matches!(
             route_result.output_contract.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryLookup
@@ -294,24 +291,22 @@ fn scalar_path_answer_bound_target(
     }
     normalize_scalar_path_bound_target(
         line,
-        route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly,
+        route_result.has_route_reason_machine_marker("scalar_path_only"),
     )
 }
 
 fn scalar_path_contract_can_bind_target(route_result: &crate::RouteResult) -> bool {
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ScalarPathOnly
-    ) || (matches!(
-        route_result.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
-    ) && route_result.output_contract.requires_content_evidence
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::CurrentWorkspace
-        ))
+    route_result.has_route_reason_machine_marker("scalar_path_only")
+        || (matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        ) && route_result.output_contract.requires_content_evidence
+            && matches!(
+                route_result.output_contract.locator_kind,
+                crate::OutputLocatorKind::Path
+                    | crate::OutputLocatorKind::Filename
+                    | crate::OutputLocatorKind::CurrentWorkspace
+            ))
 }
 
 fn normalize_scalar_path_bound_target(

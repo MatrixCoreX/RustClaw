@@ -139,17 +139,26 @@ pub(super) fn current_turn_request_text<'a>(
 }
 
 pub(super) fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ScalarCount,
+    )
 }
 
 pub(super) fn route_requests_scalar_existence(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ExistenceWithPath,
+        )
         && !route.output_contract.delivery_required
 }
 
 pub(super) fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck
+    super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::HiddenEntriesCheck,
+    )
 }
 
 pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::RouteResult) -> bool {
@@ -187,22 +196,30 @@ pub(super) fn route_allows_scalar_read_range_direct_answer(route: &crate::RouteR
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
     ) && !route.output_contract.delivery_required
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::RawCommandOutput
-        )
+        && (super::output_route_policy::route_is_unclassified_contract(route)
+            || super::output_route_policy::route_contract_marker_is_any(
+                route,
+                &[
+                    crate::OutputSemanticKind::ContentExcerptSummary,
+                    crate::OutputSemanticKind::RawCommandOutput,
+                ],
+            ))
 }
 
 pub(super) fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+        && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ScalarPathOnly,
+        )
 }
 
 pub(super) fn route_requests_file_basename(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::FileBasename
+        && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::FileBasename,
+        )
 }
 
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
@@ -210,12 +227,10 @@ pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
 ) -> bool {
     route_requests_scalar_path_only(route)
         && !route.output_contract.requires_content_evidence
-        && !route
-            .route_reason
-            .contains("execution_required_read_file_extract_scalar")
-        && !route
-            .route_reason
-            .contains("request_requires_fresh_file_observation_to_extract_title")
+        && !route.has_route_reason_machine_marker("execution_required_read_file_extract_scalar")
+        && !route.has_route_reason_machine_marker(
+            "request_requires_fresh_file_observation_to_extract_title",
+        )
 }
 
 pub(super) fn route_allows_path_batch_file_basename_observed_answer(
@@ -261,20 +276,32 @@ pub(super) fn route_prefers_plain_fs_search_paths(route: &crate::RouteResult) ->
     route_requests_scalar_path_only(route)
         || (route.output_contract.response_shape == crate::OutputResponseShape::Strict
             && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
-            && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+            && super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ExistenceWithPath,
+            )
             && !route.output_contract.delivery_required)
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames)
+        ) && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::FileNames,
+        ))
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames)
+        ) && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::DirectoryNames,
+        ))
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths)
+        ) && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::FilePaths,
+        ))
 }
 
 fn looks_like_plain_path_literal(text: &str) -> bool {
@@ -294,7 +321,10 @@ pub(super) fn route_scalar_has_plain_path_terminal_respond(
     loop_state: &LoopState,
 ) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ExistenceWithPath,
+        )
         && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
         && !route.output_contract.delivery_required
         && loop_state
@@ -310,20 +340,23 @@ pub(super) fn route_allows_raw_listing_direct_answer(route: Option<&crate::Route
         }
         if !route.output_contract.delivery_required
             && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
-            && matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::None | crate::OutputSemanticKind::ExistenceWithPath
-            )
+            && (super::output_route_policy::route_is_unclassified_contract(route)
+                || super::output_route_policy::route_contract_marker_is(
+                    route,
+                    crate::OutputSemanticKind::ExistenceWithPath,
+                ))
             && route.ask_mode.is_plain_act()
         {
             return true;
         }
-        matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-                | crate::OutputSemanticKind::FilePaths
+        super::output_route_policy::route_contract_marker_is_any(
+            route,
+            &[
+                crate::OutputSemanticKind::FileNames,
+                crate::OutputSemanticKind::DirectoryNames,
+                crate::OutputSemanticKind::DirectoryEntryGroups,
+                crate::OutputSemanticKind::FilePaths,
+            ],
         )
     })
 }
@@ -334,7 +367,7 @@ pub(super) fn route_allows_strict_plain_observation_passthrough(
     route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && super::output_route_policy::route_is_unclassified_contract(route)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && route.output_contract.exact_sentence_count.is_none()
 }
@@ -575,8 +608,10 @@ pub(super) fn directory_purpose_summary_find_ext_answer_candidate(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
-        || route.output_contract.delivery_required
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::DirectoryPurposeSummary,
+    ) || route.output_contract.delivery_required
         || route.output_contract.requires_content_evidence
         || matches!(
             route.output_contract.response_shape,

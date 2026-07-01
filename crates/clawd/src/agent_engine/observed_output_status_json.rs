@@ -20,7 +20,10 @@ pub(super) fn multi_status_json_summary_candidate(
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::FileToken
         )
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        || super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::RawCommandOutput,
+        )
     {
         return None;
     }

@@ -22,8 +22,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
     let prefers_english_free_text =
         observed_request_prefers_english_template(state, request_language_hint);
     let prefers_english_presence_answer = route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
-            && prefers_english_free_text
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ExistenceWithPath,
+        ) && prefers_english_free_text
     });
     let existence_with_path_should_use_llm_synthesis =
         route_should_synthesize_non_bilingual_existence_with_path(
@@ -39,17 +41,26 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
         && !hidden_entries_should_use_llm_synthesis;
     let health_check_prefers_raw_payload = is_plain_act
         && route.is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+            super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::RawCommandOutput,
+            )
         })
         && !matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
         );
     let health_check_service_status_direct_allowed = route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ServiceStatus,
+        )
     });
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ServiceStatus,
+        )
     }) {
         if let Some(answer) = latest_process_basic_service_status_direct_answer_candidate(
             state,
@@ -225,17 +236,19 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                     ) {
                         return None;
                     }
-                    (route.output_contract.semantic_kind
-                        == crate::OutputSemanticKind::ServiceStatus)
-                        .then(|| {
-                            process_basic_service_status_direct_answer_candidate(
-                                state,
-                                &observed_output.body,
-                                response_shape,
-                                prefers_english_free_text,
-                            )
-                        })
-                        .flatten()
+                    super::output_route_policy::route_contract_marker_is(
+                        route,
+                        crate::OutputSemanticKind::ServiceStatus,
+                    )
+                    .then(|| {
+                        process_basic_service_status_direct_answer_candidate(
+                            state,
+                            &observed_output.body,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
+                    })
+                    .flatten()
                 }),
                 "service_control" => {
                     serde_json::from_str::<serde_json::Value>(&observed_output.body)
@@ -243,8 +256,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                         .and_then(|value| {
                             route
                                 .filter(|route| {
-                                    route.output_contract.response_shape
-                                        == crate::OutputResponseShape::Scalar
+                                    super::output_route_policy::route_contract_marker_is(
+                                        route,
+                                        crate::OutputSemanticKind::ServiceStatus,
+                                    )
                                 })
                                 .and_then(|_| {
                                     service_control_status_direct_answer_candidate(
@@ -334,7 +349,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                     ) {
                         Some(answer)
                     } else if let Some(answer) =
-                        archive_read_direct_answer_candidate(&observed_output.body)
+                        archive_read_direct_answer_candidate(route, &observed_output.body)
                     {
                         Some(answer)
                     } else {
@@ -362,8 +377,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                             return system_basic_info_scalar_path_candidate(info);
                         }
                         if route.is_some_and(|route| {
-                            route.output_contract.semantic_kind
-                                == crate::OutputSemanticKind::ServiceStatus
+                            super::output_route_policy::route_contract_marker_is(
+                                route,
+                                crate::OutputSemanticKind::ServiceStatus,
+                            )
                         }) {
                             return None;
                         }
@@ -418,8 +435,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                     } else if action == Some("inventory_dir")
                         && (is_plain_act
                             || route.is_some_and(|route| {
-                                route.output_contract.semantic_kind
-                                    == crate::OutputSemanticKind::DirectoryEntryGroups
+                                super::output_route_policy::route_contract_marker_is(
+                                    route,
+                                    crate::OutputSemanticKind::DirectoryEntryGroups,
+                                )
                             }))
                         && allow_raw_listing_direct_answer
                     {
@@ -431,8 +450,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                         )
                     } else if action == Some("tree_summary") {
                         if route.is_some_and(|route| {
-                            route.output_contract.semantic_kind
-                                == crate::OutputSemanticKind::DirectoryPurposeSummary
+                            super::output_route_policy::route_contract_marker_is(
+                                route,
+                                crate::OutputSemanticKind::DirectoryPurposeSummary,
+                            )
                         }) {
                             None
                         } else {
@@ -524,8 +545,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                             .or_else(|| {
                                 (!existence_with_path_should_use_llm_synthesis
                                     && route.is_some_and(|route| {
-                                        route.output_contract.semantic_kind
-                                            == crate::OutputSemanticKind::ExistenceWithPath
+                                        super::output_route_policy::route_contract_marker_is(
+                                            route,
+                                            crate::OutputSemanticKind::ExistenceWithPath,
+                                        )
                                     }))
                                 .then(|| {
                                     system_basic_existence_with_path_candidate(
@@ -540,8 +563,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
                             })
                     } else if !existence_with_path_should_use_llm_synthesis
                         && route.is_some_and(|route| {
-                            route.output_contract.semantic_kind
-                                == crate::OutputSemanticKind::ExistenceWithPath
+                            super::output_route_policy::route_contract_marker_is(
+                                route,
+                                crate::OutputSemanticKind::ExistenceWithPath,
+                            )
                         })
                     {
                         system_basic_existence_with_path_candidate(
@@ -599,13 +624,18 @@ pub(super) fn fs_search_output_direct_answer_candidate(
     prefer_full_path: bool,
 ) -> Option<String> {
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryPurposeSummary
-            && route.output_contract.requires_content_evidence
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::DirectoryPurposeSummary,
+        ) && route.output_contract.requires_content_evidence
     }) {
         return None;
     }
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::RawCommandOutput,
+        )
     }) {
         return fs_search_direct_answer_candidate(
             state,
@@ -671,10 +701,12 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
         return false;
     }
     route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::RawCommandOutput
+        && super::output_route_policy::route_contract_marker_is_any(
+            route,
+            &[
+                crate::OutputSemanticKind::ContentExcerptSummary,
+                crate::OutputSemanticKind::RawCommandOutput,
+            ],
         )
 }
 
@@ -691,7 +723,7 @@ pub(super) fn route_allows_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::None {
+    if !super::output_route_policy::route_is_unclassified_contract(route) {
         return false;
     }
     if route.ask_mode.is_plain_act() {
@@ -719,8 +751,10 @@ pub(super) fn route_allows_raw_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
-        && route.output_contract.requires_content_evidence
+    super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::RawCommandOutput,
+    ) && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
 }
 
@@ -750,20 +784,31 @@ pub(super) fn route_requires_http_body_synthesis(route: Option<&crate::RouteResu
     if !route.output_contract.requires_content_evidence {
         return false;
     }
-    let Some(shape) =
-        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-    else {
+    if route_requests_browser_page_body(route) {
+        return true;
+    }
+    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
         return false;
     };
-    match route.output_contract.semantic_kind {
-        crate::OutputSemanticKind::WebPageSummary => {
-            shape.class() == crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
-        }
-        crate::OutputSemanticKind::ServiceStatus => {
-            shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Verdict
-        }
-        _ => false,
+    if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ServiceStatus,
+    ) {
+        return shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Verdict;
     }
+    false
+}
+
+fn route_requests_browser_page_body(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "http"],
+        &["open", "get", "read", "extract"],
+    ) && !crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "web"],
+        &["search"],
+    )
 }
 
 pub(crate) fn extract_direct_answer_from_generic_output(

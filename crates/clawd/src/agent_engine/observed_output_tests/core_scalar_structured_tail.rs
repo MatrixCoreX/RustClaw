@@ -112,6 +112,31 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
 }
 
 #[test]
+fn inventory_dir_file_names_contract_accepts_route_marker_without_semantic_enum() {
+    let value = serde_json::json!({
+        "action": "inventory_dir",
+        "names_only": true,
+        "names": ["archive", "release_checklist.md", "service_notes.md"],
+        "names_by_kind": {
+            "files": ["release_checklist.md", "service_notes.md"],
+            "dirs": ["archive"],
+            "other": []
+        },
+        "counts": {"files": 2, "dirs": 1, "total": 3}
+    });
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.route_reason = "contract:file_names".to_string();
+    assert_eq!(route.output_contract.semantic_kind, OutputSemanticKind::None);
+
+    let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
+        .expect("file names marker answer");
+
+    assert!(answer.contains("release_checklist.md"));
+    assert!(answer.contains("service_notes.md"));
+    assert!(!answer.contains("archive"));
+}
+
+#[test]
 fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract() {
     let mut loop_state = LoopState::new(1);
     loop_state.executed_step_results.push(ok_step(
@@ -181,6 +206,40 @@ fn tree_summary_direct_answer_lists_top_level_groups_without_false_truncation() 
     assert!(answer.contains("package.json"), "answer: {answer}");
     assert!(!answer.contains("未显示"), "answer: {answer}");
     assert!(!answer.contains("截断"), "answer: {answer}");
+}
+
+#[test]
+fn tree_summary_direct_answer_prefers_machine_summary_rows() {
+    let value = serde_json::json!({
+        "action": "tree_summary",
+        "summary_rows": [
+            {
+                "path": "scripts/nl_tests/fixtures/device_local",
+                "name": "device_local",
+                "kind": "dir",
+                "file_count": 2,
+                "truncated": false
+            },
+            {
+                "path": "scripts/nl_tests/fixtures/device_local/docs",
+                "name": "docs",
+                "kind": "dir",
+                "file_count": 2,
+                "truncated": false
+            }
+        ],
+        "tree": {
+            "kind": "dir",
+            "path": "scripts/nl_tests/fixtures/device_local",
+            "children": []
+        }
+    });
+
+    let answer = tree_summary_direct_answer_candidate(None, &value, false).expect("answer");
+
+    assert!(answer.contains("name=device_local file_count=2 truncated=false"));
+    assert!(answer.contains("name=docs file_count=2 truncated=false"));
+    assert!(!answer.contains("顶层结构"), "answer: {answer}");
 }
 
 #[test]

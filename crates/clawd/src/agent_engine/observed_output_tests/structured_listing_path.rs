@@ -7,7 +7,7 @@ fn direct_answer_formats_structured_keys_result_without_llm() {
             r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -52,7 +52,7 @@ fn direct_answer_formats_structured_keys_presence_without_llm() {
             r#"{"action":"structured_keys","path":"/tmp/en-US.toml","resolved_path":"/tmp/en-US.toml","field_path":"","exists":true,"container_type":"object","count":3,"keys":["execute_prefixes","locale","result_suffixes"]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读取 /tmp/en-US.toml 并确认是否存在 negative_markers 字段".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -101,7 +101,7 @@ fn direct_answer_formats_structured_array_identity_presence_without_llm() {
             r#"{"action":"structured_keys","path":"/tmp/skills_registry.toml","resolved_path":"/tmp/skills_registry.toml","field_path":"skills","exists":true,"container_type":"array","count":2,"identity_values":["fs_basic","config_basic"],"identity_omitted":0,"indices_preview":[{"index":0,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"fs_basic"},{"index":1,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"config_basic"}]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读取 /tmp/skills_registry.toml，回答 fs_basic 是否注册".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -149,7 +149,7 @@ fn structured_keys_one_sentence_defers_to_synthesis() {
             r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读 /tmp/package.json，用一句话告诉我 scripts 字段下有哪些子键"
             .to_string(),
         needs_clarify: false,
@@ -195,7 +195,7 @@ fn direct_answer_formats_extract_fields_result_without_llm() {
             r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent:
                 "读取 /tmp/config.toml 里的 database.sqlite_path 和 tools.allow_sudo，告诉我两个字段的值"
                     .to_string(),
@@ -427,7 +427,7 @@ fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
         resolved_intent: "列出 logs 目录下的文件名".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
+        route_reason: "normalizer:planner_execute_with_chat_finalizer".to_string(),
         route_confidence: None,
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Unknown,
@@ -649,7 +649,7 @@ fn direct_answer_defers_hidden_entries_explanation_shape_to_synthesis() {
         ".git\nREADME.md\n.env\nsrc\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "检查当前目录是否存在隐藏文件，然后用一句话解释隐藏文件的常见用途"
             .to_string(),
         needs_clarify: false,
@@ -739,7 +739,7 @@ fn direct_answer_formats_hidden_entries_check_strict_shape_from_listing() {
         ".\n..\n.codex\n.git/\n.gitignore\nREADME.md\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -784,7 +784,7 @@ fn direct_answer_formats_hidden_entries_check_strict_shape_from_wrapped_inventor
         r#"{"extra":{"action":"inventory_dir","counts":{"dirs":3,"files":2,"hidden":5,"total":5},"entries":[],"include_hidden":true,"names":[".agents",".codex",".git",".gitignore",".pids","README.md"],"names_only":true,"path":"/tmp/workspace"},"text":"{\"action\":\"inventory_dir\"}"}"#,
     ));
     let mut route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "hidden entries selector_limit=3".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn service_control_summary_candidate(value: &serde_json::Value) -> Option<String> {
-    value
+    service_control_status_payload_value(value)?
         .get("summary")
         .and_then(|v| v.as_str())
         .map(str::trim)
@@ -9,23 +9,110 @@ pub(super) fn service_control_summary_candidate(value: &serde_json::Value) -> Op
         .map(ToString::to_string)
 }
 
+fn service_control_status_payload_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    if value_has_service_control_status_shape(value) {
+        return Some(value.clone());
+    }
+    if let Some(extra) = value
+        .get("extra")
+        .filter(|extra| value_has_service_control_status_shape(extra))
+    {
+        return Some(extra.clone());
+    }
+    value
+        .get("text")
+        .and_then(|value| value.as_str())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
+        .filter(value_has_service_control_status_shape)
+}
+
+fn value_has_service_control_status_shape(value: &serde_json::Value) -> bool {
+    value
+        .get("service_name")
+        .or_else(|| value.get("target"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        && (value.get("post_state").is_some()
+            || value.get("pre_state").is_some()
+            || value.get("status").is_some()
+            || value.get("summary").is_some())
+}
+
 fn service_control_state_value(value: &serde_json::Value) -> Option<&str> {
     value
         .get("post_state")
         .or_else(|| value.get("pre_state"))
+        .or_else(|| value.get("status"))
         .or_else(|| value.get("summary"))
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())
 }
 
+fn service_control_json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.trim().to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+}
+
+fn push_service_control_field(
+    fields: &mut Vec<String>,
+    value: &serde_json::Value,
+    field_name: &'static str,
+    output_name: &'static str,
+) {
+    if fields.iter().any(|field| {
+        field
+            .split_once('=')
+            .is_some_and(|(key, _)| key == output_name)
+    }) {
+        return;
+    }
+    let Some(field_value) = value
+        .get(field_name)
+        .and_then(service_control_json_scalar_to_string)
+    else {
+        return;
+    };
+    fields.push(format!("{output_name}={field_value}"));
+}
+
+fn service_control_status_fields_answer(value: &serde_json::Value) -> Option<String> {
+    let mut fields = Vec::new();
+    push_service_control_field(&mut fields, value, "target", "target");
+    push_service_control_field(&mut fields, value, "service_name", "target");
+    push_service_control_field(&mut fields, value, "service_name", "service_name");
+    push_service_control_field(&mut fields, value, "post_state", "post_state");
+    push_service_control_field(&mut fields, value, "pre_state", "pre_state");
+    push_service_control_field(&mut fields, value, "status", "status");
+    push_service_control_field(&mut fields, value, "verified", "verified");
+    push_service_control_field(&mut fields, value, "manager_type", "manager_type");
+    if fields.is_empty() {
+        return None;
+    }
+    fields.push("source=service_control".to_string());
+    Some(fields.join(" "))
+}
+
 pub(super) fn service_control_status_direct_answer_candidate(
     value: &serde_json::Value,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> Option<String> {
-    let service_state = service_control_state_value(value)?;
+    let value = service_control_status_payload_value(value)?;
+    let service_state = service_control_state_value(&value)?;
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
         return Some(service_state.to_string());
+    }
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::Strict | crate::OutputResponseShape::Free)
+    ) {
+        return service_control_status_fields_answer(&value);
     }
     None
 }
@@ -872,8 +959,10 @@ pub(super) fn process_basic_port_list_should_use_llm_synthesis(
     route: &crate::RouteResult,
     body: &str,
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
-        && route_allows_model_language_direct_candidate(route)
+    super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ServiceStatus,
+    ) && route_allows_model_language_direct_candidate(route)
         && route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         && body_has_process_basic_port_list_observation(body)
 }

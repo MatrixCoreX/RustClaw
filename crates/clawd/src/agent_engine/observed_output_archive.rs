@@ -68,17 +68,81 @@ pub(super) fn archive_list_summary_from_body(body: &str) -> Option<ArchiveListSu
         .or_else(|| archive_list_summary_from_raw_output(body, None))
 }
 
-pub(super) fn archive_read_direct_answer_candidate(body: &str) -> Option<String> {
+pub(super) fn archive_read_direct_answer_candidate(
+    route: Option<&crate::RouteResult>,
+    body: &str,
+) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if value.get("action").and_then(|value| value.as_str()) != Some("read") {
         return None;
     }
-    value
-        .get("content")
+    let member_path = value
+        .get("member_path")
+        .or_else(|| value.get("member"))
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|member| !member.is_empty());
+    let content_excerpt = value
+        .get("content_excerpt")
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|content| !content.is_empty())
-        .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("content")
+                .and_then(|value| value.as_str())
+                .and_then(archive_read_first_content_line)
+        });
+    let project_structured_fields = route
+        .and_then(|route| {
+            route
+                .output_contract
+                .self_extension
+                .structured_field_selector
+                .as_deref()
+        })
+        .is_some_and(archive_read_selector_requests_member_and_excerpt);
+    match (member_path, content_excerpt) {
+        (Some(member_path), Some(content_excerpt)) if project_structured_fields => Some(
+            serde_json::json!({
+                "member_path": member_path,
+                "content_excerpt": content_excerpt,
+            })
+            .to_string(),
+        ),
+        (None, Some(content_excerpt)) if project_structured_fields => Some(
+            serde_json::json!({
+                "content_excerpt": content_excerpt,
+            })
+            .to_string(),
+        ),
+        (_, Some(content_excerpt)) => Some(content_excerpt.to_string()),
+        _ => value
+            .get("content")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|content| !content.is_empty())
+            .map(ToString::to_string),
+    }
+}
+
+fn archive_read_selector_requests_member_and_excerpt(selector: &str) -> bool {
+    let mut has_member = false;
+    let mut has_excerpt = false;
+    for token in selector
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.')))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        has_member |= matches!(token, "member" | "member_path" | "path");
+        has_excerpt |= matches!(token, "content" | "content_excerpt");
+    }
+    has_member && has_excerpt
+}
+
+fn archive_read_first_content_line(content: &str) -> Option<&str> {
+    content.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
 pub(super) fn archive_list_summary_from_value(
@@ -269,7 +333,10 @@ pub(super) fn archive_entry_existence_direct_answer(
     archive_hint: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ExistenceWithPath,
+    ) {
         return None;
     }
     let archive_path = archive_hint
@@ -583,7 +650,10 @@ pub(super) fn archive_unpack_direct_answer_candidate(
     prefer_english: bool,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ArchiveUnpack,
+    ) {
         return None;
     }
     let dest =

@@ -570,7 +570,10 @@ pub(super) fn fs_search_content_presence_direct_answer_candidate(
     value: &serde_json::Value,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentPresenceCheck {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ContentPresenceCheck,
+    ) {
         return None;
     }
     let (matches, match_count, query) = fs_search_grep_text_results(value)?;
@@ -785,14 +788,18 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
     value: &serde_json::Value,
     allow_multi_result_list: bool,
 ) -> Option<String> {
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::ScalarPathOnly
+    if !super::output_route_policy::route_contract_marker_is_any(
+        route,
+        &[
+            crate::OutputSemanticKind::FilePaths,
+            crate::OutputSemanticKind::FileNames,
+            crate::OutputSemanticKind::ScalarPathOnly,
+        ],
     ) {
-        if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
-            || !route_prefers_plain_fs_search_paths(route)
+        if !super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ExistenceWithPath,
+        ) || !route_prefers_plain_fs_search_paths(route)
         {
             return None;
         }
@@ -903,7 +910,10 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
 }
 
 fn fs_search_result_list_limit(route: &crate::RouteResult) -> usize {
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths {
+    if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::FilePaths,
+    ) {
         5
     } else {
         3
@@ -911,8 +921,10 @@ fn fs_search_result_list_limit(route: &crate::RouteResult) -> usize {
 }
 
 fn route_prefers_absolute_fs_search_file_paths(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
-        && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+    super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::FilePaths,
+    ) && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route.output_contract.locator_hint.trim().is_empty()
 }
 
@@ -1007,7 +1019,10 @@ pub(super) fn fs_search_semantic_listing_candidate(
     route: &crate::RouteResult,
     value: &serde_json::Value,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryNames {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::DirectoryNames,
+    ) {
         return None;
     }
     let (results, count, _ext) = fs_search_find_ext_results(value)?;

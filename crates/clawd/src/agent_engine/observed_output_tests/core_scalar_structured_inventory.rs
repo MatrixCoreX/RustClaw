@@ -86,7 +86,8 @@ fn market_quote_scalar_direct_answer_uses_registry_semantic_tag() {
         &["market_probe"],
     );
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=crypto.quote symbol=BTC".to_string();
     let agent_run_context = AgentRunContext {
         route_result: Some(route),
         ..AgentRunContext::default()
@@ -232,7 +233,7 @@ fn observed_outputs_keep_latest_content_read_for_same_path() {
 
 fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Run an observation, then produce the requested final wording."
             .to_string(),
         needs_clarify: false,
@@ -371,6 +372,49 @@ fn scalar_path_observed_route_rejects_content_evidence_contract() {
 }
 
 #[test]
+fn observed_output_route_policy_accepts_contract_markers_without_semantic_enum() {
+    let mut scalar_path_route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    scalar_path_route.route_reason = "contract:scalar_path_only".to_string();
+    scalar_path_route.output_contract.requires_content_evidence = false;
+    assert_eq!(
+        scalar_path_route.output_contract.semantic_kind,
+        OutputSemanticKind::None
+    );
+    assert!(route_requests_scalar_path_only(&scalar_path_route));
+    assert!(route_allows_path_batch_scalar_path_observed_answer(
+        &scalar_path_route
+    ));
+
+    scalar_path_route.route_reason =
+        "contract:scalar_path_only; execution_required_read_file_extract_scalar".to_string();
+    assert!(!route_allows_path_batch_scalar_path_observed_answer(
+        &scalar_path_route
+    ));
+
+    let mut file_names_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    file_names_route.route_reason = "contract:file_names".to_string();
+    assert!(route_prefers_plain_fs_search_paths(&file_names_route));
+    assert!(route_allows_raw_listing_direct_answer(Some(
+        &file_names_route
+    )));
+
+    let mut failed_step_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    failed_step_route.route_reason = "contract:execution_failed_step".to_string();
+    failed_step_route.output_contract.locator_kind = OutputLocatorKind::None;
+    failed_step_route.output_contract.locator_hint.clear();
+    assert!(route_disallows_direct_observation_passthrough(
+        &failed_step_route
+    ));
+
+    let mut quantity_route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    quantity_route.route_reason = "contract:quantity_comparison".to_string();
+    quantity_route.output_contract.requires_content_evidence = true;
+    assert!(route_quantity_comparison_requires_model_language_synthesis(
+        &quantity_route
+    ));
+}
+
+#[test]
 fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
@@ -485,7 +529,7 @@ fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
         "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "查看当前工作区最近一次 git 提交的标题，并简短告诉我。".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -814,7 +858,7 @@ fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route_result.output_contract.locator_kind = OutputLocatorKind::Path;
     route_result.output_contract.locator_hint =
-        "prompts/schemas/direct_answer_gate.schema.json".to_string();
+        "prompts/schemas/agent_loop_decision_envelope.schema.json".to_string();
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()
@@ -1021,6 +1065,54 @@ fn direct_scalar_formats_recent_structured_scalar_equality() {
         )
         .as_deref(),
         Some("RustClaw != rustclaw")
+    );
+}
+
+#[test]
+fn direct_scalar_formats_compare_paths_equality_with_explicit_existence_fields() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"path":"service_notes.md"},"right":{"exists":true,"path":"release_checklist.md"}},"text":"{}"}"#,
+    ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Compare two paths and return same_path plus existence fields."
+            .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "llm_contract:path_metadata_compare".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
+            locator_hint: "service_notes.md | release_checklist.md".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+            .as_deref(),
+        Some("same_path=false\nleft_exists=true\nright_exists=true")
     );
 }
 

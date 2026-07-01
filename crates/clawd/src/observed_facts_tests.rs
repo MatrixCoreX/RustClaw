@@ -24,6 +24,7 @@ fn dummy_route_result() -> crate::RouteResult {
 fn derives_ordered_entries_from_numbered_answer_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
+    route.route_reason = "file_names".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
     let facts = derive_observed_facts_from_ask_outcome(
@@ -230,6 +231,7 @@ fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
     route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
+    route.route_reason = "file_names".to_string();
     route.output_contract.locator_hint = "logs".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
@@ -248,6 +250,7 @@ fn derives_bound_target_from_scalar_path_answer_contract() {
     let journal = crate::task_journal::TaskJournal::new("find_path");
     let mut route = dummy_route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.route_reason = "scalar_path_only".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
