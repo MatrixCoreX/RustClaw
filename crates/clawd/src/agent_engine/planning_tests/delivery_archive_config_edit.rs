@@ -713,7 +713,7 @@ fn config_mutation_read_plus_plan_collapses_to_single_config_edit_plan() {
 }
 
 #[test]
-fn config_change_preview_read_plan_rewrites_to_config_edit_plan() {
+fn config_change_preview_read_plan_does_not_infer_mutation_from_user_text() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
     route.output_contract.requires_content_evidence = true;
@@ -735,23 +735,18 @@ fn config_change_preview_read_plan_rewrites_to_config_edit_plan() {
     ];
 
     let rewritten = rewrite_config_change_preview_to_config_edit_plan(
-            Some(&route),
-            "只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.affected100_probe 设置为 true，并说明会改哪里",
-            Some("configs/config.toml"),
-            actions,
-        );
-
-    assert_eq!(rewritten.len(), 1);
-    let args = expect_planned_call(&rewritten[0], "config_edit", "plan_config_change");
-    assert_eq!(
-        args.get("path").and_then(Value::as_str),
-        Some("configs/config.toml")
+        Some(&route),
+        "只生成变更计划，不要实际修改：把 configs/config.toml 里的 wrong.field 设置为 false",
+        Some("configs/config.toml"),
+        actions,
     );
+
+    assert_eq!(rewritten.len(), 2);
+    let args = expect_planned_call(&rewritten[0], "config_basic", "read_field");
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
-        Some("skills.skill_switches.affected100_probe")
+        Some("skills.skill_switches")
     );
-    assert_eq!(args.get("value").and_then(Value::as_bool), Some(true));
 }
 
 #[test]
@@ -761,6 +756,8 @@ fn config_change_preview_guard_plan_rewrites_to_config_edit_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason =
+        "field_path=skills.skill_switches.config_edit_nl_plan value=true".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "config_basic".to_string(),
@@ -776,7 +773,7 @@ fn config_change_preview_guard_plan_rewrites_to_config_edit_plan() {
 
     let rewritten = rewrite_config_change_preview_to_config_edit_plan(
         Some(&route),
-        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        "configs/config.toml wrong.field = false",
         Some("configs/config.toml"),
         actions,
     );

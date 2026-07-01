@@ -1070,13 +1070,15 @@ fn config_edit_read_back_action(parsed: &ParsedConfigChangePreview) -> AgentActi
 }
 
 pub(super) fn parse_config_change_preview(
-    user_text: &str,
+    _user_text: &str,
     route: &RouteResult,
     auto_locator_path: Option<&str>,
 ) -> Option<ParsedConfigChangePreview> {
-    let field_path = crate::intent::surface_signals::extract_dotted_field_selector(user_text)?;
-    let value = parse_config_change_value_after_field(user_text, &field_path)?;
-    let path = config_change_preview_path(user_text, route, auto_locator_path)
+    let field_path = config_change_machine_value(route, &["field_path", "field"])?;
+    let value = config_change_machine_json_value(route).or_else(|| {
+        config_change_machine_value(route, &["value"]).and_then(parse_config_value_token)
+    })?;
+    let path = config_change_preview_path(_user_text, route, auto_locator_path)
         .unwrap_or_else(|| "configs/config.toml".to_string());
     Some(ParsedConfigChangePreview {
         path,
@@ -1086,7 +1088,7 @@ pub(super) fn parse_config_change_preview(
 }
 
 pub(super) fn config_change_preview_path(
-    user_text: &str,
+    _user_text: &str,
     route: &RouteResult,
     auto_locator_path: Option<&str>,
 ) -> Option<String> {
@@ -1095,13 +1097,34 @@ pub(super) fn config_change_preview_path(
         .filter(|path| path_has_structured_text_extension(path))
         .map(ToString::to_string)
         .or_else(|| route_locator_structured_config_path(route))
-        .or_else(|| {
-            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(user_text)
-                .and_then(|locator| {
-                    path_has_structured_text_extension(&locator.locator_hint)
-                        .then_some(locator.locator_hint)
-                })
+}
+
+fn config_change_machine_value(route: &RouteResult, keys: &[&str]) -> Option<String> {
+    [
+        route.route_reason.as_str(),
+        route.resolved_intent.as_str(),
+        route.output_contract.locator_hint.as_str(),
+    ]
+    .into_iter()
+    .find_map(|text| {
+        keys.iter()
+            .find_map(|key| config_change_machine_value_from_text(text, key))
+    })
+}
+
+fn config_change_machine_value_from_text(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{}=", key.trim());
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .find_map(|part| {
+            let raw = part.trim().strip_prefix(&prefix)?;
+            let value = raw.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+            (!value.is_empty()).then(|| value.to_string())
         })
+}
+
+fn config_change_machine_json_value(route: &RouteResult) -> Option<Value> {
+    config_change_machine_value(route, &["value_json", "json_value"])
+        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
 }
 
 pub(super) fn route_locator_structured_config_path(route: &RouteResult) -> Option<String> {
