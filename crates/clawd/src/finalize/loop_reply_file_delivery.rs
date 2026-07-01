@@ -605,13 +605,13 @@ fn route_requests_generated_file_path_report(agent_run_context: Option<&AgentRun
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            !route.output_contract.delivery_required
-                && route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-                && route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::GeneratedFilePathReport
-                && crate::contract_matrix::final_answer_shape_for_output_contract(
-                    &route.output_contract,
-                ) == Some(crate::contract_matrix::FinalAnswerShape::SinglePath)
+            let contract = route.effective_output_contract();
+            !contract.delivery_required
+                && contract.response_shape == crate::OutputResponseShape::Scalar
+                && route
+                    .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+                && crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
+                    == Some(crate::contract_matrix::FinalAnswerShape::SinglePath)
         })
 }
 
@@ -661,9 +661,9 @@ fn route_allows_generated_file_path_report_payload(
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            !route.output_contract.delivery_required
-                && route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::GeneratedFilePathReport
+            !route.effective_output_contract().delivery_required
+                && route
+                    .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
         })
 }
 
@@ -767,6 +767,81 @@ fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> O
     Some(fields.join("\n"))
 }
 
+pub(super) fn async_poll_result_report_from_value(value: &serde_json::Value) -> Option<String> {
+    let extra = value.get("extra").unwrap_or(value);
+    let adapter_result = extra
+        .get("async_poll_adapter_result")
+        .filter(|value| value.is_object())?;
+    let mut fields = Vec::new();
+    if let Some(task_id) = extra
+        .get("task_id")
+        .or_else(|| {
+            adapter_result
+                .get("final_result_json")
+                .and_then(|result| result.get("task_id"))
+        })
+        .and_then(clean_machine_field_value)
+    {
+        fields.push(format!("task_id={task_id}"));
+    }
+    if let Some(job_id) = extra
+        .get("job_id")
+        .or_else(|| adapter_result.get("job_id"))
+        .or_else(|| {
+            adapter_result
+                .get("final_result_json")
+                .and_then(|result| result.get("job_id"))
+        })
+        .and_then(clean_machine_field_value)
+    {
+        fields.push(format!("job_id={job_id}"));
+    }
+    if let Some(status) = extra
+        .get("status")
+        .or_else(|| adapter_result.get("status"))
+        .and_then(clean_machine_field_value)
+    {
+        fields.push(format!("status={status}"));
+    }
+    let adapter_json = compact_machine_json(adapter_result)?;
+    fields.push(format!("async_poll_adapter_result={adapter_json}"));
+    (fields.len() >= 2).then(|| fields.join("\n"))
+}
+
+pub(super) fn direct_async_poll_result_report_from_payload(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_allows_generated_file_path_report_payload(agent_run_context) {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        if let Some(answer) = async_poll_result_report_from_value(&value) {
+            return Some((answer, matrix_observed_shape_summary(loop_state)));
+        }
+    }
+    None
+}
+
 pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -818,6 +893,9 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     {
         return None;
     }
+    if archive_pack_has_later_terminal_respond(loop_state) {
+        return None;
+    }
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok()
             || matches!(
@@ -844,6 +922,50 @@ fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
             &["archive"],
             &["pack"],
         )
+}
+
+fn archive_pack_has_later_terminal_respond(loop_state: &LoopState) -> bool {
+    let mut saw_archive_pack_observation = false;
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() {
+            continue;
+        }
+        match step.skill.as_str() {
+            "respond" => {
+                if !saw_archive_pack_observation {
+                    return true;
+                }
+            }
+            "archive_basic" => {
+                if step
+                    .output
+                    .as_deref()
+                    .and_then(archive_pack_archive_path_from_observed_body)
+                    .is_some()
+                {
+                    saw_archive_pack_observation = true;
+                }
+            }
+            "synthesize_answer" | "think" => {}
+            _ => {}
+        }
+    }
+    false
+}
+
+fn archive_pack_archive_path_from_observed_body(body: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let extra = parsed.get("extra")?;
+    let action = extra.get("action").and_then(serde_json::Value::as_str)?;
+    if action.trim() != "pack" {
+        return None;
+    }
+    extra
+        .get("archive")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| archive_output_path_candidate(value))
+        .map(ToOwned::to_owned)
 }
 
 fn created_archive_path_from_observed_body(body: &str) -> Option<String> {
@@ -985,9 +1107,10 @@ fn route_requests_scalar_path_candidate_projection(
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            !route.output_contract.delivery_required
-                && route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-                && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+            let contract = route.effective_output_contract();
+            !contract.delivery_required
+                && contract.response_shape == crate::OutputResponseShape::Scalar
+                && route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         })
 }
 

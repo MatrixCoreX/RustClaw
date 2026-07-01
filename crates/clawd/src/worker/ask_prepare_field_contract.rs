@@ -40,8 +40,7 @@ pub(super) fn repair_structured_field_target_from_prompt(
     ) else {
         return;
     };
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
-    {
+    if route_preserves_heterogeneous_observation_summary_contract(route_result) {
         route_result
             .output_contract
             .self_extension
@@ -59,6 +58,12 @@ pub(super) fn repair_structured_field_target_from_prompt(
     route_result
         .route_reason
         .push_str("; structured_field_target_from_prompt_repair");
+}
+
+fn set_effective_contract_marker(route_result: &mut crate::RouteResult, marker: &'static str) {
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.route_reason.push_str("; ");
+    route_result.route_reason.push_str(marker);
 }
 
 pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
@@ -110,8 +115,7 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         && structured_refinement_present
         && route_preserves_heterogeneous_observation_summary_contract(route_result)
     {
-        route_result.output_contract.semantic_kind =
-            crate::OutputSemanticKind::CommandOutputSummary;
+        set_effective_contract_marker(route_result, "contract:command_output_summary");
         if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
             route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
         }
@@ -121,8 +125,7 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         return;
     }
     if marker_matches_field_value_request
-        && route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::RecentScalarEqualityCheck
+        && super::route_reason_has_structural_marker(route_result, "recent_scalar_equality_check")
     {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
         route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -131,31 +134,11 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
             .push_str("; scalar_field_value_contract_repair");
         return;
     }
-    if target_count >= 2
-        && structured_refinement_present
-        && !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::StructuredKeys
-                | crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::DocumentHeading
-                | crate::OutputSemanticKind::RecentScalarEqualityCheck
-        )
-    {
-        if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
-            route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
-        }
-        route_result
-            .route_reason
-            .push_str("; multi_locator_structured_field_preserves_summary_contract");
-        return;
-    }
     if (marker_matches_field_value_request || selector_declares_field_value_request)
         && target_count >= 2
         && structured_refinement_present
     {
-        route_result.output_contract.semantic_kind =
-            crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        set_effective_contract_marker(route_result, "contract:recent_scalar_equality_check");
         if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
             route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
         }
@@ -165,13 +148,8 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         return;
     }
     if !(selector_declares_field_value_request
-        || matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::StructuredKeys
-                | crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::DocumentHeading
-                | crate::OutputSemanticKind::RecentScalarEqualityCheck
-        ))
+        || marker_matches_field_value_request
+        || route_has_scalar_field_value_compatible_marker(route_result))
     {
         return;
     }
@@ -214,13 +192,23 @@ fn explicit_locator_target_count_excluding_structured_selector(
 fn route_preserves_heterogeneous_observation_summary_contract(
     route_result: &crate::RouteResult,
 ) -> bool {
-    let route_reason = route_result.route_reason.as_str();
-    route_reason.contains("semantic_kind=command_output_summary")
-        || route_reason.contains("command_result_synthesis")
+    super::route_reason_has_structural_marker(route_result, "command_output_summary")
+        || super::route_reason_has_structural_marker(route_result, "command_result_synthesis")
         || super::route_reason_has_structural_marker(
             route_result,
             "multi_locator_structured_field_preserves_summary_contract",
         )
+}
+
+fn route_has_scalar_field_value_compatible_marker(route_result: &crate::RouteResult) -> bool {
+    [
+        "structured_keys",
+        "existence_with_path",
+        "document_heading",
+        "recent_scalar_equality_check",
+    ]
+    .iter()
+    .any(|marker| super::route_reason_has_structural_marker(route_result, marker))
 }
 
 fn candidate_matches_structured_selector(candidate: &str, selector: &str) -> bool {
