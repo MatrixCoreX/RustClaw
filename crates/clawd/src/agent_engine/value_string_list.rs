@@ -1785,15 +1785,11 @@ fn route_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> boo
 }
 
 fn route_mentions_task_control_list(route: &RouteResult) -> bool {
-    route_reason_has_marker(route, "capability_ref=task_control.list")
-        || route_reason_has_marker(route, "task_control.list")
-        || route_mentions_machine_token(route, "task_control.list")
+    crate::machine_capability_ref::route_has_capability_action(route, &["task_control"], &["list"])
 }
 
 fn route_mentions_task_control_get(route: &RouteResult) -> bool {
-    route_reason_has_marker(route, "capability_ref=task_control.get")
-        || route_reason_has_marker(route, "task_control.get")
-        || route_mentions_machine_token(route, "task_control.get")
+    crate::machine_capability_ref::route_has_capability_action(route, &["task_control"], &["get"])
 }
 
 fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
