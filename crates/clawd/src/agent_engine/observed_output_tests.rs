@@ -100,6 +100,7 @@ fn claimed_task(task_id: &str) -> ClaimedTask {
 include!("observed_output_tests/core_scalar_structured_inventory.rs");
 include!("observed_output_tests/core_scalar_structured_tail.rs");
 include!("observed_output_tests/fs_search_contracts.rs");
+include!("observed_output_tests/git_text_boundary.rs");
 include!("observed_output_tests/observed_fallback_read_range.rs");
 include!("observed_output_tests/service_control_text_boundary.rs");
 include!("observed_output_tests/structured_scalar_text_boundary.rs");
