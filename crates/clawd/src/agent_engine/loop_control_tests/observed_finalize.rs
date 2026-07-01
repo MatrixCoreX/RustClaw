@@ -65,7 +65,8 @@ fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis
     let protocol_output = json!({
         "request_id": "direct-44",
         "status": "ok",
-        "text": service_payload.to_string(),
+        "text": "service_control status",
+        "extra": service_payload,
         "error_text": null
     })
     .to_string();

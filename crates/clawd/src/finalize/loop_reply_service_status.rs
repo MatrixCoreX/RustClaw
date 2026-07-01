@@ -223,11 +223,7 @@ fn service_control_payload_from_output(output: &str) -> Option<serde_json::Value
     {
         return Some(extra.clone());
     }
-    value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .filter(json_value_has_service_control_status_shape)
+    None
 }
 
 fn json_value_has_service_control_status_shape(value: &serde_json::Value) -> bool {
@@ -265,11 +261,7 @@ fn system_basic_info_payload_from_output(output: &str) -> Option<serde_json::Val
     {
         return Some(extra.clone());
     }
-    value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .filter(json_value_has_system_basic_info_shape)
+    None
 }
 
 fn json_value_has_system_basic_info_shape(value: &serde_json::Value) -> bool {
@@ -294,11 +286,7 @@ fn health_check_payload_from_output(output: &str) -> Option<serde_json::Value> {
     {
         return Some(extra.clone());
     }
-    value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .filter(json_value_has_health_check_shape)
+    None
 }
 
 fn json_value_has_health_check_shape(value: &serde_json::Value) -> bool {
