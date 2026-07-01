@@ -287,10 +287,9 @@ pub(super) fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteRe
             | crate::OutputSemanticKind::ArchiveRead
             | crate::OutputSemanticKind::ArchivePack
             | crate::OutputSemanticKind::ArchiveUnpack
-            | crate::OutputSemanticKind::DockerPs
-            | crate::OutputSemanticKind::DockerImages
-            | crate::OutputSemanticKind::DockerLogs
-            | crate::OutputSemanticKind::DockerContainerLifecycle
+    ) || crate::machine_capability_ref::route_has_capability_namespace(
+        route_result,
+        &["archive", "docker"],
     )
 }
 

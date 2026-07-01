@@ -86,6 +86,7 @@ use super::{
     rewrite_terminal_placeholder_respond_to_synthesize_answer,
     rewrite_terminal_synthesis_placeholder_respond,
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
+    route_uses_runtime_owned_observed_finalizer,
     scalar_content_auto_locator_deterministic_plan_result,
     scalar_content_auto_locator_observation_plan, scalar_count_filter_deterministic_plan_result,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
