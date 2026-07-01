@@ -1391,7 +1391,7 @@ fn plain_text_terminal_respond_fallback_actions(
     if content.is_empty() || raw_plan_text_looks_like_structured_plan_fragment(content) {
         return None;
     }
-    let chat_like_route = route.is_chat_gate()
+    let chat_like_route = route.is_resume_discussion_mode()
         || route.uses_chat_finalizer()
         || route_reason_has_structural_marker(route, "pure_chat_agent_loop_submode");
     if !chat_like_route

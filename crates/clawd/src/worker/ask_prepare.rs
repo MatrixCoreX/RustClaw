@@ -174,7 +174,7 @@ fn active_clarify_run_control_prompt(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     current_prompt: &str,
 ) -> Option<String> {
-    if !route_result.is_chat_gate()
+    if !route_result.is_resume_discussion_mode()
         || route_result.output_contract.delivery_required
         || !matches!(
             turn_analysis.and_then(|analysis| analysis.turn_type),

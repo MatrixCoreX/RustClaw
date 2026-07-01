@@ -299,7 +299,7 @@ fn standalone_contextual_chat_result_starts_primary_task(
             )
         );
     if !allowed_turn
-        || !route_result.is_chat_gate()
+        || !route_result.is_resume_discussion_mode()
         || route_result.needs_clarify
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -380,7 +380,7 @@ fn standalone_preference_or_memory_turn_clears_primary_task(
             crate::intent_router::TargetTaskPolicy::ReuseActive
                 | crate::intent_router::TargetTaskPolicy::ReplaceActive
         )
-    ) && route_result.is_chat_gate()
+    ) && route_result.is_resume_discussion_mode()
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -467,7 +467,7 @@ fn standalone_scalar_result_should_not_promote(
 }
 
 fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResult) -> bool {
-    if route_result.is_chat_gate() {
+    if route_result.is_resume_discussion_mode() {
         return true;
     }
     route_result.is_execute_gate()
@@ -599,7 +599,7 @@ fn unannotated_chat_output_starts_primary_task(
 ) -> bool {
     if turn_analysis.is_some()
         || has_prior_primary_task(prior_state)
-        || !route_result.is_chat_gate()
+        || !route_result.is_resume_discussion_mode()
         || route_result.needs_clarify
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -681,7 +681,7 @@ fn standalone_chat_deliverable_starts_primary_task(
             Some(crate::intent_router::TurnType::TaskRequest),
             Some(crate::intent_router::TargetTaskPolicy::Standalone)
         )
-    ) && route_result.is_chat_gate()
+    ) && route_result.is_resume_discussion_mode()
         && !route_result.needs_clarify
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
