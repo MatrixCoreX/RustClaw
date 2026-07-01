@@ -856,6 +856,7 @@ fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd
         OutputResponseShape::Free,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "systemctl status clawd"}),
@@ -897,6 +898,7 @@ fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
         OutputResponseShape::Free,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "systemctl restart clawd"}),
@@ -925,6 +927,7 @@ fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
         OutputResponseShape::Free,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallTool {
         tool: "system_basic".to_string(),
         args: json!({"action": "diagnose_runtime"}),
@@ -1010,6 +1013,7 @@ fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
         OutputResponseShape::Strict,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+    route.resolved_intent = "capability_ref=filesystem.list_dir".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "find . -type f -name '*.sh' | xargs dirname | sort -u"}),
@@ -1039,6 +1043,7 @@ fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
         OutputResponseShape::Free,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({
@@ -1079,6 +1084,7 @@ fn runtime_async_job_marker_skips_preferred_skill_repair() {
         OutputResponseShape::Strict,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "capability_ref=process.ps".to_string();
     route.route_reason =
         "async_job_protocol required_job_fields=job_id|status|poll_after_seconds".to_string();
     let actions = vec![AgentAction::CallSkill {

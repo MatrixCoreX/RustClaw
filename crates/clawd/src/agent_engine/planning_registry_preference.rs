@@ -6,14 +6,7 @@ use super::planning_actions::planned_action_skill_name;
 use crate::{AgentAction, AppState, RouteResult};
 
 fn route_registry_preference_tags(route_result: &RouteResult) -> Vec<String> {
-    let capability_tags = route_capability_registry_tags(route_result);
-    if !capability_tags.is_empty() {
-        return capability_tags;
-    }
-    route_semantic_fallback_tags(route_result)
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+    route_capability_registry_tags(route_result)
 }
 
 fn route_capability_registry_tags(route_result: &RouteResult) -> Vec<String> {
@@ -36,9 +29,51 @@ fn append_capability_alias_tags(tags: &mut Vec<String>, namespace: &str, action:
             tags.push(format!("archive_{action}"));
         }
         "config" => append_config_capability_alias_tags(tags, action),
+        "database" | "db" | "sqlite" => append_database_capability_alias_tags(tags, action),
         "docker" => append_docker_capability_alias_tags(tags, action),
+        "filesystem" | "fs_basic" => append_filesystem_capability_alias_tags(tags, action),
         "package" | "package_manager" if action == "detect" => {
             tags.push("package.detect_manager".to_string());
+        }
+        "process" if matches!(action, "ps" | "status" | "runtime_status") => {
+            tags.push("service_status".to_string());
+            tags.push("runtime_health".to_string());
+        }
+        "system" | "system_basic" if matches!(action, "runtime_status" | "status") => {
+            tags.push("service_status".to_string());
+            tags.push("runtime_health".to_string());
+            tags.push("system_health".to_string());
+        }
+        _ => {}
+    }
+}
+
+fn append_filesystem_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
+    match action {
+        "stat_path" | "stat_paths" => {
+            tags.push("path_facts".to_string());
+            tags.push("existence_with_path".to_string());
+        }
+        "list_dir" | "list_entries" => {
+            tags.push("directory_inventory".to_string());
+            tags.push("directory_names".to_string());
+            tags.push("file_names".to_string());
+        }
+        "find_entries" | "find_files" | "find_paths" => {
+            tags.push("file_search".to_string());
+            tags.push("file_paths".to_string());
+        }
+        "grep_text" | "search_text" => tags.push("content_search".to_string()),
+        "read_file" | "read_text" | "read_text_range" | "read_range" => {
+            tags.push("bounded_file_read".to_string());
+        }
+        "compare_paths" => {
+            tags.push("path_compare".to_string());
+            tags.push("quantity_comparison".to_string());
+        }
+        "write_file" | "write_text" | "append_file" | "append_text" | "make_dir" | "create_dir"
+        | "remove_path" | "delete_path" => {
+            tags.push("file_write".to_string());
         }
         _ => {}
     }
@@ -65,6 +100,19 @@ fn append_config_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
     }
 }
 
+fn append_database_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
+    match action {
+        "query" | "sqlite_query" => tags.push("sqlite_query".to_string()),
+        "list" | "list_tables" | "tables" => {
+            tags.push("sqlite_table_listing".to_string());
+            tags.push("sqlite_table_names_only".to_string());
+        }
+        "schema_version" => tags.push("sqlite_schema_version".to_string()),
+        "kind" | "database_kind" => tags.push("sqlite_database_kind_judgment".to_string()),
+        _ => {}
+    }
+}
+
 fn append_docker_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
     match action {
         "ps" | "list" | "list_containers" => tags.push("docker.list_containers".to_string()),
@@ -72,17 +120,6 @@ fn append_docker_capability_alias_tags(tags: &mut Vec<String>, action: &str) {
         "log" | "logs" | "read" | "read_logs" => tags.push("docker.read_logs".to_string()),
         "inspect" | "restart" | "start" | "stop" => tags.push("docker.lifecycle".to_string()),
         _ => {}
-    }
-}
-
-fn route_semantic_fallback_tags(route_result: &RouteResult) -> Vec<&'static str> {
-    match route_result.effective_output_contract_semantic_kind() {
-        crate::OutputSemanticKind::None | crate::OutputSemanticKind::RawCommandOutput => Vec::new(),
-        crate::OutputSemanticKind::DockerPs => vec!["docker.list_containers"],
-        crate::OutputSemanticKind::DockerImages => vec!["docker.list_images"],
-        crate::OutputSemanticKind::DockerLogs => vec!["docker.read_logs"],
-        crate::OutputSemanticKind::DockerContainerLifecycle => vec!["docker.lifecycle"],
-        kind => vec![kind.as_str()],
     }
 }
 
