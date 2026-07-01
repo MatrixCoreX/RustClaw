@@ -1,10 +1,8 @@
 //! Runtime ask-mode model.
 //!
-//! `AskMode` is the runtime ask-flow state: chat/clarify entries and planner
-//! execution entries carry the information needed for dispatch. Legacy
-//! `FirstLayerDecision` values are converted at compatibility
-//! boundaries and may still be emitted as log/journal hints, but dispatch uses
-//! `AskMode` directly.
+//! `AskMode` is the runtime ask-flow state used for boundary trace and
+//! dispatch compatibility. Ordinary user semantics are owned by the agent loop;
+//! legacy `FirstLayerDecision` values may still be emitted as log/journal hints.
 
 use super::types::FirstLayerDecision;
 use super::types::RouteGateKind;
@@ -21,10 +19,10 @@ pub(crate) enum AskMode {
 /// Entry strategy for user-facing text paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ChatEntryStrategy {
-    /// Chat response selected by the compatibility normalizer gate.
-    NormalizerThenChat,
-    /// Clarification selected by the compatibility normalizer gate.
-    NormalizerThenClarify,
+    /// Chat/direct-answer compatibility trace.
+    DirectAnswerTrace,
+    /// Clarification compatibility trace.
+    ClarifyTrace,
     /// Resume context and continue discussion.
     ResumeFollowupDiscussion,
 }
@@ -43,13 +41,13 @@ pub(crate) enum ActFinalizeStyle {
 impl AskMode {
     pub(crate) fn direct_answer() -> Self {
         AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::NormalizerThenChat,
+            entry: ChatEntryStrategy::DirectAnswerTrace,
         }
     }
 
     pub(crate) fn clarify() -> Self {
         AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::NormalizerThenClarify,
+            entry: ChatEntryStrategy::ClarifyTrace,
         }
     }
 
@@ -59,7 +57,8 @@ impl AskMode {
         }
     }
 
-    pub(crate) fn planner_execute_chat_wrapped() -> Self {
+    #[cfg(test)]
+    pub(crate) fn planner_execute_with_chat_finalizer() -> Self {
         AskMode::Act {
             finalize: ActFinalizeStyle::ChatWrapped,
         }
@@ -88,10 +87,10 @@ impl AskMode {
     pub(crate) fn legacy_route_label_for_trace(&self) -> &'static str {
         match self {
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenChat,
+                entry: ChatEntryStrategy::DirectAnswerTrace,
             } => "Chat",
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
+                entry: ChatEntryStrategy::ClarifyTrace,
             } => "AskClarify",
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
@@ -108,10 +107,10 @@ impl AskMode {
         }
     }
 
-    pub(crate) fn legacy_first_layer_decision_for_trace(&self) -> FirstLayerDecision {
+    pub(crate) fn route_trace_decision_for_legacy_journal(&self) -> FirstLayerDecision {
         match self {
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
+                entry: ChatEntryStrategy::ClarifyTrace,
             } => FirstLayerDecision::Clarify,
             AskMode::ClarifyOrChat { .. } => FirstLayerDecision::DirectAnswer,
             AskMode::Act { .. } => FirstLayerDecision::PlannerExecute,
@@ -121,7 +120,7 @@ impl AskMode {
     pub(crate) fn gate_kind(&self) -> RouteGateKind {
         match self {
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
+                entry: ChatEntryStrategy::ClarifyTrace,
             } => RouteGateKind::Clarify,
             AskMode::ClarifyOrChat { .. } => RouteGateKind::Chat,
             AskMode::Act { .. } => RouteGateKind::Execute,
@@ -157,18 +156,18 @@ impl AskMode {
         matches!(
             self,
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
+                entry: ChatEntryStrategy::ClarifyTrace,
             }
         )
     }
 
-    /// Direct-answer entry selected by the first-layer gate.
+    /// Direct-answer compatibility trace.
     #[cfg(test)]
-    pub(crate) fn is_normalizer_chat(&self) -> bool {
+    pub(crate) fn is_direct_answer_trace(&self) -> bool {
         matches!(
             self,
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenChat,
+                entry: ChatEntryStrategy::DirectAnswerTrace,
             }
         )
     }
@@ -211,11 +210,11 @@ impl AskMode {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenChat,
-            } => "clarify_or_chat:normalizer_chat",
+                entry: ChatEntryStrategy::DirectAnswerTrace,
+            } => "clarify_or_chat:direct_answer_trace",
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::NormalizerThenClarify,
-            } => "clarify_or_chat:normalizer_clarify",
+                entry: ChatEntryStrategy::ClarifyTrace,
+            } => "clarify_or_chat:clarify_trace",
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
             } => "clarify_or_chat:resume_followup_discussion",

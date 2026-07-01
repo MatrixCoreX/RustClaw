@@ -1,16 +1,8 @@
-//! Phase 3.1：ask 任务生命周期状态机。
+//! Ask task lifecycle state machine.
 //!
-//! 把 ask 任务从"入队"到"出最终答覆"的过程显式建模为一个有限状态机；
-//! 每次 transition 通过 [`crate::log_ask_transition`] 写入 tracing + task_journal，
-//! 合法 transition 由 [`AskState::can_transition_to`] 守护、`debug_assert!` 在
-//! 主路径调用点强保证。
-//!
-//! # 设计参考
-//! [`docs/p31_ask_state_machine_proposal.md`](../../../../docs/p31_ask_state_machine_proposal.md)
-//!
-//! # Stage A 范围
-//! 本文件只引入类型 + 合法 transition 表 + 单测；**不**修改任何现有调用面，
-//! Stage B 起接 logger，Stage C 起在主路径插桩。
+//! The outer ask path now models the current agent-loop flow only. Ordinary
+//! respond/clarify/act decisions happen inside the loop, so the state machine
+//! keeps boundary states instead of preserving old pre-planner semantic branches.
 
 /// ask 任务的生命周期状态。
 ///
@@ -21,16 +13,8 @@
 pub(crate) enum AskState {
     /// task 已被 worker 拿到（claim），prepare 之前。
     Received,
-    /// intent_normalizer + post_route_policy 进行中。
+    /// Boundary context, schedule, safety, and machine contract preparation.
     Routing,
-    /// 路由判定需要追问（`AskMode::is_clarify_only()`）。
-    Clarifying,
-    /// 路由结论是直接 LLM 直答（chat）。
-    Chatting,
-    /// 路由结论是恢复执行已暂停 task。
-    ResumeExecuting,
-    /// 路由结论是讨论已暂停 task（非执行）。
-    ResumeDiscussing,
     /// 路由结论是 schedule 本地短路。
     ScheduleDirect,
     /// agent loop 执行中（含 plan / execute / verify 子循环，本轮先不细分）。
@@ -49,10 +33,6 @@ impl AskState {
         match self {
             Self::Received => "received",
             Self::Routing => "routing",
-            Self::Clarifying => "clarifying",
-            Self::Chatting => "chatting",
-            Self::ResumeExecuting => "resume_executing",
-            Self::ResumeDiscussing => "resume_discussing",
             Self::ScheduleDirect => "schedule_direct",
             Self::Executing => "executing",
             Self::Finalizing => "finalizing",
@@ -82,24 +62,8 @@ impl AskState {
         }
         match (self, next) {
             (AskState::Received, AskState::Routing) => true,
-
-            (AskState::Routing, AskState::Clarifying) => true,
-            (AskState::Routing, AskState::Chatting) => true,
-            (AskState::Routing, AskState::ResumeExecuting) => true,
-            (AskState::Routing, AskState::ResumeDiscussing) => true,
             (AskState::Routing, AskState::ScheduleDirect) => true,
             (AskState::Routing, AskState::Executing) => true,
-
-            (AskState::Clarifying, AskState::Completed) => true,
-
-            (AskState::Chatting, AskState::Finalizing) => true,
-            (AskState::Chatting, AskState::Completed) => true,
-
-            (AskState::ResumeExecuting, AskState::Executing) => true,
-            (AskState::ResumeExecuting, AskState::Finalizing) => true,
-            (AskState::ResumeExecuting, AskState::Completed) => true,
-
-            (AskState::ResumeDiscussing, AskState::Completed) => true,
 
             (AskState::ScheduleDirect, AskState::Completed) => true,
 
