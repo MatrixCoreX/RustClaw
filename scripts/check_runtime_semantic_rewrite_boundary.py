@@ -306,6 +306,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_service_status_process_user_text_selection())
     findings.extend(scan_service_status_url_user_text_selection())
     findings.extend(scan_service_status_workspace_product_text_selection())
+    findings.extend(scan_service_status_scalar_shape_health_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -973,6 +974,36 @@ def scan_service_status_workspace_product_text(rel_path: str, text: str) -> list
     return findings
 
 
+def scan_service_status_scalar_shape_health_selection() -> list[Finding]:
+    return scan_service_status_scalar_shape_health_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_service_status_scalar_shape_health_text(rel_path: str, text: str) -> list[Finding]:
+    block = function_block(text, "service_status_deterministic_plan_result")
+    if block is None:
+        return []
+    lines = block[1].splitlines()
+    findings: list[Finding] = []
+    block_start = block[0]
+    for idx, line in enumerate(lines):
+        if "OutputResponseShape::Scalar" not in line:
+            continue
+        window = "\n".join(lines[idx : idx + 8])
+        if "health_check_available_for_plan" in window and "route_requests_health_check" not in window:
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + idx,
+                    "service_status_scalar_shape_health_selection",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1471,6 +1502,21 @@ def run_self_test() -> int:
         == "service_status_workspace_product_text_selection"
     )
     assert not scan_service_status_workspace_product_text_selection()
+    blocked_service_status_scalar_health = scan_service_status_scalar_shape_health_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn service_status_deterministic_plan_result(\n"
+        ") -> Option<PlanResult> {\n"
+        "    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar\n"
+        "        && health_check_available_for_plan(state)\n"
+        "    {}\n"
+        "}\n",
+    )
+    assert (
+        blocked_service_status_scalar_health
+        and blocked_service_status_scalar_health[0].kind
+        == "service_status_scalar_shape_health_selection"
+    )
+    assert not scan_service_status_scalar_shape_health_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",

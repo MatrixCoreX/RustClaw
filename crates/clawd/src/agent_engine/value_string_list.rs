@@ -1213,6 +1213,7 @@ pub(super) fn service_status_deterministic_plan_result(
     }
     if route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && health_check_available_for_plan(state)
+        && route_requests_health_check(route)
     {
         let action = AgentAction::CallSkill {
             skill: "health_check".to_string(),
