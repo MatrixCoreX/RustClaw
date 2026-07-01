@@ -402,7 +402,10 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(
@@ -437,7 +440,10 @@ fn structural_config_field_value_repairs_direct_misroute_from_current_request() 
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(contract.locator_hint, "configs/config.toml");
@@ -469,7 +475,10 @@ fn structural_config_field_value_repairs_filesystem_mutation_to_config_mutation_
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(
@@ -504,7 +513,10 @@ fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_cont
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(contract.locator_hint, "configs/config.toml");
@@ -537,7 +549,10 @@ fn structural_config_field_value_overrides_failed_step_misroute_to_config_mutati
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -573,7 +588,10 @@ fn config_mutation_contract_repairs_missing_locator_from_current_request() {
         None,
     );
 
-    assert_eq!(reason, Some("config_mutation_structural_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(

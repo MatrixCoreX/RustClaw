@@ -407,7 +407,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract.response_shape = OutputResponseShape::Free;
         output_contract.locator_kind = OutputLocatorKind::Path;
         output_contract.locator_hint = locator_hint;
-        reason = Some("config_mutation_structural_contract_repair");
+        reason =
+            Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change");
     }
 
     if let Some(repair_reason) =
