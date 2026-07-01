@@ -1635,6 +1635,76 @@ fn preferred_archive_basic_uses_capability_ref_with_semantic_none() {
 }
 
 #[test]
+fn preferred_config_basic_uses_capability_ref_with_semantic_none() {
+    let state = test_state_with_enabled_skills(&["config_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason = "capability_ref=config.guard_rustclaw_config".to_string();
+    let preferred = crate::contract_matrix::ActionRef {
+        skill: "config_basic".to_string(),
+        action: None,
+    };
+
+    let action =
+        preferred_structured_action_for_contract_hint(&state, &route, &preferred, None, "")
+            .expect("config_basic capability ref should choose guard action");
+
+    match action {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "config_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("guard_rustclaw_config")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some("configs/config.toml")
+            );
+        }
+        other => panic!("expected config_basic action, got {other:?}"),
+    }
+}
+
+#[test]
+fn preferred_config_edit_uses_capability_ref_with_semantic_none() {
+    let state = test_state_with_enabled_skills(&["config_edit"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason = "capability_ref=config.validate_after_change".to_string();
+    let preferred = crate::contract_matrix::ActionRef {
+        skill: "config_edit".to_string(),
+        action: None,
+    };
+
+    let action =
+        preferred_structured_action_for_contract_hint(&state, &route, &preferred, None, "")
+            .expect("config_edit capability ref should choose validate action");
+
+    match action {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "config_edit");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("validate_config")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some("configs/config.toml")
+            );
+        }
+        other => panic!("expected config_edit action, got {other:?}"),
+    }
+}
+
+#[test]
 fn contract_hint_preferred_run_cmd_uses_docker_capability_ref_with_semantic_none() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();
