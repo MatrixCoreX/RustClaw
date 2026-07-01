@@ -182,7 +182,7 @@ pub(super) fn infer_missing_target_policy_from_contract(
         return target_task_policy;
     }
 
-    let strict_chat_deliverable =
+    let strict_inline_response_contract =
         matches!(output_contract.response_shape, OutputResponseShape::Strict)
             && !output_contract.requires_content_evidence
             && !output_contract.delivery_required
@@ -190,7 +190,7 @@ pub(super) fn infer_missing_target_policy_from_contract(
             && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
             && output_contract.semantic_kind_is_unclassified();
 
-    if strict_chat_deliverable {
+    if strict_inline_response_contract {
         Some(TargetTaskPolicy::Standalone)
     } else {
         target_task_policy

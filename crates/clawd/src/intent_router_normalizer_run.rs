@@ -554,9 +554,12 @@ pub(crate) async fn run_intent_normalizer(
             turn_type = None;
             target_task_policy = None;
             force_current_request_resolved_intent = true;
-            append_route_reason(&mut reason, "bare_acknowledgement_standalone_chat");
+            append_route_reason(
+                &mut reason,
+                "bare_acknowledgement_detached_active_task_context",
+            );
             info!(
-                "{} intent_normalizer task_id={} bare_acknowledgement_standalone_chat input={}",
+                "{} intent_normalizer task_id={} bare_acknowledgement_detached_active_task_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
