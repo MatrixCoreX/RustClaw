@@ -32,6 +32,8 @@ mod filesystem_mutation_lifecycle;
 mod machine_envelope;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]
 mod synthesize_failure_replan;
+#[path = "dispatch_support_tests/text_protocol_boundary.rs"]
+mod text_protocol_boundary;
 
 fn test_state_with_registry() -> AppState {
     test_state_with_registry_excluding(&[])

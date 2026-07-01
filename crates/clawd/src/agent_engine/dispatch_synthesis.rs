@@ -548,11 +548,6 @@ fn skill_output_payload(output: &str) -> Option<Value> {
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
         return Some(extra.clone());
     }
-    if let Some(text) = value.get("text").and_then(Value::as_str) {
-        if let Ok(inner) = serde_json::from_str::<Value>(text.trim()) {
-            return Some(inner);
-        }
-    }
     Some(value)
 }
 
@@ -640,13 +635,6 @@ fn strict_raw_tail_read_answer_from_value(value: &Value) -> Option<String> {
     value
         .get("extra")
         .and_then(strict_raw_tail_read_answer_from_value)
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .and_then(|inner| strict_raw_tail_read_answer_from_value(&inner))
-        })
 }
 
 fn strict_raw_tail_read_answer_from_flat_value(value: &Value) -> Option<String> {
