@@ -776,7 +776,7 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
     if is_supported_archive_path(path) {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation {
+    if route_requests_config_validation(route) {
         return Some(vec![config_basic_validate_action(path.to_string())]);
     }
     Some(vec![
@@ -796,6 +796,15 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
             content: "{{last_output}}".to_string(),
         },
     ])
+}
+
+fn route_requests_config_validation(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &["validate"],
+        )
 }
 
 pub(super) fn content_presence_query_deterministic_plan_result(
