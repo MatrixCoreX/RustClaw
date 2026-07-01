@@ -21,17 +21,17 @@ fn ask_mode_from_machine_route_state(
     if needs_clarify {
         return AskMode::clarify();
     }
-    if route_has_structured_execution_signal(
+    let finalize = if route_has_structured_execution_signal(
         output_contract,
         wants_file_delivery,
         schedule_kind,
         execution_recipe_hint,
     ) {
-        return AskMode::Act {
-            finalize: finalize_style,
-        };
-    }
-    AskMode::direct_answer()
+        finalize_style
+    } else {
+        ActFinalizeStyle::Plain
+    };
+    AskMode::Act { finalize }
 }
 
 pub(super) fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
