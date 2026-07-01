@@ -47,7 +47,7 @@ fn normalize_planned_actions_resolves_action_ref_call_capability_before_policy_g
 fn normalize_planned_actions_keeps_sqlite_query_on_db_basic_despite_literal_sql() {
     let state = test_state_with_registry();
     let mut route = base_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
+    route.resolved_intent = "capability_ref=database.query".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -418,8 +418,8 @@ fn sqlite_table_listing_route_rewrites_text_read_plan_to_db_basic_list_tables() 
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -518,7 +518,7 @@ fn sqlite_schema_version_machine_token_wins_over_binary_text_read_fallback() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
-    route.route_reason = "machine tokens: sqlite_schema_version_target=/tmp/app.sqlite".to_string();
+    route.route_reason = "capability_ref=database.schema_version".to_string();
     let actions = vec![
         AgentAction::CallCapability {
             capability: "fs_basic.read_text_range".to_string(),
@@ -855,8 +855,8 @@ fn sqlite_table_names_route_rewrites_system_basic_action_alias_to_db_basic_list_
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({
@@ -890,8 +890,8 @@ fn sqlite_table_listing_route_rewrites_text_field_extract_to_db_basic_list_table
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({
@@ -923,12 +923,11 @@ fn sqlite_table_listing_route_rewrites_text_field_extract_to_db_basic_list_table
 #[test]
 fn sqlite_database_kind_judgment_rewrites_run_cmd_to_db_basic_list_tables() {
     let mut route = base_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteDatabaseKindJudgment;
     route.output_contract.locator_hint = "/tmp/db-basic-contract.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -969,8 +968,8 @@ fn sqlite_table_listing_preserves_explicit_literal_run_cmd() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "sqlite3 /tmp/app.sqlite '.tables'"}),
@@ -1063,8 +1062,8 @@ fn sqlite_schema_version_route_rewrites_binary_text_read_to_db_basic_pragma() {
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteSchemaVersion;
     route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    route.resolved_intent = "capability_ref=database.schema_version".to_string();
     let actions = vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -1231,11 +1230,10 @@ fn sqlite_table_probe_keeps_table_listing_contract() {
     conn.execute("CREATE TABLE orders (id INTEGER, status TEXT)", [])
         .expect("create table");
     let mut route = base_route_result();
-    route.resolved_intent = "List the tables in the database".to_string();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
     route.output_contract.locator_hint = db_path.display().to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "db_basic".to_string(),
