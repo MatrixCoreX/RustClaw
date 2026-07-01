@@ -102,8 +102,7 @@ fn route_trace_repair_code_class(code: &str) -> &'static str {
         | "raw_output_explicit_locator_contract_repaired"
         | "target_task_policy_enum_normalized"
         | "turn_type_enum_normalized" => "schema_normalization",
-        "direct_answer_decision_overridden_by_executable_contract"
-        | "executable_contract_preserved_for_agent_loop" => "contract_execution_signal",
+        "executable_contract_preserved_for_agent_loop" => "contract_execution_signal",
         "archive_unpack_missing_archive_locator_requires_clarify"
         | "current_turn_anchor_overrides_contextual_target"
         | "current_turn_locator_overrides_contextual_path"
@@ -139,7 +138,7 @@ mod tests {
             FirstLayerDecision::PlannerExecute,
             false,
             &contract,
-            vec!["direct_answer_decision_overridden_by_executable_contract".to_string()],
+            vec!["executable_contract_preserved_for_agent_loop".to_string()],
         );
         assert_eq!(execute.reason_code, "planner_execute_trace_inferred");
         assert_eq!(execute.outcome, "allowed");
@@ -147,7 +146,7 @@ mod tests {
         assert!(execute.output_contract_ref.contains("semantic=file_paths"));
         assert_eq!(
             execute.repair_codes,
-            vec!["direct_answer_decision_overridden_by_executable_contract"]
+            vec!["executable_contract_preserved_for_agent_loop"]
         );
         assert_eq!(execute.repair_classes, vec!["contract_execution_signal"]);
 
