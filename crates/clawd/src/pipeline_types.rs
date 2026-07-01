@@ -283,6 +283,12 @@ impl OutputSemanticKind {
                 Self::ConfigValidation
                     | Self::ConfigMutation
                     | Self::ConfigRiskAssessment
+                    | Self::GitCommitSubject
+                    | Self::GitRepositoryState
+                    | Self::SqliteTableListing
+                    | Self::SqliteTableNamesOnly
+                    | Self::SqliteDatabaseKindJudgment
+                    | Self::SqliteSchemaVersion
                     | Self::ArchiveList
                     | Self::ArchiveRead
                     | Self::ArchivePack
