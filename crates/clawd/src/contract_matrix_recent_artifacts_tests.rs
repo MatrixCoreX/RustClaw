@@ -17,7 +17,7 @@ fn recent_artifacts_judgment_rejects_structured_field_substitute() {
         &serde_json::json!({
             "action": "read_field",
             "path": "configs/agent_guard.toml",
-            "field_path": "agent_guard.semantic_route_authority"
+            "field_path": "agent_guard.answer_verifier_enforce_required_scope"
         }),
     )
     .expect("config field policy");

@@ -213,12 +213,9 @@ pub(super) fn backend_identity_metadata_answer_verifier_guard(
 }
 
 fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
-    [
-        "agent_display_name_hint_backend_metadata_removed",
-        "normalizer_answer_candidate_backend_metadata_removed",
-    ]
-    .iter()
-    .any(|marker| route_result.route_reason.contains(marker))
+    route_result
+        .route_reason
+        .contains("agent_display_name_hint_backend_metadata_removed")
 }
 
 fn candidate_answer_mentions_backend_identity_metadata(
@@ -267,6 +264,13 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
+    if config_guard_machine_payload_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     if workspace_project_summary_requires_model_verifier(route_result) {
         return false;
     }
@@ -292,12 +296,11 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
 pub(super) fn workspace_project_summary_requires_model_verifier(
     route_result: &RouteResult,
 ) -> bool {
-    if route_result.output_contract.semantic_kind
-        != crate::OutputSemanticKind::WorkspaceProjectSummary
-    {
+    if !route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
         return false;
     }
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route_result.output_contract)
+    let contract = route_result.effective_output_contract();
+    crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -500,6 +503,13 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
+    if config_guard_machine_payload_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return None;
+    }
     let gap = local_missing_evidence_verifier_gap(route_result, journal)?;
     if missing_target_answer_is_grounded_in_latest_error(
         route_result,
@@ -525,6 +535,62 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
         return None;
     }
     Some(gap)
+}
+
+fn config_guard_machine_payload_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let contract = route_result.effective_output_contract();
+    if contract.delivery_required
+        || !route_result.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::ConfigRiskAssessment,
+            crate::OutputSemanticKind::ConfigValidation,
+        ])
+    {
+        return false;
+    }
+    if !is_config_guard_machine_payload(candidate_answer) {
+        return false;
+    }
+    finalizer_grounded_machine_payload_can_skip_verifier(journal)
+}
+
+fn is_config_guard_machine_payload(candidate_answer: &str) -> bool {
+    let Ok(serde_json::Value::Object(object)) =
+        serde_json::from_str::<serde_json::Value>(candidate_answer.trim())
+    else {
+        return false;
+    };
+    let Some(message_key) = object
+        .get("message_key")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return false;
+    };
+    matches!(
+        message_key,
+        "clawd.msg.config_edit.guard" | "clawd.msg.config_risk.summary"
+    ) && object.contains_key("path")
+        && (object.contains_key("risk_count")
+            || object.contains_key("count")
+            || object.contains_key("candidates")
+            || object.contains_key("risks"))
+}
+
+fn finalizer_grounded_machine_payload_can_skip_verifier(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(summary) = journal.finalizer_summary.as_ref() else {
+        return false;
+    };
+    summary.disposition == Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        && summary.contract_ok
+        && summary.completion_ok != Some(false)
+        && summary.grounded_ok == Some(true)
+        && summary.format_ok != Some(false)
+        && summary.used_evidence_ids_count > 0
 }
 
 pub(super) fn missing_target_answer_is_grounded_in_latest_error(
@@ -763,13 +829,11 @@ pub(super) fn scalar_field_value_gap_is_grounded_in_structured_read(
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
     {
         return false;
     }
-    let Some(shape) =
-        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-    else {
+    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
         return false;
     };
     if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
@@ -834,15 +898,15 @@ pub(crate) fn local_compound_listing_answer_verifier_gap(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
-    if !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ExcerptKindJudgment
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-                | crate::OutputSemanticKind::DirectoryPurposeSummary
-        )
+    let contract = route_result.effective_output_contract();
+    if !contract.requires_content_evidence
+        || contract.delivery_required
+        || !route_result.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::ExcerptKindJudgment,
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ContentExcerptWithSummary,
+            crate::OutputSemanticKind::DirectoryPurposeSummary,
+        ])
     {
         return None;
     }
@@ -1145,7 +1209,7 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
         "delivery_required": route_result.output_contract.delivery_required,
         "locator_kind": route_result.output_contract.locator_kind.as_str(),
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
-        "semantic_kind": route_result.output_contract.semantic_kind.as_str(),
+        "semantic_kind": route_result.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
         "contract_matrix": contract_matrix_trace,
     }))
@@ -1153,8 +1217,7 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
 }
 
 fn verifier_contract_matrix_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
-    let mut trace =
-        crate::contract_matrix::trace_snapshot_for_output_contract(&route_result.output_contract)?;
+    let mut trace = crate::contract_matrix::trace_snapshot_for_route(route_result)?;
     if let Some(obj) = trace.as_object_mut() {
         obj.remove("trace_policy");
         obj.remove("observation_extractors");

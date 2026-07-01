@@ -22,12 +22,13 @@ use runtime::{
     validate_contract_runtime_fields, validate_observation_extractors,
 };
 pub(crate) use runtime::{
-    action_matches_policy_tokens, action_policy_for_output_contract,
-    action_trace_for_output_contract, allowed_action_refs_for_output_contract, arg_policy_decision,
-    bundled_contract_matrix, compact_prompt_line_for_route,
-    contract_trace_action_key_for_output_contract, final_answer_shape_for_output_contract,
-    fnv1a_hex, preferred_action_refs_for_output_contract, required_evidence_for_output_contract,
-    runtime_contract_snapshot_for_route, trace_snapshot_for_output_contract,
+    action_matches_policy_tokens, action_policy_for_output_contract, action_policy_for_route,
+    action_trace_for_output_contract, allowed_action_refs_for_output_contract,
+    allowed_action_refs_for_route, arg_policy_decision, bundled_contract_matrix,
+    compact_prompt_line_for_route, contract_trace_action_key_for_output_contract,
+    final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
+    preferred_action_refs_for_output_contract, preferred_action_refs_for_route,
+    required_evidence_for_output_contract, runtime_contract_snapshot_for_route,
     trace_snapshot_for_route,
 };
 // Keep policy return types nameable outside the private runtime module.
@@ -35,7 +36,7 @@ pub(crate) use runtime::{
 pub(crate) use runtime::{
     available_action_refs_from_registry, bundled_contract_matrix_result,
     compact_prompt_line_for_output_contract, parse_contract_matrix_source,
-    runtime_contract_snapshot_for_output_contract,
+    runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
 };
 #[cfg(test)]
 use runtime::{collect_action_tokens, collect_external_observation_admission_errors};
@@ -1095,7 +1096,9 @@ impl ContractMatrix {
         &self,
         output: &IntentOutputContract,
     ) -> Option<MatchedContract<'_>> {
-        if output.semantic_kind != OutputSemanticKind::None {
+        if output.semantic_kind != OutputSemanticKind::None
+            && !output.semantic_kind.is_registry_capability_bridge()
+        {
             return self
                 .semantic_contract(output.semantic_kind)
                 .map(MatchedContract::Semantic);

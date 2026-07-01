@@ -379,7 +379,7 @@ mod tests {
         output_contract.requires_content_evidence = true;
         output_contract.locator_kind = crate::OutputLocatorKind::Path;
         crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

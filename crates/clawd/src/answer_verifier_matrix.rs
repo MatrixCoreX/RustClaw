@@ -58,10 +58,36 @@ fn strict_list_selector_limit(route: &RouteResult) -> Option<usize> {
 }
 
 pub(super) fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FilePaths | crate::OutputSemanticKind::DirectoryNames
-    )
+    route_contract_marker_is(route, crate::OutputSemanticKind::FilePaths)
+        || route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
+}
+
+fn route_contract_marker_is(route: &RouteResult, semantic_kind: crate::OutputSemanticKind) -> bool {
+    route.output_contract_marker_is(semantic_kind)
+}
+
+pub(super) fn route_contract_marker_is_scalar_path_only(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::ScalarPathOnly)
+}
+
+fn route_contract_marker_is_service_status(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
+}
+
+fn route_contract_marker_is_archive_unpack(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::ArchiveUnpack)
+}
+
+fn route_contract_marker_is_git_repository_state(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
+}
+
+fn route_contract_marker_is_hidden_entries_check(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::HiddenEntriesCheck)
+}
+
+fn route_contract_marker_is_directory_names(route: &RouteResult) -> bool {
+    route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
 
 pub(super) fn matrix_table_answer_is_grounded_in_successful_observation(
@@ -90,7 +116,7 @@ pub(super) fn matrix_single_path_answer_is_grounded_in_successful_observation(
             .iter()
             .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path));
     }
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly {
+    if !route_contract_marker_is_scalar_path_only(route) {
         return false;
     }
     let candidate_items = strict_list_answer_items(candidate_answer);
@@ -137,7 +163,7 @@ pub(super) fn archive_unpack_summary_answer_is_grounded_in_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack {
+    if !route_contract_marker_is_archive_unpack(route) {
         return false;
     }
     let candidate_answer = candidate_answer.trim();
@@ -156,7 +182,7 @@ pub(super) fn git_repository_state_answer_is_grounded_in_successful_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+    if !route_contract_marker_is_git_repository_state(route) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -225,7 +251,7 @@ pub(super) fn service_status_port_answer_is_grounded_in_successful_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+    if !route_contract_marker_is_service_status(route) {
         return false;
     }
     let candidate_answer = candidate_answer.trim();
@@ -274,7 +300,7 @@ pub(super) fn health_check_diagnostic_answer_is_grounded_in_successful_observati
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+    if !route_contract_marker_is_service_status(route) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -961,9 +987,7 @@ pub(super) fn strict_list_item_variants_for_route(
     observed_item: bool,
 ) -> Vec<String> {
     let mut variants = strict_list_item_variants(item);
-    if observed_item
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames
-    {
+    if observed_item && route_contract_marker_is_directory_names(route) {
         variants.extend(strict_list_parent_directory_variants(item));
     }
     variants.sort();
@@ -1053,7 +1077,7 @@ pub(super) fn observed_strict_list_items(
         let Some(output) = step.output_excerpt.as_deref() else {
             continue;
         };
-        if route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck {
+        if route_contract_marker_is_hidden_entries_check(route) {
             collect_observed_hidden_entries_from_output(output, &mut items);
             continue;
         }

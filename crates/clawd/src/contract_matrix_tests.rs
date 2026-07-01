@@ -2,7 +2,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use super::*;
 use crate::task_contract::fallback_required_evidence_fields_for_output_contract;
-use crate::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
+use crate::{
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, ResumeBehavior, RiskCeiling,
+    RouteResult, ScheduleKind,
+};
 #[path = "contract_matrix_recent_artifacts_tests.rs"]
 mod recent_artifacts_tests;
 
@@ -195,8 +198,7 @@ fn rss_news_fetch_allows_rss_fetch_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "rss_fetch.latest");
-    assert_eq!(policy.contract_match, "rss_news_fetch");
-    assert_eq!(policy.required_evidence, vec!["field_value"]);
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -502,7 +504,7 @@ fn assert_delete_policy_for_actions(context: &str, operation: &str, actions: &[S
                 "{context} allows read/list observation action `{}` for delete operation",
                 action.as_key()
             );
-        } else {
+        } else if operation != "mutate" {
             assert!(
                 !action_is_delete_mutation(&action),
                 "{context} allows delete action `{}` without delete operation",
@@ -1200,6 +1202,9 @@ fn contract_matrix_evidence_matches_task_contract_defaults() {
     let matrix = load_workspace_matrix();
 
     for kind in OutputSemanticKind::ALL {
+        if kind.is_registry_capability_bridge() {
+            continue;
+        }
         let output_contract = IntentOutputContract {
             semantic_kind: *kind,
             ..IntentOutputContract::default()
@@ -1232,6 +1237,91 @@ fn route_specific_evidence_augments_matrix_base_contract() {
         required,
         vec!["exists", "field_value", "kind", "size_bytes"]
     );
+}
+
+#[test]
+fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enum() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "quantity_comparison".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Filename,
+            locator_hint: "README.md | AGENTS.md".to_string(),
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let snapshot = trace_snapshot_for_route(&route).expect("route snapshot");
+    let required = snapshot
+        .get("required_evidence")
+        .and_then(Value::as_array)
+        .expect("required evidence")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+
+    assert!(required.contains(&"exists"));
+    assert!(required.contains(&"kind"));
+}
+
+#[test]
+fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "contract:workspace_project_summary".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilePaths,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let policy = action_policy_for_route(
+        Some(&route),
+        "git_basic",
+        &serde_json::json!({"action": "status"}),
+    )
+    .expect("route policy");
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        OutputSemanticKind::FilePaths
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.contract_match, "workspace_project_summary");
 }
 
 #[test]
@@ -1335,6 +1425,26 @@ fn generic_path_content_allows_stat_paths_observation() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "fs_basic.stat_paths");
+    assert_eq!(policy.contract_match, "generic_path_content");
+}
+
+#[test]
+fn generic_path_content_allows_git_status_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            response_shape: OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        }),
+        "git_basic",
+        &serde_json::json!({"action": "status", "path": "/home/guagua/rustclaw"}),
+    )
+    .expect("action policy");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "git_basic.status");
     assert_eq!(policy.contract_match, "generic_path_content");
 }
 

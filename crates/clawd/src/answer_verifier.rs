@@ -9,6 +9,47 @@ const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_promp
 const MAX_VERIFIER_STEPS: usize = 8;
 const DEFAULT_RETRY_INSTRUCTION: &str =
     "retry_policy=use_observed_evidence_and_original_contract;repeat_rejected_answer=false";
+const OUTPUT_CONTRACT_ROUTE_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "scalar_count",
+    "scalar_path_only",
+    "file_basename",
+    "raw_command_output",
+    "command_output_summary",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "file_paths",
+    "existence_with_path",
+    "existence_with_path_summary",
+    "hidden_entries_check",
+    "execution_failed_step",
+    "generated_file_delivery",
+    "generated_file_path_report",
+    "filesystem_mutation_result",
+    "recent_scalar_equality_check",
+    "quantity_comparison",
+    "recent_artifacts_judgment",
+    "directory_purpose_summary",
+    "workspace_project_summary",
+    "git_commit_subject",
+    "git_repository_state",
+    "structured_keys",
+    "config_validation",
+    "config_mutation",
+    "config_risk_assessment",
+    "sqlite_table_listing",
+    "sqlite_table_names_only",
+    "sqlite_database_kind_judgment",
+    "sqlite_schema_version",
+    "archive_list",
+    "archive_read",
+    "archive_pack",
+    "archive_unpack",
+    "service_status",
+    "tool_discovery",
+];
 
 #[path = "answer_verifier_delivery_raw.rs"]
 mod answer_verifier_delivery_raw;
@@ -108,7 +149,7 @@ pub(crate) fn should_verify_answer(
     }
     task_contract.evidence_required
         || !journal.step_results.is_empty()
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || route_has_output_contract_marker(route_result)
 }
 
 fn pure_chat_agent_loop_submode_should_verify(
@@ -133,7 +174,7 @@ fn pure_chat_agent_loop_submode_can_skip_answer_verifier(
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery
-        && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && !route_has_output_contract_marker(route_result)
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
         && pure_chat_agent_loop_has_no_tool_observations(journal)
@@ -150,16 +191,17 @@ fn pure_chat_agent_loop_has_no_tool_observations(
 }
 
 fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
-    [
-        "agent_display_name_hint_backend_metadata_removed",
-        "normalizer_answer_candidate_backend_metadata_removed",
-    ]
-    .iter()
-    .any(|marker| route_result.route_reason.contains(marker))
+    route_result.has_route_reason_machine_marker("agent_display_name_hint_backend_metadata_removed")
+}
+
+fn route_has_output_contract_marker(route_result: &RouteResult) -> bool {
+    OUTPUT_CONTRACT_ROUTE_MARKERS
+        .iter()
+        .any(|marker| route_result.has_route_reason_machine_marker(marker))
 }
 
 fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ToolDiscovery
+    route_result.has_route_reason_machine_marker("tool_discovery")
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery
@@ -235,9 +277,7 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
-    if let Some(shape) = crate::contract_matrix::final_answer_shape_for_output_contract(
-        &route_result.output_contract,
-    ) {
+    if let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route_result) {
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
             return matrix_scalar_answer_is_grounded_in_successful_observation(
                 route_result,
