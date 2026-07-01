@@ -129,6 +129,7 @@ pub(crate) fn recent_structured_scalar_observation_count(loop_state: &LoopState)
     recent_structured_scalar_observations(loop_state, 2).len()
 }
 
+#[cfg(test)]
 pub(crate) fn latest_structured_scalar_observation_text(loop_state: &LoopState) -> Option<String> {
     recent_structured_scalar_observations(loop_state, 1)
         .into_iter()

@@ -31,6 +31,7 @@ pub(super) fn delivery_is_single_line_text(delivery: &str) -> bool {
         == 1
 }
 
+#[cfg(test)]
 pub(super) fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&str> {
     let mut publishable = delivery_messages
         .iter()

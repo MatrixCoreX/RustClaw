@@ -3,7 +3,6 @@ use crate::finalize::build_from_loop_state as build_loop_journal;
 use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
-    build_execution_summary_messages, delivery_contract_suppresses_execution_summary,
     deterministic_execution_failed_step_answer, deterministic_matrix_observed_shape_answer,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_observed_execution_status_summary,
@@ -333,8 +332,6 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
     clarify_reason: &str,
 ) -> Option<AskReply> {
-    let execution_summaries =
-        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
     let status_summary = || deterministic_observed_execution_status_summary(loop_state);
     let prefer_language_rendered_failed_step =
         route_prefers_language_rendered_execution_failed_step(agent_run_context);
@@ -422,15 +419,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
             },
         )
         .await;
-        let mut delivery_messages = Vec::new();
-        if !delivery_contract_suppresses_execution_summary(
-            loop_state,
-            agent_run_context,
-            std::slice::from_ref(&clarify),
-        ) {
-            delivery_messages.extend(execution_summaries);
-        }
-        delivery_messages.push(clarify.clone());
+        let delivery_messages = vec![clarify.clone()];
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&clarify, &delivery_messages);
         let journal = build_loop_journal(
@@ -466,15 +455,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
         observed_contract_evidence_complete,
     )
     .await;
-    let mut delivery_messages = Vec::new();
-    if !delivery_contract_suppresses_execution_summary(
-        loop_state,
-        agent_run_context,
-        std::slice::from_ref(&message),
-    ) {
-        delivery_messages.extend(execution_summaries);
-    }
-    delivery_messages.push(message.clone());
+    let delivery_messages = vec![message.clone()];
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let has_deterministic_answer = deterministic_answer.is_some();
@@ -548,9 +529,7 @@ pub(super) fn observed_synthesis_unavailable_reply(
         Some(&context_hint),
         &language_hint,
     );
-    let mut delivery_messages =
-        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
-    delivery_messages.push(message.clone());
+    let delivery_messages = vec![message.clone()];
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
@@ -619,7 +598,7 @@ fn observed_execution_has_complete_contract_evidence(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    if route.output_contract_is_unclassified()
         && !route.output_contract.delivery_required
         && !route.wants_file_delivery
     {

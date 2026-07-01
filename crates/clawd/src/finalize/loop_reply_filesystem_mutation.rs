@@ -2,10 +2,7 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::finalize::build_from_loop_state as build_loop_journal;
 use crate::{AskReply, ClaimedTask};
 
-use super::{
-    build_execution_summary_messages, route_accepts_filesystem_mutation_synthesis,
-    valid_publishable_synthesis_output,
-};
+use super::{route_accepts_filesystem_mutation_synthesis, valid_publishable_synthesis_output};
 
 pub(super) fn filesystem_mutation_synthesis_reply(
     task: &ClaimedTask,
@@ -23,9 +20,7 @@ pub(super) fn filesystem_mutation_synthesis_reply(
     } else {
         synthesis.to_string()
     };
-    let mut delivery_messages =
-        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
-    delivery_messages.push(final_text.clone());
+    let delivery_messages = vec![final_text.clone()];
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&final_text, &delivery_messages);
     let finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
