@@ -8,8 +8,7 @@ fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.resolved_intent =
-        "Inspect agent_hooks PreToolUse decision surface without mutation".to_string();
+    route.route_reason = "surface=agent_hooks stage=pre_tool_use".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = hook_permission_surface_deterministic_plan_result(
@@ -17,7 +16,7 @@ fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
         "inspect hook surface",
         Some(&route),
         &loop_state,
-        "PreToolUse agent_hooks",
+        "检查工具调用前的权限边界",
     )
     .expect("machine hook token should use deterministic surface plan");
 
@@ -44,8 +43,7 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
-    route.resolved_intent =
-        "Inspect agent_hooks PreToolUse decision surface without mutation".to_string();
+    route.route_reason = "surface=agent_hooks stage=pre_tool_use".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = hook_permission_surface_deterministic_plan_result(
@@ -53,7 +51,7 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
         "inspect hook surface",
         Some(&route),
         &loop_state,
-        "PreToolUse agent_hooks",
+        "检查工具调用前的权限边界",
     )
     .expect("config validation contract should still collect hook field evidence");
 
@@ -70,7 +68,7 @@ fn clawcli_resume_surface_reports_resume_task_id_field_token() {
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.resolved_intent = "Inspect clawcli resume surface".to_string();
+    route.route_reason = "surface=clawcli subcommand=resume".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = clawcli_resume_surface_deterministic_plan_result(
@@ -78,7 +76,7 @@ fn clawcli_resume_surface_reports_resume_task_id_field_token() {
         "inspect clawcli resume",
         Some(&route),
         &loop_state,
-        "clawcli resume",
+        "检查命令行恢复能力",
     )
     .expect("clawcli resume machine tokens should use deterministic surface plan");
 
@@ -99,6 +97,25 @@ fn clawcli_resume_surface_reports_resume_task_id_field_token() {
 }
 
 #[test]
+fn clawcli_resume_surface_ignores_user_text_tokens_without_machine_tokens() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    let loop_state = LoopState::new(1);
+
+    let plan = clawcli_resume_surface_deterministic_plan_result(
+        &state,
+        "inspect clawcli resume",
+        Some(&route),
+        &loop_state,
+        "clawcli resume",
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
 fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let plan_dir = state.skill_rt.workspace_root.join("plan");
@@ -110,8 +127,7 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "AGENTS.md".to_string();
-    route.resolved_intent =
-        "Review AGENTS.md and plan boundary with read-only subagent".to_string();
+    route.route_reason = "surface=subagent role=review context_ref=AGENTS.md".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = subagent_review_boundary_surface_deterministic_plan_result(
@@ -119,7 +135,7 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
         "review runtime boundary",
         Some(&route),
         &loop_state,
-        "review AGENTS.md plan",
+        "检查运行边界",
     )
     .expect("review role token with AGENTS.md and plan should use subagent boundary surface");
 
@@ -187,10 +203,8 @@ fn subagent_bounded_batch_surface_uses_children_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_hint = "AGENTS.md".to_string();
-    route.resolved_intent =
-        "subagent AGENTS.md explorer verifier execution_mode finding_refs".to_string();
     route.route_reason =
-        "subagent explorer verifier execution_mode finding_refs current_workspace_scope"
+        "subagent context_ref=AGENTS.md explorer verifier execution_mode finding_refs current_workspace_scope"
             .to_string();
     let loop_state = LoopState::new(1);
 
@@ -199,7 +213,7 @@ fn subagent_bounded_batch_surface_uses_children_contract() {
         "subagent batch surface",
         Some(&route),
         &loop_state,
-        "subagent AGENTS.md explorer verifier execution_mode finding_refs",
+        "检查子任务边界",
     )
     .expect("machine role tokens should use bounded batch subagent surface");
 
@@ -249,10 +263,9 @@ fn subagent_review_boundary_surface_resolves_current_plan_when_route_requested_c
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint.clear();
-    route.resolved_intent =
-        "Review AGENTS.md and current plan boundary with read-only subagent".to_string();
     route.route_reason =
-        "reason_code=missing_locator source=current_plan_boundary_surface".to_string();
+        "reason_code=missing_locator source=current_plan_boundary_surface context_ref=AGENTS.md role=review"
+            .to_string();
     let loop_state = LoopState::new(1);
 
     let plan = subagent_review_boundary_surface_deterministic_plan_result(
@@ -260,7 +273,7 @@ fn subagent_review_boundary_surface_resolves_current_plan_when_route_requested_c
         "review runtime boundary",
         Some(&route),
         &loop_state,
-        "review AGENTS.md plan",
+        "检查当前计划边界",
     )
     .expect("current plan surface should resolve bounded route clarify into readonly plan");
 
@@ -287,7 +300,6 @@ fn subagent_review_boundary_surface_uses_current_plan_without_plan_text_token() 
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_hint = "AGENTS.md".to_string();
     route.agent_display_name_hint = "review".to_string();
-    route.resolved_intent = "只读 review 子代理检查 AGENTS.md 和当前文件执行边界".to_string();
     route.route_reason =
         "subagent_roles=review; current_workspace_scope_from_current_request".to_string();
     let loop_state = LoopState::new(1);
