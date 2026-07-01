@@ -265,7 +265,6 @@ pub(crate) fn apply_post_route_policy(
     }
     if apply_force_clarify {
         execution_route_result.needs_clarify = true;
-        execution_route_result.set_clarify_gate();
     }
 
     let clarify_reason_kind = if missing_locator_for_path_scoped_content {
