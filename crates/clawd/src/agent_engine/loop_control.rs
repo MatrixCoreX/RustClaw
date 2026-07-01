@@ -890,6 +890,9 @@ async fn run_agent_round(
         route_result,
         &prepared_round.plan_result,
     );
+    if let Some(route) = route_result {
+        loop_state.route_policy_context = Some(route.clone());
+    }
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
         loop_state.output_contract = Some(output_contract.clone());
         loop_state.output_vars.insert(

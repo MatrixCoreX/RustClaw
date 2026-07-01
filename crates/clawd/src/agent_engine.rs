@@ -518,6 +518,9 @@ pub(crate) struct LoopState {
     /// existence_with_path / scalar / file_token 契约答成自由段落。
     /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
+    /// Route-level policy context keeps planner capability refs available to
+    /// preflight paths that otherwise only see `output_contract`.
+    pub(crate) route_policy_context: Option<crate::RouteResult>,
 }
 
 impl LoopState {
@@ -660,6 +663,7 @@ fn seed_loop_state_from_agent_context(
         // 和无 RouteResult 入参的 preflight 都能拿到统一机器合同。
         // clone 因为 RouteResult 跨 await 共享，loop 内部要独立可写。
         loop_state.output_contract = Some(route.effective_output_contract());
+        loop_state.route_policy_context = Some(route.clone());
     }
     if let Some(cross_turn_ctx) = ctx
         .cross_turn_recent_execution_context
