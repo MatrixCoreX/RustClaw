@@ -53,7 +53,8 @@ use super::{
     observation_only_plan_can_finalize_from_direct_output,
     package_docker_readonly_probe_deterministic_plan_result,
     package_manager_detect_deterministic_plan_result,
-    package_manager_dry_run_deterministic_plan_result, plan_repair_reason,
+    package_manager_dry_run_deterministic_plan_result,
+    path_metadata_compare_deterministic_plan_result, plan_repair_reason,
     plan_result_with_fallback_reason, planner_notes_for_initial_fallback,
     planner_notes_for_repair_fallback, planner_notes_for_repair_success,
     preferred_run_cmd_for_contract_hint, process_status_filter_token,
@@ -63,6 +64,7 @@ use super::{
     replace_scalar_count_plan_with_count_inventory,
     replace_scalar_path_respond_only_with_auto_locator_observation,
     replace_workspace_synthesis_respond_only_plan,
+    rewrite_active_bound_target_observations_to_matching_locator_hint,
     rewrite_archive_basic_short_archive_to_active_bound_target,
     rewrite_archive_pack_plan_to_archive_basic, rewrite_archive_unpack_run_cmd_to_archive_basic,
     rewrite_config_change_preview_to_config_edit_plan,
@@ -376,28 +378,6 @@ fn backend_identity_metadata_respond_rewrites_to_runtime_identity() {
         [AgentAction::Respond { content }] if content == "RustClaw"
     ));
 
-    let mut route_with_answer_candidate_marker = base_route_result();
-    route_with_answer_candidate_marker.route_reason =
-        "normalizer_answer_candidate_backend_metadata_removed; pure_chat_agent_loop_submode"
-            .to_string();
-    let actions = vec![AgentAction::Respond {
-        content: "你好，我是 MiMo-v2.5-pro。".to_string(),
-    }];
-    let normalized = normalize_planned_actions_with_original_and_context(
-        &state,
-        Some(&route_with_answer_candidate_marker),
-        &loop_state,
-        "Briefly tell me 你是谁，回答用中文",
-        Some("Briefly tell me 你是谁，回答用中文"),
-        Some("Briefly tell me 你是谁，回答用中文"),
-        None,
-        actions,
-    );
-    assert!(matches!(
-        normalized.as_slice(),
-        [AgentAction::Respond { content }] if content == "RustClaw"
-    ));
-
     let mut route_without_marker = base_route_result();
     route_without_marker.route_reason = "pure_chat_agent_loop_submode".to_string();
     let actions = vec![AgentAction::Respond {
@@ -511,6 +491,8 @@ mod delivery_archive_config_edit;
 mod directory_locator_and_workspace_summary;
 #[path = "planning_tests/dry_run_contracts.rs"]
 mod dry_run_contracts;
+#[path = "planning_tests/existence_summary_metadata.rs"]
+mod existence_summary_metadata;
 #[path = "planning_tests/explicit_command_sequences.rs"]
 mod explicit_command_sequences;
 #[path = "planning_tests/file_paths_workspace_and_raw_command.rs"]

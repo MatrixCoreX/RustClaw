@@ -144,6 +144,6 @@ pub(super) fn route_explicitly_requests_raw_command_output(
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
     })
 }

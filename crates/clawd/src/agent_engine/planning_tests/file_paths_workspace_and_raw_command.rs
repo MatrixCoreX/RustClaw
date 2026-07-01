@@ -197,7 +197,7 @@ fn file_paths_contract_preserves_allowed_grep_text_and_prunes_disallowed_steps()
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -250,7 +250,7 @@ fn file_paths_contract_rewrites_fs_basic_list_dir_extension_filter_to_recursive_
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -599,7 +599,7 @@ fn workspace_summary_keeps_requested_structured_field_evidence() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -636,7 +636,7 @@ fn workspace_summary_with_scope_prunes_sibling_evidence() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -669,7 +669,7 @@ fn workspace_root_identity_scope_keeps_relative_workspace_evidence() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -715,7 +715,7 @@ fn unscoped_workspace_evidence_appends_synthesis_after_existing_text_read_plan()
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -763,7 +763,7 @@ fn unscoped_workspace_text_answer_strips_unrequested_file_artifact_plan() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -830,7 +830,7 @@ fn active_execution_recipe_keeps_workspace_file_mutation_plan() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1018,7 +1018,7 @@ fn process_basic_port_list_keeps_terminal_discussion_followup() {
     let kept = strip_terminal_discussion_for_direct_skill_passthrough(
         &state,
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1046,7 +1046,7 @@ fn process_basic_port_list_keeps_terminal_discussion_followup() {
 fn service_status_process_basic_port_list_keeps_terminal_synthesis() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1089,7 +1089,7 @@ fn service_status_process_basic_port_list_keeps_terminal_synthesis() {
 fn service_status_process_basic_port_list_does_not_direct_finalize_model_language_shape() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1111,7 +1111,7 @@ fn process_basic_synthesis_survives_workspace_text_guard_for_exact_sentence() {
     let state = test_state();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1166,7 +1166,7 @@ fn output_template_code_span_is_not_treated_as_literal_command() {
     let state = test_state_with_enabled_skills(&["run_cmd", "config_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1193,7 +1193,7 @@ fn colon_output_template_code_span_is_not_treated_as_literal_command() {
     let state = test_state_with_enabled_skills(&["run_cmd", "git_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1223,7 +1223,7 @@ fn concrete_shell_code_span_still_uses_literal_command_path() {
 fn direct_passthrough_keeps_mixed_placeholder_terminal_respond() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1325,7 +1325,7 @@ fn chat_wrapped_execution_route_repairs_observation_only_plan_before_any_observa
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1349,7 +1349,7 @@ fn chat_wrapped_execution_route_repairs_observation_plus_unavailable_followup_pl
         },
     ];
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -1379,7 +1379,7 @@ fn chat_wrapped_execution_route_keeps_observation_plus_synthesize_followup_plan(
     ];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),

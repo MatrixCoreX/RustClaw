@@ -13,7 +13,7 @@ pub(super) fn rewrite_structured_multi_field_read_plan_to_read_fields(
     };
     if route.needs_clarify
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+        || route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         || !route.output_contract.requires_content_evidence
         || actions.iter().any(action_is_structured_config_validation)
         || actions.iter().any(action_is_structured_scalar_field_read)
@@ -303,7 +303,7 @@ pub(super) fn route_allows_structured_field_token_fallback(route: &RouteResult) 
     {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    if route.output_contract_is_unclassified()
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -1056,7 +1056,7 @@ pub(super) fn current_turn_requests_config_edit(
         .iter()
         .filter(|action| action_targets_config_edit(action))
         .collect::<Vec<_>>();
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigRiskAssessment {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment) {
         return !config_actions.is_empty()
             && config_actions
                 .iter()

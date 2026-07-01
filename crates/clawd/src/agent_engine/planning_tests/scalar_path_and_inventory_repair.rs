@@ -28,7 +28,7 @@ fn recent_scalar_pair_normalization_strips_terminal_synthesis_for_runtime_finali
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -76,7 +76,7 @@ fn recent_scalar_pair_observation_only_normalization_does_not_append_synthesis()
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -236,6 +236,37 @@ fn system_basic_compare_paths_numbered_alias_sets_left_and_right_paths() {
             assert!(args.get("path2").is_none());
         }
         other => panic!("expected system_basic compare_paths action, got {other:?}"),
+    }
+}
+
+#[test]
+fn fs_basic_compare_paths_ab_alias_sets_left_and_right_paths() {
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "compare_paths",
+            "path_a": "scripts/a.md",
+            "path_b": "scripts/b.md",
+        }),
+    }];
+
+    let normalized = normalize_fs_basic_schema_aliases(actions);
+    assert_eq!(normalized.len(), 1);
+    match &normalized[0] {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("left_path").and_then(Value::as_str),
+                Some("scripts/a.md")
+            );
+            assert_eq!(
+                args.get("right_path").and_then(Value::as_str),
+                Some("scripts/b.md")
+            );
+            assert!(args.get("path_a").is_none());
+            assert!(args.get("path_b").is_none());
+        }
+        other => panic!("expected fs_basic compare_paths action, got {other:?}"),
     }
 }
 
@@ -894,8 +925,7 @@ async fn explicit_command_scalar_path_auto_locator_conflict_uses_run_cmd_plan() 
     route.output_contract.delivery_required = false;
     route.route_reason = concat!(
         "User requests execution of pwd command; ",
-        "explicit_command_preserves_structured_observation_contract; ",
-        "workspace_child_locator_prebound_from_current_request"
+        "explicit_command_preserves_structured_observation_contract"
     )
     .to_string();
     route.resolved_intent =
@@ -953,7 +983,7 @@ fn file_facts_auto_locator_builds_stat_paths_synthesis_plan() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -994,7 +1024,7 @@ fn file_facts_auto_locator_does_not_override_content_semantic() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1012,7 +1042,7 @@ fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_c
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1045,7 +1075,7 @@ fn file_facts_auto_locator_uses_route_locator_hint_without_auto_locator_path() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1071,7 +1101,7 @@ fn file_facts_auto_locator_accepts_single_directory_metadata_quantity_comparison
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1115,7 +1145,7 @@ fn strict_quantity_directory_target_uses_ranked_size_inventory() {
     fs::write(target.join("large.log"), "abcdef").expect("write large");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1156,7 +1186,7 @@ fn strict_quantity_directory_without_selector_uses_path_metadata_plan() {
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1201,7 +1231,7 @@ fn free_quantity_directory_target_uses_broader_ranked_inventory() {
     fs::write(target.join("large.json"), "{\"title\":\"larger\"}").expect("write large");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1237,7 +1267,7 @@ fn file_facts_auto_locator_deterministic_plan_resolves_current_workspace_quantit
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1273,7 +1303,7 @@ fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1312,7 +1342,7 @@ fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1391,7 +1421,7 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1437,7 +1467,7 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
 #[test]
 fn quantity_directory_inventory_injects_structural_extension_filter() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1471,7 +1501,7 @@ fn quantity_directory_inventory_injects_structural_extension_filter() {
 #[test]
 fn directory_entry_groups_inventory_injects_extension_from_machine_token() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1502,7 +1532,7 @@ fn directory_entry_groups_inventory_injects_extension_from_machine_token() {
 #[test]
 fn directory_entry_groups_inventory_ignores_non_extension_user_words() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1536,7 +1566,7 @@ fn directory_entry_groups_inventory_ignores_non_extension_user_words() {
 #[test]
 fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1609,7 +1639,7 @@ fn explicit_command_deterministic_plan_preserves_pipeline_literal() {
 fn execution_failed_step_code_span_sequence_gets_multi_run_cmd_plan() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

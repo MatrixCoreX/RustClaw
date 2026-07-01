@@ -15,12 +15,11 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::CommandOutputSummary
-                | crate::OutputSemanticKind::ArchiveList
-                | crate::OutputSemanticKind::ContentExcerptSummary
-        )
+        || !route.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::CommandOutputSummary,
+            crate::OutputSemanticKind::ArchiveList,
+            crate::OutputSemanticKind::ContentExcerptSummary,
+        ])
         || !archive_basic_enabled_for_planning(state)
         || !db_basic_enabled_for_planning(state)
     {
@@ -241,7 +240,7 @@ fn route_requests_schema_version_machine_token(
     route: &RouteResult,
     current_user_text: &str,
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteSchemaVersion
+    route.output_contract_marker_is(crate::OutputSemanticKind::SqliteSchemaVersion)
         || [
             route.route_reason.as_str(),
             route.resolved_intent.as_str(),
@@ -267,10 +266,6 @@ fn aggregate_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
     else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed() && policy.action_matches_preferred())
+    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed() && policy.action_matches_preferred())
 }

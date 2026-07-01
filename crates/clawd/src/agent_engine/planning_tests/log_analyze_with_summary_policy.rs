@@ -10,7 +10,7 @@ fn content_excerpt_with_summary_single_log_file_without_slice_uses_log_analyze_p
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -48,7 +48,7 @@ fn content_excerpt_with_summary_single_log_file_with_slice_keeps_bounded_read() 
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

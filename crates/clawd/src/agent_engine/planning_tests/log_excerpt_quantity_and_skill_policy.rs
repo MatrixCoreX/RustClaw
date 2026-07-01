@@ -208,7 +208,7 @@ fn fs_basic_append_text_aliases_text_to_content_before_verify() {
 #[test]
 fn structured_scalar_compare_accepts_fs_basic_count_entries_pair() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -624,6 +624,94 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
 }
 
 #[test]
+fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
+    let state = test_state_with_registry();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_bundle.zip".to_string();
+    let mut loop_state = LoopState::new(3);
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "archive_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"extra":{"action":"pack","archive":"tmp/nl_basic_skill_coverage_bundle.zip","format":"zip","source":"scripts/nl_tests/fixtures/device_local/tmp/bundle_src"},"text":"archive_path=tmp/nl_basic_skill_coverage_bundle.zip"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "remove_path",
+            "path": "tmp/nl_basic_skill_coverage_bundle.zip",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "scratch archive cleanup",
+        None,
+        actions,
+    );
+
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    let steps = vec![crate::PlanStep {
+        step_id: "step_2".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: json!({
+            "action": "remove_path",
+            "path": "tmp/nl_basic_skill_coverage_bundle.zip",
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }];
+    let effective =
+        crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
+            &state,
+            &loop_state,
+            &route,
+            &steps,
+        )
+        .expect("archive cleanup recovery should upgrade effective contract");
+    assert_eq!(
+        effective.semantic_kind,
+        OutputSemanticKind::FilesystemMutationResult
+    );
+
+    let mut runtime_args = json!({
+        "path": "tmp/nl_basic_skill_coverage_bundle.zip",
+    });
+    assert!(
+        crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
+            &state,
+            &loop_state,
+            "fs_basic",
+            &json!({
+                "action": "remove_path",
+                "path": "tmp/nl_basic_skill_coverage_bundle.zip",
+            }),
+            "remove_file",
+            &mut runtime_args,
+        )
+    );
+}
+
+#[test]
 fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
     let state = test_state_with_registry();
     let mut route = route_result(
@@ -741,7 +829,7 @@ fn unavailable_skill_plan_forces_repair() {
         args: json!({ "path": "out.txt" }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -1177,7 +1265,7 @@ fn repair_failure_does_not_fallback_to_unavailable_skill_plan() {
         args: json!({ "path": "README.md" }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -1199,7 +1287,7 @@ fn actionable_route_allows_respond_only_after_observation_exists() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1217,7 +1305,7 @@ fn content_evidence_route_keeps_observation_only_plan_for_observed_finalize() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1267,7 +1355,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1668,7 +1756,7 @@ fn auto_locator_file_does_not_collapse_multi_read_plan() {
     let beta_path = beta.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1728,7 +1816,7 @@ fn content_evidence_route_keeps_terminal_discussion_followup_for_planned_synthes
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1765,7 +1853,7 @@ fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthes
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1809,7 +1897,7 @@ fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1864,7 +1952,7 @@ fn recent_scalar_pair_strips_terminal_synthesis_for_runtime_finalizer() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

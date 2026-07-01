@@ -10,8 +10,7 @@ pub(super) fn http_download_artifact_deterministic_plan_result(
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::FilesystemMutationResult
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
         || !matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
@@ -33,12 +32,8 @@ pub(super) fn http_download_artifact_deterministic_plan_result(
         }),
     };
     if let AgentAction::CallSkill { skill, args } = &action {
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return None;
         }
@@ -464,12 +459,8 @@ fn runtime_surface_action_allowed(route: &RouteResult, action: &AgentAction) -> 
     let Some((skill, args)) = runtime_surface_action_call_ref(action) else {
         return false;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
 }
 
 fn runtime_surface_action_call_ref<'a>(action: &'a AgentAction) -> Option<(&'a str, &'a Value)> {

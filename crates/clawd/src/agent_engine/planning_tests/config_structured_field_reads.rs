@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_engine::planning::preferred_structured_action_for_contract_hint;
 
 #[test]
 fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard() {
@@ -170,7 +171,7 @@ fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
     let state = test_state();
     let root_cargo = root_cargo.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -437,7 +438,7 @@ db_path = "data/test_contract.sqlite"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -506,7 +507,7 @@ fn structured_multi_field_rewrite_ignores_background_filename_tokens() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1058,7 +1059,8 @@ fn package_manager_detect_uses_deterministic_skill_plan() {
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = OutputSemanticKind::PackageManagerDetection;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=package.detect_manager".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = package_manager_detect_deterministic_plan_result(
@@ -1088,7 +1090,7 @@ fn package_docker_probe_uses_structured_readonly_skills_for_service_status_route
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.route_reason =
-        "machine_plan: package_manager_detection docker_container_lifecycle docker.version docker_ps"
+        "machine_plan: capability_ref=package.detect_manager capability_ref=docker.version capability_ref=docker.list_containers"
             .to_string();
     let loop_state = LoopState::new(1);
 
@@ -1124,7 +1126,7 @@ fn package_docker_probe_overrides_content_excerpt_auto_locator_route() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/home/guagua/rustclaw/docker".to_string();
     route.route_reason =
-        "machine_plan: package_manager.detect_manager package_manager_detection docker_basic list_containers docker.version read_only_no_mutation_no_retry"
+        "machine_plan: capability_ref=package.detect_manager capability_ref=docker.list_containers capability_ref=docker.version read_only_no_mutation_no_retry"
             .to_string();
     let loop_state = LoopState::new(1);
 
@@ -1149,35 +1151,44 @@ fn package_docker_probe_overrides_content_excerpt_auto_locator_route() {
 }
 
 #[test]
-fn package_docker_probe_uses_package_manager_for_docker_lifecycle_route() {
+fn package_docker_probe_requires_exact_capability_tokens() {
+    let state = test_state_with_enabled_skills(&["package_manager", "docker_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.route_reason =
+        "machine_plan: capability_ref=package.detect_manager capability_ref=docker.version_extra"
+            .to_string();
+    let loop_state = LoopState::new(1);
+
+    assert!(package_docker_readonly_probe_deterministic_plan_result(
+        &state,
+        "package and docker readonly probe",
+        Some(&route),
+        &loop_state,
+    )
+    .is_none());
+}
+
+#[test]
+fn package_docker_probe_ignores_legacy_machine_tokens_without_capability_ref() {
     let state = test_state_with_enabled_skills(&["package_manager", "docker_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::DockerContainerLifecycle;
     route.route_reason =
-        "machine_plan: package_manager_detection package_manager.detect docker_container_lifecycle docker.version docker.ps"
-            .to_string();
+        "machine_plan: package_manager_detection docker_container_lifecycle docker_ps".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = package_docker_readonly_probe_deterministic_plan_result(
+    assert!(package_docker_readonly_probe_deterministic_plan_result(
         &state,
         "package and docker readonly probe",
         Some(&route),
         &loop_state,
     )
-    .expect("docker lifecycle probe should keep package detection structured");
-
-    assert_eq!(plan.steps.len(), 5);
-    let package_action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&package_action, "package_manager", "detect");
-    assert_eq!(args.get("action").and_then(Value::as_str), Some("detect"));
-    let docker_version_action = plan.steps[1].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&docker_version_action, "docker_basic", "version");
-    assert_eq!(args.get("action").and_then(Value::as_str), Some("version"));
-    let docker_ps_action = plan.steps[2].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&docker_ps_action, "docker_basic", "ps");
-    assert_eq!(args.get("action").and_then(Value::as_str), Some("ps"));
+    .is_none());
 }
 
 #[test]
@@ -1186,7 +1197,8 @@ fn contract_hint_preferred_run_cmd_uses_machine_hint_not_request_words() {
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::PackageManagerDetection;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=package.detect_manager".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let request =
             "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
@@ -1505,14 +1517,15 @@ fn contract_hint_matrix_preferred_workspace_summary_reads_text_evidence() {
 }
 
 #[test]
-fn contract_hint_matrix_preferred_docker_logs_reads_container_candidates_first() {
+fn contract_hint_preferred_docker_logs_does_not_use_legacy_semantic_fast_path() {
     let state = test_state_with_enabled_skills(&["docker_basic", "run_cmd"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::DockerLogs;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=docker_logs\n[/CONTRACT_TEST_HINT]";
+    route.resolved_intent = "capability_ref=docker.read_logs".to_string();
+    let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=docker_basic\n[/CONTRACT_TEST_HINT]";
 
     let plan = contract_hint_preferred_action_deterministic_plan_result(
         &state,
@@ -1521,15 +1534,105 @@ fn contract_hint_matrix_preferred_docker_logs_reads_container_candidates_first()
         &LoopState::new(1),
         request,
         None,
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn preferred_docker_basic_uses_capability_ref_with_semantic_none() {
+    let state = test_state_with_enabled_skills(&["docker_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.route_reason = "capability_ref=docker.list_images".to_string();
+    let preferred = crate::contract_matrix::ActionRef {
+        skill: "docker_basic".to_string(),
+        action: None,
+    };
+
+    let action =
+        preferred_structured_action_for_contract_hint(&state, &route, &preferred, None, "")
+            .expect("docker_basic capability ref should choose structured action");
+
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "docker_basic");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("images"));
+        }
+        other => panic!("expected docker_basic action, got {other:?}"),
+    }
+}
+
+#[test]
+fn preferred_docker_basic_ignores_legacy_semantic_without_capability_ref() {
+    let state = test_state_with_enabled_skills(&["docker_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::DockerImages;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let preferred = crate::contract_matrix::ActionRef {
+        skill: "docker_basic".to_string(),
+        action: None,
+    };
+
+    let action =
+        preferred_structured_action_for_contract_hint(&state, &route, &preferred, None, "")
+            .expect("docker_basic remains available, but legacy marker must not choose images");
+
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "docker_basic");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("ps"));
+        }
+        other => panic!("expected docker_basic action, got {other:?}"),
+    }
+}
+
+#[test]
+fn contract_hint_preferred_run_cmd_uses_docker_capability_ref_with_semantic_none() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.resolved_intent = "capability_ref=docker.list_images".to_string();
+    let request =
+        "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
+
+    let plan = contract_hint_preferred_action_deterministic_plan_result(
+        &state,
+        "list docker images",
+        Some(&route),
+        &LoopState::new(1),
+        request,
+        None,
     )
-    .expect("docker logs contract should first gather candidate containers");
+    .expect("machine hint and capability ref should select run_cmd");
 
     assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "docker_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("ps")
-    );
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert!(plan.steps[0]
+        .args
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| command.contains("docker images")));
+}
+
+#[test]
+fn contract_hint_preferred_run_cmd_ignores_legacy_docker_semantic_without_capability_ref() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::DockerImages;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+
+    assert!(preferred_run_cmd_for_contract_hint(&state, &route, None).is_none());
 }
 
 #[test]

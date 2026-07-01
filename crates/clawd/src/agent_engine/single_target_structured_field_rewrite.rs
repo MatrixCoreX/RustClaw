@@ -157,25 +157,16 @@ pub(super) fn rewrite_single_target_file_read_to_auto_locator(
 
 pub(super) fn rewrite_session_alias_delivery_observations_to_route_locator(
     route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    let Some(route) = route_result else {
+    let Some(target) = session_alias_delivery_target(route_result, loop_state) else {
         return actions;
     };
-    if route.needs_clarify
-        || !route.output_contract.delivery_required
-        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || route.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
-        )
-        || route.output_contract.locator_hint.trim().is_empty()
-        || !route_reason_has_marker(route, "session_alias_locator_prebound_from_current_request")
-    {
+    let target = target.trim().to_string();
+    if target.is_empty() {
         return actions;
     }
-    let target = route.output_contract.locator_hint.trim().to_string();
     let mut changed = false;
     let rewritten = actions
         .into_iter()
@@ -193,6 +184,117 @@ pub(super) fn rewrite_session_alias_delivery_observations_to_route_locator(
         );
     }
     rewritten
+}
+
+fn session_alias_delivery_target(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.delivery_required
+        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+        || route.output_contract.response_shape != crate::OutputResponseShape::FileToken
+    {
+        return None;
+    }
+
+    if matches!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+    ) && !route.output_contract.locator_hint.trim().is_empty()
+        && route_reason_has_marker(route, "session_alias_locator_prebound_from_current_request")
+    {
+        return Some(route.output_contract.locator_hint.trim().to_string());
+    }
+
+    let targets = required_session_alias_targets_from_loop_state(loop_state);
+    (targets.len() == 1).then(|| targets[0].clone())
+}
+
+pub(super) fn rewrite_active_bound_target_observations_to_matching_locator_hint(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(target) = matching_active_bound_target(route_result, loop_state) else {
+        return actions;
+    };
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|mut action| {
+            if rewrite_session_alias_delivery_observation_action_path(&mut action, &target) {
+                changed = true;
+            }
+            action
+        })
+        .collect::<Vec<_>>();
+    if changed {
+        info!(
+            "plan_rewrite_active_bound_target_observations_to_matching_locator_hint target={}",
+            target
+        );
+    }
+    rewritten
+}
+
+fn matching_active_bound_target(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return None;
+    }
+    let locator_hint = route.output_contract.locator_hint.trim();
+    if locator_hint.is_empty()
+        || locator_hint.contains('/')
+        || locator_hint.contains('\\')
+        || std::path::Path::new(locator_hint).is_absolute()
+    {
+        return None;
+    }
+    let targets = active_bound_targets_from_loop_state(loop_state);
+    let mut matches = targets
+        .into_iter()
+        .filter(|target| path_basename_matches(target, locator_hint))
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches.dedup();
+    (matches.len() == 1).then(|| matches.remove(0))
+}
+
+fn active_bound_targets_from_loop_state(loop_state: &LoopState) -> Vec<String> {
+    let Some(raw) = loop_state.output_vars.get("active_bound_targets") else {
+        return Vec::new();
+    };
+    let Ok(values) = serde_json::from_str::<Vec<String>>(raw) else {
+        return Vec::new();
+    };
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn path_basename_matches(path: &str, basename: &str) -> bool {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(basename))
 }
 
 pub(super) fn rewrite_session_alias_delivery_observation_action_path(
@@ -300,7 +402,7 @@ pub(super) fn route_allows_route_target_file_content_plan(route: &RouteResult) -
             route.output_contract.response_shape,
             crate::OutputResponseShape::Strict | crate::OutputResponseShape::Scalar
         )
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
@@ -566,7 +668,7 @@ pub(super) fn canonicalize_quantity_compare_structured_field_reads(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         || !actions.iter().any(action_reads_workspace_text_content)
     {
         return actions;
@@ -1059,16 +1161,17 @@ pub(super) fn lookup_structured_field_value<'a>(
 }
 
 pub(super) fn route_requests_sqlite_table_listing(route: &RouteResult) -> bool {
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::SqliteTableListing
-            | crate::OutputSemanticKind::SqliteTableNamesOnly
-            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-    )
+    [
+        crate::OutputSemanticKind::SqliteTableListing,
+        crate::OutputSemanticKind::SqliteTableNamesOnly,
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+    ]
+    .iter()
+    .any(|kind| route.output_contract_marker_is(*kind))
 }
 
 pub(super) fn route_requests_sqlite_schema_version(route: &RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteSchemaVersion
+    route.output_contract_marker_is(crate::OutputSemanticKind::SqliteSchemaVersion)
         || route
             .output_contract
             .self_extension

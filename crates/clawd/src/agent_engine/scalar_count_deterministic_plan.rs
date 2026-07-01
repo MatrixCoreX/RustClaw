@@ -15,7 +15,7 @@ pub(super) fn scalar_count_filter_deterministic_plan_result(
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !scalar_count_contract_allows_count_shape(route)
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarCount
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
     {
         return None;
     }
@@ -31,6 +31,41 @@ pub(super) fn scalar_count_filter_deterministic_plan_result(
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args,
+    }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+pub(super) fn path_metadata_compare_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || !route_requests_path_metadata_compare(route)
+    {
+        return None;
+    }
+    let (left, right) = two_route_locator_targets(route)?;
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "compare_paths",
+            "left_path": left,
+            "right_path": right,
+        }),
     }];
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
@@ -97,7 +132,7 @@ pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
     {
         return None;
@@ -117,12 +152,8 @@ pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
     let AgentAction::CallTool { tool, args } = &action else {
         return None;
     };
-    if crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        tool,
-        args,
-    )
-    .is_some_and(|policy| !policy.is_allowed())
+    if crate::contract_matrix::action_policy_for_route(Some(route), tool, args)
+        .is_some_and(|policy| !policy.is_allowed())
     {
         return None;
     }
@@ -146,7 +177,7 @@ pub(super) fn scalar_path_directory_locator_search_observation_plan(
     if route.needs_clarify
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
     {
         return None;
     }
@@ -214,7 +245,7 @@ pub(super) fn explicit_command_deterministic_plan_result(
         return None;
     }
     let request_text = original_user_text.trim();
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep) {
         let commands = execution_failed_step_literal_command_segments(
             &state.policy.command_intent,
             request_text,
@@ -316,7 +347,7 @@ pub(super) fn explicit_command_request_present(
         return true;
     }
     route_result.is_some_and(|route| {
-        (route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+        (route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
             || explicit_command_plan_needs_terminal_synthesis(Some(route)))
             && execution_failed_step_literal_command_segments(runtime, request, None).len() >= 2
     })
@@ -432,8 +463,7 @@ pub(super) fn explicit_command_plan_needs_terminal_synthesis(
                 route.output_contract.response_shape,
                 crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
             )
-            && route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::CommandOutputSummary
+            && route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
     })
 }
 
@@ -585,10 +615,8 @@ pub(super) fn route_prefers_text_excerpt_action_for_contract_hint(route: &RouteR
         && !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
         && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
-        )
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary))
 }
 
 pub(super) fn contract_hint_selector_value(original_user_text: &str, key: &str) -> Option<String> {
@@ -812,59 +840,60 @@ pub(super) fn preferred_run_cmd_for_contract_hint(
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
     let cwd = state.skill_rt.workspace_root.display().to_string();
-    let command = match route.output_contract.semantic_kind {
-        crate::OutputSemanticKind::PackageManagerDetection => {
-            r#"for m in apt-get apt dnf yum brew pacman zypper apk; do if command -v "$m" >/dev/null 2>&1; then printf 'manager=%s\nbasis=command_path:%s\n' "$m" "$m"; exit 0; fi; done; printf 'manager=unknown\nbasis=path_scan_none\n'"#.to_string()
+    let command = if route_capability_action_for_namespaces(route, &["package", "package_manager"])
+        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
+    {
+        r#"for m in apt-get apt dnf yum brew pacman zypper apk; do if command -v "$m" >/dev/null 2>&1; then printf 'manager=%s\nbasis=command_path:%s\n' "$m" "$m"; exit 0; fi; done; printf 'manager=unknown\nbasis=path_scan_none\n'"#.to_string()
+    } else if let Some(action) = route_capability_action_for_namespaces(route, &["docker"]) {
+        docker_readonly_probe_command_from_capability_action(action).to_string()
+    } else {
+        match route.effective_output_contract_semantic_kind() {
+            crate::OutputSemanticKind::QuantityComparison => {
+                let (left, right) = two_route_locator_targets(route)?;
+                format!(
+                    "stat -c 'size_bytes=%s path=%n' {} {} 2>/dev/null || wc -c {} {}",
+                    shell_single_quote(&left),
+                    shell_single_quote(&right),
+                    shell_single_quote(&left),
+                    shell_single_quote(&right)
+                )
+            }
+            crate::OutputSemanticKind::ScalarCount => {
+                let path = first_route_locator_target(route, auto_locator_path)?;
+                format!(
+                    "find {} -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' '",
+                    shell_single_quote(&path)
+                )
+            }
+            crate::OutputSemanticKind::RecentScalarEqualityCheck => {
+                "git branch --show-current | awk '{print \"field_value=\" $0}'".to_string()
+            }
+            crate::OutputSemanticKind::ServiceStatus => {
+                let filter = process_status_contract_filter_token(route)
+                    .unwrap_or_else(|| "clawd".to_string());
+                format!(
+                    "ps -eo pid,comm,args | grep -F {} | grep -v grep || true",
+                    shell_single_quote(&filter)
+                )
+            }
+            crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
+                let db_path = first_route_locator_target(route, auto_locator_path)?;
+                format!(
+                    "sqlite3 {} '.tables' | tr -s ' ' '\\n' | sed '/^$/d'",
+                    shell_single_quote(&db_path)
+                )
+            }
+            crate::OutputSemanticKind::SqliteSchemaVersion => {
+                let db_path = first_route_locator_target(route, auto_locator_path)?;
+                format!(
+                    "sqlite3 {} 'PRAGMA schema_version;' | awk '{{print \"schema_version=\" $0}}'",
+                    shell_single_quote(&db_path)
+                )
+            }
+            _ => return None,
         }
-        crate::OutputSemanticKind::QuantityComparison => {
-            let (left, right) = two_route_locator_targets(route)?;
-            format!(
-                "stat -c 'size_bytes=%s path=%n' {} {} 2>/dev/null || wc -c {} {}",
-                shell_single_quote(&left),
-                shell_single_quote(&right),
-                shell_single_quote(&left),
-                shell_single_quote(&right)
-            )
-        }
-        crate::OutputSemanticKind::ScalarCount => {
-            let path = first_route_locator_target(route, auto_locator_path)?;
-            format!(
-                "find {} -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' '",
-                shell_single_quote(&path)
-            )
-        }
-        crate::OutputSemanticKind::RecentScalarEqualityCheck => {
-            "git branch --show-current | awk '{print \"field_value=\" $0}'".to_string()
-        }
-        crate::OutputSemanticKind::ServiceStatus => {
-            let filter = process_status_contract_filter_token(route)
-                .unwrap_or_else(|| "clawd".to_string());
-            format!(
-                "ps -eo pid,comm,args | grep -F {} | grep -v grep || true",
-                shell_single_quote(&filter)
-            )
-        }
-        crate::OutputSemanticKind::SqliteTableListing
-        | crate::OutputSemanticKind::SqliteTableNamesOnly
-        | crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
-            let db_path = first_route_locator_target(route, auto_locator_path)?;
-            format!(
-                "sqlite3 {} '.tables' | tr -s ' ' '\\n' | sed '/^$/d'",
-                shell_single_quote(&db_path)
-            )
-        }
-        crate::OutputSemanticKind::SqliteSchemaVersion => {
-            let db_path = first_route_locator_target(route, auto_locator_path)?;
-            format!(
-                "sqlite3 {} 'PRAGMA schema_version;' | awk '{{print \"schema_version=\" $0}}'",
-                shell_single_quote(&db_path)
-            )
-        }
-        crate::OutputSemanticKind::DockerPs => "docker ps 2>&1 || true".to_string(),
-        crate::OutputSemanticKind::DockerImages => "docker images 2>&1 || true".to_string(),
-        crate::OutputSemanticKind::DockerLogs => "docker ps 2>&1 || true".to_string(),
-        crate::OutputSemanticKind::DockerContainerLifecycle => "docker version 2>&1 || true".to_string(),
-        _ => return None,
     };
     let mut args = serde_json::json!({
         "command": command,
@@ -877,6 +906,69 @@ pub(super) fn preferred_run_cmd_for_contract_hint(
     })
 }
 
+fn route_capability_action_for_namespaces<'a>(
+    route: &'a RouteResult,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
+        .next()
+}
+
+fn machine_context_capability_action_for_namespaces<'a>(
+    machine_context: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
+        .next()
+}
+
+fn capability_action_for_namespace_token<'a>(
+    token: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    let capability = token.strip_prefix("capability_ref=")?;
+    let (namespace, action) = capability.split_once('.')?;
+    if namespace.is_empty()
+        || action.is_empty()
+        || !namespaces.iter().any(|candidate| namespace == *candidate)
+        || !capability.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+    {
+        return None;
+    }
+    Some(action)
+}
+
+fn docker_readonly_probe_command_from_capability_action(action: &str) -> &'static str {
+    if action_has_any_segment(action, &["image", "images"]) {
+        "docker images 2>&1 || true"
+    } else if action_has_any_segment(action, &["inspect", "restart", "start", "stop", "version"]) {
+        "docker version 2>&1 || true"
+    } else {
+        "docker ps 2>&1 || true"
+    }
+}
+
+fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    action
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        .any(|segment| {
+            let segment = segment.trim();
+            !segment.is_empty()
+                && needles.iter().any(|needle| {
+                    segment == *needle
+                        || segment.starts_with(&format!("{needle}_"))
+                        || segment.ends_with(&format!("_{needle}"))
+                        || segment.contains(&format!("_{needle}_"))
+                })
+        })
+}
+
 pub(super) fn preferred_fs_basic_for_contract_hint(
     state: &AppState,
     route: &RouteResult,
@@ -885,8 +977,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
     original_user_text: &str,
 ) -> Option<AgentAction> {
     let action_name = if action_name != "read_text_range"
-        && (route.output_contract.semantic_kind
-            == crate::OutputSemanticKind::WorkspaceProjectSummary
+        && (route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
             || route_prefers_text_excerpt_action_for_contract_hint(route))
     {
         "read_text_range"
@@ -895,9 +986,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
     };
     let mut args = match action_name {
         "stat_paths" => {
-            if route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::RecentArtifactsJudgment
-            {
+            if route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment) {
                 let root = first_route_locator_target(route, auto_locator_path)?;
                 let paths =
                     recent_child_paths_for_directory(&root, 2).unwrap_or_else(|| vec![root]);
@@ -911,11 +1000,11 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
         }
         "find_entries" => {
             let path = first_route_locator_target(route, auto_locator_path)?;
-            if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly {
+            if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly) {
                 scalar_path_find_entries_args(&path)
             } else {
-                let default_target_kind = if route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::DirectoryEntryGroups
+                let default_target_kind = if route
+                    .output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
                 {
                     "any"
                 } else {
@@ -928,7 +1017,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
                     "root": path,
                     "target_kind": target_kind,
                     "max_results": 50,
-                    "include_hidden": route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck,
+                    "include_hidden": route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck),
                 })
             }
         }
@@ -953,7 +1042,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
                 "path": path,
                 "names_only": false,
                 "max_entries": 1000,
-                "sort_by": if route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment {
+                "sort_by": if route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment) {
                     "mtime_desc"
                 } else {
                     "name"
@@ -966,8 +1055,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
                     args["dirs_only"] = Value::Bool(true);
                 }
             }
-            if route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck
-            {
+            if route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
                 args["include_hidden"] = Value::Bool(true);
             }
             args
@@ -1003,8 +1091,7 @@ pub(super) fn preferred_fs_basic_for_contract_hint(
                 "max_results": 50,
             });
             if contract_hint_selector_case_insensitive(original_user_text).unwrap_or(
-                route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::ContentPresenceCheck,
+                route.output_contract_marker_is(crate::OutputSemanticKind::ContentPresenceCheck),
             ) {
                 args["case_insensitive"] = Value::Bool(true);
             }
@@ -1052,12 +1139,12 @@ pub(super) fn preferred_config_basic_for_contract_hint(
     action_name: Option<&str>,
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentScalarEqualityCheck
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         && first_route_locator_target(route, auto_locator_path).is_none()
     {
         return None;
     }
-    let action = action_name.unwrap_or(match route.output_contract.semantic_kind {
+    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::ConfigRiskAssessment => "guard_rustclaw_config",
         crate::OutputSemanticKind::ConfigValidation => "validate",
         crate::OutputSemanticKind::StructuredKeys => "list_keys",
@@ -1094,7 +1181,7 @@ pub(super) fn preferred_config_edit_for_contract_hint(
     action_name: Option<&str>,
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
-    let action = action_name.unwrap_or(match route.output_contract.semantic_kind {
+    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::ConfigRiskAssessment => "guard_config",
         crate::OutputSemanticKind::ConfigValidation => "validate_config",
         _ => "guard_config",
@@ -1127,7 +1214,7 @@ pub(super) fn preferred_archive_basic_for_contract_hint(
     if !archive_basic_enabled_for_planning(state) {
         return None;
     }
-    let action = action_name.unwrap_or(match route.output_contract.semantic_kind {
+    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::ArchiveRead => "read",
         crate::OutputSemanticKind::ArchivePack => "pack",
         crate::OutputSemanticKind::ArchiveUnpack => "unpack",

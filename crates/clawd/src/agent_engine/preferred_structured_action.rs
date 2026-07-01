@@ -84,9 +84,7 @@ pub(super) fn preferred_structured_action_for_contract_hint(
             }),
         }),
         "git_basic" if git_basic_available_for_plan(state) => {
-            if route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::WorkspaceProjectSummary
-            {
+            if route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
                 preferred_fs_basic_for_contract_hint(
                     state,
                     route,
@@ -95,40 +93,56 @@ pub(super) fn preferred_structured_action_for_contract_hint(
                     original_user_text,
                 )
             } else {
+                let action = if route
+                    .output_contract_marker_is(crate::OutputSemanticKind::GitCommitSubject)
+                {
+                    "log"
+                } else if route
+                    .output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
+                {
+                    "status"
+                } else if route
+                    .output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+                {
+                    "current_branch"
+                } else {
+                    preferred.action.as_deref().unwrap_or("status")
+                };
                 Some(AgentAction::CallSkill {
                     skill: "git_basic".to_string(),
                     args: serde_json::json!({
-                        "action": match route.output_contract.semantic_kind {
-                            crate::OutputSemanticKind::GitCommitSubject => "log",
-                            crate::OutputSemanticKind::GitRepositoryState => "status",
-                            crate::OutputSemanticKind::RecentScalarEqualityCheck => "current_branch",
-                            _ => preferred.action.as_deref().unwrap_or("status"),
-                        },
+                        "action": action,
                     }),
                 })
             }
         }
         "db_basic" => {
-            if !matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::SqliteSchemaVersion
-                    | crate::OutputSemanticKind::SqliteTableListing
-                    | crate::OutputSemanticKind::SqliteTableNamesOnly
-                    | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-            ) {
+            if !route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::SqliteSchemaVersion,
+                crate::OutputSemanticKind::SqliteTableListing,
+                crate::OutputSemanticKind::SqliteTableNamesOnly,
+                crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+            ]) {
                 return None;
             }
             let db_path = first_route_locator_target(route, auto_locator_path)?;
+            let action = if route
+                .output_contract_marker_is(crate::OutputSemanticKind::SqliteSchemaVersion)
+            {
+                "schema_version"
+            } else if route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::SqliteTableListing,
+                crate::OutputSemanticKind::SqliteTableNamesOnly,
+                crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+            ]) {
+                "list_tables"
+            } else {
+                preferred.action.as_deref().unwrap_or("list_tables")
+            };
             Some(AgentAction::CallSkill {
                 skill: "db_basic".to_string(),
                 args: serde_json::json!({
-                    "action": match route.output_contract.semantic_kind {
-                        crate::OutputSemanticKind::SqliteSchemaVersion => "schema_version",
-                        crate::OutputSemanticKind::SqliteTableListing
-                        | crate::OutputSemanticKind::SqliteTableNamesOnly
-                        | crate::OutputSemanticKind::SqliteDatabaseKindJudgment => "list_tables",
-                        _ => preferred.action.as_deref().unwrap_or("list_tables"),
-                    },
+                    "action": action,
                     "db_path": db_path,
                 }),
             })
@@ -136,16 +150,33 @@ pub(super) fn preferred_structured_action_for_contract_hint(
         "docker_basic" if docker_basic_available_for_plan(state) => Some(AgentAction::CallSkill {
             skill: "docker_basic".to_string(),
             args: serde_json::json!({
-                "action": preferred.action.as_deref().unwrap_or(match route.output_contract.semantic_kind {
-                    crate::OutputSemanticKind::DockerImages => "images",
-                    crate::OutputSemanticKind::DockerLogs => "ps",
-                    crate::OutputSemanticKind::DockerContainerLifecycle => "version",
-                    _ => "ps",
-                }),
+                "action": preferred_docker_basic_action(route, preferred),
             }),
         }),
         _ => None,
     }
+}
+
+fn preferred_docker_basic_action(
+    route: &RouteResult,
+    preferred: &crate::contract_matrix::ActionRef,
+) -> &'static str {
+    if let Some(action) = preferred.action.as_deref() {
+        return match action {
+            "images" => "images",
+            "logs" => "logs",
+            "inspect" => "inspect",
+            "start" => "start",
+            "stop" => "stop",
+            "restart" => "restart",
+            "version" => "version",
+            _ => "ps",
+        };
+    }
+    if let Some(action) = route_capability_action_for_namespaces(route, &["docker"]) {
+        return docker_basic_action_from_capability_action(action);
+    }
+    "ps"
 }
 
 pub(super) fn route_has_contract_hint_context(
@@ -158,7 +189,7 @@ pub(super) fn route_has_contract_hint_context(
             "preferred_action_ref",
         )
         .is_some()
-        || route.route_reason.contains("contract_hint_fast_path")
+        || route.has_route_reason_machine_marker("contract_hint_fast_path")
 }
 
 pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
@@ -167,7 +198,7 @@ pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
     route: &RouteResult,
     auto_locator_path: Option<&str>,
 ) -> Option<PlanResult> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPathSummary {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPathSummary) {
         return None;
     }
     let target = first_route_locator_target(route, auto_locator_path)?;
@@ -197,12 +228,8 @@ pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
         let Some((skill, args)) = planned_execution_action_ref(action) else {
             return false;
         };
-        crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
     }) {
         return None;
     }
@@ -252,13 +279,12 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
     ) {
         return Some(plan_result);
     }
-    let preferred_actions = if let Some(preferred) =
-        contract_hint_preferred_action_ref(original_user_text)
-    {
-        vec![preferred]
-    } else {
-        crate::contract_matrix::preferred_action_refs_for_output_contract(&route.output_contract)
-    };
+    let preferred_actions =
+        if let Some(preferred) = contract_hint_preferred_action_ref(original_user_text) {
+            vec![preferred]
+        } else {
+            crate::contract_matrix::preferred_action_refs_for_route(route)
+        };
     for preferred in preferred_actions {
         let Some(action) = preferred_structured_action_for_contract_hint(
             state,
@@ -274,13 +300,7 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
             AgentAction::CallTool { tool, args } => (tool.as_str(), args),
             _ => continue,
         };
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
-        {
+        if !contract_hint_preferred_action_allowed(route, skill, args) {
             continue;
         }
         let actions = vec![action];
@@ -294,6 +314,23 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
         ));
     }
     None
+}
+
+fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args: &Value) -> bool {
+    if crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
+    {
+        return true;
+    }
+    if skill != "run_cmd"
+        || args
+            .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return false;
+    }
+    route_has_capability_namespace(route, &["docker", "package", "package_manager"])
 }
 
 pub(super) fn planned_execution_action_ref<'a>(
@@ -402,27 +439,26 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     let Some(route) = route_result else {
         return actions;
     };
-    let preferred_actions =
-        crate::contract_matrix::preferred_action_refs_for_output_contract(&route.output_contract);
+    let preferred_actions = crate::contract_matrix::preferred_action_refs_for_route(route);
     if preferred_actions.is_empty() {
         return actions;
     }
     let original_user_text = original_user_text.unwrap_or_default();
-    let file_paths_has_allowed_executable = route.output_contract.semantic_kind
-        == crate::OutputSemanticKind::FilePaths
+    let file_paths_has_allowed_executable = route
+        .output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
         && actions.iter().any(|action| {
             matches!(
                 file_paths_contract_executable_action_allowed(action),
                 Some(true)
             )
         });
-    let quantity_compare_has_text_evidence = route.output_contract.semantic_kind
-        == crate::OutputSemanticKind::QuantityComparison
+    let quantity_compare_has_text_evidence = route
+        .output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         && actions.iter().any(action_reads_workspace_text_content);
     let compound_plan_has_content_read =
         actions.len() > 1 && actions.iter().any(action_reads_workspace_text_content);
-    let quantity_compare_directory_name_pair = route.output_contract.semantic_kind
-        == crate::OutputSemanticKind::QuantityComparison
+    let quantity_compare_directory_name_pair = route
+        .output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         && actions
             .iter()
             .filter(|action| planned_find_entries_directory_name(action).is_some())
@@ -444,8 +480,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             let Some((skill, args)) = planned_execution_action_ref(&action) else {
                 return action;
             };
-            let Some(policy) = crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            let Some(policy) = crate::contract_matrix::action_policy_for_route(
+        Some(route),
                 skill,
                 args,
             ) else {
@@ -547,8 +583,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 if let Some((candidate_skill, candidate_args)) =
                     planned_execution_action_ref(&candidate)
                 {
-                    if crate::contract_matrix::action_policy_for_output_contract(
-                        Some(&route.output_contract),
+                    if crate::contract_matrix::action_policy_for_route(
+        Some(route),
                         candidate_skill,
                         candidate_args,
                     )
@@ -568,8 +604,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 if let Some((candidate_skill, candidate_args)) =
                     planned_execution_action_ref(&candidate)
                 {
-                    if crate::contract_matrix::action_policy_for_output_contract(
-                        Some(&route.output_contract),
+                    if crate::contract_matrix::action_policy_for_route(
+        Some(route),
                         candidate_skill,
                         candidate_args,
                     )
@@ -585,7 +621,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                     }
                 }
             }
-            if route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
+            if route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
                 && normalized_skill.eq_ignore_ascii_case("fs_basic")
                 && args
                     .get("action")
@@ -629,8 +665,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                         if let Some((candidate_skill, candidate_args)) =
                             planned_execution_action_ref(&candidate)
                         {
-                            if crate::contract_matrix::action_policy_for_output_contract(
-                                Some(&route.output_contract),
+                            if crate::contract_matrix::action_policy_for_route(
+        Some(route),
                                 candidate_skill,
                                 candidate_args,
                             )
@@ -679,8 +715,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                     continue;
                 };
                 let Some(candidate_policy) =
-                    crate::contract_matrix::action_policy_for_output_contract(
-                        Some(&route.output_contract),
+                    crate::contract_matrix::action_policy_for_route(
+        Some(route),
                         candidate_skill,
                         candidate_args,
                     )
@@ -882,7 +918,7 @@ pub(super) fn inherit_count_entries_filters_from_rejected_action(
             out.insert("kind_filter".to_string(), Value::String("file".to_string()));
         }
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
         out.insert("include_hidden".to_string(), Value::Bool(true));
     } else if dirs_only || files_only || out.get("ext_filter").is_some() {
         out.insert("include_hidden".to_string(), Value::Bool(false));
@@ -904,7 +940,7 @@ pub(super) fn apply_scalar_count_contract_filter_to_count_entries_actions(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarCount {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount) {
         return actions;
     }
     let Some(hint) = scalar_count_filter_hint_from_route(route) else {
@@ -951,9 +987,8 @@ pub(super) fn git_basic_available_for_plan(state: &AppState) -> bool {
 pub(super) fn normalizer_answer_candidate_from_resolved_prompt(
     resolved_prompt: &str,
 ) -> Option<String> {
-    let (_intent, candidate) = resolved_prompt.rsplit_once("\nanswer_candidate:")?;
-    let candidate = crate::visible_text::strip_internal_context_sections(candidate).trim();
-    (!candidate.is_empty()).then(|| candidate.to_string())
+    let _ = resolved_prompt;
+    None
 }
 
 pub(super) fn package_manager_detect_deterministic_plan_result(
@@ -968,7 +1003,7 @@ pub(super) fn package_manager_detect_deterministic_plan_result(
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
         || !route.is_execute_gate()
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::PackageManagerDetection
+        || !route_has_package_detect_machine_signal(route)
         || !package_manager_available_for_plan(state)
     {
         return None;
@@ -1062,27 +1097,91 @@ pub(super) fn package_docker_readonly_probe_deterministic_plan_result(
 }
 
 fn route_has_package_docker_probe_tokens(route: &RouteResult) -> bool {
-    let text = format!("{}\n{}", route.route_reason, route.resolved_intent);
-    let has_package = [
-        "package_manager_detection",
-        "package.detect_manager",
-        "package_manager.detect",
-        "package_manager.detect_manager",
-    ]
-    .iter()
-    .any(|token| text.contains(token));
-    let has_docker = [
-        "docker_container_lifecycle",
-        "docker_basic",
-        "docker.version",
-        "docker.list_containers",
-        "list_containers",
-        "docker_ps",
-        "docker_version",
-    ]
-    .iter()
-    .any(|token| text.contains(token));
+    let has_package = route_has_capability_namespace(route, &["package", "package_manager"]);
+    let has_docker = route_has_capability_namespace(route, &["docker"]);
     has_package && has_docker
+}
+
+fn route_has_package_detect_machine_signal(route: &RouteResult) -> bool {
+    route_capability_action_for_namespaces(route, &["package", "package_manager"])
+        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
+}
+
+fn route_has_capability_namespace(route: &RouteResult, namespaces: &[&str]) -> bool {
+    route_capability_action_for_namespaces(route, namespaces).is_some()
+}
+
+fn route_capability_action_for_namespaces<'a>(
+    route: &'a RouteResult,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .filter_map(|text| machine_context_capability_action_for_namespaces(text, namespaces))
+        .next()
+}
+
+fn machine_context_capability_action_for_namespaces<'a>(
+    machine_context: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
+        .next()
+}
+
+fn capability_action_for_namespace_token<'a>(
+    token: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    let capability = token.strip_prefix("capability_ref=")?;
+    let (namespace, action) = capability.split_once('.')?;
+    if namespace.is_empty()
+        || action.is_empty()
+        || !namespaces.iter().any(|candidate| namespace == *candidate)
+        || !capability.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+    {
+        return None;
+    }
+    Some(action)
+}
+
+fn docker_basic_action_from_capability_action(action: &str) -> &'static str {
+    if action_has_any_segment(action, &["image", "images"]) {
+        "images"
+    } else if action_has_any_segment(action, &["log", "logs"]) {
+        "logs"
+    } else if action_has_any_segment(action, &["inspect"]) {
+        "inspect"
+    } else if action_has_any_segment(action, &["start"]) {
+        "start"
+    } else if action_has_any_segment(action, &["stop"]) {
+        "stop"
+    } else if action_has_any_segment(action, &["restart"]) {
+        "restart"
+    } else if action_has_any_segment(action, &["version"]) {
+        "version"
+    } else {
+        "ps"
+    }
+}
+
+fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    action
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        .any(|segment| {
+            let segment = segment.trim();
+            !segment.is_empty()
+                && needles.iter().any(|needle| {
+                    segment == *needle
+                        || segment.starts_with(&format!("{needle}_"))
+                        || segment.ends_with(&format!("_{needle}"))
+                        || segment.contains(&format!("_{needle}_"))
+                })
+        })
 }
 
 fn readonly_probe_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
@@ -1091,12 +1190,8 @@ fn readonly_probe_action_allowed(route: &RouteResult, action: &AgentAction) -> b
     else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
 }
 
 pub(super) fn package_manager_dry_run_deterministic_plan_result(
@@ -1158,7 +1253,7 @@ pub(super) fn existence_with_path_locator_observation_plan(
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if route.needs_clarify
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
     {
         return None;
     }
@@ -1303,7 +1398,7 @@ pub(super) fn existing_file_delivery_probe_deterministic_plan_result(
     }
     let route = route_result?;
     if route.needs_clarify
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFileDelivery
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFileDelivery)
         || route.output_contract.locator_kind != crate::OutputLocatorKind::Filename
         || !route_requests_single_file_delivery_probe(route)
         || turn_analysis

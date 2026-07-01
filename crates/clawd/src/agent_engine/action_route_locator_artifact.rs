@@ -278,8 +278,7 @@ pub(super) fn content_evidence_plan_only_has_locator_observation(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ContentPresenceCheck
-    {
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ContentPresenceCheck) {
         let executable_actions = actions
             .iter()
             .filter(|action| {
@@ -339,12 +338,11 @@ pub(super) fn name_listing_observation_plan_satisfies_route(
     route_result: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if !matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-    ) {
+    if !route_result.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::FilePaths,
+    ]) {
         return false;
     }
     actions.iter().any(action_provides_name_listing_evidence)
@@ -467,8 +465,8 @@ pub(super) fn path_metadata_facts_plan_satisfies_route(
     route_result: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
-        || (route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
+        || (route_result.output_contract_is_unclassified()
             && route_result.output_contract.requires_content_evidence
             && matches!(
                 route_result.output_contract.locator_kind,
@@ -547,7 +545,7 @@ pub(super) fn has_listing_grounded_synthesis_answer_plan(
     route: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    route.output_contract_is_unclassified()
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && has_discussion_followup_action(actions)
         && actions.iter().any(action_is_directory_listing_observation)
@@ -846,11 +844,10 @@ pub(super) fn route_requests_structured_scalar_compare(route: &RouteResult) -> b
     let contract = crate::TaskContract::from_route_result(route);
     !route.needs_clarify
         && !route.output_contract.delivery_required
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::QuantityComparison
-                | crate::OutputSemanticKind::RecentScalarEqualityCheck
-        )
+        && route.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::QuantityComparison,
+            crate::OutputSemanticKind::RecentScalarEqualityCheck,
+        ])
         && contract
             .required_evidence_fields
             .iter()
@@ -859,7 +856,19 @@ pub(super) fn route_requests_structured_scalar_compare(route: &RouteResult) -> b
 
 pub(super) fn route_requests_path_metadata_compare(route: &RouteResult) -> bool {
     route_requests_structured_scalar_compare(route)
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && (route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
+            || (route
+                .output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+                && route_has_multiple_locator_targets(route)))
+}
+
+fn route_has_multiple_locator_targets(route: &RouteResult) -> bool {
+    crate::task_contract::target_locators_for_route(route)
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .take(2)
+        .count()
+        >= 2
 }
 
 pub(super) fn action_scalar_compare_observation_units(action: &AgentAction) -> usize {
@@ -1087,7 +1096,7 @@ pub(super) fn actions_satisfy_single_path_metadata_facts(
     route: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         || route.output_contract.delivery_required
         || crate::task_contract::target_locators_for_route(route).len() > 1
     {
@@ -1131,7 +1140,7 @@ pub(super) fn actions_satisfy_current_workspace_scalar_field_observation(
     route: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentScalarEqualityCheck
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
     {
         return false;

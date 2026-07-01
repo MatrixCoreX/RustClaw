@@ -343,7 +343,12 @@ fn archive_pack_route_rewrites_probe_only_plan_to_archive_basic() {
         },
     ];
 
-    let rewritten = rewrite_archive_pack_plan_to_archive_basic(Some(&route), false, actions);
+    let rewritten = rewrite_archive_pack_plan_to_archive_basic(
+        Some(&route),
+        &LoopState::new(2),
+        false,
+        actions,
+    );
 
     assert_eq!(rewritten.len(), 2);
     match &rewritten[0] {
@@ -396,7 +401,12 @@ fn archive_pack_route_rewrites_archive_list_plan_to_pack() {
         },
     ];
 
-    let rewritten = rewrite_archive_pack_plan_to_archive_basic(Some(&route), false, actions);
+    let rewritten = rewrite_archive_pack_plan_to_archive_basic(
+        Some(&route),
+        &LoopState::new(2),
+        false,
+        actions,
+    );
 
     assert_eq!(rewritten.len(), 2);
     match &rewritten[0] {
@@ -418,6 +428,68 @@ fn archive_pack_route_rewrites_archive_list_plan_to_pack() {
 }
 
 #[test]
+fn archive_pack_route_preserves_post_pack_list_and_cleanup_plan() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/skill_calls | tmp/nl_archive_case_en.zip".to_string();
+    let mut loop_state = LoopState::new(3);
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "archive_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"extra":{"action":"pack","archive":"/home/guagua/rustclaw/tmp/nl_archive_case_en.zip","format":"zip","source":"scripts/skill_calls"},"text":"archive_path=/home/guagua/rustclaw/tmp/nl_archive_case_en.zip"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "list",
+                "archive": "tmp/nl_archive_case_en.zip",
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "remove_path",
+                "path": "tmp/nl_archive_case_en.zip",
+            }),
+        },
+        AgentAction::Respond {
+            content: "created_archive_path=tmp/nl_archive_case_en.zip".to_string(),
+        },
+    ];
+
+    let rewritten =
+        rewrite_archive_pack_plan_to_archive_basic(Some(&route), &loop_state, false, actions);
+
+    assert_eq!(rewritten.len(), 3);
+    assert!(matches!(
+        &rewritten[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "archive_basic"
+                && args.get("action").and_then(Value::as_str) == Some("list")
+    ));
+    assert!(matches!(
+        &rewritten[1],
+        AgentAction::CallSkill { skill, args }
+            if skill == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("remove_path")
+    ));
+}
+
+#[test]
 fn archive_pack_preserves_explicit_literal_run_cmd() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
@@ -430,7 +502,8 @@ fn archive_pack_preserves_explicit_literal_run_cmd() {
         args: json!({"command": "tar -czf /tmp/source.tgz /tmp/source"}),
     }];
 
-    let rewritten = rewrite_archive_pack_plan_to_archive_basic(Some(&route), true, actions);
+    let rewritten =
+        rewrite_archive_pack_plan_to_archive_basic(Some(&route), &LoopState::new(2), true, actions);
 
     match &rewritten[0] {
         AgentAction::CallSkill { skill, args } => {
@@ -829,7 +902,7 @@ fn config_mutation_without_recipe_does_not_upgrade_readback_to_apply() {
 fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
     let state = test_state_with_enabled_skills(&["config_edit", "synthesize_answer"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -879,7 +952,7 @@ fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
 fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
     let state = test_state_with_enabled_skills(&["config_edit"]);
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -963,7 +1036,7 @@ fn rustclaw_config_syntax_only_validation_keeps_validate_action() {
 fn command_output_summary_preserves_structured_config_validate() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1015,7 +1088,7 @@ fn command_output_summary_preserves_structured_config_validate() {
 fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_guard() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1056,7 +1129,7 @@ fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_g
 fn main_config_content_summary_read_rewrites_to_guard() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1100,7 +1173,7 @@ fn main_config_content_summary_read_rewrites_to_guard() {
 #[test]
 fn guard_config_with_invalid_product_locator_uses_main_config_default() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1569,7 +1642,7 @@ fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
 fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_guard() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

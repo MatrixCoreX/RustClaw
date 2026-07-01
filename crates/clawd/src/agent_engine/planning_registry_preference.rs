@@ -5,12 +5,15 @@ use std::path::Path;
 use super::planning_actions::planned_action_skill_name;
 use crate::{AgentAction, AppState, RouteResult};
 
-fn route_semantic_tag(route_result: &RouteResult) -> Option<&'static str> {
-    let tag = route_result.output_contract.semantic_kind.as_str();
-    if tag == "none" || tag == "raw_command_output" {
-        return None;
+fn route_semantic_tags(route_result: &RouteResult) -> Vec<&'static str> {
+    match route_result.effective_output_contract_semantic_kind() {
+        crate::OutputSemanticKind::None | crate::OutputSemanticKind::RawCommandOutput => Vec::new(),
+        crate::OutputSemanticKind::DockerPs => vec!["docker.list_containers"],
+        crate::OutputSemanticKind::DockerImages => vec!["docker.list_images"],
+        crate::OutputSemanticKind::DockerLogs => vec!["docker.read_logs"],
+        crate::OutputSemanticKind::DockerContainerLifecycle => vec!["docker.lifecycle"],
+        kind => vec![kind.as_str()],
     }
-    Some(tag)
 }
 
 pub(super) fn registry_preferred_skill_names_for_route(
@@ -21,24 +24,27 @@ pub(super) fn registry_preferred_skill_names_for_route(
         return Vec::new();
     };
     let enabled_skills = state.get_skills_list();
-    let mut preferred = route_semantic_tag(route_result)
-        .map(|route_tag| {
-            registry
-                .enabled_names()
-                .into_iter()
-                .filter(|name| enabled_skills.is_empty() || enabled_skills.contains(name))
-                .filter(|name| {
-                    registry.get(name).is_some_and(|entry| {
-                        entry.preferred_over_run_cmd
-                            && entry
-                                .semantic_tags
+    let route_tags = route_semantic_tags(route_result);
+    let mut preferred = if route_tags.is_empty() {
+        Vec::new()
+    } else {
+        registry
+            .enabled_names()
+            .into_iter()
+            .filter(|name| enabled_skills.is_empty() || enabled_skills.contains(name))
+            .filter(|name| {
+                registry.get(name).is_some_and(|entry| {
+                    entry.preferred_over_run_cmd
+                        && entry.semantic_tags.iter().any(|tag| {
+                            let tag = tag.trim();
+                            route_tags
                                 .iter()
-                                .any(|tag| tag.trim().eq_ignore_ascii_case(route_tag))
-                    })
+                                .any(|route_tag| tag.eq_ignore_ascii_case(route_tag))
+                        })
                 })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+            })
+            .collect::<Vec<_>>()
+    };
     if route_targets_log_analysis(route_result) {
         preferred.extend(
             registry
@@ -54,10 +60,10 @@ pub(super) fn registry_preferred_skill_names_for_route(
 }
 
 fn route_targets_log_analysis(route_result: &RouteResult) -> bool {
-    route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::ContentExcerptSummary
+    let contract = route_result.effective_output_contract();
+    contract.requires_content_evidence
+        && !contract.delivery_required
+        && route_result.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
         && path_targets_log_artifact(&route_result.output_contract.locator_hint)
 }
 
@@ -205,16 +211,18 @@ fn action_satisfies_structured_key_listing_contract(
     if !action_is_structured_key_listing(action) {
         return false;
     }
-    match route_result.output_contract.semantic_kind {
-        crate::OutputSemanticKind::StructuredKeys => true,
-        crate::OutputSemanticKind::FileNames => action_structured_key_listing_path(action)
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys) {
+        return true;
+    }
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::FileNames) {
+        return action_structured_key_listing_path(action)
             .or_else(|| {
                 let hint = route_result.output_contract.locator_hint.trim();
                 (!hint.is_empty()).then_some(hint)
             })
-            .is_some_and(path_has_structured_document_extension),
-        _ => false,
+            .is_some_and(path_has_structured_document_extension);
     }
+    false
 }
 
 fn action_is_structured_key_listing(action: &AgentAction) -> bool {

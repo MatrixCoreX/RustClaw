@@ -37,14 +37,7 @@ pub(in crate::agent_engine) fn route_has_unresolved_clarify_or_locator_marker(
             || part.contains("missing_locator")
     });
     has_unresolved_machine_token
-        || [
-            "locator_required_for_path_scoped_content",
-            "deictic_bare_locator_requires_clarify",
-            "deictic_memory_only_requires_clarify",
-            "unbound_existing_file_delivery_requires_clarify",
-            "unbound_targeted_evidence_requires_clarify",
-            "locatorless_observation_requires_clarify",
-        ]
-        .iter()
-        .any(|marker| route_reason_has_structural_marker(route, marker))
+        || ["locator_required_for_path_scoped_content"]
+            .iter()
+            .any(|marker| route_reason_has_structural_marker(route, marker))
 }

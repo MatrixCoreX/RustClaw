@@ -1041,10 +1041,11 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
-    route.resolved_intent = "rust async tutorial".to_string();
+    route.resolved_intent =
+        "capability_ref=web.search_results query=rust async tutorial".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::WebSearchSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.self_extension.list_selector.limit = Some(3);
     let loop_state = LoopState::new(1);
 
@@ -1066,7 +1067,7 @@ fn web_search_summary_contract_uses_web_search_extract_plan() {
     );
     assert_eq!(
         args.get("backend").and_then(Value::as_str),
-        Some("bing_html")
+        Some("duckduckgo_html")
     );
     assert_eq!(args.get("top_k").and_then(Value::as_u64), Some(3));
 }
@@ -1328,7 +1329,7 @@ fn service_status_generic_status_without_machine_target_defers_to_planner() {
 }
 
 #[test]
-fn package_manager_dry_run_uses_commandish_answer_candidate() {
+fn package_manager_dry_run_ignores_legacy_answer_candidate_and_uses_current_request() {
     let state = test_state_with_enabled_skills(&["package_manager"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -1545,7 +1546,7 @@ fn preferred_route_allows_more_specific_structured_tool_action() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1665,7 +1666,7 @@ fn date_run_cmd_rewrites_to_system_basic_current_time() {
         args: json!({"command": "date '+%Y-%m-%d %H:%M:%S %Z'"}),
     }];
 
-    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, None, actions);
     let args = expect_planned_call(&rewritten[0], "system_basic", "runtime_status");
 
     assert_eq!(
@@ -1685,7 +1686,7 @@ fn runtime_status_run_cmd_rewrite_preserves_literal_command_flag() {
         }),
     }];
 
-    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, None, actions);
 
     match &rewritten[0] {
         AgentAction::CallSkill { skill, args } => {
@@ -1706,7 +1707,7 @@ fn runtime_status_run_cmd_rewrite_rejects_shell_control_commands() {
         args: json!({"command": command}),
     }];
 
-    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, actions);
+    let rewritten = rewrite_readonly_runtime_status_run_cmd_to_system_basic(&state, None, actions);
 
     match &rewritten[0] {
         AgentAction::CallSkill { skill, args } => {
@@ -1837,7 +1838,7 @@ fn doc_parse_unsupported_transform_action_normalizes_to_parse_doc() {
 fn archive_auto_locator_plans_list_instead_of_text_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Inspect the archive contents without unpacking it.".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1883,7 +1884,7 @@ fn archive_auto_locator_plans_list_instead_of_text_read() {
 fn archive_read_contract_plans_direct_member_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
             .to_string();
@@ -1923,7 +1924,7 @@ fn archive_read_contract_ignores_non_archive_auto_locator() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = format!("Read notes.txt from {archive}");
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

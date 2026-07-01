@@ -223,3 +223,115 @@ fn observed_output_projection_dry_run_prefers_projection_contract() {
         .iter()
         .any(|item| item.as_str() == Some("artifact_refs")));
 }
+
+#[test]
+fn finalizer_language_policy_dry_run_returns_machine_policy_contract() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "dry_run message_key finalizer i18n structured_evidence runtime_boundary".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry_run message_key finalizer i18n structured_evidence",
+        Some(&route),
+        &loop_state,
+    )
+    .expect("finalizer language policy dry-run contract should be deterministic");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("json response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("finalizer_language_policy_dry_run")
+    );
+    assert_eq!(
+        value.get("message_key").and_then(Value::as_str),
+        Some("clawd.finalizer.language_policy")
+    );
+    assert_eq!(
+        value
+            .pointer("/final_reply_policy/renderer")
+            .and_then(Value::as_str),
+        Some("finalizer_llm_i18n")
+    );
+    assert_eq!(
+        value
+            .pointer("/structured_evidence/output_contract")
+            .and_then(Value::as_str),
+        Some("message_key_or_structured_evidence")
+    );
+}
+
+#[test]
+fn finalizer_language_policy_dry_run_does_not_require_route_result() {
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run message_key finalizer i18n structured evidence",
+        None,
+        &loop_state,
+    )
+    .expect("current user-text protocol tokens should be enough for dry-run contract");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("json response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("finalizer_language_policy_dry_run")
+    );
+    assert_eq!(
+        value.get("message_key").and_then(Value::as_str),
+        Some("clawd.finalizer.language_policy")
+    );
+}
+
+#[test]
+fn finalizer_language_policy_dry_run_accepts_evidence_machine_token() {
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run message_key finalizer i18n evidence",
+        None,
+        &loop_state,
+    )
+    .expect("evidence machine token should trigger finalizer language dry-run contract");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("json response");
+    assert_eq!(
+        value.get("semantic_kind").and_then(Value::as_str),
+        Some("finalizer_language_policy_dry_run")
+    );
+}
+
+#[test]
+fn finalizer_language_policy_dry_run_can_preempt_initial_observation_state() {
+    let mut loop_state = LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry-run message_key finalizer i18n evidence",
+        None,
+        &loop_state,
+    )
+    .expect("first-round finalizer language dry-run should preempt observation guard");
+
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let AgentAction::Respond { content } = action else {
+        panic!("expected respond action, got {action:?}");
+    };
+    let value: Value = serde_json::from_str(&content).expect("json response");
+    assert_eq!(
+        value.get("message_key").and_then(Value::as_str),
+        Some("clawd.finalizer.language_policy")
+    );
+}
