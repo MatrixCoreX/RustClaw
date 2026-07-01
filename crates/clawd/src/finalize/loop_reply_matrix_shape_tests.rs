@@ -159,6 +159,36 @@ fn matrix_strict_list_shape_builds_list_from_observed_json() {
 }
 
 #[test]
+fn matrix_strict_list_ignores_inventory_json_hidden_in_visible_text() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "document".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    let hidden_payload = serde_json::json!({
+        "action": "find_ext",
+        "count": 2,
+        "ext": "md",
+        "results": ["document/beta.md", "document/alpha.md"],
+        "root": "document"
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        &serde_json::json!({
+            "status": "ok",
+            "text": hidden_payload
+        })
+        .to_string(),
+    ));
+
+    assert!(super::super::matrix_strict_list_observed_answer(&route, &loop_state).is_none());
+}
+
+#[test]
 fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -530,6 +560,40 @@ fn matrix_grouped_name_list_shape_reads_wrapped_inventory_extra() {
     );
     assert_eq!(summary.format_ok, Some(true));
     assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn matrix_grouped_name_list_ignores_inventory_json_hidden_in_visible_text() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "workspace".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    let hidden_payload = serde_json::json!({
+        "action": "inventory_dir",
+        "counts": {"dirs": 2, "files": 3, "total": 5},
+        "names_by_kind": {
+            "files": ["README.md", "Cargo.lock", "Cargo.toml"],
+            "dirs": ["configs", "crates"],
+            "other": []
+        },
+        "path": "workspace"
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        &serde_json::json!({
+            "status": "ok",
+            "text": hidden_payload
+        })
+        .to_string(),
+    ));
+
+    assert!(!super::super::directory_entry_groups_prefers_observed_groups(&route, &loop_state));
+    assert!(super::super::matrix_grouped_name_list_observed_answer(&route, &loop_state).is_none());
 }
 
 #[test]
