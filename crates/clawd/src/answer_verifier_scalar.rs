@@ -159,16 +159,8 @@ pub(super) fn recent_structured_scalar_values_from_journal(
 
 pub(super) fn observed_scalar_value_from_step_output(output: &str) -> Option<ObservedScalarValue> {
     let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    observed_scalar_value_from_json(&value).or_else(|| {
-        value
-            .get("extra")
-            .and_then(observed_scalar_value_from_json)
-            .or_else(|| {
-                let text = value.get("text").and_then(|item| item.as_str())?;
-                let nested = serde_json::from_str::<serde_json::Value>(text.trim()).ok()?;
-                observed_scalar_value_from_json(&nested)
-            })
-    })
+    observed_scalar_value_from_json(&value)
+        .or_else(|| value.get("extra").and_then(observed_scalar_value_from_json))
 }
 
 pub(super) fn observed_scalar_value_from_json(
@@ -570,11 +562,7 @@ pub(super) fn find_ext_results_from_value(
             return Some(batch);
         }
     }
-    value
-        .get("text")
-        .and_then(|text| text.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-        .and_then(|value| find_ext_results_from_object(&value))
+    None
 }
 
 pub(super) fn find_ext_results_from_object(
