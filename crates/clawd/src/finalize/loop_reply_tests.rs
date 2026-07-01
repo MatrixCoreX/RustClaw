@@ -90,6 +90,9 @@ fn visible_answer_machine_payload_detection_is_structural() {
 #[path = "loop_reply_execution_summary_tests.rs"]
 mod execution_summary_tests;
 
+#[path = "loop_reply_execution_summary_text_boundary_tests.rs"]
+mod execution_summary_text_boundary_tests;
+
 #[path = "loop_reply_exact_contract_tests.rs"]
 mod exact_contract_tests;
 
