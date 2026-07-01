@@ -1825,16 +1825,25 @@ fn is_uuid_like_token(token: &str) -> bool {
     })
 }
 
-pub(super) fn service_status_url_locator(route: &RouteResult, user_text: &str) -> Option<String> {
-    [user_text, route.resolved_intent.as_str()]
-        .into_iter()
-        .filter_map(crate::intent::locator_extractor::extract_explicit_locator_for_fallback)
-        .find(|locator| locator.locator_kind == crate::OutputLocatorKind::Url)
-        .map(|locator| locator.locator_hint)
-        .or_else(|| {
-            let hint = route.output_contract.locator_hint.trim();
-            (hint.starts_with("http://") || hint.starts_with("https://")).then(|| hint.to_string())
-        })
+pub(super) fn service_status_url_locator(route: &RouteResult, _user_text: &str) -> Option<String> {
+    if !crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["http", "http_basic"],
+        &["get", "read"],
+    ) && !route_mentions_any_machine_token(route, &["http_basic", "http_basic.get", "http.get"])
+    {
+        return None;
+    }
+    route_machine_value(route, &["url", "uri"])
+        .or_else(|| service_status_http_url(route.output_contract.locator_hint.as_str()))
+        .and_then(|value| service_status_http_url(value.as_str()))
+}
+
+fn service_status_http_url(value: &str) -> Option<String> {
+    let value = value
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    (value.starts_with("http://") || value.starts_with("https://")).then(|| value.to_string())
 }
 
 pub(super) fn runtime_status_query_kind(
