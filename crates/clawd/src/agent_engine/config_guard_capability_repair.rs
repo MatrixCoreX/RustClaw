@@ -57,12 +57,8 @@ pub(super) fn planned_action_allowed_by_current_contract(
     let Some((skill, args)) = planned_execution_action_ref(action) else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
 }
 
 pub(super) fn repair_guard_config_default_path_for_invalid_locator(
@@ -145,9 +141,8 @@ pub(super) fn rewrite_rustclaw_config_risk_assessment_to_guard(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if route_result.is_none_or(|route| {
-        route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigRiskAssessment
-    }) || actions.iter().any(is_config_basic_guard_action)
+    if route_result.is_none_or(|route| !route_requests_config_risk_guard(route))
+        || actions.iter().any(is_config_basic_guard_action)
     {
         return actions;
     }
@@ -219,7 +214,7 @@ pub(super) fn rustclaw_main_config_excerpt_guard_target(
     if route.needs_clarify
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
         || !matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
@@ -764,6 +759,14 @@ fn route_requests_config_validation(route: &RouteResult) -> bool {
             &["config"],
             &["validate", "validate_config", "validate_after_change"],
         )
+}
+
+fn route_requests_config_risk_guard(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["config"],
+        &["guard", "risk"],
+    ) || route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
 }
 
 pub(super) fn is_rustclaw_main_config_path(path: &str) -> bool {
