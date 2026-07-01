@@ -142,6 +142,42 @@ fn config_risk_preview_uses_git_plan_change_and_guard_observations() {
 }
 
 #[test]
+fn config_risk_preview_uses_capability_ref_without_semantic_kind() {
+    let state = test_state_with_enabled_skills(&["git_basic", "config_edit", "config_basic"]);
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=config.guard_after_change".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = config_risk_preview_deterministic_plan_result(
+        &state,
+        "preview config change and guard",
+        Some(&route),
+        &loop_state,
+        "configs/config.toml llm.selected_vendor minimax",
+        None,
+    )
+    .expect("config risk preview should use config capability_ref");
+
+    assert_eq!(plan.steps.len(), 5);
+    let preview = plan.steps[1].to_agent_action().expect("preview action");
+    let preview_args = expect_planned_call(&preview, "config_edit", "plan_config_change");
+    assert_eq!(
+        preview_args.get("field_path").and_then(Value::as_str),
+        Some("llm.selected_vendor")
+    );
+    assert_eq!(
+        preview_args.get("value").and_then(Value::as_str),
+        Some("minimax")
+    );
+    let guard = plan.steps[2].to_agent_action().expect("guard action");
+    expect_planned_call(&guard, "config_basic", "guard_rustclaw_config");
+}
+
+#[test]
 fn main_config_content_excerpt_deterministic_fast_path_uses_guard_observation() {
     let state = test_state_with_enabled_skills(&["fs_basic", "config_basic"]);
     let mut route = base_route_result();
