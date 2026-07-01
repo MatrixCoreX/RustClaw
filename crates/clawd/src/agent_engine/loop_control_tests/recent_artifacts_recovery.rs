@@ -62,6 +62,59 @@ fn recent_artifacts_verifier_gap_recovers_from_inventory_metadata() {
 }
 
 #[test]
+fn recent_artifacts_verifier_gap_ignores_visible_text_inventory_metadata() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-recent-artifacts-text-only",
+        "ask",
+        "judge tmp",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            serde_json::json!({
+                "status": "ok",
+                "text": serde_json::json!({
+                    "action": "inventory_dir",
+                    "entries": [
+                        {"kind": "file", "modified_ts": 9, "name": "clawd.run.log", "path": "logs/clawd.run.log", "size_bytes": 2048}
+                    ],
+                    "path": "/repo/logs",
+                    "sort_by": "mtime_desc"
+                })
+                .to_string()
+            })
+            .to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate leaked raw step output".to_string(),
+        should_retry: true,
+        retry_instruction: "render observed recent entries".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
+
+    assert!(!try_recover_recent_artifacts_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+    assert_eq!(reply.text, "incomplete");
+}
+
+#[test]
 fn recent_artifacts_verifier_gap_recovery_respects_selector_limit_and_target_kind() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
