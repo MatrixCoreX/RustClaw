@@ -1,4 +1,4 @@
-use crate::{OutputLocatorKind, OutputSemanticKind, RouteResult};
+use crate::{OutputLocatorKind, RouteResult};
 use std::path::Path;
 
 pub(super) fn locator_kind_is_current_workspace(kind: OutputLocatorKind) -> bool {
@@ -13,7 +13,7 @@ pub(super) fn locator_kind_requires_path_binding(kind: OutputLocatorKind) -> boo
 }
 
 pub(super) fn semantic_locator_hint_satisfies_non_path_binding(route_result: &RouteResult) -> bool {
-    route_result.output_contract.semantic_kind == OutputSemanticKind::ServiceStatus
+    route_reason_has_marker(route_result, "service_status")
         && !route_result.output_contract.locator_hint.trim().is_empty()
 }
 
@@ -22,22 +22,18 @@ pub(super) fn path_is_existing_directory(path: &str) -> bool {
     !trimmed.is_empty() && Path::new(trimmed).is_dir()
 }
 
-fn semantic_requires_database_file_locator(kind: OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        OutputSemanticKind::SqliteTableListing
-            | OutputSemanticKind::SqliteTableNamesOnly
-            | OutputSemanticKind::SqliteDatabaseKindJudgment
-            | OutputSemanticKind::SqliteSchemaVersion
-    )
+fn route_requires_database_file_locator(route_result: &RouteResult) -> bool {
+    route_reason_has_marker(route_result, "sqlite_table_listing")
+        || route_reason_has_marker(route_result, "sqlite_table_names_only")
+        || route_reason_has_marker(route_result, "sqlite_database_kind_judgment")
+        || route_reason_has_marker(route_result, "sqlite_schema_version")
 }
 
 pub(super) fn direct_locator_path_is_unsuitable_for_contract(
     route_result: &RouteResult,
     path: &str,
 ) -> bool {
-    semantic_requires_database_file_locator(route_result.output_contract.semantic_kind)
-        && path_is_existing_directory(path)
+    route_requires_database_file_locator(route_result) && path_is_existing_directory(path)
 }
 
 pub(super) fn current_workspace_content_summary_requires_concrete_locator(
@@ -46,12 +42,9 @@ pub(super) fn current_workspace_content_summary_requires_concrete_locator(
     route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && route_result.output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
-        && matches!(
-            route_result.output_contract.semantic_kind,
-            OutputSemanticKind::ContentExcerptSummary
-                | OutputSemanticKind::ContentExcerptWithSummary
-                | OutputSemanticKind::ExcerptKindJudgment
-        )
+        && (route_reason_has_marker(route_result, "content_excerpt_summary")
+            || route_reason_has_marker(route_result, "content_excerpt_with_summary")
+            || route_reason_has_marker(route_result, "excerpt_kind_judgment"))
 }
 
 pub(super) fn route_reason_has_marker(route_result: &RouteResult, marker: &str) -> bool {
@@ -121,23 +114,21 @@ pub(super) fn direct_auto_locator_can_satisfy_background_clarify(
     if !route_reason_has_marker(route_result, "clarify_reason_code:missing_read_target") {
         return true;
     }
-    if route_result.output_contract.semantic_kind == OutputSemanticKind::FilesystemMutationResult {
+    if route_reason_has_marker(route_result, "filesystem_mutation_result") {
         return filesystem_mutation_locator_can_satisfy_missing_read_target(
             route_result,
             direct_locator_path,
         );
     }
-    if route_result.output_contract.semantic_kind == OutputSemanticKind::ArchiveUnpack {
+    if route_reason_has_marker(route_result, "archive_unpack") {
         return archive_locator_can_satisfy_missing_read_target(route_result, direct_locator_path);
     }
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        OutputSemanticKind::ContentExcerptSummary
-            | OutputSemanticKind::ContentExcerptWithSummary
-            | OutputSemanticKind::ContentPresenceCheck
-            | OutputSemanticKind::DocumentHeading
-            | OutputSemanticKind::ExcerptKindJudgment
-    ) {
+    if route_reason_has_marker(route_result, "content_excerpt_summary")
+        || route_reason_has_marker(route_result, "content_excerpt_with_summary")
+        || route_reason_has_marker(route_result, "content_presence_check")
+        || route_reason_has_marker(route_result, "document_heading")
+        || route_reason_has_marker(route_result, "excerpt_kind_judgment")
+    {
         return locator_hint_matches_direct_locator(route_result, direct_locator_path);
     }
     true
