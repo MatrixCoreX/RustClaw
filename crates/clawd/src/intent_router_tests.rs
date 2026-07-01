@@ -757,7 +757,7 @@ fn intent_normalizer_schema_drift() {
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();
     for kind in OutputSemanticKind::ALL {
-        if kind.is_registry_capability_bridge() {
+        if kind.is_normalizer_schema_capability_bridge() {
             assert!(
                 !schema_semantic_kinds.contains(kind.as_str()),
                 "intent_normalizer schema must not expose registry capability bridge semantic_kind `{}`; planner capability metadata owns this routing",

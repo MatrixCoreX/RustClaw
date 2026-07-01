@@ -275,6 +275,14 @@ impl OutputSemanticKind {
                 | Self::DockerContainerLifecycle
         )
     }
+
+    pub(crate) fn is_normalizer_schema_capability_bridge(self) -> bool {
+        self.is_registry_capability_bridge()
+            || matches!(
+                self,
+                Self::ArchiveList | Self::ArchiveRead | Self::ArchivePack | Self::ArchiveUnpack
+            )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

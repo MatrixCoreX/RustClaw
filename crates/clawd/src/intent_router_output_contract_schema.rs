@@ -289,7 +289,7 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
             .to_string();
     }
     let declared_semantic_kind_enum = parse_output_semantic_kind(&semantic_kind);
-    if declared_semantic_kind_enum.is_registry_capability_bridge() {
+    if declared_semantic_kind_enum.is_normalizer_schema_capability_bridge() {
         semantic_kind = OutputSemanticKind::None.as_str().to_string();
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
     }
