@@ -1176,7 +1176,7 @@ pub(super) fn service_status_deterministic_plan_result(
     if process_basic_available_for_plan(state)
         && !request_mentions_workspace_product(state, user_text)
     {
-        if let Some(port) = first_port_filter_token(user_text) {
+        if let Some(port) = service_status_process_port_filter(route) {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_port_list",
@@ -1190,9 +1190,7 @@ pub(super) fn service_status_deterministic_plan_result(
                 }],
             ));
         }
-        if let Some(filter) = process_status_contract_filter_token(route)
-            .or_else(|| process_status_filter_token(user_text))
-        {
+        if let Some(filter) = service_status_process_filter(route) {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_process_list",
@@ -1266,7 +1264,7 @@ pub(super) fn service_status_deterministic_plan_result(
         ));
     }
     if process_basic_available_for_plan(state) {
-        if let Some(port) = first_port_filter_token(user_text) {
+        if let Some(port) = service_status_process_port_filter(route) {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_port_list",
@@ -1280,9 +1278,7 @@ pub(super) fn service_status_deterministic_plan_result(
                 }],
             ));
         }
-        if let Some(filter) = process_status_contract_filter_token(route)
-            .or_else(|| process_status_filter_token(user_text))
-        {
+        if let Some(filter) = service_status_process_filter(route) {
             return Some(build_plan_result(
                 goal,
                 "deterministic:service_status_process_list",
@@ -1299,6 +1295,55 @@ pub(super) fn service_status_deterministic_plan_result(
         }
     }
     None
+}
+
+fn service_status_process_port_filter(route: &RouteResult) -> Option<String> {
+    if !crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["process"],
+        &["port_list"],
+    ) {
+        return None;
+    }
+    route_machine_value(route, &["port", "filter", "query"])
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then(|| hint.to_string())
+        })
+        .and_then(|value| first_port_filter_token(&value))
+}
+
+fn service_status_process_filter(route: &RouteResult) -> Option<String> {
+    if !crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["process"],
+        &["ps"],
+    ) {
+        return None;
+    }
+    process_status_contract_filter_token(route).or_else(|| {
+        route_machine_value(route, &["filter", "query", "name", "target"])
+            .filter(|value| safe_process_status_filter_token(value))
+    })
+}
+
+fn route_machine_value(route: &RouteResult, keys: &[&str]) -> Option<String> {
+    [route.route_reason.as_str(), route.resolved_intent.as_str()]
+        .into_iter()
+        .find_map(|text| {
+            keys.iter()
+                .find_map(|key| route_machine_value_from_text(text, key))
+        })
+}
+
+fn route_machine_value_from_text(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{}=", key.trim());
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .find_map(|part| {
+            let raw = part.trim().strip_prefix(&prefix)?;
+            let value = raw.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+            (!value.is_empty()).then(|| value.to_string())
+        })
 }
 
 pub(super) fn async_job_start_deterministic_plan_result(

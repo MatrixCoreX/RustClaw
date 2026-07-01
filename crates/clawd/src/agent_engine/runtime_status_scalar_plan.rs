@@ -96,54 +96,12 @@ pub(super) fn first_port_filter_token(text: &str) -> Option<String> {
         .find_map(port_filter_from_structural_token)
 }
 
-pub(super) fn process_status_filter_token(text: &str) -> Option<String> {
-    let candidates = text
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
-        .filter_map(|token| {
-            let token = token.trim_matches(|ch: char| matches!(ch, '.' | '-' | '_'));
-            if safe_process_status_filter_token(token) {
-                Some(token.to_string())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return None;
-    }
-    if let Some(structural) = candidates.iter().find(|token| {
-        token.contains(['_', '-', '.'])
-            || token.chars().any(|ch| ch.is_ascii_digit())
-            || (token.chars().any(|ch| ch.is_ascii_uppercase())
-                && !token_is_ascii_uppercase_acronym(token))
-    }) {
-        return Some(structural.clone());
-    }
-    (candidates.len() == 1 && !token_is_ascii_uppercase_acronym(&candidates[0]))
-        .then(|| candidates[0].clone())
-}
-
 pub(super) fn process_status_contract_filter_token(route: &RouteResult) -> Option<String> {
     let hint = route.output_contract.locator_hint.trim();
     if hint.is_empty() || !safe_process_status_filter_token(hint) {
         return None;
     }
     Some(hint.to_string())
-}
-
-pub(super) fn token_is_ascii_uppercase_acronym(token: &str) -> bool {
-    let mut saw_alpha = false;
-    for ch in token.chars() {
-        if ch.is_ascii_alphabetic() {
-            saw_alpha = true;
-            if !ch.is_ascii_uppercase() {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-    saw_alpha
 }
 
 pub(super) fn port_filter_from_structural_token(token: &str) -> Option<String> {
