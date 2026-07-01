@@ -48,6 +48,7 @@ EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
 CONTRACT_MATRIX_FILE = SRC_ROOT / "contract_matrix.rs"
 TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
+VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 FINALIZER_OBSERVED_OUTPUT_SCAN_ROOTS: tuple[Path, ...] = (
     SRC_ROOT / "finalize",
     SRC_ROOT / "agent_engine/observed_output.rs",
@@ -296,6 +297,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
+    findings.extend(scan_git_deterministic_user_text_action_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -770,6 +772,54 @@ def scan_task_contract_registry_bridge_semantic_defaults() -> list[Finding]:
     )
 
 
+def scan_git_deterministic_user_text_action_selection() -> list[Finding]:
+    return scan_git_deterministic_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_git_deterministic_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if "git_repository_state_action_from_text" in line:
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "git_deterministic_user_text_action_selection",
+                    line.strip(),
+                )
+            )
+    block = function_block(text, "git_repository_state_deterministic_plan_result")
+    if block is None:
+        return findings
+    block_start, block_text = block
+    for offset, line in enumerate(block_text.splitlines(), start=0):
+        if "structural_token_present(" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                block_start + offset,
+                "git_deterministic_user_text_action_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
+def function_block(text: str, function_name: str) -> tuple[int, str] | None:
+    pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
+    match = pattern.search(text)
+    if not match:
+        return None
+    start_line = text.count("\n", 0, match.start()) + 1
+    next_match = re.search(r"^pub\(super\)\s+fn\s+", text[match.end() :], re.MULTILINE)
+    end = match.end() + next_match.start() if next_match else len(text)
+    return start_line, text[match.start() : end]
+
+
 def scan_finalizer_observed_output_registry_bridge_markers() -> list[Finding]:
     findings: list[Finding] = []
     for root in FINALIZER_OBSERVED_OUTPUT_SCAN_ROOTS:
@@ -1173,6 +1223,20 @@ def run_self_test() -> int:
         and blocked_contract[0].kind == "task_contract_registry_bridge_semantic_default"
     )
     assert not scan_task_contract_registry_bridge_semantic_defaults()
+    blocked_git_text_action = scan_git_deterministic_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn git_repository_state_deterministic_plan_result(\n"
+        ") -> Option<PlanResult> {\n"
+        '    let action = git_repository_state_action_from_text(user_text)?;\n'
+        '    if structural_token_present(user_text, "status") {}\n'
+        "}\n",
+    )
+    assert (
+        blocked_git_text_action
+        and blocked_git_text_action[0].kind
+        == "git_deterministic_user_text_action_selection"
+    )
+    assert not scan_git_deterministic_user_text_action_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",

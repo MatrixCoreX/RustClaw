@@ -607,17 +607,16 @@ pub(super) fn git_repository_state_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
     {
         return None;
     }
-    let action = git_repository_state_action_from_text(user_text)?;
+    let action = git_repository_state_action_from_route(route)?;
     Some(build_plan_result(
         goal,
         "deterministic:git_repository_state",
@@ -629,17 +628,13 @@ pub(super) fn git_repository_state_deterministic_plan_result(
     ))
 }
 
-pub(super) fn git_repository_state_action_from_text(user_text: &str) -> Option<&'static str> {
-    if structural_token_present(user_text, "remote") {
-        return Some("remote");
+pub(super) fn git_repository_state_action_from_route(route: &RouteResult) -> Option<&'static str> {
+    match crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["git"])? {
+        "remote" => Some("remote"),
+        "status" | "repository_state" => Some("status"),
+        "rev_parse" => Some("rev_parse"),
+        _ => None,
     }
-    if structural_token_present(user_text, "status") {
-        return Some("status");
-    }
-    if structural_token_present(user_text, "HEAD") {
-        return Some("rev_parse");
-    }
-    None
 }
 
 pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
