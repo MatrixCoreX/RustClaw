@@ -180,7 +180,7 @@ pub(super) fn try_accept_language_only_output_format_answer_verifier_gap(
     if route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.wants_file_delivery
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || route.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !matches!(
             route.output_contract.response_shape,

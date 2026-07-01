@@ -47,6 +47,61 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
 }
 
 #[test]
+fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis_round() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    let service_payload = json!({
+        "status": "ok",
+        "target": "clawd",
+        "service_name": "clawd",
+        "manager_type": "rustclaw",
+        "requested_action": "status",
+        "executed_actions": ["status"],
+        "pre_state": "clawd=running",
+        "post_state": "clawd=running",
+        "verified": true,
+        "summary": "Status: clawd=running"
+    });
+    let protocol_output = json!({
+        "request_id": "direct-44",
+        "status": "ok",
+        "text": service_payload.to_string(),
+        "error_text": null
+    })
+    .to_string();
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "service_control", &protocol_output));
+
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "service_control".to_string(),
+        args: json!({"action":"status","target":"clawd","manager_type":"rustclaw"}),
+    }];
+
+    let context = AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let direct_answer =
+        crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
+            &loop_state,
+            Some(&context),
+        )
+        .expect("service status direct answer");
+    assert!(direct_answer.contains("target=clawd"));
+    assert!(direct_answer.contains("status=ok"));
+    assert!(direct_answer.contains("manager_type=rustclaw"));
+    assert!(should_stop_for_observed_finalize(
+        Some(&context),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

@@ -1,10 +1,8 @@
 use super::{
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, boundary_context_snapshot_json,
-    evaluate_round_outcome, initial_execution_recipe_spec,
-    machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
-    maybe_record_agent_decides_shadow_attribution,
-    maybe_record_agent_decides_shadow_first_action_attribution, parse_log_analyze_finding,
+    apply_structured_respond_clarify_to_loop_state, evaluate_round_outcome,
+    initial_execution_recipe_spec, machine_status_visible_output_format_gap,
+    mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
     selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
     structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
@@ -25,7 +23,7 @@ use super::{
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
-    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
 };
 use crate::{
     agent_engine::{AgentRunContext, LoopState},
@@ -42,7 +40,7 @@ use serde_json::json;
 
 fn route_result(shape: OutputResponseShape) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -430,7 +428,8 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
 #[test]
 fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
     journal.record_route_result(&route);
@@ -482,7 +481,8 @@ fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
 #[test]
 fn rss_news_passed_verifier_preserves_observed_source_hosts() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
     journal.record_route_result(&route);
@@ -1147,11 +1147,13 @@ fn latest_terminal_recovery_prefers_strict_list_candidate_that_satisfies_contrac
 }
 
 #[test]
-fn http_health_verifier_gap_recovers_with_structured_status_line() {
+fn http_health_browser_open_extract_capability_gap_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WebPageSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Url;
     route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+    route.resolved_intent =
+        "capability_ref=browser.open_extract url=http://127.0.0.1:8787/v1/health".to_string();
 
     let body = json!({
         "ok": true,
@@ -1416,8 +1418,6 @@ fn test_policy() -> AgentLoopGuardPolicy {
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
-        semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
@@ -1437,8 +1437,7 @@ fn selected_scalar_path_route() -> RouteResult {
 
 #[test]
 fn selected_contract_structured_evidence_gate_respects_switch() {
-    let mut policy = test_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
+    let policy = test_policy();
     let route = selected_scalar_path_route();
     let journal =
         crate::task_journal::TaskJournal::for_task("task-evidence-off", "ask", "read field");
@@ -1449,7 +1448,6 @@ fn selected_contract_structured_evidence_gate_respects_switch() {
 #[test]
 fn selected_contract_structured_evidence_gate_reports_missing_machine_fields() {
     let mut policy = test_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
     policy.structured_evidence_required_for_selected_contracts = true;
     let route = selected_scalar_path_route();
     let journal =
@@ -1471,244 +1469,6 @@ fn selected_contract_structured_evidence_gate_reports_missing_machine_fields() {
     assert!(!gap.missing_evidence_fields.is_empty());
 }
 
-#[test]
-fn agent_decides_shadow_switch_records_route_snapshot_only() {
-    let mut policy = test_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::Shadow;
-    let route = route_result(OutputResponseShape::Free);
-    let task = test_task();
-    let mut loop_state = LoopState::new(2);
-    maybe_record_agent_decides_shadow_attribution(
-        &policy,
-        &task,
-        Some(&AgentRunContext {
-            session_alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
-                alias: "doc".to_string(),
-                target: "README.md".to_string(),
-                updated_at_ts: 1,
-            }],
-            auto_locator_path: Some("README.md".to_string()),
-            has_authoritative_deictic_anchor: true,
-            memory_context_for_execution: Some("memory_context_present".to_string()),
-            cross_turn_recent_execution_context: Some("recent_execution_present".to_string()),
-            ..AgentRunContext::default()
-        }),
-        Some(&route),
-        super::LoopBudgetProfile::FastRead,
-        &mut loop_state,
-    );
-    assert_eq!(loop_state.rollout_attribution.len(), 1);
-    let attribution = &loop_state.rollout_attribution[0];
-    assert_eq!(attribution.switch_name, "semantic_route_authority");
-    assert_eq!(
-        attribution.reason_code.as_deref(),
-        Some("agent_decides_shadow_not_evaluated")
-    );
-    assert_eq!(
-        attribution.old_first_layer_decision.as_deref(),
-        Some("planner_execute")
-    );
-    assert_eq!(loop_state.total_steps_executed, 0);
-    assert_eq!(loop_state.tool_calls_total, 0);
-    let boundary = attribution
-        .boundary_context
-        .as_ref()
-        .expect("boundary context should be recorded");
-    assert_eq!(
-        boundary
-            .pointer("/owner_layer")
-            .and_then(serde_json::Value::as_str),
-        Some("boundary_layer")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/activation_state")
-            .and_then(serde_json::Value::as_str),
-        Some("shadow")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/ordinary_semantic_authority")
-            .and_then(serde_json::Value::as_str),
-        Some("planner_loop_shadow")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/normalizer_role")
-            .and_then(serde_json::Value::as_str),
-        Some("initial_hint")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/post_route_role")
-            .and_then(serde_json::Value::as_str),
-        Some("boundary_machine_gate")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/direct_answer_gate_role")
-            .and_then(serde_json::Value::as_str),
-        Some("fallback_safety_check")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/semantic_routing/runtime_default_authority")
-            .and_then(serde_json::Value::as_str),
-        Some("legacy_pre_agent_until_activation_gates_pass")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/confirmation/owned_by")
-            .and_then(serde_json::Value::as_str),
-        Some("plan_verifier")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/active_bindings/session_alias_count")
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/active_bindings/auto_locator_present")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/intent_normalizer/authority_target")
-            .and_then(serde_json::Value::as_str),
-        Some("initial_hint_shadow")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/intent_normalizer/ownership_class")
-            .and_then(serde_json::Value::as_str),
-        Some("semantic_initial_hint")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/intent_normalizer/boundary_allowed")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/intent_normalizer/semantic_migration_target")
-            .and_then(serde_json::Value::as_str),
-        Some("planner_loop_decision_envelope")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/intent_normalizer/current_gate_kind")
-            .and_then(serde_json::Value::as_str),
-        Some("execute")
-    );
-    assert!(boundary
-        .pointer("/pre_agent_gates/intent_normalizer/current_decision")
-        .is_none());
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/authority_target")
-            .and_then(serde_json::Value::as_str),
-        Some("boundary_machine_gate")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/ownership_class")
-            .and_then(serde_json::Value::as_str),
-        Some("boundary_machine_check")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/post_route_policy/boundary_allowed")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/authority_target")
-            .and_then(serde_json::Value::as_str),
-        Some("fallback_safety_check")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/ownership_class")
-            .and_then(serde_json::Value::as_str),
-        Some("fallback_safety_check")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/semantic_migration_target")
-            .and_then(serde_json::Value::as_str),
-        Some("none")
-    );
-    assert_eq!(
-        boundary
-            .pointer("/pre_agent_gates/direct_answer_gate/boundary_class")
-            .and_then(serde_json::Value::as_str),
-        Some("not_observed_in_planner_shadow")
-    );
-}
-
-#[test]
-fn agent_decides_shadow_records_first_action_delta_without_execution() {
-    let mut policy = test_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::Shadow;
-    let route = route_result(OutputResponseShape::Free);
-    let task = test_task();
-    let mut loop_state = LoopState::new(2);
-    loop_state.round_no = 1;
-    let actions = vec![AgentAction::CallCapability {
-        capability: "fs.read_text_range".to_string(),
-        args: json!({"path": "README.md"}),
-    }];
-    maybe_record_agent_decides_shadow_first_action_attribution(
-        &policy,
-        &task,
-        Some(&AgentRunContext::default()),
-        Some(&route),
-        super::LoopBudgetProfile::FastRead,
-        &actions,
-        &mut loop_state,
-    );
-    assert_eq!(loop_state.rollout_attribution.len(), 1);
-    let attribution = &loop_state.rollout_attribution[0];
-    assert_eq!(attribution.event, "agent_decides_shadow_first_action");
-    assert_eq!(
-        attribution.agent_decision.as_deref(),
-        Some("call_capability")
-    );
-    assert_eq!(attribution.decision_delta.as_deref(), Some("same_gate"));
-    assert_eq!(
-        attribution.capability_delta.as_deref(),
-        Some("agent_capability_ref")
-    );
-    assert_eq!(loop_state.total_steps_executed, 0);
-    assert_eq!(loop_state.tool_calls_total, 0);
-    assert_eq!(
-        attribution
-            .boundary_context
-            .as_ref()
-            .and_then(|value| value.pointer("/budget/profile"))
-            .and_then(serde_json::Value::as_str),
-        Some("fast_read")
-    );
-    assert_eq!(
-        attribution
-            .boundary_context
-            .as_ref()
-            .and_then(|value| value.pointer("/budget/agent_loop_canary_bucket"))
-            .and_then(serde_json::Value::as_str),
-        Some("none")
-    );
-}
-
-#[path = "loop_control_tests/boundary_context_direct_gate.rs"]
-mod boundary_context_direct_gate;
-#[path = "loop_control_tests/semantic_route_authority.rs"]
-mod semantic_route_authority;
-
 #[path = "loop_control_tests/answer_verifier_exhaustion.rs"]
 mod answer_verifier_exhaustion;
 
@@ -1717,8 +1477,6 @@ mod local_health_recovery;
 #[path = "loop_control_tests/machine_status_visible.rs"]
 mod machine_status_visible;
 
-#[path = "loop_control_tests/dispatch_handoff.rs"]
-mod dispatch_handoff;
 #[path = "loop_control_tests/observed_finalize.rs"]
 mod observed_finalize;
 #[path = "loop_control_tests/recent_artifacts_recovery.rs"]

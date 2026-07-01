@@ -45,6 +45,29 @@ const LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "delivery_consistency_gate",
 ];
 
+const TOOL_DISCOVERY_MARKERS: &[&str] = &["tool_discovery"];
+const SERVICE_STATUS_MARKERS: &[&str] = &["service_status"];
+const CONFIG_READ_MARKERS: &[&str] = &[
+    "structured_keys",
+    "config_validation",
+    "config_risk_assessment",
+];
+const LISTING_MARKERS: &[&str] = &[
+    "file_paths",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "hidden_entries_check",
+];
+const GROUNDED_SUMMARY_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "directory_purpose_summary",
+    "workspace_project_summary",
+];
+const METADATA_JUDGMENT_MARKERS: &[&str] = &["recent_artifacts_judgment"];
+const SCALAR_OBSERVATION_MARKERS: &[&str] = &["scalar_count"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentLoopEligibilityBucket {
     LowRiskStructuredRead,
@@ -131,12 +154,6 @@ impl AgentLoopEligibility {
         }
     }
 
-    pub(crate) fn bucket_token(self) -> &'static str {
-        self.bucket
-            .map(AgentLoopEligibilityBucket::as_str)
-            .unwrap_or("none")
-    }
-
     pub(crate) fn compatibility_migration_class(self) -> &'static str {
         self.bucket
             .map(AgentLoopEligibilityBucket::compatibility_migration_class)
@@ -174,7 +191,9 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     if route.wants_file_delivery || route.output_contract.delivery_required {
         return AgentLoopEligibility::blocked("delivery_required");
     }
-    if route.output_contract.semantic_kind == OutputSemanticKind::ToolDiscovery {
+    if route.output_contract_marker_is(OutputSemanticKind::ToolDiscovery)
+        || route_has_any_machine_marker(route, TOOL_DISCOVERY_MARKERS)
+    {
         return AgentLoopEligibility::eligible_with_requirements(
             AgentLoopEligibilityBucket::LowRiskToolDiscovery,
             LOW_RISK_CONTEXT_BOUNDARY_REQUIREMENTS,
@@ -200,63 +219,72 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     }
 
     let has_bound_locator = route_has_bound_locator(route);
-    if route.output_contract.semantic_kind == OutputSemanticKind::ServiceStatus {
+    if route.output_contract_marker_is(OutputSemanticKind::ServiceStatus)
+        || route_has_any_machine_marker(route, SERVICE_STATUS_MARKERS)
+    {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskStatusObservation)
-    } else if matches!(
-        route.output_contract.semantic_kind,
-        OutputSemanticKind::PackageManagerDetection
-    ) {
+    } else if route_has_package_detect_machine_signal(route)
+        || route_has_docker_status_machine_signal(route)
+    {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskStatusObservation)
-    } else if matches!(
-        route.output_contract.semantic_kind,
-        OutputSemanticKind::StructuredKeys
-            | OutputSemanticKind::ConfigValidation
-            | OutputSemanticKind::ConfigRiskAssessment
-    ) {
+    } else if route.output_contract_marker_is_any(&[
+        OutputSemanticKind::StructuredKeys,
+        OutputSemanticKind::ConfigValidation,
+        OutputSemanticKind::ConfigRiskAssessment,
+    ]) || route_has_any_machine_marker(route, CONFIG_READ_MARKERS)
+    {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskConfigRead)
-    } else if route.output_contract.semantic_kind == OutputSemanticKind::DockerLogs {
+    } else if route_has_docker_log_machine_signal(route) {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskLogObservation)
     } else if route.output_contract.response_shape == OutputResponseShape::Scalar
         && has_bound_locator
-        && !matches!(
-            route.output_contract.semantic_kind,
-            OutputSemanticKind::ScalarCount
-        )
+        && !route.output_contract_marker_is(OutputSemanticKind::ScalarCount)
+        && !route_has_any_machine_marker(route, SCALAR_OBSERVATION_MARKERS)
     {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskStructuredRead)
-    } else if matches!(
-        route.output_contract.semantic_kind,
-        OutputSemanticKind::FilePaths
-            | OutputSemanticKind::FileNames
-            | OutputSemanticKind::DirectoryNames
-            | OutputSemanticKind::DirectoryEntryGroups
-            | OutputSemanticKind::HiddenEntriesCheck
-    ) && has_bound_locator
+    } else if route.output_contract_marker_is_any(&[
+        OutputSemanticKind::FilePaths,
+        OutputSemanticKind::FileNames,
+        OutputSemanticKind::DirectoryNames,
+        OutputSemanticKind::DirectoryEntryGroups,
+        OutputSemanticKind::HiddenEntriesCheck,
+    ]) && has_bound_locator
+        || route_has_any_machine_marker(route, LISTING_MARKERS) && has_bound_locator
     {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskListing)
-    } else if matches!(
-        route.output_contract.semantic_kind,
-        OutputSemanticKind::ContentExcerptSummary
-            | OutputSemanticKind::ContentExcerptWithSummary
-            | OutputSemanticKind::DirectoryPurposeSummary
-            | OutputSemanticKind::WorkspaceProjectSummary
-    ) && has_bound_locator
+    } else if route.output_contract_marker_is_any(&[
+        OutputSemanticKind::ContentExcerptSummary,
+        OutputSemanticKind::ContentExcerptWithSummary,
+        OutputSemanticKind::DirectoryPurposeSummary,
+        OutputSemanticKind::WorkspaceProjectSummary,
+    ]) && has_bound_locator
         && matches!(
             route.output_contract.response_shape,
             OutputResponseShape::Free
                 | OutputResponseShape::OneSentence
                 | OutputResponseShape::Strict
         )
+        || route_has_any_machine_marker(route, GROUNDED_SUMMARY_MARKERS)
+            && has_bound_locator
+            && matches!(
+                route.output_contract.response_shape,
+                OutputResponseShape::Free
+                    | OutputResponseShape::OneSentence
+                    | OutputResponseShape::Strict
+            )
     {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskGroundedSummary)
-    } else if route.output_contract.semantic_kind == OutputSemanticKind::RecentArtifactsJudgment {
+    } else if route.output_contract_marker_is(OutputSemanticKind::RecentArtifactsJudgment)
+        || route_has_any_machine_marker(route, METADATA_JUDGMENT_MARKERS)
+    {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskMetadataJudgment)
-    } else if route.output_contract.semantic_kind == OutputSemanticKind::ScalarCount
+    } else if (route.output_contract_marker_is(OutputSemanticKind::ScalarCount)
+        || route_has_any_machine_marker(route, SCALAR_OBSERVATION_MARKERS))
         && route.output_contract.response_shape == OutputResponseShape::Scalar
         && has_bound_locator
     {
         AgentLoopEligibility::eligible(AgentLoopEligibilityBucket::LowRiskScalarObservation)
-    } else if route.output_contract.semantic_kind == OutputSemanticKind::None
+    } else if route.output_contract_is_unclassified()
         && route.output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
         && matches!(
             route.output_contract.response_shape,
@@ -269,6 +297,92 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     } else {
         AgentLoopEligibility::blocked("unsupported_contract")
     }
+}
+
+fn route_has_package_detect_machine_signal(route: &RouteResult) -> bool {
+    route_capability_action_for_namespaces(route, &["package", "package_manager"])
+        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
+}
+
+fn route_has_any_machine_marker(route: &RouteResult, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| {
+        [&route.route_reason, &route.resolved_intent]
+            .iter()
+            .any(|surface| machine_context_has_marker(surface, marker))
+    })
+}
+
+fn machine_context_has_marker(machine_context: &str, marker: &str) -> bool {
+    machine_context.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
+}
+
+fn route_has_docker_status_machine_signal(route: &RouteResult) -> bool {
+    route_capability_action_for_namespaces(route, &["docker"]).is_some_and(|action| {
+        action_has_any_segment(action, &["image", "images", "inspect", "list", "version"])
+    })
+}
+
+fn route_has_docker_log_machine_signal(route: &RouteResult) -> bool {
+    route_capability_action_for_namespaces(route, &["docker"])
+        .is_some_and(|action| action_has_any_segment(action, &["log", "logs", "read"]))
+}
+
+fn route_capability_action_for_namespaces<'a>(
+    route: &'a RouteResult,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
+        .next()
+}
+
+fn machine_context_capability_action_for_namespaces<'a>(
+    machine_context: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
+        .next()
+}
+
+fn capability_action_for_namespace_token<'a>(
+    token: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    let capability = token.strip_prefix("capability_ref=")?;
+    let (namespace, action) = capability.split_once('.')?;
+    if namespace.is_empty()
+        || action.is_empty()
+        || !namespaces.iter().any(|candidate| namespace == *candidate)
+        || !capability.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+    {
+        return None;
+    }
+    Some(action)
+}
+
+fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    action
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        .any(|segment| {
+            let segment = segment.trim();
+            !segment.is_empty()
+                && needles.iter().any(|needle| {
+                    segment == *needle
+                        || segment.starts_with(&format!("{needle}_"))
+                        || segment.ends_with(&format!("_{needle}"))
+                        || segment.contains(&format!("_{needle}_"))
+                })
+        })
 }
 
 fn route_is_low_risk_single_file_delivery(
@@ -284,7 +398,7 @@ fn route_is_low_risk_single_file_delivery(
     ) {
         return false;
     }
-    if route.output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery {
+    if route.output_contract_marker_is(OutputSemanticKind::GeneratedFileDelivery) {
         return false;
     }
     if route.output_contract.response_shape != OutputResponseShape::FileToken
@@ -320,7 +434,7 @@ fn route_has_delivery_locator_scope(route: &RouteResult) -> bool {
 }
 
 fn route_is_low_risk_direct_response(route: &RouteResult) -> bool {
-    route.output_contract.semantic_kind == OutputSemanticKind::None
+    route.output_contract_is_unclassified()
         && !route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && !route.wants_file_delivery

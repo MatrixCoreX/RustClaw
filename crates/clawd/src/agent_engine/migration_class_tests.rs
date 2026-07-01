@@ -9,7 +9,7 @@ use crate::{
 
 fn route_result(shape: OutputResponseShape, kind: OutputSemanticKind) -> RouteResult {
     RouteResult {
-        ask_mode: AskMode::planner_execute_chat_wrapped(),
+        ask_mode: AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -202,12 +202,6 @@ fn eligibility_adds_generic_low_risk_buckets() {
             "low_risk_config_read",
             AgentLoopEligibilityBucket::LowRiskConfigRead,
         ),
-        (
-            OutputResponseShape::Strict,
-            OutputSemanticKind::DockerLogs,
-            "low_risk_log_observation",
-            AgentLoopEligibilityBucket::LowRiskLogObservation,
-        ),
     ] {
         let route = route_result(shape, kind);
         let eligibility = agent_loop_eligibility(&route);
@@ -216,6 +210,59 @@ fn eligibility_adds_generic_low_risk_buckets() {
         assert_eq!(eligibility.bucket, Some(expected_bucket));
         assert_eq!(eligibility.compatibility_migration_class(), expected_class);
     }
+
+    let legacy_docker_logs =
+        route_result(OutputResponseShape::Strict, OutputSemanticKind::DockerLogs);
+    let eligibility = agent_loop_eligibility(&legacy_docker_logs);
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.compatibility_migration_class(), "none");
+
+    for marker in [
+        "capability_ref=package.detect_manager",
+        "capability_ref=docker.list_containers",
+        "capability_ref=docker.list_images",
+        "capability_ref=docker.version",
+        "capability_ref=docker.version_extra",
+    ] {
+        let mut route = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+        route.resolved_intent = marker.to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        let eligibility = agent_loop_eligibility(&route);
+
+        assert!(eligibility.eligible, "{marker} should be eligible");
+        assert_eq!(
+            eligibility.bucket,
+            Some(AgentLoopEligibilityBucket::LowRiskStatusObservation)
+        );
+        assert_eq!(
+            eligibility.compatibility_migration_class(),
+            "low_risk_status_observation"
+        );
+    }
+
+    let mut docker_logs = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+    docker_logs.resolved_intent = "capability_ref=docker.read_logs".to_string();
+    docker_logs.output_contract.locator_kind = OutputLocatorKind::None;
+    docker_logs.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&docker_logs);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskLogObservation)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "low_risk_log_observation"
+    );
+
+    let mut suffix = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+    suffix.resolved_intent = "capability_ref=dockerversion".to_string();
+    suffix.output_contract.locator_kind = OutputLocatorKind::None;
+    suffix.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&suffix);
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.compatibility_migration_class(), "none");
 
     let mut workspace = route_result(OutputResponseShape::Free, OutputSemanticKind::None);
     workspace.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -268,6 +315,57 @@ fn eligibility_adds_generic_low_risk_buckets() {
     assert!(eligibility
         .boundary_requirements
         .contains(&"no_external_evidence_required"));
+}
+
+#[test]
+fn eligibility_accepts_machine_markers_without_semantic_kind() {
+    let mut listing = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+    listing.route_reason = "file_names".to_string();
+    let eligibility = agent_loop_eligibility(&listing);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskListing)
+    );
+
+    let mut summary = route_result(OutputResponseShape::Free, OutputSemanticKind::None);
+    summary.route_reason = "content_excerpt_summary".to_string();
+    let eligibility = agent_loop_eligibility(&summary);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskGroundedSummary)
+    );
+
+    let mut scalar = route_result(OutputResponseShape::Scalar, OutputSemanticKind::None);
+    scalar.route_reason = "scalar_count".to_string();
+    let eligibility = agent_loop_eligibility(&scalar);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskScalarObservation)
+    );
+
+    let mut config = route_result(OutputResponseShape::Strict, OutputSemanticKind::None);
+    config.route_reason = "config_validation".to_string();
+    let eligibility = agent_loop_eligibility(&config);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskConfigRead)
+    );
+
+    let mut tool_discovery = route_result(OutputResponseShape::Free, OutputSemanticKind::None);
+    tool_discovery.route_reason = "tool_discovery".to_string();
+    tool_discovery.output_contract.requires_content_evidence = false;
+    tool_discovery.output_contract.locator_kind = OutputLocatorKind::None;
+    tool_discovery.output_contract.locator_hint.clear();
+    let eligibility = agent_loop_eligibility(&tool_discovery);
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskToolDiscovery)
+    );
 }
 
 #[test]
