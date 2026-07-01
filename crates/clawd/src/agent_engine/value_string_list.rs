@@ -1039,15 +1039,13 @@ pub(super) fn structured_field_leaf_query(field_path: &str) -> Option<String> {
 
 pub(super) fn service_status_requests_system_basic_identity(
     route: &RouteResult,
-    user_text: &str,
+    _user_text: &str,
 ) -> bool {
-    [user_text, route.resolved_intent.as_str()]
-        .iter()
-        .any(|text| {
-            ["hostname", "host_name", "current_user", "whoami"]
-                .iter()
-                .any(|token| structural_token_present(text, token))
-        })
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["system"],
+        &["runtime_status"],
+    )
 }
 
 pub(super) fn service_status_system_basic_info_plan(
