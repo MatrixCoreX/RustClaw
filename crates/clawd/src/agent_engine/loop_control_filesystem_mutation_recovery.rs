@@ -18,7 +18,7 @@ pub(super) fn try_recover_filesystem_mutation_success_answer_verifier_gap(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilesystemMutationResult
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,

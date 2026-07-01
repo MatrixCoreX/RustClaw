@@ -263,7 +263,7 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison) {
         return quantity_comparison_reply_has_derived_numeric_answer(reply);
     }
     if terminal_content_access_blocker_reply_satisfies_contract(reply, route) {
@@ -531,7 +531,7 @@ pub(super) fn try_recover_structured_count_answer_verifier_gap(
     reply: &mut AskReply,
 ) -> bool {
     if !route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+        route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
     }) {
         return false;
     }
@@ -618,7 +618,7 @@ pub(super) fn try_recover_rss_news_answer_verifier_gap(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RssNewsFetch {
+    if !route_is_rss_news_fetch(route) {
         return false;
     }
     let Some(verifier) = reply
@@ -655,7 +655,7 @@ pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RssNewsFetch {
+    if !route_is_rss_news_fetch(route) {
         return false;
     }
     if !reply.task_journal.as_ref().is_some_and(|journal| {
@@ -700,12 +700,11 @@ pub(super) fn route_allows_structured_search_recovery(
     let Some(route) = route_result else {
         return false;
     };
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-    )
+    route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::FilePaths,
+    ])
 }
 
 pub(super) fn try_recover_document_heading_answer_verifier_gap(
@@ -726,7 +725,7 @@ pub(super) fn try_recover_document_heading_answer_verifier_gap(
         return false;
     }
     if !route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::DocumentHeading
+        route.output_contract_marker_is(crate::OutputSemanticKind::DocumentHeading)
             || verifier
                 .missing_evidence_fields
                 .iter()
@@ -769,15 +768,14 @@ pub(super) fn route_allows_document_heading_recovery(route: &crate::RouteResult)
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::DocumentHeading {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::DocumentHeading) {
         return true;
     }
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    route.output_contract_is_unclassified()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.locator_hint.trim().is_empty()
         && route
-            .route_reason
-            .contains("session_alias_locator_prebound_from_current_request")
+            .has_route_reason_machine_marker("session_alias_locator_prebound_from_current_request")
 }
 
 pub(super) fn observed_markdown_heading(reply: &AskReply) -> Option<String> {
@@ -1068,7 +1066,7 @@ fn latest_terminal_candidate_can_recover_answer_gap(
 }
 
 fn route_requires_structural_terminal_recovery(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
@@ -1076,7 +1074,7 @@ fn route_allows_latest_synthesis_retry_recovery(
     route: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if !crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    if !crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
     {
         return false;
@@ -1126,12 +1124,11 @@ fn route_allows_latest_respond_retry_recovery(
 }
 
 pub(super) fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
-    if route
-        .output_contract
-        .semantic_kind
-        .is_content_excerpt_summary()
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
-    {
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::WorkspaceProjectSummary,
+    ]) {
         return true;
     }
     false
@@ -1146,7 +1143,7 @@ pub(super) fn try_recover_generic_path_content_read_range_answer_verifier_gap(
     };
     if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::FileToken
@@ -1189,7 +1186,7 @@ pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
     if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
     {
         return false;
     }
@@ -1289,12 +1286,8 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
     let Some(route) = route_result else {
         return false;
     };
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::WebPageSummary
-            | crate::OutputSemanticKind::CommandOutputSummary
-            | crate::OutputSemanticKind::ServiceStatus
-    ) || route.output_contract.locator_kind != crate::OutputLocatorKind::Url
+    if !(route_requests_http_health_recovery(route))
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::Url
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {
@@ -1345,6 +1338,21 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
     reply.is_llm_reply = false;
     info!("answer_verifier_retry_exhausted_recovered_with_{reason}");
     true
+}
+
+fn route_requests_http_health_recovery(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::CommandOutputSummary,
+        crate::OutputSemanticKind::ServiceStatus,
+    ]) || (crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "http"],
+        &["open", "get", "read", "extract"],
+    ) && !crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "web"],
+        &["search"],
+    ))
 }
 
 pub(super) fn observed_http_health_finding(reply: &AskReply) -> Option<HttpHealthFinding> {
@@ -1661,6 +1669,14 @@ pub(super) fn collect_json_scalar_values(value: &serde_json::Value, values: &mut
         }
         serde_json::Value::Null => {}
     }
+}
+
+fn route_is_rss_news_fetch(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["rss"],
+        &["latest", "news", "fetch", "feed"],
+    )
 }
 
 pub(super) fn rss_verifier_requests_source_grounding(

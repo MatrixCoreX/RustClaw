@@ -82,7 +82,7 @@ fn route_allows_local_health_recovery(route: &crate::RouteResult) -> bool {
     route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ServiceStatus
         )

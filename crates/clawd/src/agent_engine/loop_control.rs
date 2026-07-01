@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use super::support::{publish_agent_loop_checkpoint_progress, LoopBudgetProfile};
+use super::support::publish_agent_loop_checkpoint_progress;
 use super::{
     append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
     execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
@@ -240,7 +240,7 @@ fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
 }
 
 fn route_requires_direct_candidate_for_observed_stop(route_result: &RouteResult) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         && crate::contract_matrix::final_answer_shape_for_output_contract(
             &route_result.output_contract,
         )
@@ -484,7 +484,7 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteRes
     route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route.output_contract.response_shape == crate::OutputResponseShape::Free
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract_is_unclassified()
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route.output_contract.locator_hint.trim().is_empty()
 }
@@ -494,8 +494,7 @@ fn structured_scalar_equality_observation_can_finalize(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    route_result.output_contract.semantic_kind
-        == crate::OutputSemanticKind::RecentScalarEqualityCheck
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         && !route_result.output_contract.delivery_required
         && has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
@@ -599,7 +598,7 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
         && has_direct_observed_answer
     {
         return required_success_marker.is_none_or(|marker| {
@@ -614,8 +613,7 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if route_result.output_contract.semantic_kind
-        == crate::OutputSemanticKind::RecentArtifactsJudgment
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && !has_discussion_followup_action(actions)
     {
         return false;
@@ -694,7 +692,7 @@ fn should_stop_for_observed_finalize(
 fn quantity_comparison_one_sentence_needs_model_language_before_stop(
     route_result: &RouteResult,
 ) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         && route_result.output_contract.response_shape == crate::OutputResponseShape::OneSentence
         && crate::contract_matrix::final_answer_shape_for_output_contract(
             &route_result.output_contract,
@@ -899,17 +897,8 @@ async fn run_agent_round(
             output_contract.semantic_kind.as_str().to_string(),
         );
     }
-    let budget_profile =
+    let _budget_profile =
         AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
-    maybe_record_agent_decides_shadow_first_action_attribution(
-        policy,
-        task,
-        agent_run_context,
-        route_result,
-        budget_profile,
-        &prepared_round.actions,
-        loop_state,
-    );
     if let Some(intent) = structured_respond_terminal_intent_from_plan(&prepared_round.plan_result)
         .filter(|intent| intent.terminal_intent == "clarify")
         .filter(|_| actions_allow_structured_respond_terminal_intent(&prepared_round.actions))
@@ -981,585 +970,6 @@ fn initial_execution_recipe_spec(
     crate::execution_recipe::ExecutionRecipeSpec::default()
 }
 
-fn maybe_record_agent_decides_shadow_attribution(
-    policy: &AgentLoopGuardPolicy,
-    task: &ClaimedTask,
-    agent_run_context: Option<&AgentRunContext>,
-    route_result: Option<&RouteResult>,
-    budget_profile: LoopBudgetProfile,
-    loop_state: &mut LoopState,
-) {
-    if !policy.records_agent_decides_attribution() {
-        return;
-    }
-    let Some(route) = route_result else {
-        return;
-    };
-    maybe_record_dispatch_handoff_attribution(route, loop_state);
-    loop_state.rollout_attribution.push(
-        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
-            route,
-            budget_profile.as_str(),
-            Some(boundary_context_snapshot_json(
-                task,
-                policy,
-                agent_run_context,
-                route_result,
-                budget_profile,
-            )),
-        ),
-    );
-}
-
-fn maybe_record_dispatch_handoff_attribution(route: &RouteResult, loop_state: &mut LoopState) {
-    for (marker, old_owner, new_owner, chosen_path) in [
-        (
-            "ordinary_clarify_deferred_to_agent_loop",
-            "legacy_pre_agent_semantic_clarify",
-            "agent_loop_terminal_clarify",
-            "agent_loop_structured_respond_clarify",
-        ),
-        (
-            "resume_discussion_requires_agent_loop",
-            "legacy_pre_agent_resume_discussion",
-            "agent_loop_resume_discussion",
-            "agent_loop_chat_wrapped_resume",
-        ),
-    ] {
-        if !route_reason_has_marker(route, marker)
-            || loop_state
-                .rollout_attribution
-                .iter()
-                .any(|item| item.event == marker)
-        {
-            continue;
-        }
-        loop_state.rollout_attribution.push(
-            crate::task_journal::TaskJournalRolloutAttribution::dispatch_boundary_attribution(
-                route,
-                marker,
-                old_owner,
-                new_owner,
-                chosen_path,
-                "semantic_route_authority:legacy_pre_agent",
-            ),
-        );
-    }
-}
-
-fn maybe_record_agent_decides_shadow_first_action_attribution(
-    policy: &AgentLoopGuardPolicy,
-    task: &ClaimedTask,
-    agent_run_context: Option<&AgentRunContext>,
-    route_result: Option<&RouteResult>,
-    budget_profile: LoopBudgetProfile,
-    actions: &[AgentAction],
-    loop_state: &mut LoopState,
-) {
-    if !policy.records_agent_decides_attribution() || loop_state.round_no != 1 {
-        return;
-    }
-    let Some(route) = route_result else {
-        return;
-    };
-    if loop_state
-        .rollout_attribution
-        .iter()
-        .any(|item| item.event == "agent_decides_shadow_first_action")
-    {
-        return;
-    }
-    loop_state.rollout_attribution.push(
-        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
-            route,
-            budget_profile.as_str(),
-            actions,
-            Some(boundary_context_snapshot_json(
-                task,
-                policy,
-                agent_run_context,
-                route_result,
-                budget_profile,
-            )),
-        ),
-    );
-}
-
-pub(super) fn boundary_context_snapshot_json(
-    task: &ClaimedTask,
-    policy: &AgentLoopGuardPolicy,
-    agent_run_context: Option<&AgentRunContext>,
-    route_result: Option<&RouteResult>,
-    budget_profile: LoopBudgetProfile,
-) -> Value {
-    let semantic_route_authority = policy.effective_semantic_route_authority();
-    let output_contract = route_result.map(|route| &route.output_contract);
-    let eligibility = route_result.map(super::migration_class::agent_loop_eligibility);
-    let eligible_migration_class = eligibility
-        .map(|eligibility| eligibility.compatibility_migration_class())
-        .unwrap_or("none");
-    let eligibility_bucket = eligibility
-        .map(|eligibility| eligibility.bucket_token())
-        .unwrap_or("none");
-    let eligibility_blocked_reason = eligibility
-        .map(|eligibility| eligibility.blocked_reason)
-        .unwrap_or("route_unavailable");
-    let eligibility_boundary_requirements = eligibility
-        .map(|eligibility| eligibility.boundary_requirements)
-        .unwrap_or(&[] as &[&str]);
-    let selected_migration_class =
-        policy.selected_migration_class_for_eligible(eligible_migration_class);
-    let agent_loop_selected =
-        policy.uses_agent_loop_semantic_authority() && selected_migration_class != "none";
-    json!({
-        "schema_version": 1,
-        "owner_layer": "boundary_layer",
-        "semantic_routing": {
-            "activation_state": semantic_route_authority.as_str(),
-            "ordinary_semantic_authority": if agent_loop_selected {
-                "planner_loop_selected_class"
-            } else {
-                "planner_loop_shadow"
-            },
-            "normalizer_role": "initial_hint",
-            "post_route_role": "boundary_machine_gate",
-            "direct_answer_gate_role": "fallback_safety_check",
-            "runtime_default_authority": if agent_loop_selected {
-                "agent_loop_for_selected_migration_class"
-            } else {
-                "legacy_pre_agent_until_activation_gates_pass"
-            },
-            "agent_loop_authority_enabled": agent_loop_selected,
-            "chosen_authority": if agent_loop_selected {
-                semantic_route_authority.as_str()
-            } else {
-                "legacy_pre_agent"
-            },
-            "rollback_reason": if policy.uses_agent_loop_semantic_authority() && selected_migration_class == "none" {
-                "migration_class_not_selected"
-            } else {
-                "none"
-            },
-        },
-        "normalizer_hints": route_result
-            .map(normalizer_hints_json)
-            .unwrap_or_else(|| json!({
-                "schema_version": 1,
-                "source": "route_result_machine_fields",
-                "available": false,
-            })),
-        "session": {
-            "user_id_present": task.user_id != 0,
-            "chat_id_present": task.chat_id != 0,
-            "user_key_present": task.user_key.as_deref().is_some_and(|value| !value.trim().is_empty()),
-        },
-        "workspace": {
-            "available": true,
-        },
-        "capability_visibility": {
-            "route_available": route_result.is_some(),
-            "visible_skill_candidates_count": route_result
-                .map(|route| route.visible_skill_candidates.len())
-                .unwrap_or(0),
-        },
-        "risk": {
-            "ceiling": route_result
-                .map(|route| route.risk_ceiling.as_str())
-                .unwrap_or("unknown"),
-        },
-        "budget": {
-            "profile": budget_profile.as_str(),
-            "agent_loop_canary_bucket": policy.agent_loop_canary_bucket.as_str(),
-            "eligible_migration_class": eligible_migration_class,
-            "selected_migration_class": selected_migration_class,
-            "agent_loop_eligibility_bucket": eligibility_bucket,
-            "agent_loop_eligibility_blocked_reason": eligibility_blocked_reason,
-            "agent_loop_boundary_requirements": eligibility_boundary_requirements,
-            "max_rounds": policy.max_rounds,
-            "max_steps": policy.max_steps,
-            "max_tool_calls": policy.max_tool_calls,
-            "no_progress_limit": policy.no_progress_limit,
-            "repeat_action_limit": policy.repeat_action_limit,
-        },
-        "confirmation": {
-            "owned_by": "plan_verifier",
-        },
-        "dry_run": {
-            "owned_by": "plan_verifier_execution_adapter",
-        },
-        "active_bindings": {
-            "session_alias_count": agent_run_context
-                .map(|ctx| ctx.session_alias_bindings.len())
-                .unwrap_or(0),
-            "auto_locator_present": agent_run_context
-                .and_then(|ctx| ctx.auto_locator_path.as_deref())
-                .is_some_and(|value| !value.trim().is_empty()),
-            "authoritative_deictic_anchor": agent_run_context
-                .map(|ctx| ctx.has_authoritative_deictic_anchor)
-                .unwrap_or(false),
-            "fuzzy_locator_suggestion_count": agent_run_context
-                .map(|ctx| ctx.fuzzy_locator_suggestions.len())
-                .unwrap_or(0),
-        },
-        "memory": {
-            "execution_memory_context_present": agent_run_context
-                .and_then(|ctx| ctx.memory_context_for_execution.as_deref())
-                .is_some_and(|value| !value.trim().is_empty()),
-            "cross_turn_recent_execution_context_present": agent_run_context
-                .and_then(|ctx| ctx.cross_turn_recent_execution_context.as_deref())
-                .is_some_and(|value| !value.trim().is_empty()),
-        },
-        "delivery_constraints": {
-            "delivery_required": route_result
-                .map(|route| route.wants_file_delivery || route.output_contract.delivery_required)
-                .unwrap_or(false),
-            "response_shape": output_contract
-                .map(|contract| contract.response_shape.as_str())
-                .unwrap_or("unknown"),
-            "semantic_kind": output_contract
-                .map(|contract| contract.semantic_kind.as_str())
-                .unwrap_or("unknown"),
-            "locator_kind": output_contract
-                .map(|contract| contract.locator_kind.as_str())
-                .unwrap_or("unknown"),
-            "requires_content_evidence": output_contract
-                .map(|contract| contract.requires_content_evidence)
-                .unwrap_or(false),
-        },
-        "pre_agent_gates": pre_agent_gate_summary_json(route_result, agent_run_context),
-    })
-}
-
-fn normalizer_hints_json(route: &RouteResult) -> Value {
-    let contract = &route.output_contract;
-    json!({
-        "schema_version": 1,
-        "source": "route_result_machine_fields",
-        "available": true,
-        "gate_kind_hint": route.gate_kind().as_str(),
-        "route_confidence": route.route_confidence,
-        "candidate_contracts": [
-            crate::TaskContract::from_route_result(route).compact_prompt_line()
-        ],
-        "output_contract": {
-            "response_shape": contract.response_shape.as_str(),
-            "semantic_kind": contract.semantic_kind.as_str(),
-            "locator_kind": contract.locator_kind.as_str(),
-            "locator_hint_present": !contract.locator_hint.trim().is_empty(),
-            "delivery_intent": contract.delivery_intent.as_str(),
-            "delivery_required": contract.delivery_required,
-            "requires_content_evidence": contract.requires_content_evidence,
-        },
-        "candidate_locators": normalizer_candidate_locators_json(route),
-        "missing_slot_hints": normalizer_missing_slot_hints(route),
-        "risk_hints": normalizer_risk_hints(route),
-    })
-}
-
-fn normalizer_candidate_locators_json(route: &RouteResult) -> Vec<Value> {
-    let contract = &route.output_contract;
-    let mut locators = Vec::new();
-    if contract.locator_kind != crate::OutputLocatorKind::None
-        || !contract.locator_hint.trim().is_empty()
-    {
-        locators.push(json!({
-            "kind": contract.locator_kind.as_str(),
-            "hint": contract.locator_hint.trim(),
-            "hint_present": !contract.locator_hint.trim().is_empty(),
-        }));
-    }
-    locators
-}
-
-fn normalizer_missing_slot_hints(route: &RouteResult) -> Vec<&'static str> {
-    let contract = &route.output_contract;
-    let locator_missing = contract.locator_kind == crate::OutputLocatorKind::None
-        && contract.locator_hint.trim().is_empty();
-    let mut hints = Vec::new();
-    if route.needs_clarify {
-        hints.push("clarify_required");
-    }
-    if locator_missing && (contract.delivery_required || route.wants_file_delivery) {
-        hints.push("delivery_locator");
-    }
-    if locator_missing && contract.requires_content_evidence {
-        hints.push("content_evidence_locator");
-    }
-    hints
-}
-
-fn normalizer_risk_hints(route: &RouteResult) -> Vec<&'static str> {
-    match route.risk_ceiling {
-        crate::RiskCeiling::Unknown => Vec::new(),
-        crate::RiskCeiling::Low => vec!["risk_ceiling_low"],
-        crate::RiskCeiling::Medium => vec!["risk_ceiling_medium"],
-        crate::RiskCeiling::High => vec!["risk_ceiling_high"],
-    }
-}
-
-fn pre_agent_gate_summary_json(
-    route_result: Option<&RouteResult>,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Value {
-    json!({
-        "schema_version": 1,
-        "intent_normalizer": route_result
-            .map(intent_normalizer_initial_hint_json)
-            .unwrap_or_else(|| json!({
-                "owner_layer": "intent_normalizer",
-                "authority_target": "initial_hint_shadow",
-                "ownership_class": "semantic_initial_hint",
-                "boundary_allowed": false,
-                "semantic_migration_target": "planner_loop_decision_envelope",
-                "available": false,
-            })),
-        "post_route_policy": route_result
-            .map(|route| post_route_boundary_gate_json(route, agent_run_context))
-            .unwrap_or_else(|| json!({
-                "owner_layer": "post_route_policy",
-                "authority_target": "boundary_machine_gate",
-                "ownership_class": "boundary_machine_check",
-                "boundary_allowed": true,
-                "semantic_migration_target": "none",
-                "available": false,
-            })),
-        "direct_answer_gate": route_result
-            .map(direct_answer_fallback_gate_json)
-            .unwrap_or_else(|| json!({
-                "owner_layer": "direct_answer_gate",
-                "authority_target": "fallback_safety_check",
-                "ownership_class": "fallback_safety_check",
-                "boundary_allowed": true,
-                "semantic_migration_target": "planner_loop_decision_envelope",
-                "available": false,
-            })),
-    })
-}
-
-fn intent_normalizer_initial_hint_json(route: &RouteResult) -> Value {
-    json!({
-        "owner_layer": "intent_normalizer",
-        "authority_target": "initial_hint_shadow",
-        "ownership_class": "semantic_initial_hint",
-        "boundary_allowed": false,
-        "semantic_migration_target": "planner_loop_decision_envelope",
-        "available": true,
-        "current_gate_kind": route.gate_kind().as_str(),
-        "output_contract_ref": crate::TaskContract::from_route_result(route).compact_prompt_line(),
-    })
-}
-
-fn post_route_boundary_gate_json(
-    route: &RouteResult,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Value {
-    let boundary_class = post_route_boundary_class(route, agent_run_context);
-    let boundary_allowed = post_route_boundary_class_is_boundary_owned(boundary_class);
-    json!({
-        "owner_layer": "post_route_policy",
-        "authority_target": "boundary_machine_gate",
-        "ownership_class": if boundary_allowed {
-            "boundary_machine_check"
-        } else {
-            "semantic_policy_candidate"
-        },
-        "boundary_allowed": boundary_allowed,
-        "semantic_migration_target": if boundary_allowed {
-            "none"
-        } else {
-            "planner_loop_decision_envelope"
-        },
-        "available": true,
-        "boundary_class": boundary_class,
-        "fuzzy_locator_suggestion_count": agent_run_context
-            .map(|ctx| ctx.fuzzy_locator_suggestions.len())
-            .unwrap_or(0),
-        "auto_locator_present": agent_run_context
-            .and_then(|ctx| ctx.auto_locator_path.as_deref())
-            .is_some_and(|value| !value.trim().is_empty()),
-        "delivery_required": route.wants_file_delivery || route.output_contract.delivery_required,
-        "requires_content_evidence": route.output_contract.requires_content_evidence,
-    })
-}
-
-fn post_route_boundary_class(
-    route: &RouteResult,
-    agent_run_context: Option<&AgentRunContext>,
-) -> &'static str {
-    if agent_run_context
-        .map(|ctx| !ctx.fuzzy_locator_suggestions.is_empty())
-        .unwrap_or(false)
-    {
-        return "locator_fuzzy_candidates";
-    }
-    if route_reason_has_prefix(route, "clarify_reason_code:missing_")
-        || route_reason_has_marker(route, "locator_required_for_path_scoped_content")
-        || route_reason_has_marker(route, "deictic_bare_locator_requires_clarify")
-        || route_reason_has_marker(route, "unbound_existing_file_delivery_requires_clarify")
-        || route_reason_has_marker(route, "unbound_targeted_evidence_requires_clarify")
-        || route_reason_has_marker(route, "locatorless_observation_requires_clarify")
-    {
-        return "locator_binding";
-    }
-    if route.wants_file_delivery || route.output_contract.delivery_required {
-        return "delivery_contract";
-    }
-    if route.output_contract.requires_content_evidence {
-        return "content_evidence_contract";
-    }
-    "no_boundary_gate_observed"
-}
-
-fn post_route_boundary_class_is_boundary_owned(boundary_class: &str) -> bool {
-    matches!(
-        boundary_class,
-        "locator_fuzzy_candidates"
-            | "locator_binding"
-            | "delivery_contract"
-            | "content_evidence_contract"
-            | "no_boundary_gate_observed"
-    )
-}
-
-fn direct_answer_fallback_gate_json(route: &RouteResult) -> Value {
-    let boundary_class = direct_answer_gate_boundary_class(route);
-    let observed = boundary_class != "not_observed_in_planner_shadow";
-    let boundary_allowed = direct_answer_gate_boundary_class_is_boundary_owned(boundary_class);
-    let ownership_class = direct_answer_gate_ownership_class(boundary_class);
-    json!({
-        "owner_layer": "direct_answer_gate",
-        "authority_target": ownership_class,
-        "ownership_class": ownership_class,
-        "boundary_allowed": boundary_allowed,
-        "semantic_migration_target": if boundary_allowed {
-            "none"
-        } else {
-            "planner_loop_decision_envelope"
-        },
-        "available": true,
-        "observed": observed,
-        "boundary_class": boundary_class,
-        "observation_class": if observed {
-            "legacy_gate_observed"
-        } else {
-            "not_observed_in_planner_shadow"
-        },
-    })
-}
-
-fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
-    if !route_reason_has_prefix(route, "direct_answer_gate_")
-        && !route_reason_has_prefix(route, "inline_structured_payload_context_execute")
-    {
-        return "not_observed_in_planner_shadow";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_unbound_deictic_clarify") {
-        return "locator_binding_fallback";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_bound_candidate_evidence")
-        || route_reason_has_marker(route, "direct_answer_gate_recent_count_selection")
-    {
-        return "evidence_backed_direct_candidate";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_memory_update_ignored")
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_active_task_text_mutation_ignored",
-        )
-        || route_reason_has_marker(route, "direct_answer_gate_executionless_promotion_blocked")
-        || route_reason_has_marker(route, "direct_answer_gate_existing_observed_result_ignored")
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_chat_promotion_without_structured_target_ignored",
-        )
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_preference_memory_context_ignored",
-        )
-        || route_reason_has_marker(route, "direct_answer_gate_background_only_ignored")
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_exact_candidate_ignored_execution",
-        )
-        || route_reason_has_marker(
-            route,
-            "direct_answer_gate_standalone_freeform_clarify_ignored",
-        )
-    {
-        return "fallback_safety_filter";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_contract_execute")
-        || route_reason_has_marker(route, "direct_answer_gate_inline_transform_execute")
-        || route_reason_has_marker(route, "direct_answer_gate_package_manager_detect_execute")
-        || route_reason_has_marker(route, "inline_structured_payload_context_execute")
-    {
-        return "contract_execution_boundary";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_recent_file_context_execute")
-        || route_reason_has_marker(route, "direct_answer_gate_artifact_listing_execute")
-        || route_reason_has_marker(route, "direct_answer_gate_workspace_child_context_execute")
-    {
-        return "evidence_projection_execution";
-    }
-    if route_reason_has_marker(
-        route,
-        "direct_answer_gate_direct_answer_deferred_to_agent_loop",
-    ) || route_reason_has_marker(route, "direct_answer_gate_execute")
-    {
-        return "agent_loop_activation_boundary";
-    }
-    if route_reason_has_marker(route, "direct_answer_gate_clarify") {
-        return "clarify_boundary";
-    }
-    "legacy_unclassified_gate_observed"
-}
-
-fn direct_answer_gate_ownership_class(boundary_class: &str) -> &'static str {
-    match boundary_class {
-        "contract_execution_boundary" => "contract_boundary",
-        "evidence_projection_execution" | "evidence_backed_direct_candidate" => {
-            "evidence_projection"
-        }
-        "agent_loop_activation_boundary" => "agent_loop_activation",
-        "clarify_boundary"
-        | "not_observed_in_planner_shadow"
-        | "locator_binding_fallback"
-        | "fallback_safety_filter" => "fallback_safety_check",
-        _ => "semantic_policy_candidate",
-    }
-}
-
-fn direct_answer_gate_boundary_class_is_boundary_owned(boundary_class: &str) -> bool {
-    matches!(
-        boundary_class,
-        "not_observed_in_planner_shadow"
-            | "locator_binding_fallback"
-            | "evidence_backed_direct_candidate"
-            | "fallback_safety_filter"
-            | "contract_execution_boundary"
-            | "evidence_projection_execution"
-            | "agent_loop_activation_boundary"
-            | "clarify_boundary"
-    )
-}
-
-fn route_reason_has_marker(route: &RouteResult, marker: &str) -> bool {
-    route.route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .strip_prefix(marker)
-                .is_some_and(|suffix| suffix.starts_with(':'))
-    })
-}
-
-fn route_reason_has_prefix(route: &RouteResult, prefix: &str) -> bool {
-    route
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .any(|part| part.starts_with(prefix))
-}
-
 pub(super) async fn run_agent_with_loop(
     state: &AppState,
     task: &ClaimedTask,
@@ -1598,14 +1008,6 @@ pub(super) async fn run_agent_with_loop_seeded(
             enabled_rollout_switches.join(","),
         );
     }
-    maybe_record_agent_decides_shadow_attribution(
-        &policy,
-        task,
-        agent_run_context,
-        route_result,
-        budget_profile,
-        &mut loop_state,
-    );
     info!(
         "loop_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={} repeat_action_limit={}",
         task.task_id,
@@ -1937,15 +1339,20 @@ fn selected_contract_structured_evidence_gap(
     if !policy.structured_evidence_required_for_selected_contracts {
         return None;
     }
+    if route_result.risk_ceiling == crate::RiskCeiling::High
+        || route_result.schedule_kind != crate::ScheduleKind::None
+    {
+        return None;
+    }
     let selected_class =
-        super::agent_loop_authority_selected_migration_class_for_policy(policy, route_result)?;
+        super::migration_class::agent_decides_eligible_migration_class(route_result);
+    if selected_class == "none" {
+        return None;
+    }
     crate::answer_verifier::local_missing_evidence_verifier_gap(route_result, journal)
         .map(|gap| (selected_class, gap))
 }
 
-#[cfg(test)]
-#[path = "loop_control_authority_tests.rs"]
-mod authority_tests;
 #[cfg(test)]
 #[path = "loop_control_tests.rs"]
 mod tests;

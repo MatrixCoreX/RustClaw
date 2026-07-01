@@ -69,7 +69,7 @@ pub(super) fn try_recover_recent_artifacts_answer_verifier_gap(
 fn route_allows_recent_artifacts_recovery(route: &crate::RouteResult) -> bool {
     route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+        && route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
 }
 
 fn observed_recent_artifact_inventory(reply: &AskReply) -> Option<RecentArtifactInventory> {
