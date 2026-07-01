@@ -639,18 +639,20 @@ def scan_execution_recipe_registry_bridge_tokens() -> list[Finding]:
 
 def scan_contract_matrix_registry_bridge_bypass() -> list[Finding]:
     text = CONTRACT_MATRIX_FILE.read_text(encoding="utf-8")
-    required = (
-        "output.semantic_kind != OutputSemanticKind::None\n"
-        "            && !output.semantic_kind.is_registry_capability_bridge()"
+    required = re.compile(
+        r"fn\s+match_output_contract\b[\s\S]*?"
+        r"output\s*\.\s*semantic_kind\s*!=\s*OutputSemanticKind::None[\s\S]*?"
+        r"!\s*output\s*\.\s*semantic_kind\s*\.\s*is_normalizer_schema_capability_bridge\s*\(",
+        re.MULTILINE,
     )
-    if required in text:
+    if required.search(text):
         return []
     return [
         Finding(
             rel(CONTRACT_MATRIX_FILE),
             1,
             "contract_matrix_registry_bridge_bypass_missing",
-            "match_output_contract must not match registry-bridge semantic kinds as semantic contracts",
+            "match_output_contract must not match normalizer schema capability bridge semantic kinds as semantic contracts",
         )
     ]
 

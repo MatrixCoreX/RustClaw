@@ -452,6 +452,54 @@ fn filesystem_mutation_result_allows_archive_pack_path_evidence() {
 }
 
 #[test]
+fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete() {
+    for (capability_ref, skill, args, expected_action_key) in [
+        (
+            "capability_ref=archive.pack",
+            "archive_basic",
+            serde_json::json!({
+                "action": "pack",
+                "source": "scripts/source",
+                "archive": "tmp/bundle.zip",
+                "format": "zip"
+            }),
+            "archive_basic.pack",
+        ),
+        (
+            "capability_ref=archive.list",
+            "archive_basic",
+            serde_json::json!({
+                "action": "list",
+                "archive": "tmp/bundle.zip"
+            }),
+            "archive_basic.list",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+        let policy = action_policy_for_route(Some(&route), skill, &args).expect("policy decision");
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action_key);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+
+    let cleanup_route = route_with_machine_capability_ref("capability_ref=archive.pack");
+    let cleanup_policy = action_policy_for_route(
+        Some(&cleanup_route),
+        "fs_basic",
+        &serde_json::json!({
+            "action": "remove_path",
+            "path": "tmp/bundle.zip",
+            "target_kind": "file"
+        }),
+    )
+    .expect("cleanup policy decision");
+    assert!(!cleanup_policy.is_allowed(), "{cleanup_policy:?}");
+    assert_eq!(cleanup_policy.action_key, "fs_basic.remove_path");
+    assert_ne!(cleanup_policy.contract_match, "capability_ref");
+}
+
+#[test]
 fn filesystem_mutation_result_allows_kb_ingest_path_evidence() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -577,7 +625,7 @@ fn web_page_summary_allows_browser_open_extract_for_url() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "web_page_summary");
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -600,7 +648,7 @@ fn web_search_summary_allows_web_search_extract() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "web_search_extract.search_extract");
-    assert_eq!(policy.contract_match, "web_search_summary");
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -621,7 +669,7 @@ fn web_search_summary_allows_followup_browser_extract() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "web_search_summary");
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -641,8 +689,7 @@ fn weather_query_allows_weather_query_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "weather.query");
-    assert_eq!(policy.contract_match, "weather_query");
-    assert_eq!(policy.required_evidence, vec!["content_excerpt"]);
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -662,8 +709,7 @@ fn market_quote_allows_stock_quote_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "stock");
-    assert_eq!(policy.contract_match, "market_quote");
-    assert_eq!(policy.required_evidence, vec!["content_excerpt"]);
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -683,7 +729,7 @@ fn market_quote_allows_crypto_quote_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "crypto.quote");
-    assert_eq!(policy.contract_match, "market_quote");
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -703,7 +749,7 @@ fn market_quote_allows_crypto_positions_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "crypto.positions");
-    assert_eq!(policy.contract_match, "market_quote");
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -724,8 +770,7 @@ fn image_understanding_allows_image_vision_describe_with_url_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_vision.describe");
-    assert_eq!(policy.contract_match, "image_understanding");
-    assert_eq!(policy.required_evidence, vec!["content_excerpt"]);
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
@@ -746,5 +791,25 @@ fn image_understanding_allows_image_vision_analyze_alias() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_vision.analyze");
-    assert_eq!(policy.contract_match, "image_understanding");
+    assert_eq!(policy.contract_match, "none");
+}
+
+#[test]
+fn photo_organization_allows_prepare_candidate_discovery_without_locator() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::PhotoOrganization,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Strict,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "photo_organize",
+        &serde_json::json!({"action":"prepare","mode":"plan"}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "photo_organize.prepare");
+    assert_eq!(policy.contract_match, "none");
 }
