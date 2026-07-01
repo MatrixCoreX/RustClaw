@@ -417,61 +417,11 @@ pub(super) fn market_quote_scalar_candidate(
 }
 
 fn route_is_market_quote(route: &crate::RouteResult) -> bool {
-    route_capability_action_for_namespaces(route, &["crypto", "stock"])
-        .is_some_and(|action| action_has_any_segment(action, &["quote"]))
-}
-
-fn route_capability_action_for_namespaces<'a>(
-    route: &'a crate::RouteResult,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
-        .next()
-}
-
-fn machine_context_capability_action_for_namespaces<'a>(
-    machine_context: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
-        .next()
-}
-
-fn capability_action_for_namespace_token<'a>(
-    token: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    let capability = token.strip_prefix("capability_ref=")?;
-    let (namespace, action) = capability.split_once('.')?;
-    if namespace.is_empty()
-        || action.is_empty()
-        || !namespaces.iter().any(|candidate| namespace == *candidate)
-        || !capability.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-    {
-        return None;
-    }
-    Some(action)
-}
-
-fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
-    action
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
-        .any(|segment| {
-            let segment = segment.trim();
-            !segment.is_empty()
-                && needles.iter().any(|needle| {
-                    segment == *needle
-                        || segment.starts_with(&format!("{needle}_"))
-                        || segment.ends_with(&format!("_{needle}"))
-                        || segment.contains(&format!("_{needle}_"))
-                })
-        })
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["crypto", "stock"],
+        &["quote"],
+    )
 }
 
 pub(super) fn market_quote_output_has_scalar_price(

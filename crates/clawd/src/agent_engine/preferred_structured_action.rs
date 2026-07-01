@@ -173,7 +173,9 @@ fn preferred_docker_basic_action(
             _ => "ps",
         };
     }
-    if let Some(action) = route_capability_action_for_namespaces(route, &["docker"]) {
+    if let Some(action) =
+        crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["docker"])
+    {
         return docker_basic_action_from_capability_action(action);
     }
     "ps"
@@ -330,7 +332,10 @@ fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args
     {
         return false;
     }
-    route_has_capability_namespace(route, &["docker", "package", "package_manager"])
+    crate::machine_capability_ref::route_has_capability_namespace(
+        route,
+        &["docker", "package", "package_manager"],
+    )
 }
 
 pub(super) fn planned_execution_action_ref<'a>(
@@ -1097,56 +1102,21 @@ pub(super) fn package_docker_readonly_probe_deterministic_plan_result(
 }
 
 fn route_has_package_docker_probe_tokens(route: &RouteResult) -> bool {
-    let has_package = route_has_capability_namespace(route, &["package", "package_manager"]);
-    let has_docker = route_has_capability_namespace(route, &["docker"]);
+    let has_package = crate::machine_capability_ref::route_has_capability_namespace(
+        route,
+        &["package", "package_manager"],
+    );
+    let has_docker =
+        crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"]);
     has_package && has_docker
 }
 
 fn route_has_package_detect_machine_signal(route: &RouteResult) -> bool {
-    route_capability_action_for_namespaces(route, &["package", "package_manager"])
-        .is_some_and(|action| action_has_any_segment(action, &["detect"]))
-}
-
-fn route_has_capability_namespace(route: &RouteResult, namespaces: &[&str]) -> bool {
-    route_capability_action_for_namespaces(route, namespaces).is_some()
-}
-
-fn route_capability_action_for_namespaces<'a>(
-    route: &'a RouteResult,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .filter_map(|text| machine_context_capability_action_for_namespaces(text, namespaces))
-        .next()
-}
-
-fn machine_context_capability_action_for_namespaces<'a>(
-    machine_context: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
-        .next()
-}
-
-fn capability_action_for_namespace_token<'a>(
-    token: &'a str,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    let capability = token.strip_prefix("capability_ref=")?;
-    let (namespace, action) = capability.split_once('.')?;
-    if namespace.is_empty()
-        || action.is_empty()
-        || !namespaces.iter().any(|candidate| namespace == *candidate)
-        || !capability.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-    {
-        return None;
-    }
-    Some(action)
+    crate::machine_capability_ref::route_capability_action_for_namespaces(
+        route,
+        &["package", "package_manager"],
+    )
+    .is_some_and(|action| action_has_any_segment(action, &["detect"]))
 }
 
 fn docker_basic_action_from_capability_action(action: &str) -> &'static str {
