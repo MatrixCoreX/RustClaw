@@ -85,6 +85,7 @@ pub(super) fn locator_hint_points_to_workspace_root(hint: &str, workspace_root: 
     normalize_compare_path(candidate) == normalize_compare_path(workspace_root.to_path_buf())
 }
 
+#[cfg(test)]
 fn workspace_identity_token(workspace_root: &Path) -> Option<String> {
     workspace_root
         .file_name()
@@ -93,6 +94,7 @@ fn workspace_identity_token(workspace_root: &Path) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(test)]
 fn ascii_identifier_tokens(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -111,6 +113,7 @@ fn ascii_identifier_tokens(text: &str) -> Vec<String> {
     tokens
 }
 
+#[cfg(test)]
 pub(super) fn current_request_mentions_workspace_identity(
     req: &str,
     workspace_root: &Path,
@@ -122,24 +125,6 @@ pub(super) fn current_request_mentions_workspace_identity(
         .iter()
         .map(|token| normalize_locator_identity_token(token))
         .any(|token| token == identity)
-}
-
-pub(super) fn workspace_identity_semantic_repair_context(
-    req: &str,
-    workspace_root: &Path,
-) -> Option<String> {
-    if !current_request_mentions_workspace_identity(req, workspace_root) {
-        return None;
-    }
-    let workspace_name = workspace_identity_token(workspace_root)?;
-    Some(format!(
-        "workspace_identity:\n\
-         workspace_root: {}\n\
-         normalized_workspace_name: {}\n\
-         current_request_mentions_workspace_name: true",
-        workspace_root.display(),
-        workspace_name
-    ))
 }
 
 fn normalize_locator_identity_token(value: &str) -> String {

@@ -69,11 +69,11 @@ use parse_failed_fallback::{
 
 #[path = "intent_router_path_tokens.rs"]
 mod path_tokens;
+#[cfg(test)]
+use path_tokens::current_request_mentions_workspace_identity;
 use path_tokens::{
-    compare_path_targets_current_anchor, current_request_mentions_workspace_identity,
-    first_compare_path_from_text, locator_hint_compare_path, locator_hint_is_unset_or_broad,
-    locator_hint_points_to_workspace_root, scope_patch_hint_value,
-    workspace_identity_semantic_repair_context,
+    compare_path_targets_current_anchor, first_compare_path_from_text, locator_hint_compare_path,
+    locator_hint_is_unset_or_broad, locator_hint_points_to_workspace_root, scope_patch_hint_value,
 };
 
 #[path = "intent_router_schema_parse.rs"]
@@ -303,6 +303,7 @@ use active_task_repair::{
     apply_missing_active_task_reuse_clarify, repair_state_patch_replacement_literal_conflicts,
 };
 
+#[cfg(test)]
 #[path = "intent_router_semantic_suspect.rs"]
 mod semantic_suspect;
 #[cfg(test)]
