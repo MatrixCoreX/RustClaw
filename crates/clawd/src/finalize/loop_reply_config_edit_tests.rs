@@ -130,6 +130,20 @@ fn direct_config_edit_observed_answer_summarizes_guard_config() {
 }
 
 #[test]
+fn direct_config_edit_observed_answer_ignores_visible_text_json_payload() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_edit",
+        r#"{"status":"ok","text":"{\"action\":\"guard_config\",\"path\":\"configs/config.toml\",\"risk_count\":2}"}"#,
+    ));
+
+    assert!(direct_config_edit_observed_answer(&state, "检查配置风险", &loop_state).is_none());
+}
+
+#[test]
 fn direct_config_edit_observed_answer_accepts_config_basic_guard_config() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);
