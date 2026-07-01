@@ -1348,7 +1348,7 @@ pub(super) fn async_job_start_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     let recipe_command = loop_state_async_start_command(loop_state);
@@ -1359,9 +1359,7 @@ pub(super) fn async_job_start_deterministic_plan_result(
     {
         return None;
     }
-    let command = recipe_command
-        .or_else(|| explicit_command_segment(&state.policy.command_intent, &route.resolved_intent))
-        .or_else(|| explicit_command_segment(&state.policy.command_intent, user_text))?;
+    let command = recipe_command?;
     let action = AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({
