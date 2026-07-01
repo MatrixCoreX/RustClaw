@@ -1161,26 +1161,17 @@ pub(super) fn lookup_structured_field_value<'a>(
 }
 
 pub(super) fn route_requests_sqlite_table_listing(route: &RouteResult) -> bool {
-    [
-        crate::OutputSemanticKind::SqliteTableListing,
-        crate::OutputSemanticKind::SqliteTableNamesOnly,
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
-    ]
-    .iter()
-    .any(|kind| route.output_contract_marker_is(*kind))
+    route_has_database_capability_action(route, "list_tables")
 }
 
 pub(super) fn route_requests_sqlite_schema_version(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::SqliteSchemaVersion)
+    route_has_database_capability_action(route, "schema_version")
         || route
             .output_contract
             .self_extension
             .structured_field_selector
             .as_deref()
             .is_some_and(sqlite_schema_version_field_token)
-        || [route.route_reason.as_str(), route.resolved_intent.as_str()]
-            .into_iter()
-            .any(text_has_sqlite_schema_version_machine_token)
 }
 
 fn sqlite_schema_version_field_token(token: &str) -> bool {
@@ -1190,14 +1181,12 @@ fn sqlite_schema_version_field_token(token: &str) -> bool {
     )
 }
 
-fn text_has_sqlite_schema_version_machine_token(text: &str) -> bool {
-    [
-        "sqlite_schema_version",
-        "database.schema_version",
-        "db_basic.schema_version",
-    ]
-    .into_iter()
-    .any(|token| text.contains(token))
+fn route_has_database_capability_action(route: &RouteResult, action: &str) -> bool {
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["database", "db", "sqlite"],
+        &[action],
+    )
 }
 
 pub(super) fn sqlite_locator_path_for_route(
