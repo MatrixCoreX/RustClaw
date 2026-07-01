@@ -333,6 +333,62 @@ fn recent_artifacts_judgment_rewrites_synth_only_after_listing_to_selected_file_
 }
 
 #[test]
+fn recent_artifacts_judgment_ignores_visible_text_inventory_for_selected_file_reads() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        &json!({
+            "status": "ok",
+            "text": json!({
+                "action": "inventory_dir",
+                "entries": [
+                    {"kind": "file", "path": "configs/task_contract_matrix.toml"},
+                    {"kind": "file", "path": "configs/agent_guard.toml"}
+                ],
+                "sort_by": "mtime_desc"
+            })
+            .to_string()
+        })
+        .to_string(),
+    ));
+    let actions = vec![
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        &route.resolved_intent,
+        Some("configs"),
+        actions,
+    );
+
+    assert!(
+        normalized
+            .iter()
+            .all(|action| planned_call(action, "fs_basic", "read_text_range").is_none()),
+        "visible text inventory must not drive planner rewrite: {normalized:?}"
+    );
+}
+
+#[test]
 fn recent_artifacts_judgment_rewrites_repair_field_extract_to_selected_file_reads() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let route = route_with_contract(IntentOutputContract {
