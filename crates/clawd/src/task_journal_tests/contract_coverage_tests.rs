@@ -624,7 +624,7 @@ fn config_risk_evidence_coverage_accepts_guard_findings() {
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: String::new(),
+        route_reason: "capability_ref=config.guard".to_string(),
         route_confidence: Some(1.0),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,

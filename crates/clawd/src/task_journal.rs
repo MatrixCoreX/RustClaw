@@ -450,10 +450,7 @@ fn plan_step_action_ref(
     let action = crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)?;
     let raw_key = action.as_key();
     if let Some(compact) = route.and_then(|route| {
-        crate::contract_matrix::contract_trace_action_key_for_output_contract(
-            &route.output_contract,
-            &raw_key,
-        )
+        crate::contract_matrix::contract_trace_action_key_for_route(route, &raw_key)
     }) {
         return Some(compact);
     }
@@ -1033,9 +1030,8 @@ fn step_contract_trace_json(
     let route = route?;
     let contract = crate::contract_matrix::trace_snapshot_for_route(route)?;
     let requested_action_ref = requested.and_then(|value| value.action_ref.as_deref());
-    let action_policy = requested_action_ref.and_then(|action_ref| {
-        crate::contract_matrix::action_trace_for_output_contract(&route.output_contract, action_ref)
-    });
+    let action_policy = requested_action_ref
+        .and_then(|action_ref| crate::contract_matrix::action_trace_for_route(route, action_ref));
     Some(json!({
         "contract_match": contract.get("contract_match").and_then(Value::as_str),
         "semantic_kind": contract.get("semantic_kind").and_then(Value::as_str),

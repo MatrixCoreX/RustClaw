@@ -1451,6 +1451,46 @@ fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enu
 }
 
 #[test]
+fn action_trace_for_route_uses_route_trace_evidence() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "quantity_comparison".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Filename,
+            locator_hint: "README.md | AGENTS.md".to_string(),
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let trace = action_trace_for_route(&route, "fs_basic.stat_paths").expect("route action trace");
+    let required = trace
+        .get("required_evidence")
+        .and_then(Value::as_array)
+        .expect("required evidence")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+
+    assert!(required.contains(&"exists"));
+    assert!(required.contains(&"kind"));
+}
+
+#[test]
 fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
     let route = RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),

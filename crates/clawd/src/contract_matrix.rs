@@ -23,9 +23,9 @@ use runtime::{
 };
 pub(crate) use runtime::{
     action_matches_policy_tokens, action_policy_for_output_contract, action_policy_for_route,
-    action_trace_for_output_contract, allowed_action_refs_for_route, arg_policy_decision,
+    action_trace_for_route, allowed_action_refs_for_route, arg_policy_decision,
     arg_policy_decision_for_route, bundled_contract_matrix, compact_prompt_line_for_route,
-    contract_trace_action_key_for_output_contract, final_answer_shape_for_output_contract,
+    contract_trace_action_key_for_route, final_answer_shape_for_output_contract,
     final_answer_shape_for_route, fnv1a_hex, preferred_action_refs_for_route,
     required_evidence_for_output_contract, runtime_contract_snapshot_for_route,
     trace_snapshot_for_route,
@@ -33,9 +33,10 @@ pub(crate) use runtime::{
 // Keep policy return types nameable outside the private runtime module.
 #[cfg(test)]
 pub(crate) use runtime::{
-    available_action_refs_from_registry, bundled_contract_matrix_result,
-    compact_prompt_line_for_output_contract, parse_contract_matrix_source,
-    runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
+    action_trace_for_output_contract, available_action_refs_from_registry,
+    bundled_contract_matrix_result, compact_prompt_line_for_output_contract,
+    parse_contract_matrix_source, runtime_contract_snapshot_for_output_contract,
+    trace_snapshot_for_output_contract,
 };
 #[cfg(test)]
 use runtime::{collect_action_tokens, collect_external_observation_admission_errors};
