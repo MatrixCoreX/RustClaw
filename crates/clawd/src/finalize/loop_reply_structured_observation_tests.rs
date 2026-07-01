@@ -280,13 +280,31 @@ fn broad_structured_read_drops_separator_and_validates_file() {
     )
     .expect("structured validation fallback");
     assert!(
-        answer.contains("toml")
-            && (answer.contains("解析成功") || answer.contains("parsed successfully")),
+        answer.contains("format=toml") && answer.contains("validation_status=pass"),
         "answer: {answer}"
     );
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=config.validate".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let (answer, _) = deterministic_structured_file_validation_from_read_range(
+        &state,
+        "Vérifie seulement si ce fichier est un TOML valide.",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("capability_ref structured validation fallback");
+    assert!(
+        answer.contains("format=toml") && answer.contains("validation_status=pass"),
+        "answer: {answer}"
     );
 
     let _ = std::fs::remove_file(path);
