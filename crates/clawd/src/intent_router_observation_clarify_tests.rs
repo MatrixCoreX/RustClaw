@@ -543,14 +543,14 @@ fn structured_contract_hint_repair_keeps_tool_discovery_context_only() {
         &mut finalize_style,
     );
 
-    assert_eq!(reason, Some("structured_contract_hint_repair"));
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::ToolDiscovery);
-    assert_eq!(contract.response_shape, OutputResponseShape::Free);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
-    assert!(!needs_clarify);
-    assert!(clarify_question.is_empty());
+    assert_eq!(reason, None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "model-supplied-background-locator");
+    assert!(needs_clarify);
+    assert_eq!(clarify_question, "provide locator");
     assert_eq!(decision, FirstLayerDecision::Clarify);
 }
 
@@ -753,24 +753,9 @@ fn contract_hint_fallback_keeps_tool_discovery_context_only() {
         &surface,
         workspace_root,
         "normalizer_parse_failed_contract_hint",
-    )
-    .expect("contract hint fallback");
+    );
 
-    assert!(!decision.needs_clarify);
-    assert_eq!(
-        decision.output_contract.semantic_kind,
-        OutputSemanticKind::ToolDiscovery
-    );
-    assert_eq!(
-        decision.output_contract.response_shape,
-        OutputResponseShape::Free
-    );
-    assert!(!decision.output_contract.requires_content_evidence);
-    assert_eq!(
-        decision.output_contract.locator_kind,
-        OutputLocatorKind::None
-    );
-    assert!(decision.output_contract.locator_hint.is_empty());
+    assert!(decision.is_none());
 }
 
 #[test]
