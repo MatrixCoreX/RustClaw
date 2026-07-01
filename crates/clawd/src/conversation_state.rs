@@ -10,10 +10,11 @@ const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
 #[path = "conversation_alias.rs"]
 mod conversation_alias;
 
+#[cfg(test)]
+pub(crate) use conversation_alias::session_alias_bindings_from_state_patch;
 pub(crate) use conversation_alias::{
     alias_bindings_mentioned_in_prompt, alias_surface_matches_prompt,
-    session_alias_bindings_from_state_patch, single_alias_binding_mentioned_in_prompt,
-    state_patch_is_alias_bindings_only, structural_alias_binding_from_memory_prompt,
+    single_alias_binding_mentioned_in_prompt, state_patch_is_alias_bindings_only,
     structural_quoted_alias_binding_from_single_locator_prompt,
     structural_quoted_alias_bindings_from_prompt,
 };
@@ -102,11 +103,10 @@ fn next_last_primary_task_prompt(
         return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     }
     let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
-    if standalone_answer_candidate_request_should_not_promote(
+    if standalone_scalar_result_should_not_promote(
         prior_prompt.as_deref(),
         route_result,
         turn_analysis,
-        resolved_prompt_for_execution,
     ) {
         return prior_prompt;
     }
@@ -138,17 +138,12 @@ fn next_last_primary_task_prompt(
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
             return Some(current_prompt.to_string());
         }
-        if route_result.is_clarify_gate() && prior_prompt.is_none() {
+        if route_result.needs_clarify && prior_prompt.is_none() {
             return Some(current_prompt.to_string());
         }
         return prior_prompt;
     };
     if !is_primary_task_turn_type(turn_type) {
-        return prior_prompt;
-    }
-    if route_result.is_clarify_gate()
-        && !should_persist_clarify_primary_task_prompt(route_result, turn_analysis)
-    {
         return prior_prompt;
     }
     match turn_type {
@@ -320,7 +315,7 @@ fn standalone_contextual_chat_result_starts_primary_task(
         return false;
     }
     matches!(
-        route_result.output_contract.semantic_kind,
+        route_result.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::QuantityComparison
             | crate::OutputSemanticKind::RecentScalarEqualityCheck
     )
@@ -433,7 +428,7 @@ fn standalone_task_request_preserves_prior_primary(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
             Some(crate::intent_router::TargetTaskPolicy::Standalone)
         )
-        && route_allows_standalone_answer_candidate_non_promotion(route_result)
+        && route_allows_standalone_scalar_non_promotion(route_result)
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -442,11 +437,10 @@ fn standalone_task_request_preserves_prior_primary(
         )
 }
 
-fn standalone_answer_candidate_request_should_not_promote(
-    prior_primary_task_prompt: Option<&str>,
+fn standalone_scalar_result_should_not_promote(
+    _prior_primary_task_prompt: Option<&str>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    resolved_prompt_for_execution: &str,
 ) -> bool {
     let is_standalone_task_request =
         matches!(
@@ -455,7 +449,7 @@ fn standalone_answer_candidate_request_should_not_promote(
         ) && matches!(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
             Some(crate::intent_router::TargetTaskPolicy::Standalone)
-        ) && route_allows_standalone_answer_candidate_non_promotion(route_result);
+        ) && route_allows_standalone_scalar_non_promotion(route_result);
     if !is_standalone_task_request
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -466,24 +460,13 @@ fn standalone_answer_candidate_request_should_not_promote(
     {
         return false;
     }
-    if matches!(
+    matches!(
         route_result.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    ) {
-        return true;
-    }
-    prior_primary_task_prompt
-        .map(str::trim)
-        .is_some_and(|prompt| !prompt.is_empty())
-        && !state_patch_requests_primary_task_replacement(turn_analysis)
-        && resolved_prompt_for_execution
-            .lines()
-            .any(|line| line.trim_start().starts_with("answer_candidate:"))
+    )
 }
 
-fn route_allows_standalone_answer_candidate_non_promotion(
-    route_result: &crate::RouteResult,
-) -> bool {
+fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResult) -> bool {
     if route_result.is_chat_gate() {
         return true;
     }
@@ -504,27 +487,25 @@ fn route_allows_standalone_answer_candidate_non_promotion(
             crate::OutputDeliveryIntent::None
         )
         && matches!(
-            route_result.output_contract.semantic_kind,
+            route_result.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None
         )
 }
 
-fn standalone_answer_candidate_output_should_not_promote(
+fn standalone_scalar_output_should_not_promote(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    resolved_prompt_for_execution: &str,
+    _resolved_prompt_for_execution: &str,
 ) -> bool {
-    standalone_answer_candidate_request_should_not_promote(
+    standalone_scalar_result_should_not_promote(
         prior_state.and_then(|state| state.last_primary_task_prompt.as_deref()),
         route_result,
         turn_analysis,
-        resolved_prompt_for_execution,
-    ) || standalone_answer_candidate_request_should_not_promote(
+    ) || standalone_scalar_result_should_not_promote(
         prior_state.and_then(|state| state.last_primary_task_output.as_deref()),
         route_result,
         turn_analysis,
-        resolved_prompt_for_execution,
     )
 }
 
@@ -631,7 +612,7 @@ fn unannotated_chat_output_starts_primary_task(
             crate::OutputDeliveryIntent::None
         )
         || !matches!(
-            route_result.output_contract.semantic_kind,
+            route_result.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None
         )
         || matches!(
@@ -730,8 +711,7 @@ fn next_last_primary_task_output(
         return prior_last_primary_task_output(prior_state);
     }
     if should_preserve_active_session_pointers(turn_analysis)
-        || route_result.is_clarify_gate()
-        || standalone_answer_candidate_output_should_not_promote(
+        || standalone_scalar_output_should_not_promote(
             prior_state,
             route_result,
             turn_analysis,
@@ -777,37 +757,6 @@ fn next_last_primary_task_output(
     }
     let latest_output = current_turn_answer_text(answer_text, answer_messages);
     latest_output.or_else(|| prior_last_primary_task_output(prior_state))
-}
-
-fn should_persist_clarify_primary_task_prompt(
-    route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> bool {
-    if matches!(
-        turn_analysis.and_then(|analysis| analysis.turn_type),
-        Some(
-            crate::intent_router::TurnType::TaskRequest
-                | crate::intent_router::TurnType::TaskAppend
-                | crate::intent_router::TurnType::TaskReplace
-                | crate::intent_router::TurnType::TaskCorrect
-                | crate::intent_router::TurnType::TaskScopeUpdate
-        )
-    ) {
-        return true;
-    }
-    route_result.is_clarify_gate()
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
-        && matches!(
-            route_result.output_contract.delivery_intent,
-            crate::OutputDeliveryIntent::None
-        )
-        && matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-        )
 }
 
 fn effective_locale_hint(

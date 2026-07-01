@@ -203,7 +203,7 @@ pub(super) fn agent_loop_decision_envelope_json(
     semantic_authority: &str,
 ) -> Value {
     let contract = crate::TaskContract::from_route_result(route);
-    let decision = agent_loop_decision_from_first_action(route, actions);
+    let decision = agent_loop_decision_from_first_action(actions);
     let (validation_status, validation_reason_code) =
         agent_loop_decision_validation(route, actions, decision, &contract);
     let terminal_intent = agent_loop_terminal_intent(decision);
@@ -294,16 +294,11 @@ pub(super) fn first_non_think_action_capability_ref(
     })
 }
 
-fn agent_loop_decision_from_first_action(
-    route: &crate::RouteResult,
-    actions: &[crate::AgentAction],
-) -> &'static str {
+fn agent_loop_decision_from_first_action(actions: &[crate::AgentAction]) -> &'static str {
     match first_non_think_action_decision(actions) {
         "call_tool" | "call_skill" | "call_capability" => "call_capability",
         "synthesize_answer" => "synthesize_answer",
-        "respond" if route.is_clarify_gate() => "clarify",
         "respond" => "respond",
-        "no_action" if route.is_clarify_gate() => "clarify",
         "no_action" | "think" => "respond",
         _ => "respond",
     }
