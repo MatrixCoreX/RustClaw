@@ -80,11 +80,6 @@ fn structured_scalar_observation_from_step(
         value
             .get("extra")
             .and_then(structured_scalar_observation_from_value)
-            .or_else(|| {
-                let text = value.get("text").and_then(|item| item.as_str())?;
-                let nested = serde_json::from_str::<serde_json::Value>(text.trim()).ok()?;
-                structured_scalar_observation_from_value(&nested)
-            })
     })
 }
 
