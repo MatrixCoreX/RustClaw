@@ -508,7 +508,8 @@ fn eligibility_blocks_non_boundary_safe_routes_with_machine_reasons() {
     assert_eq!(eligibility.blocked_reason, "schedule_active");
 
     route.schedule_kind = ScheduleKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.route_reason = "capability_ref=config.apply_change".to_string();
     let eligibility = agent_loop_eligibility(&route);
     assert!(!eligibility.eligible);
     assert_eq!(eligibility.blocked_reason, "side_effect_operation");
