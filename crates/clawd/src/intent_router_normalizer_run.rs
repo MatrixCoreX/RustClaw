@@ -808,7 +808,7 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        if should_route_active_task_mutation_to_direct_answer(
+        if let Some(loop_context_reason) = active_task_mutation_loop_context_hint(
             req,
             &reason,
             session_snapshot,
@@ -818,14 +818,9 @@ pub(crate) async fn run_intent_normalizer(
             &output_contract,
             state_patch.as_ref(),
         ) {
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            needs_clarify = false;
-            clarify_question.clear();
-            wants_file_delivery = false;
-            clear_output_contract_for_active_text_followup(&mut output_contract);
-            append_route_reason(&mut reason, "active_task_mutation_to_direct_answer");
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_mutation_to_direct_answer input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=active_task_mutation_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)

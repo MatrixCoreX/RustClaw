@@ -4,7 +4,7 @@ use super::{
 };
 
 #[test]
-fn active_task_output_table_refinement_is_routed_back_to_direct_answer() {
+fn active_task_output_table_refinement_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("Summarize the release checklist".to_string()),
@@ -17,20 +17,23 @@ fn active_task_output_table_refinement_is_routed_back_to_direct_answer() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_route_active_task_mutation_to_direct_answer(
-        "把结果改成 markdown table 输出",
-        "",
-        Some(&snapshot),
-        Some(TurnType::TaskScopeUpdate),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_mutation_loop_context_hint(
+            "把结果改成 markdown table 输出",
+            "",
+            Some(&snapshot),
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_mutation_loop_context")
+    );
 }
 
 #[test]
-fn active_task_correct_is_routed_back_to_direct_answer() {
+fn active_task_correct_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some(
@@ -42,16 +45,19 @@ fn active_task_correct_is_routed_back_to_direct_answer() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_route_active_task_mutation_to_direct_answer(
-        "Correction: not Python 3.10, use Python 3.11",
-        "",
-        Some(&snapshot),
-        Some(TurnType::TaskCorrect),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_mutation_loop_context_hint(
+            "Correction: not Python 3.10, use Python 3.11",
+            "",
+            Some(&snapshot),
+            Some(TurnType::TaskCorrect),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_mutation_loop_context")
+    );
 }
 
 #[test]
@@ -228,16 +234,19 @@ fn active_task_mutation_with_content_evidence_stays_executable() {
         semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
         ..IntentOutputContract::default()
     };
-    assert!(!super::should_route_active_task_mutation_to_direct_answer(
-        "Focus only on the UI part",
-        "workspace_project_summary",
-        Some(&snapshot),
-        Some(TurnType::TaskScopeUpdate),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        &contract,
-        None,
-    ));
+    assert_eq!(
+        super::active_task_mutation_loop_context_hint(
+            "Focus only on the UI part",
+            "workspace_project_summary",
+            Some(&snapshot),
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            &contract,
+            None,
+        ),
+        None
+    );
 }
 
 #[test]
@@ -417,7 +426,7 @@ fn active_task_append_clarify_without_output_is_resolved() {
 }
 
 #[test]
-fn missing_active_text_append_clarify_continues_as_chat() {
+fn missing_active_text_append_requires_loop_context() {
     let mut needs_clarify = true;
     let mut clarify_question = "who is the beginner?".to_string();
     let mut finalize = crate::ActFinalizeStyle::Plain;
@@ -436,8 +445,8 @@ fn missing_active_text_append_clarify_continues_as_chat() {
         &mut contract,
     );
 
-    assert_eq!(reason, Some("missing_active_task_reuse_continues_as_chat"));
-    assert!(!needs_clarify);
+    assert_eq!(reason, Some("missing_active_task_reuse_loop_needs_context"));
+    assert!(needs_clarify);
     assert!(clarify_question.is_empty());
 }
 

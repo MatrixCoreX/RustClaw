@@ -178,7 +178,7 @@ pub(super) fn should_resolve_task_replace_clarify_with_active_task(
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
-pub(super) fn should_route_active_task_mutation_to_direct_answer(
+pub(super) fn active_task_mutation_loop_context_hint(
     prompt: &str,
     route_reason: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
@@ -187,12 +187,12 @@ pub(super) fn should_route_active_task_mutation_to_direct_answer(
     attachment_processing_required: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
-) -> bool {
+) -> Option<&'static str> {
     if attachment_processing_required
         || active_primary_task_prompt(session_snapshot).is_none()
         || !output_contract_allows_chat_only_task_mutation(route_reason, output_contract)
     {
-        return false;
+        return None;
     }
     if output_contract.requires_content_evidence
         && route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS)
@@ -200,15 +200,15 @@ pub(super) fn should_route_active_task_mutation_to_direct_answer(
             .and_then(|(_, output)| output)
             .is_some()
     {
-        return false;
+        return None;
     }
     let turn_type = match turn_type {
         Some(value) => value,
-        None => return false,
+        None => return None,
     };
     let target_task_policy = match target_task_policy {
         Some(value) => value,
-        None => return false,
+        None => return None,
     };
     if !matches!(
         turn_type,
@@ -217,16 +217,17 @@ pub(super) fn should_route_active_task_mutation_to_direct_answer(
             | TurnType::TaskReplace
             | TurnType::TaskScopeUpdate
     ) {
-        return false;
+        return None;
     }
     if !matches!(
         target_task_policy,
         TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive
     ) {
-        return false;
+        return None;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+        .then_some("active_task_mutation_loop_context")
 }
 
 pub(super) fn apply_missing_active_task_reuse_clarify(
@@ -253,7 +254,7 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
     ) {
         return None;
     }
-    if missing_active_text_followup_can_continue_as_chat(
+    if missing_active_text_followup_can_continue_in_loop(
         prompt,
         route_reason,
         turn_type,
@@ -261,11 +262,11 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
         output_contract,
         state_patch,
     ) {
-        *needs_clarify = false;
+        *needs_clarify = true;
         clarify_question.clear();
         *execution_finalize_style = ActFinalizeStyle::Plain;
         clear_output_contract_for_active_text_followup(output_contract);
-        return Some("missing_active_task_reuse_continues_as_chat");
+        return Some("missing_active_task_reuse_loop_needs_context");
     }
     *needs_clarify = true;
     clarify_question.clear();
@@ -274,7 +275,7 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
     Some("missing_active_task_reuse_requires_clarify")
 }
 
-fn missing_active_text_followup_can_continue_as_chat(
+fn missing_active_text_followup_can_continue_in_loop(
     prompt: &str,
     route_reason: &str,
     turn_type: Option<TurnType>,
