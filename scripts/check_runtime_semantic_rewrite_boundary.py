@@ -308,6 +308,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_service_status_workspace_product_text_selection())
     findings.extend(scan_service_status_scalar_shape_health_selection())
     findings.extend(scan_task_control_task_id_user_text_selection())
+    findings.extend(scan_task_control_legacy_token_fallback())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -1046,6 +1047,50 @@ def scan_task_control_task_id_user_text(rel_path: str, text: str) -> list[Findin
     return findings
 
 
+def scan_task_control_legacy_token_fallback() -> list[Finding]:
+    return scan_task_control_legacy_token_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_task_control_legacy_token_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for function_name in ("route_mentions_task_control_list", "route_mentions_task_control_get"):
+        block = rust_private_or_pub_function_block(text, function_name)
+        if block is None:
+            continue
+        block_start, block_text = block
+        for offset, line in enumerate(block_text.splitlines(), start=0):
+            if (
+                "route_reason_has_marker" not in line
+                and "route_mentions_machine_token" not in line
+            ):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + offset,
+                    "task_control_legacy_token_fallback",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
+def rust_private_or_pub_function_block(text: str, function_name: str) -> tuple[int, str] | None:
+    pattern = re.compile(
+        rf"^(?:pub\(super\)\s+)?fn\s+{re.escape(function_name)}\b", re.MULTILINE
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    start_line = text.count("\n", 0, match.start()) + 1
+    next_match = re.search(r"^(?:pub\(super\)\s+)?fn\s+", text[match.end() :], re.MULTILINE)
+    end = match.end() + next_match.start() if next_match else len(text)
+    return start_line, text[match.start() : end]
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1573,6 +1618,18 @@ def run_self_test() -> int:
         and blocked_task_control_task_id[0].kind == "task_control_task_id_user_text_selection"
     )
     assert not scan_task_control_task_id_user_text_selection()
+    blocked_task_control_legacy_token = scan_task_control_legacy_token_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "fn route_mentions_task_control_list(route: &RouteResult) -> bool {\n"
+        "    route_reason_has_marker(route, \"task_control.list\")\n"
+        "        || route_mentions_machine_token(route, \"task_control.list\")\n"
+        "}\n",
+    )
+    assert (
+        blocked_task_control_legacy_token
+        and blocked_task_control_legacy_token[0].kind == "task_control_legacy_token_fallback"
+    )
+    assert not scan_task_control_legacy_token_fallback()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
