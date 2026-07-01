@@ -110,7 +110,7 @@ fn pure_direct_chat_current_request_route(
     {
         return false;
     }
-    route_result.is_chat_gate()
+    route_result.is_resume_discussion_mode()
 }
 
 fn turn_analysis_allows_current_request_only_freeform_rewrite(

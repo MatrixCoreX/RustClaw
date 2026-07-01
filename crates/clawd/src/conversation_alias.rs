@@ -371,7 +371,7 @@ fn structural_alias_bindings_from_prompt(
                 crate::intent_router::TurnType::PreferenceOrMemory
             )
         })
-        || (route_result.is_chat_gate()
+        || (route_result.is_resume_discussion_mode()
             && !route_result.output_contract.requires_content_evidence
             && !route_result.output_contract.delivery_required)
     {
@@ -729,7 +729,9 @@ pub(crate) fn structural_alias_binding_from_prompt(
     route_result: &crate::RouteResult,
     resolved_prompt_for_execution: &str,
 ) -> Option<SessionAliasBinding> {
-    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
+    if !route_result.is_resume_discussion_mode()
+        || route_result.output_contract.requires_content_evidence
+    {
         return None;
     }
     let alias = single_structural_quoted_alias(prompt)?;
@@ -772,24 +774,6 @@ fn single_structural_quoted_alias(text: &str) -> Option<String> {
     candidates.sort();
     candidates.dedup();
     (candidates.len() == 1).then(|| candidates.remove(0))
-}
-
-pub(crate) fn structural_alias_binding_from_memory_prompt(
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    resolved_prompt_for_execution: &str,
-) -> Option<SessionAliasBinding> {
-    if let Some(binding) =
-        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
-    {
-        return Some(binding);
-    }
-    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
-        return None;
-    }
-    structural_alias_bindings_from_single_locator_prefix(prompt)
-        .into_iter()
-        .next()
 }
 
 fn structural_alias_candidate_is_safe(candidate: &str) -> bool {

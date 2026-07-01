@@ -556,14 +556,34 @@ fn route_uses_bounded_observation_summary_light_budget(route_result: &RouteResul
     ) {
         return false;
     }
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
-            | crate::OutputSemanticKind::ServiceStatus
-            | crate::OutputSemanticKind::PackageManagerDetection
-            | crate::OutputSemanticKind::DockerPs
-            | crate::OutputSemanticKind::DockerImages
-    )
+    route_result.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::CommandOutputSummary,
+        crate::OutputSemanticKind::ServiceStatus,
+    ]) || route_has_capability_ref_machine_token(route_result)
+}
+
+fn route_has_capability_ref_machine_token(route_result: &RouteResult) -> bool {
+    [&route_result.route_reason, &route_result.resolved_intent]
+        .iter()
+        .any(|surface| machine_context_has_capability_ref_token(surface))
+}
+
+fn machine_context_has_capability_ref_token(machine_context: &str) -> bool {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .map(|part| part.trim().to_ascii_lowercase())
+        .any(|part| {
+            let Some(capability) = part.strip_prefix("capability_ref=") else {
+                return false;
+            };
+            !capability.is_empty()
+                && capability.bytes().any(|byte| byte == b'.')
+                && capability.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'_' | b'-' | b'.')
+                })
+        })
 }
 
 pub(crate) fn uses_light_execution_context_budget(
@@ -588,27 +608,53 @@ pub(crate) fn uses_light_execution_context_budget(
         return false;
     }
     route_uses_structured_bound_scalar_read(route_result)
-        || route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
-        || route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::ExistenceWithPath
+        || route_has_output_contract_marker(route_result, "scalar_path_only")
+        || route_has_output_contract_marker(route_result, "existence_with_path")
         || route_uses_structured_listing(route_result)
         || route_uses_structured_content_read(route_result, &intent_surface)
 }
 
+const ROUTE_OUTPUT_CONTRACT_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "content_presence_check",
+    "excerpt_kind_judgment",
+    "file_basename",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "file_paths",
+    "scalar_path_only",
+    "existence_with_path",
+    "quantity_comparison",
+    "recent_artifacts_judgment",
+    "workspace_project_summary",
+    "sqlite_table_listing",
+    "sqlite_table_names_only",
+];
+
+fn route_has_output_contract_marker(route_result: &RouteResult, marker: &str) -> bool {
+    route_result.has_route_reason_machine_marker(marker)
+}
+
+fn route_has_any_output_contract_marker(route_result: &RouteResult) -> bool {
+    ROUTE_OUTPUT_CONTRACT_MARKERS
+        .iter()
+        .any(|marker| route_has_output_contract_marker(route_result, marker))
+}
+
 fn route_uses_structured_listing(route_result: &RouteResult) -> bool {
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::SqliteTableListing
-            | crate::OutputSemanticKind::SqliteTableNamesOnly
-    ) || matches!(
-        route_result.output_contract.delivery_intent,
-        crate::OutputDeliveryIntent::DirectoryLookup
-            | crate::OutputDeliveryIntent::DirectoryBatchFiles
-    )
+    route_has_output_contract_marker(route_result, "file_names")
+        || route_has_output_contract_marker(route_result, "directory_names")
+        || route_has_output_contract_marker(route_result, "directory_entry_groups")
+        || route_has_output_contract_marker(route_result, "file_paths")
+        || route_has_output_contract_marker(route_result, "sqlite_table_listing")
+        || route_has_output_contract_marker(route_result, "sqlite_table_names_only")
+        || matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::DirectoryLookup
+                | crate::OutputDeliveryIntent::DirectoryBatchFiles
+        )
 }
 
 fn route_uses_structured_chat_wrapped_light_budget(
@@ -621,9 +667,7 @@ fn route_uses_structured_chat_wrapped_light_budget(
     {
         return false;
     }
-    if route_result.output_contract.semantic_kind
-        == crate::OutputSemanticKind::WorkspaceProjectSummary
-    {
+    if route_has_output_contract_marker(route_result, "workspace_project_summary") {
         return false;
     }
     route_uses_structured_content_read(route_result, intent_surface)
@@ -662,27 +706,21 @@ fn should_suppress_execution_anchor_context(
 
 fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
     if route_has_concrete_locator_hint(route_result)
-        && matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-                | crate::OutputSemanticKind::ContentPresenceCheck
-                | crate::OutputSemanticKind::ExcerptKindJudgment
-                | crate::OutputSemanticKind::FileBasename
-        )
+        && (route_has_output_contract_marker(route_result, "content_excerpt_summary")
+            || route_has_output_contract_marker(route_result, "content_excerpt_with_summary")
+            || route_has_output_contract_marker(route_result, "content_presence_check")
+            || route_has_output_contract_marker(route_result, "excerpt_kind_judgment")
+            || route_has_output_contract_marker(route_result, "file_basename"))
     {
         return false;
     }
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::QuantityComparison
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-            | crate::OutputSemanticKind::ContentPresenceCheck
-            | crate::OutputSemanticKind::ExcerptKindJudgment
-            | crate::OutputSemanticKind::RecentArtifactsJudgment
-            | crate::OutputSemanticKind::FileBasename
-    )
+    route_has_output_contract_marker(route_result, "quantity_comparison")
+        || route_has_output_contract_marker(route_result, "content_excerpt_summary")
+        || route_has_output_contract_marker(route_result, "content_excerpt_with_summary")
+        || route_has_output_contract_marker(route_result, "content_presence_check")
+        || route_has_output_contract_marker(route_result, "excerpt_kind_judgment")
+        || route_has_output_contract_marker(route_result, "recent_artifacts_judgment")
+        || route_has_output_contract_marker(route_result, "file_basename")
 }
 
 fn route_has_concrete_locator_hint(route_result: &RouteResult) -> bool {
@@ -1006,7 +1044,7 @@ fn active_task_context_only_memory_context(
 ) -> bool {
     if !has_active_session_state
         || route_result.needs_clarify
-        || !route_result.is_chat_gate()
+        || !route_result.is_resume_discussion_mode()
         || route_result.wants_file_delivery
         || route_result.schedule_kind != crate::ScheduleKind::None
         || route_result.should_refresh_long_term_memory
@@ -1041,7 +1079,7 @@ fn active_task_context_only_memory_context(
         && !contract.delivery_required
         && contract.locator_kind == crate::OutputLocatorKind::None
         && contract.delivery_intent == crate::OutputDeliveryIntent::None
-        && contract.semantic_kind == crate::OutputSemanticKind::None
+        && !route_has_any_output_contract_marker(route_result)
 }
 
 fn current_request_only_memory_context(
@@ -1049,7 +1087,7 @@ fn current_request_only_memory_context(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     has_active_session_state: bool,
 ) -> bool {
-    if has_active_session_state || !route_result.is_chat_gate() {
+    if has_active_session_state || !route_result.is_resume_discussion_mode() {
         return false;
     }
     if let Some(analysis) = turn_analysis {
@@ -1070,7 +1108,7 @@ fn current_request_only_memory_context(
         && !contract.delivery_required
         && contract.locator_kind == crate::OutputLocatorKind::None
         && contract.delivery_intent == crate::OutputDeliveryIntent::None
-        && contract.semantic_kind == crate::OutputSemanticKind::None
+        && !route_has_any_output_contract_marker(route_result)
 }
 
 pub(crate) fn set_execution_image_context(

@@ -254,7 +254,7 @@ pub(crate) fn apply_post_route_policy(
     let apply_force_clarify = force_clarify && !non_boundary_clarify_requested;
     if non_boundary_clarify_requested {
         execution_route_result.needs_clarify = false;
-        if execution_route_result.is_chat_gate() {
+        if execution_route_result.is_resume_discussion_mode() {
             execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         }
     }

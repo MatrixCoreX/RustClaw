@@ -497,6 +497,18 @@ impl RouteResult {
         self.ask_mode.gate_kind()
     }
 
+    pub(crate) fn is_resume_discussion_mode(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.ask_mode.is_resume_discussion() || self.ask_mode.is_chat_gate()
+        }
+        #[cfg(not(test))]
+        {
+            self.ask_mode.is_resume_discussion()
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn is_chat_gate(&self) -> bool {
         matches!(self.gate_kind(), crate::RouteGateKind::Chat)
     }
