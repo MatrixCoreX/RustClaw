@@ -42,8 +42,9 @@ fn fuzzy_candidates_force_clarify_for_locator_requests() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
+    assert!(result.execution_route_result.needs_clarify);
     assert_eq!(result.fuzzy_locator_suggestions.len(), 2);
     assert_eq!(
         result.gate_record.reason_code,
@@ -58,8 +59,9 @@ fn missing_locator_still_forces_clarify() {
     let result = apply_post_route_policy(route_result(), LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
+    assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
     assert_eq!(
         result.gate_record.reason_code,
@@ -271,8 +273,9 @@ fn sqlite_schema_version_current_workspace_directory_auto_locator_requires_clari
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
+    assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
     assert!(result.auto_locator_path.is_none());
     assert_eq!(
@@ -297,8 +300,9 @@ fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
+    assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
     assert_eq!(
         result.clarify_reason_kind,
@@ -762,7 +766,7 @@ fn explicit_relative_path_without_locator_hint_does_not_rescue_clarify_back_to_e
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
 }
 
@@ -776,7 +780,7 @@ fn explicit_relative_path_followup_without_locator_hint_stays_clarify() {
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_plain()
     );
 }
 
