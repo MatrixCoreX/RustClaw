@@ -100,7 +100,7 @@ pub(super) fn unresolved_deictic_observable_target_should_clarify(
     false
 }
 
-pub(super) fn should_resolve_task_scope_update_clarify_with_active_task(
+pub(super) fn active_task_scope_update_loop_context_hint(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
@@ -109,23 +109,24 @@ pub(super) fn should_resolve_task_scope_update_clarify_with_active_task(
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
-) -> bool {
+) -> Option<&'static str> {
     if attachment_processing_required
         || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
     {
-        return false;
+        return None;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
-        return false;
+        return None;
     }
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+        .then_some("active_task_scope_update_loop_context")
 }
 
-pub(super) fn should_resolve_task_append_clarify_with_active_task(
+pub(super) fn active_task_append_loop_context_hint(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
@@ -134,7 +135,7 @@ pub(super) fn should_resolve_task_append_clarify_with_active_task(
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
-) -> bool {
+) -> Option<&'static str> {
     if attachment_processing_required
         || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
@@ -144,16 +145,17 @@ pub(super) fn should_resolve_task_append_clarify_with_active_task(
         )
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
     {
-        return false;
+        return None;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
-        return false;
+        return None;
     }
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+        .then_some("active_task_append_loop_context")
 }
 
-pub(super) fn should_resolve_task_replace_clarify_with_active_task(
+pub(super) fn active_task_replace_loop_context_hint(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
@@ -162,20 +164,21 @@ pub(super) fn should_resolve_task_replace_clarify_with_active_task(
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
-) -> bool {
+) -> Option<&'static str> {
     if attachment_processing_required
         || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskReplace))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
     {
-        return false;
+        return None;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
-        return false;
+        return None;
     }
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+        .then_some("active_task_replace_loop_context")
 }
 
 pub(super) fn active_task_mutation_loop_context_hint(

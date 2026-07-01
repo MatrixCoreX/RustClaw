@@ -26,8 +26,8 @@ fn scope_update_clarify_is_resolved_when_active_task_exists() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(
-        super::should_resolve_task_scope_update_clarify_with_active_task(
+    assert_eq!(
+        super::active_task_scope_update_loop_context_hint(
             "先只看登录模块",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
@@ -36,7 +36,8 @@ fn scope_update_clarify_is_resolved_when_active_task_exists() {
             true,
             &IntentOutputContract::default(),
             None,
-        )
+        ),
+        Some("active_task_scope_update_loop_context")
     );
 }
 
@@ -51,8 +52,8 @@ fn scope_update_clarify_reuses_active_task_without_keyword_detector() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(
-        super::should_resolve_task_scope_update_clarify_with_active_task(
+    assert_eq!(
+        super::active_task_scope_update_loop_context_hint(
             "Keep it limited to the onboarding flow",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
@@ -61,7 +62,8 @@ fn scope_update_clarify_reuses_active_task_without_keyword_detector() {
             true,
             &IntentOutputContract::default(),
             None,
-        )
+        ),
+        Some("active_task_scope_update_loop_context")
     );
 }
 
@@ -76,16 +78,19 @@ fn task_replace_clarify_is_resolved_when_active_task_exists() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_resolve_task_replace_clarify_with_active_task(
-        "Actually, replace it with a short thread",
-        Some(&snapshot),
-        Some(TurnType::TaskReplace),
-        Some(TargetTaskPolicy::ReplaceActive),
-        false,
-        true,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_replace_loop_context_hint(
+            "Actually, replace it with a short thread",
+            Some(&snapshot),
+            Some(TurnType::TaskReplace),
+            Some(TargetTaskPolicy::ReplaceActive),
+            false,
+            true,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_replace_loop_context")
+    );
 }
 
 #[test]
@@ -99,16 +104,19 @@ fn task_replace_clarify_reuses_active_task_without_keyword_detector() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_resolve_task_replace_clarify_with_active_task(
-        "Make it a shorter internal memo instead",
-        Some(&snapshot),
-        Some(TurnType::TaskReplace),
-        Some(TargetTaskPolicy::ReplaceActive),
-        false,
-        true,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_replace_loop_context_hint(
+            "Make it a shorter internal memo instead",
+            Some(&snapshot),
+            Some(TurnType::TaskReplace),
+            Some(TargetTaskPolicy::ReplaceActive),
+            false,
+            true,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_replace_loop_context")
+    );
 }
 
 #[test]
