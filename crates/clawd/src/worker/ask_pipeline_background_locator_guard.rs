@@ -90,7 +90,7 @@ fn route_has_quantity_comparison_machine_signal(route_result: &crate::RouteResul
 }
 
 #[cfg(test)]
-pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
+pub(super) fn recover_background_locator_clarify_to_agent_loop(
     route_result: &mut crate::RouteResult,
     recent_execution_context: &str,
 ) -> bool {
@@ -107,7 +107,7 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
         return false;
     }
     route_result.needs_clarify = false;
-    route_result.set_chat_gate();
+    route_result.set_execute_gate();
     route_result.clarify_question.clear();
     let response_shape =
         language_response_shape_or_default(route_result.output_contract.response_shape);
@@ -115,10 +115,10 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
         response_shape,
         ..Default::default()
     };
-    append_route_reason(route_result, "active_observed_output_chat_repair");
+    append_route_reason(route_result, "active_observed_output_loop_recovery");
     append_route_reason(
         route_result,
-        "recent_observed_results_background_locator_chat_repair",
+        "recent_observed_results_background_locator_loop_recovery",
     );
     true
 }

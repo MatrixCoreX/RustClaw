@@ -60,14 +60,6 @@ fn contract_hint_requires_content_evidence(semantic_kind: OutputSemanticKind) ->
     output_semantic_kind_requires_fresh_evidence(semantic_kind)
 }
 
-fn contract_hint_output_semantic_kind(semantic_kind: OutputSemanticKind) -> OutputSemanticKind {
-    semantic_kind
-}
-
-fn contract_hint_skips_locator_defaults(semantic_kind: OutputSemanticKind) -> bool {
-    matches!(semantic_kind, OutputSemanticKind::ToolDiscovery)
-}
-
 pub(super) fn apply_structured_contract_hint_repair(
     output_contract: &mut IntentOutputContract,
     req: &str,
@@ -80,7 +72,7 @@ pub(super) fn apply_structured_contract_hint_repair(
 ) -> Option<&'static str> {
     let semantic_kind = contract_test_hint_semantic_kind(req)?;
     let surface_req = request_without_contract_test_hint(req);
-    output_contract.semantic_kind = contract_hint_output_semantic_kind(semantic_kind);
+    output_contract.semantic_kind = semantic_kind;
     output_contract.requires_content_evidence =
         contract_hint_requires_content_evidence(semantic_kind);
     output_contract.delivery_required = false;
@@ -98,23 +90,15 @@ pub(super) fn apply_structured_contract_hint_repair(
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
         }
-        OutputSemanticKind::ToolDiscovery => {
-            output_contract.locator_kind = OutputLocatorKind::None;
-            output_contract.locator_hint.clear();
-        }
         _ => {}
     }
-    if !contract_hint_skips_locator_defaults(semantic_kind) {
-        apply_contract_hint_locator_defaults(
-            output_contract,
-            &surface_req,
-            req_surface,
-            workspace_root,
-        );
-    }
-    if output_contract.requires_content_evidence
-        || output_contract.semantic_kind_is(OutputSemanticKind::ToolDiscovery)
-    {
+    apply_contract_hint_locator_defaults(
+        output_contract,
+        &surface_req,
+        req_surface,
+        workspace_root,
+    );
+    if output_contract.requires_content_evidence {
         *needs_clarify = false;
         clarify_question.clear();
         *execution_finalize_style =
@@ -142,19 +126,17 @@ pub(super) fn contract_hint_fallback_decision(
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: contract_hint_output_semantic_kind(semantic_kind),
+        semantic_kind,
         locator_hint: String::new(),
         ..Default::default()
     };
     apply_contract_hint_delivery_defaults(&mut output_contract, &mut wants_file_delivery);
-    if !contract_hint_skips_locator_defaults(semantic_kind) {
-        apply_contract_hint_locator_defaults(
-            &mut output_contract,
-            &surface_req,
-            req_surface,
-            workspace_root,
-        );
-    }
+    apply_contract_hint_locator_defaults(
+        &mut output_contract,
+        &surface_req,
+        req_surface,
+        workspace_root,
+    );
 
     let resolved_user_intent = if surface_req.trim().is_empty() {
         req.trim().to_string()
@@ -178,7 +160,6 @@ pub(super) fn contract_hint_fallback_decision(
 
 fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> OutputResponseShape {
     match kind {
-        OutputSemanticKind::ToolDiscovery => OutputResponseShape::Free,
         OutputSemanticKind::RawCommandOutput
         | OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ServiceStatus

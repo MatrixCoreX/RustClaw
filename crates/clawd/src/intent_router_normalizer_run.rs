@@ -307,25 +307,14 @@ pub(crate) async fn run_intent_normalizer(
             .state_patch
             .as_ref()
             .filter(|value| is_meaningful_state_patch(value));
-        let active_ordered_scalar_path_chat_repair = apply_active_ordered_scalar_path_chat_repair(
+        let active_ordered_scalar_path_loop_context = active_ordered_scalar_path_loop_context_hint(
             session_snapshot,
             state_patch_for_decision,
             &out.reason,
             needs_clarify,
-            &mut execution_finalize_style,
-            &mut output_contract,
+            &output_contract,
         );
-        if active_ordered_scalar_path_chat_repair.is_some() {
-            synced_route_label = route_trace_label_from_state(
-                needs_clarify,
-                &output_contract,
-                wants_file_delivery,
-                schedule_kind,
-                execution_recipe_hint,
-                execution_finalize_style,
-            );
-        }
-        let active_observed_output_chat_repair = apply_active_observed_output_chat_repair(
+        let active_observed_output_loop_context = active_observed_output_loop_context_hint(
             req,
             session_snapshot,
             parsed_turn_type,
@@ -337,19 +326,8 @@ pub(crate) async fn run_intent_normalizer(
             wants_file_delivery,
             needs_clarify,
             &out.reason,
-            &mut execution_finalize_style,
-            &mut output_contract,
+            &output_contract,
         );
-        if active_observed_output_chat_repair.is_some() {
-            synced_route_label = route_trace_label_from_state(
-                needs_clarify,
-                &output_contract,
-                wants_file_delivery,
-                schedule_kind,
-                execution_recipe_hint,
-                execution_finalize_style,
-            );
-        }
         let decision_contract_conflict_repair = structured_execution_signal_for_effective_route(
             &output_contract,
             wants_file_delivery,
@@ -588,8 +566,8 @@ pub(crate) async fn run_intent_normalizer(
             structural_contract_repair,
             state_patch_replacement_literal_conflict_repair,
             fs_basic_lifecycle_contract_repair,
-            active_ordered_scalar_path_chat_repair,
-            active_observed_output_chat_repair,
+            active_ordered_scalar_path_loop_context,
+            active_observed_output_loop_context,
             structured_contract_hint_repair,
         ]
         .into_iter()
@@ -1044,8 +1022,8 @@ pub(crate) async fn run_intent_normalizer(
             &contract_repair_report,
             &[
                 structural_contract_repair,
-                active_ordered_scalar_path_chat_repair,
-                active_observed_output_chat_repair,
+                active_ordered_scalar_path_loop_context,
+                active_observed_output_loop_context,
                 structured_contract_hint_repair,
                 current_turn_anchor_drift_repair,
                 archive_unpack_missing_archive_locator_clarify_repair,

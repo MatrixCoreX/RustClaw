@@ -745,7 +745,7 @@ fn scope_refinement_repair_detaches_from_structured_active_target() {
 }
 
 #[test]
-fn active_ordered_scalar_path_without_ref_stays_chat() {
+fn active_ordered_scalar_path_without_ref_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
@@ -765,8 +765,8 @@ fn active_ordered_scalar_path_without_ref_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-    let mut contract = IntentOutputContract {
+    let finalize_style = crate::ActFinalizeStyle::Plain;
+    let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
         requires_content_evidence: false,
@@ -778,28 +778,27 @@ fn active_ordered_scalar_path_without_ref_stays_chat() {
         self_extension: Default::default(),
     };
 
-    let reason = super::apply_active_ordered_scalar_path_chat_repair(
+    let reason = super::active_ordered_scalar_path_loop_context_hint(
         Some(&snapshot),
         None,
         "scalar_path_only",
         false,
-        &mut finalize_style,
-        &mut contract,
+        &contract,
     );
 
     assert_eq!(
         reason,
-        Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
+        Some("active_ordered_scalar_path_loop_context_without_structured_ref")
     );
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
     assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ScalarPathOnly);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
 }
 
 #[test]
-fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
+fn active_ordered_scalar_path_without_ref_preserves_planner_contract() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
@@ -819,8 +818,8 @@ fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
-    let mut contract = IntentOutputContract {
+    let finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
         requires_content_evidence: true,
@@ -832,28 +831,27 @@ fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
         self_extension: Default::default(),
     };
 
-    let reason = super::apply_active_ordered_scalar_path_chat_repair(
+    let reason = super::active_ordered_scalar_path_loop_context_hint(
         Some(&snapshot),
         None,
         "scalar_path_only",
         false,
-        &mut finalize_style,
-        &mut contract,
+        &contract,
     );
 
     assert_eq!(
         reason,
-        Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
+        Some("active_ordered_scalar_path_loop_context_without_structured_ref")
     );
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ScalarPathOnly);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
 }
 
 #[test]
-fn active_observed_output_summary_stays_chat() {
+fn active_observed_output_summary_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_output: Some(r#"{"phase":"loop_done","tool_calls":1}"#.to_string()),
@@ -871,8 +869,8 @@ fn active_observed_output_summary_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-    let mut contract = IntentOutputContract {
+    let finalize_style = crate::ActFinalizeStyle::Plain;
+    let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
         requires_content_evidence: true,
@@ -884,7 +882,7 @@ fn active_observed_output_summary_stays_chat() {
         self_extension: Default::default(),
     };
 
-    let reason = super::apply_active_observed_output_chat_repair(
+    let reason = super::active_observed_output_loop_context_hint(
         "one sentence status judgment",
         Some(&snapshot),
         Some(TurnType::TaskRequest),
@@ -896,21 +894,23 @@ fn active_observed_output_summary_stays_chat() {
         false,
         false,
         "excerpt_kind_judgment",
-        &mut finalize_style,
-        &mut contract,
+        &contract,
     );
 
-    assert_eq!(reason, Some("active_observed_output_chat_repair"));
+    assert_eq!(reason, Some("active_observed_output_loop_context"));
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert!(!contract.requires_content_evidence);
+    assert!(contract.requires_content_evidence);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExcerptKindJudgment
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "/tmp/rustclaw/logs/act_plan.log");
 }
 
 #[test]
-fn active_observed_output_chinese_category_judgment_stays_chat() {
+fn active_observed_output_chinese_category_judgment_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_output: Some(
@@ -931,8 +931,8 @@ fn active_observed_output_chinese_category_judgment_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
-    let mut contract = IntentOutputContract {
+    let finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let contract = IntentOutputContract {
         exact_sentence_count: Some(1),
         response_shape: OutputResponseShape::OneSentence,
         requires_content_evidence: true,
@@ -944,7 +944,7 @@ fn active_observed_output_chinese_category_judgment_stays_chat() {
         self_extension: Default::default(),
     };
 
-    let reason = super::apply_active_observed_output_chat_repair(
+    let reason = super::active_observed_output_loop_context_hint(
         "一句话说它更像日志还是清单",
         Some(&snapshot),
         Some(TurnType::TaskScopeUpdate),
@@ -956,20 +956,25 @@ fn active_observed_output_chinese_category_judgment_stays_chat() {
         false,
         false,
         "excerpt_kind_judgment",
-        &mut finalize_style,
-        &mut contract,
+        &contract,
     );
 
-    assert_eq!(reason, Some("active_observed_output_chat_repair"));
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(reason, Some("active_observed_output_loop_context"));
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExcerptKindJudgment
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "/tmp/rustclaw/logs/clawd.nl-focus.log"
+    );
 }
 
 #[test]
-fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_chat() {
+fn active_observed_output_conversation_judgment_without_fresh_evidence_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_output: Some(
@@ -989,8 +994,8 @@ fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_cha
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
-    let mut contract = IntentOutputContract {
+    let finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let contract = IntentOutputContract {
         exact_sentence_count: Some(1),
         response_shape: OutputResponseShape::OneSentence,
         requires_content_evidence: false,
@@ -1002,7 +1007,7 @@ fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_cha
         self_extension: Default::default(),
     };
 
-    let reason = super::apply_active_observed_output_chat_repair(
+    let reason = super::active_observed_output_loop_context_hint(
         "one sentence category judgment for the latest observed output",
         Some(&snapshot),
         Some(TurnType::TaskRequest),
@@ -1014,17 +1019,19 @@ fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_cha
         false,
         false,
         "",
-        &mut finalize_style,
-        &mut contract,
+        &contract,
     );
 
-    assert_eq!(reason, Some("active_observed_output_chat_repair"));
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert_eq!(reason, Some("active_observed_output_loop_context"));
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "/tmp/rustclaw/logs/clawd.nl-focus.log"
+    );
 }
 
 #[test]

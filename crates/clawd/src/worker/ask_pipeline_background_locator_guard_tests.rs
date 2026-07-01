@@ -1,7 +1,6 @@
 use super::{
     background_only_locator_route_should_force_clarify,
-    downgrade_background_locator_clarify_to_recent_observed_chat,
-    route_has_model_supplied_concrete_locator,
+    recover_background_locator_clarify_to_agent_loop, route_has_model_supplied_concrete_locator,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -378,12 +377,10 @@ Chinese version: README.zh-CN.md
 - ts=1 kind=ask request=read service_notes.md result=# Service Notes
 RustClaw test fixture service notes.";
 
-    assert!(
-        !downgrade_background_locator_clarify_to_recent_observed_chat(
-            &mut route,
-            recent_execution_context,
-        )
-    );
+    assert!(!recover_background_locator_clarify_to_agent_loop(
+        &mut route,
+        recent_execution_context,
+    ));
     assert!(route.needs_clarify);
     assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Clarify);
     assert_eq!(
@@ -396,11 +393,11 @@ RustClaw test fixture service notes.";
     );
     assert!(!route
         .route_reason
-        .contains("active_observed_output_chat_repair"));
+        .contains("active_observed_output_loop_recovery"));
 }
 
 #[test]
-fn background_locator_clarify_downgrades_existing_observed_synthesis_with_recent_result() {
+fn background_locator_clarify_recovers_to_agent_loop_with_recent_result() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
     route.set_clarify_gate();
@@ -420,19 +417,17 @@ fn background_locator_clarify_downgrades_existing_observed_synthesis_with_recent
 ### RECENT_EXECUTION_EVENTS
 - ts=2 kind=ask request=tail act_plan.log result={\"phase\":\"loop_done\",\"tool_calls\":1}";
 
-    assert!(
-        downgrade_background_locator_clarify_to_recent_observed_chat(
-            &mut route,
-            recent_execution_context,
-        )
-    );
+    assert!(recover_background_locator_clarify_to_agent_loop(
+        &mut route,
+        recent_execution_context,
+    ));
     assert!(!route.needs_clarify);
-    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Chat);
+    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Execute);
     assert_eq!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::OneSentence
     );
     assert!(route
         .route_reason
-        .contains("active_observed_output_chat_repair"));
+        .contains("active_observed_output_loop_recovery"));
 }

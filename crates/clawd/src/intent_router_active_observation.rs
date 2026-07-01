@@ -2,9 +2,9 @@ use serde_json::Value;
 
 use super::{
     parse_output_contract, parse_output_semantic_kind,
-    state_patch_deictic_reference_requires_clarify, ActFinalizeStyle, IntentNormalizerOut,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    state_patch_deictic_reference_requires_clarify, IntentNormalizerOut, IntentOutputContract,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind,
+    TargetTaskPolicy, TurnType,
 };
 
 const ACTIVE_OBSERVATION_CONTRACT_MARKERS: &[&str] = &[
@@ -295,13 +295,12 @@ pub(super) fn active_ordered_scalar_path_missing_state_patch_context(
     ))
 }
 
-pub(super) fn apply_active_ordered_scalar_path_chat_repair(
+pub(super) fn active_ordered_scalar_path_loop_context_hint(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     state_patch: Option<&Value>,
     route_reason: &str,
     needs_clarify: bool,
-    execution_finalize_style: &mut ActFinalizeStyle,
-    output_contract: &mut IntentOutputContract,
+    output_contract: &IntentOutputContract,
 ) -> Option<&'static str> {
     if needs_clarify
         || !active_session_has_ordered_entries(session_snapshot)
@@ -315,16 +314,10 @@ pub(super) fn apply_active_ordered_scalar_path_chat_repair(
     {
         return None;
     }
-    output_contract.response_shape = OutputResponseShape::Strict;
-    output_contract.requires_content_evidence = false;
-    output_contract.semantic_kind = OutputSemanticKind::None;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.locator_hint.clear();
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
+    Some("active_ordered_scalar_path_loop_context_without_structured_ref")
 }
 
-pub(super) fn apply_active_observed_output_chat_repair(
+pub(super) fn active_observed_output_loop_context_hint(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
@@ -336,8 +329,7 @@ pub(super) fn apply_active_observed_output_chat_repair(
     wants_file_delivery: bool,
     needs_clarify: bool,
     route_reason: &str,
-    execution_finalize_style: &mut ActFinalizeStyle,
-    output_contract: &mut IntentOutputContract,
+    output_contract: &IntentOutputContract,
 ) -> Option<&'static str> {
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     let current_turn_has_concrete_target = surface.has_concrete_locator_hint()
@@ -388,12 +380,5 @@ pub(super) fn apply_active_observed_output_chat_repair(
         return None;
     }
 
-    output_contract.requires_content_evidence = false;
-    output_contract.delivery_required = false;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.locator_hint.clear();
-    output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.semantic_kind = OutputSemanticKind::None;
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    Some("active_observed_output_chat_repair")
+    Some("active_observed_output_loop_context")
 }
