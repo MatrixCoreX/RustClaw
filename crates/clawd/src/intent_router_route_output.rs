@@ -11,16 +11,13 @@ use crate::{
 };
 
 fn ask_mode_from_machine_route_state(
-    needs_clarify: bool,
+    _needs_clarify: bool,
     output_contract: &crate::IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: crate::ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     finalize_style: ActFinalizeStyle,
 ) -> AskMode {
-    if needs_clarify {
-        return AskMode::clarify();
-    }
     let finalize = if route_has_structured_execution_signal(
         output_contract,
         wants_file_delivery,
