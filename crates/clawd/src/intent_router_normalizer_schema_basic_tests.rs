@@ -383,12 +383,12 @@ fn contract_repair_report_marks_structured_alias_repair() {
         .contains("output_contract_semantic_kind_normalized"));
     assert!(!report
         .detail_csv()
-        .contains("decision_promoted_by_output_contract"));
+        .contains("execution_signal_derived_from_output_contract"));
     assert_eq!(report.class_csv(), "schema_normalization");
 }
 
 #[test]
-fn contract_repair_report_marks_execution_signal_promoted_by_output_contract() {
+fn contract_repair_report_marks_execution_signal_derived_from_output_contract() {
     let before = serde_json::json!({
         "output_contract": {
             "response_shape": "free",
@@ -416,10 +416,7 @@ fn contract_repair_report_marks_execution_signal_promoted_by_output_contract() {
 
     assert!(report
         .detail_csv()
-        .contains("execution_signal_promoted_by_output_contract"));
-    assert!(!report
-        .detail_csv()
-        .contains("decision_promoted_by_output_contract"));
+        .contains("execution_signal_derived_from_output_contract"));
 }
 
 #[test]

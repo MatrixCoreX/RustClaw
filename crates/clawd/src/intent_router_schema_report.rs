@@ -96,7 +96,10 @@ pub(super) fn contract_repair_report_from_before_after(
     let after_obj = after.as_object();
 
     if before_obj.is_some_and(normalizer_object_declares_tool_action_payload) {
-        report.add("tool_payload", "normalizer_tool_payload_promoted_to_act");
+        report.add(
+            "tool_payload",
+            "normalizer_tool_payload_declared_action_boundary",
+        );
     }
 
     let before_recipe = before_obj.and_then(|obj| obj.get("execution_recipe"));
@@ -240,7 +243,7 @@ pub(super) fn contract_repair_report_from_before_after(
     {
         report.add(
             "structured_contract",
-            "execution_signal_promoted_by_output_contract",
+            "execution_signal_derived_from_output_contract",
         );
     }
     if execution_recipe_schema_field_changed(

@@ -68,7 +68,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     } else {
         (needs_clarify, clarify_question)
     };
-    let bare_path_promotes_to_execute =
+    let bare_path_active_observable_boundary =
         !needs_clarify_eff && bare_path_only && bare_path_fills_active_observable_task;
     let structured_execution_signal = structured_execution_signal_for_effective_route(
         &output_contract,
@@ -78,7 +78,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     );
     let legacy_normalizer_decision_eff = if needs_clarify_eff {
         FirstLayerDecision::Clarify
-    } else if bare_path_promotes_to_execute || structured_execution_signal {
+    } else if bare_path_active_observable_boundary || structured_execution_signal {
         FirstLayerDecision::PlannerExecute
     } else {
         FirstLayerDecision::DirectAnswer
@@ -87,7 +87,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         legacy_normalizer_decision_eff,
         FirstLayerDecision::PlannerExecute
     ) {
-        if bare_path_promotes_to_execute {
+        if bare_path_active_observable_boundary {
             crate::post_route_policy::content_evidence_execution_finalize_style(
                 &output_contract,
                 false,
