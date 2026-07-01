@@ -1046,8 +1046,8 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
-    route.resolved_intent =
-        "capability_ref=web.search_results query=rust async tutorial".to_string();
+    route.resolved_intent = "capability_ref=web.search_results".to_string();
+    route.output_contract.locator_hint = "query=rust async tutorial".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
