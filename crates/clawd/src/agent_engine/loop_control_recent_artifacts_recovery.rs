@@ -175,19 +175,11 @@ fn selector_limit_machine_token(text: &str) -> Option<usize> {
 
 fn recent_artifact_inventory_from_output(output: &str) -> Option<RecentArtifactInventory> {
     let value = serde_json::from_str::<Value>(output).ok()?;
-    recent_artifact_inventory_from_value(&value)
-        .or_else(|| {
-            value
-                .get("extra")
-                .and_then(recent_artifact_inventory_from_value)
-        })
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .and_then(|inner| recent_artifact_inventory_from_value(&inner))
-        })
+    recent_artifact_inventory_from_value(&value).or_else(|| {
+        value
+            .get("extra")
+            .and_then(recent_artifact_inventory_from_value)
+    })
 }
 
 fn recent_artifact_inventory_from_value(payload: &Value) -> Option<RecentArtifactInventory> {
