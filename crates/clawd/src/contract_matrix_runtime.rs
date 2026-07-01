@@ -367,6 +367,10 @@ pub(crate) fn action_trace_for_output_contract(
 }
 
 pub(crate) fn action_trace_for_route(route: &RouteResult, action_ref: &str) -> Option<Value> {
+    let action = ActionRef::parse(action_ref)?;
+    if route_capability_ref_allows_action_ref(route, &action) {
+        return Some(capability_ref_action_trace(route, &action));
+    }
     let output_contract = route.effective_output_contract();
     action_trace_for_output_contract_with_route_reason(
         &output_contract,
@@ -414,6 +418,33 @@ fn action_trace_for_output_contract_with_route_reason(
         "allowed_actions": normalized_tokens(matched.allowed_actions()),
         "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
     }))
+}
+
+fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value {
+    let action_key = action.as_key();
+    let final_answer_shape_kind =
+        final_answer_shape_for_route(route).unwrap_or(FinalAnswerShape::Free);
+    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    let evidence_expression = EvidenceExpression::default().to_trace_json(&required_evidence);
+    let observation_extractor = ObservationExtractor::from_source(&action_key);
+    json!({
+        "schema_version": 1,
+        "action_ref": action_key,
+        "contract_match": "capability_ref",
+        "decision": ActionPolicyDecision::Allowed.as_str(),
+        "policy_mode": "observe",
+        "evidence_profile": "capability_ref",
+        "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
+        "required_evidence": required_evidence,
+        "evidence_expression": evidence_expression,
+        "final_answer_shape": final_answer_shape_kind.as_str(),
+        "final_answer_shape_class": final_answer_shape_kind.class().as_str(),
+        "coarse_response_shape": final_answer_shape_kind.coarse_response_shape().as_str(),
+        "allows_model_language": final_answer_shape_kind.allows_model_language(),
+        "preferred_actions": [action_key.clone()],
+        "allowed_actions": [action_key],
+        "forbidden_actions": Vec::<String>::new(),
+    })
 }
 
 pub(crate) fn contract_trace_action_key_for_route(
@@ -718,6 +749,10 @@ fn route_capability_ref_allows_action(
     let Some(action) = ActionRef::from_skill_args(normalized_skill, args) else {
         return false;
     };
+    route_capability_ref_allows_action_ref(route, &action)
+}
+
+fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
     let action_name = action.action.as_deref().unwrap_or_default();
     match (action.skill.as_str(), action_name) {
         ("config_basic", "validate")
