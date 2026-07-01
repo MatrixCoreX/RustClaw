@@ -85,48 +85,6 @@ pub(super) fn locator_hint_points_to_workspace_root(hint: &str, workspace_root: 
     normalize_compare_path(candidate) == normalize_compare_path(workspace_root.to_path_buf())
 }
 
-#[cfg(test)]
-fn workspace_identity_token(workspace_root: &Path) -> Option<String> {
-    workspace_root
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(normalize_locator_identity_token)
-        .filter(|value| !value.is_empty())
-}
-
-#[cfg(test)]
-fn ascii_identifier_tokens(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    for ch in text.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
-            current.push(ch);
-            continue;
-        }
-        if !current.is_empty() {
-            tokens.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    tokens
-}
-
-#[cfg(test)]
-pub(super) fn current_request_mentions_workspace_identity(
-    req: &str,
-    workspace_root: &Path,
-) -> bool {
-    let Some(identity) = workspace_identity_token(workspace_root) else {
-        return false;
-    };
-    ascii_identifier_tokens(req)
-        .iter()
-        .map(|token| normalize_locator_identity_token(token))
-        .any(|token| token == identity)
-}
-
 fn normalize_locator_identity_token(value: &str) -> String {
     value
         .trim()

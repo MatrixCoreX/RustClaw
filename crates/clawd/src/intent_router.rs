@@ -69,8 +69,6 @@ use parse_failed_fallback::{
 
 #[path = "intent_router_path_tokens.rs"]
 mod path_tokens;
-#[cfg(test)]
-use path_tokens::current_request_mentions_workspace_identity;
 use path_tokens::{
     compare_path_targets_current_anchor, first_compare_path_from_text, locator_hint_compare_path,
     locator_hint_is_unset_or_broad, locator_hint_points_to_workspace_root, scope_patch_hint_value,
@@ -281,8 +279,6 @@ use current_turn_structural_repair::{
 #[path = "intent_router_active_observation.rs"]
 mod active_observation;
 #[cfg(test)]
-use active_observation::active_ordered_scalar_path_missing_state_patch_context;
-#[cfg(test)]
 use active_observation::prompt_has_concrete_fileish_cue;
 use active_observation::{
     active_clarify_locator_task_prompt, active_observable_task_prompt,
@@ -301,15 +297,6 @@ use active_task_repair::{
     active_task_replace_loop_context_hint, active_task_scope_update_loop_context_hint,
     apply_active_task_scope_refinement_repair, apply_active_task_structured_patch_repair,
     apply_missing_active_task_reuse_clarify, repair_state_patch_replacement_literal_conflicts,
-};
-
-#[cfg(test)]
-#[path = "intent_router_semantic_suspect.rs"]
-mod semantic_suspect;
-#[cfg(test)]
-use semantic_suspect::{
-    semantic_suspect_detail_for_normalizer_output,
-    semantic_suspect_detail_for_normalizer_output_with_command_runtime,
 };
 
 #[path = "intent_router_prompt_render.rs"]
@@ -457,10 +444,6 @@ mod contract_repair_judge_tests;
 #[cfg(test)]
 #[path = "intent_router_prompt_render_tests.rs"]
 mod prompt_render_tests;
-
-#[cfg(test)]
-#[path = "intent_router_semantic_suspect_tests.rs"]
-mod semantic_suspect_tests;
 
 #[cfg(test)]
 #[path = "intent_router_normalizer_schema_basic_tests.rs"]

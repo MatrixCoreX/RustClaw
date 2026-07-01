@@ -27,7 +27,7 @@ pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
             out.should_refresh_long_term_memory,
         ) {
             append_contract_repair_context(&mut contract_repair_context, invalid_binding_context);
-            contract_repair_report.add("semantic_suspect", "active_task_invalid_turn_binding");
+            contract_repair_report.add("boundary_contract", "active_task_invalid_turn_binding");
         }
     }
     if contract_repair_judge_runtime_enabled()

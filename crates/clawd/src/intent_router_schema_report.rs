@@ -228,7 +228,7 @@ pub(super) fn contract_repair_report_from_before_after(
     }
     if output_contract_unknown_scalar_was_ignored(before_obj, after_contract) {
         report.add(
-            "semantic_suspect",
+            "boundary_contract",
             "executable_route_unknown_scalar_output_contract",
         );
     }
