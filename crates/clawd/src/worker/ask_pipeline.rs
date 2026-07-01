@@ -979,13 +979,10 @@ pub(super) fn route_reason_has_capability_ref_prefix(
 }
 
 fn route_machine_tokens(route_result: &crate::RouteResult) -> impl Iterator<Item = &str> {
-    [&route_result.route_reason, &route_result.resolved_intent]
-        .into_iter()
-        .flat_map(|surface| {
-            surface
-                .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
-                .map(str::trim)
-        })
+    route_result
+        .route_reason
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
+        .map(str::trim)
 }
 
 fn valid_capability_ref_token(token: &str) -> bool {
