@@ -96,8 +96,7 @@ pub(super) fn directory_entry_groups_prefers_observed_groups(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
-    let contract = route.effective_output_contract();
-    crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         == Some(crate::contract_matrix::FinalAnswerShape::GroupedNameList)
         && route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
         && loop_has_structured_listing_observation(loop_state)
