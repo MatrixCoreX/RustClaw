@@ -638,6 +638,10 @@ pub(super) fn is_supported_archive_path(path: &str) -> bool {
     path_lower.ends_with(".zip") || path_lower.ends_with(".tar.gz") || path_lower.ends_with(".tgz")
 }
 
+fn route_has_archive_capability_action(route: &RouteResult, action: &str) -> bool {
+    crate::machine_capability_ref::route_has_capability_action_name(route, &["archive"], &[action])
+}
+
 pub(super) fn archive_format_for_path(path: &str) -> &'static str {
     if path.trim().to_ascii_lowercase().ends_with(".zip") {
         "zip"
@@ -647,7 +651,9 @@ pub(super) fn archive_format_for_path(path: &str) -> &'static str {
 }
 
 pub(super) fn archive_unpack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveUnpack) {
+    if !route_has_archive_capability_action(route, "unpack")
+        && !route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveUnpack)
+    {
         return None;
     }
     let (archive, dest) = split_archive_locator_pair(&route.output_contract.locator_hint)?;
@@ -699,7 +705,8 @@ pub(super) fn rewrite_archive_unpack_run_cmd_to_archive_basic(
 }
 
 pub(super) fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
+    if (!route_has_archive_capability_action(route, "pack")
+        && !route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack))
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
     {
@@ -722,12 +729,14 @@ pub(super) fn archive_pack_pair_for_route_or_text(
     if let Some(pair) = archive_pack_pair_for_route(route) {
         return Some(pair);
     }
-    if !matches!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::ArchivePack
-            | crate::OutputSemanticKind::FilesystemMutationResult
-            | crate::OutputSemanticKind::GeneratedFileDelivery
-    ) {
+    if !route_has_archive_capability_action(route, "pack")
+        && !matches!(
+            route.effective_output_contract_semantic_kind(),
+            crate::OutputSemanticKind::ArchivePack
+                | crate::OutputSemanticKind::FilesystemMutationResult
+                | crate::OutputSemanticKind::GeneratedFileDelivery
+        )
+    {
         return None;
     }
 
