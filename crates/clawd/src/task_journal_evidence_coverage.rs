@@ -40,8 +40,7 @@ pub(crate) fn evidence_coverage_for_route(
     route: &crate::RouteResult,
     journal: &TaskJournal,
 ) -> TaskJournalEvidenceCoverage {
-    let required_evidence =
-        crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
+    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
     let (observed_fields, mut observed_canonical, observed_extractors, observed_evidence_sources) =
         observed_evidence_field_sets(journal);
     augment_route_canonical_evidence(
@@ -50,8 +49,9 @@ pub(crate) fn evidence_coverage_for_route(
         &observed_extractors,
         &mut observed_canonical,
     );
+    let effective_output_contract = route.effective_output_contract();
     let evidence_expression = crate::contract_matrix::bundled_contract_matrix()
-        .and_then(|matrix| matrix.match_output_contract(&route.output_contract))
+        .and_then(|matrix| matrix.match_output_contract(&effective_output_contract))
         .map(|matched| matched.evidence_expression());
     let missing_evidence = evidence_expression
         .as_ref()
@@ -357,7 +357,7 @@ pub(super) fn augment_route_canonical_evidence(
     observed_extractors: &BTreeSet<String>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigMutation {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation) {
         if observed_field_present(observed_fields, "valid")
             || observed_field_present(observed_fields, "validated")
             || config_mutation_plan_fields_present(observed_fields)
@@ -366,21 +366,21 @@ pub(super) fn augment_route_canonical_evidence(
             observed_canonical.insert("valid".to_string());
         }
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    if route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         && observed_canonical.contains("size_bytes")
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::GitCommitSubject | crate::OutputSemanticKind::GitRepositoryState
-    ) && (observed_canonical.contains("command_output")
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::GitCommitSubject,
+        crate::OutputSemanticKind::GitRepositoryState,
+    ]) && (observed_canonical.contains("command_output")
         || observed_canonical.contains("content_excerpt")
         || observed_fields.contains("text_excerpt"))
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("field_value")
             || observed_fields.contains("excerpt")
@@ -388,25 +388,25 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("command_output".to_string());
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::FilePaths
-    ) && observed_canonical.contains("content_match")
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::FilePaths,
+    ]) && observed_canonical.contains("content_match")
         && observed_canonical.contains("path")
     {
         observed_canonical.insert("candidates".to_string());
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::FileBasename
-    ) && (observed_canonical.contains("path")
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ScalarPathOnly,
+        crate::OutputSemanticKind::FileBasename,
+    ]) && (observed_canonical.contains("path")
         || observed_canonical.contains("content_match")
         || observed_canonical.contains("candidates")
         || observed_field_with_prefix(observed_fields, "results["))
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && (observed_canonical.contains("content_excerpt")
             || observed_canonical.contains("content_match")
             || observed_fields.contains("excerpt")
@@ -414,40 +414,29 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
         && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
     {
         observed_canonical.insert("count".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::StructuredKeys
+    if route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys)
         && (observed_canonical.contains("keys")
             || observed_field_with_prefix(observed_fields, "keys["))
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DockerContainerLifecycle
-            | crate::OutputSemanticKind::DockerPs
-            | crate::OutputSemanticKind::DockerImages
-            | crate::OutputSemanticKind::DockerLogs
-    ) && (observed_canonical.contains("command_output")
-        || observed_canonical.contains("content_excerpt")
-        || observed_fields.contains("text_excerpt"))
+    if route_has_docker_capability_marker(route)
+        && (observed_canonical.contains("command_output")
+            || observed_canonical.contains("content_excerpt")
+            || observed_fields.contains("text_excerpt"))
     {
-        match route.output_contract.semantic_kind {
-            crate::OutputSemanticKind::DockerContainerLifecycle => {
-                observed_canonical.insert("field_value".to_string());
-            }
-            crate::OutputSemanticKind::DockerPs
-            | crate::OutputSemanticKind::DockerImages
-            | crate::OutputSemanticKind::DockerLogs => {
-                observed_canonical.insert("candidates".to_string());
-            }
-            _ => {}
+        if route_has_docker_lifecycle_capability_marker(route) {
+            observed_canonical.insert("field_value".to_string());
+        } else if route_has_docker_list_capability_marker(route) {
+            observed_canonical.insert("candidates".to_string());
         }
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         && (observed_canonical.contains("status")
             || observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
@@ -455,23 +444,22 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::WebPageSummary
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-    ) && http_response_body_fields_present(observed_fields)
+    if (route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+    ]) || route_has_browser_http_excerpt_capability_marker(route))
+        && http_response_body_fields_present(observed_fields)
     {
         observed_canonical.insert("content_excerpt".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::PublishingPreview
+    if crate::machine_capability_ref::route_has_capability_namespace(route, &["x"])
         && (observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
             || observed_fields.contains("text_excerpt"))
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+    if route.output_contract_marker_is(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
         && (observed_canonical.contains("candidates")
             || observed_fields.contains("rows")
             || observed_fields.contains("columns"))
@@ -484,6 +472,34 @@ pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, pre
     observed_fields
         .iter()
         .any(|field| field.starts_with(prefix))
+}
+
+fn route_has_docker_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
+}
+
+fn route_has_docker_lifecycle_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["docker"],
+        &["inspect", "restart", "start", "stop", "version"],
+    )
+}
+
+fn route_has_docker_list_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["docker"],
+        &["image", "images", "list", "log", "logs", "read"],
+    )
+}
+
+fn route_has_browser_http_excerpt_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "http", "web"],
+        &["extract", "get", "open", "read"],
+    )
 }
 
 pub(super) fn http_response_body_fields_present(observed_fields: &BTreeSet<String>) -> bool {
@@ -519,13 +535,13 @@ pub(super) fn step_can_supply_contract_evidence(
             step_error_supplies_negative_contract_evidence(step, route)
                 || step.skill == "run_cmd"
                     && route.is_some_and(|route| {
-                        route.output_contract.semantic_kind
-                            == crate::OutputSemanticKind::ExecutionFailedStep
-                            || crate::task_contract::required_evidence_fields_for_output_contract(
-                                &route.output_contract,
-                            )
-                            .iter()
-                            .any(|field| field == "command_output")
+                        route.output_contract_marker_is(
+                            crate::OutputSemanticKind::ExecutionFailedStep,
+                        ) || crate::task_contract::required_evidence_fields_for_output_contract(
+                            &route.effective_output_contract(),
+                        )
+                        .iter()
+                        .any(|field| field == "command_output")
                     })
         }
     }
@@ -538,15 +554,14 @@ pub(super) fn step_error_supplies_negative_contract_evidence(
     let Some(route) = route else {
         return false;
     };
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentPresenceCheck
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-            | crate::OutputSemanticKind::ExcerptKindJudgment
-            | crate::OutputSemanticKind::ExistenceWithPath
-            | crate::OutputSemanticKind::ExistenceWithPathSummary
-    ) {
+    if !route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ContentPresenceCheck,
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::ExcerptKindJudgment,
+        crate::OutputSemanticKind::ExistenceWithPath,
+        crate::OutputSemanticKind::ExistenceWithPathSummary,
+    ]) {
         return false;
     }
     let Some(error) = step
