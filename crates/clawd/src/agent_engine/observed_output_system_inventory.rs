@@ -35,11 +35,7 @@ fn system_basic_info_payload_from_value(value: &serde_json::Value) -> Option<ser
     {
         return Some(extra.clone());
     }
-    value
-        .get("text")
-        .and_then(|v| v.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .filter(system_basic_value_looks_like_info)
+    None
 }
 
 pub(super) fn system_basic_info_value(skill: &str, body: &str) -> Option<serde_json::Value> {
