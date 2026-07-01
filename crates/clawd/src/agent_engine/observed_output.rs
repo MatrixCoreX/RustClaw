@@ -1563,13 +1563,6 @@ fn strict_raw_tail_read_answer_from_value(value: &serde_json::Value) -> Option<S
     value
         .get("extra")
         .and_then(strict_raw_tail_read_answer_from_value)
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-                .and_then(|inner| strict_raw_tail_read_answer_from_value(&inner))
-        })
 }
 
 fn strict_raw_tail_read_answer_from_flat_value(value: &serde_json::Value) -> Option<String> {
