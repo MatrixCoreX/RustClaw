@@ -30,10 +30,6 @@ pub(crate) fn canonicalize_legacy_tool_call(
     }
 }
 
-pub(crate) fn is_planner_facing_virtual_tool(tool: &str) -> bool {
-    matches!(tool, "fs_basic" | "config_basic")
-}
-
 pub(crate) fn normalize_virtual_tool_arg_aliases(tool: &str, args: &mut Value) -> bool {
     match tool {
         "fs_basic" => normalize_fs_basic_args(args),

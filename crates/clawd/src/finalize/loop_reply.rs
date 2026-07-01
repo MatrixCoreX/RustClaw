@@ -84,7 +84,6 @@ use markdown_scalar::markdown_heading_from_read_output;
 use markdown_scalar::{
     deterministic_scalar_markdown_heading_answer_from_loop,
     first_markdown_heading_from_read_output, markdown_heading_from_line,
-    observed_markdown_heading_scalar_answer_for_delivery,
     replace_delivery_with_observed_markdown_heading_scalar,
     route_allows_observed_markdown_heading_scalar_delivery,
 };
@@ -252,13 +251,11 @@ use language_closeout::{
     attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
     ensure_requested_success_marker_visible, execution_recipe_budget_exhausted_message,
     execution_recipe_closeout_note, execution_recipe_missing_success_marker_message,
-    execution_summary_language, execution_summary_prefix, execution_summary_status_label,
     final_reply_language_hint, missing_requested_success_marker,
     planned_delivery_is_publishable_model_language_answer,
     prefer_english_for_agent_contextual_user_text, prefer_english_for_user_text,
     route_allows_model_language_final_answer,
     route_prefers_language_rendered_execution_failed_step, route_resolved_intent,
-    ExecutionSummaryLanguage,
 };
 
 #[path = "loop_reply_missing_delivery.rs"]
