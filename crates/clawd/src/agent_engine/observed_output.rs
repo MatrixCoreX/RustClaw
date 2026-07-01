@@ -316,7 +316,8 @@ fn read_range_direct_candidate_conflicts_with_request_language(
 }
 
 fn compare_paths_observed_candidate(body: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let raw_value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let value = structured_observed_body_value(&raw_value);
     if value.get("action").and_then(|v| v.as_str()) != Some("compare_paths") {
         return None;
     }
@@ -343,6 +344,21 @@ fn compare_paths_observed_candidate(body: &str) -> Option<String> {
         .map(|size| size.to_string())
         .unwrap_or_else(|| "-".to_string());
     let comparison = value.get("comparison").and_then(|v| v.as_object());
+    let same_path = comparison
+        .and_then(|item| item.get("same_path"))
+        .and_then(|v| v.as_bool())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let left_exists = left
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let right_exists = right
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string());
     let same_size = comparison
         .and_then(|item| item.get("same_size"))
         .and_then(|v| v.as_bool())
@@ -354,7 +370,7 @@ fn compare_paths_observed_candidate(body: &str) -> Option<String> {
         .map(|v| v.to_string())
         .unwrap_or_else(|| "-".to_string());
     Some(format!(
-        "compare_paths left={left_path} left_size_bytes={left_size} right={right_path} right_size_bytes={right_size} same_size={same_size} size_delta_bytes={size_delta}"
+        "compare_paths left={left_path} left.exists={left_exists} left_size_bytes={left_size} right={right_path} right.exists={right_exists} right_size_bytes={right_size} same_path={same_path} same_size={same_size} size_delta_bytes={size_delta}"
     ))
 }
 
@@ -578,7 +594,10 @@ fn multi_count_quantity_comparison_guard_entry(
     route: Option<&crate::RouteResult>,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
+    if !output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::QuantityComparison,
+    ) {
         return None;
     }
     let rows = loop_state
@@ -787,8 +806,10 @@ fn hidden_entries_empty_direct_candidate_satisfies_contract(
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::HiddenEntriesCheck
-        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    if !output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::HiddenEntriesCheck,
+    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
         || answer.trim().is_empty()
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
@@ -803,8 +824,10 @@ fn hidden_entries_direct_candidate_satisfies_contract(
     loop_state: &LoopState,
     answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::HiddenEntriesCheck
-        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    if !output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::HiddenEntriesCheck,
+    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
     {
@@ -839,12 +862,12 @@ fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
 }
 
 fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
 fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -908,18 +931,13 @@ fn latest_observation_is_explicitly_forbidden_by_contract(
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        &step.skill,
-        &args,
+    crate::contract_matrix::action_policy_for_route(Some(route), &step.skill, &args).is_some_and(
+        |policy| policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden,
     )
-    .is_some_and(|policy| {
-        policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
-    })
 }
 
 fn route_uses_enforced_generic_path_content_profile(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    output_route_policy::route_is_unclassified_contract(route)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route.output_contract.response_shape == crate::OutputResponseShape::Free
@@ -1134,7 +1152,7 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
         "direct_observation_passthrough_allowed": direct_observation_passthrough_allowed,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_intent": route.output_contract.delivery_intent.as_str(),
-        "semantic_kind": route.output_contract.semantic_kind.as_str(),
+        "semantic_kind": route.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route.output_contract.locator_hint,
         "needs_clarify": route.needs_clarify,
     })
@@ -1169,17 +1187,42 @@ fn observed_answer_fallback_can_use_compact_prompt(
     {
         return false;
     }
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-            | crate::OutputSemanticKind::CommandOutputSummary
-            | crate::OutputSemanticKind::ServiceStatus
-            | crate::OutputSemanticKind::ExecutionFailedStep
-            | crate::OutputSemanticKind::DockerPs
-            | crate::OutputSemanticKind::DockerImages
-            | crate::OutputSemanticKind::DockerLogs
-            | crate::OutputSemanticKind::DockerContainerLifecycle
-    )
+    output_route_policy::route_contract_marker_is_any(
+        route,
+        &[
+            crate::OutputSemanticKind::RawCommandOutput,
+            crate::OutputSemanticKind::CommandOutputSummary,
+            crate::OutputSemanticKind::ServiceStatus,
+            crate::OutputSemanticKind::ExecutionFailedStep,
+        ],
+    ) || route_has_docker_capability_marker(route)
+}
+
+fn route_has_docker_capability_marker(route: &crate::RouteResult) -> bool {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .any(|surface| machine_context_has_capability_namespace(surface, "docker"))
+}
+
+fn machine_context_has_capability_namespace(machine_context: &str, namespace: &str) -> bool {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .map(str::trim)
+        .any(|token| {
+            let Some(capability) = token.strip_prefix("capability_ref=") else {
+                return false;
+            };
+            let Some((candidate, action)) = capability.split_once('.') else {
+                return false;
+            };
+            candidate == namespace
+                && !action.is_empty()
+                && capability.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'_' | b'-' | b'.')
+                })
+        })
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {
@@ -1514,8 +1557,10 @@ fn strict_raw_tail_read_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
-        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+    if !output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::RawCommandOutput,
+    ) || route.output_contract.response_shape != crate::OutputResponseShape::Strict
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {

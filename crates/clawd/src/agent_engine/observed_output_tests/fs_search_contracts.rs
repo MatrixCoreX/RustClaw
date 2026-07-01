@@ -91,6 +91,32 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
 }
 
 #[test]
+fn fs_search_file_paths_contract_accepts_route_marker_without_semantic_enum() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
+        ));
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.route_reason = "contract:file_paths".to_string();
+    route.resolved_intent = "machine contract only".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+    assert_eq!(route.output_contract.semantic_kind, OutputSemanticKind::None);
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("plan/execution_intent_routing_repair_plan_20260509_已完成.md")
+    );
+}
+
+#[test]
 fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -831,7 +857,7 @@ fn observed_entries_preserve_full_find_name_results_for_synthesis() {
 #[test]
 fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -966,7 +992,7 @@ fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
 #[test]
 fn observed_response_style_hint_reflects_output_contract_shape() {
     let mut route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

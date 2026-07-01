@@ -1,4 +1,6 @@
-use super::requested_machine_kv_summary_from_observations;
+use super::{
+    collect_machine_text_fragments_from_output, requested_machine_kv_summary_from_observations,
+};
 
 #[test]
 fn machine_summary_accepts_grounded_command_with_path_continuation() {
@@ -84,6 +86,433 @@ fn machine_summary_preserves_dotted_markers_and_embedded_pairs() {
         summary.as_deref(),
         Some("task_control.resume.dry_run task_control.pause.dry_run task_id=00000000-0000-4000-8000-000000000010 checkpoint_id=ckpt-1 pause_seconds=120")
     );
+}
+
+#[test]
+fn machine_summary_preserves_requested_underscore_field_markers_from_json_keys() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"adapter_kind":"local_process_poll","cancel_ref":"optional_cancel_reference","status":"cancelled","terminal_projection":{"state":"cancelled","terminal":true}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "必须包含 cancel_ref、adapter_kind=local_process_poll、status=cancelled 和 terminal_projection。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(
+            "cancel_ref=optional_cancel_reference terminal_projection adapter_kind=local_process_poll status=cancelled"
+        )
+    );
+}
+
+#[test]
+fn machine_summary_projects_multiline_weather_machine_fields() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        "location=北京\ntemperature=25.4\nweather_code=多云",
+        &mut observed,
+    );
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"location":"北京","temperature":25.4,"weather_code":"多云","weather_code_raw":3}}"#,
+        &mut observed,
+    );
+    observed.sort();
+    observed.dedup();
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只返回 location、temperature、weather_code。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("location=北京 temperature=25.4 weather_code=多云")
+    );
+}
+
+#[test]
+fn machine_summary_projects_bulleted_candidate_count_field() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        "照片整理来源候选发现与预览完成。\n\n- candidate_count=7\n- mode=plan\n- path=/home/guagua/rustclaw/plan",
+        &mut observed,
+    );
+    observed.sort();
+    observed.dedup();
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "返回 candidate_count、mode=plan。",
+        &observed,
+    );
+
+    assert_eq!(summary.as_deref(), Some("candidate_count=7 mode=plan"));
+}
+
+#[test]
+fn machine_summary_does_not_duplicate_following_inline_machine_pair() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"planned_groups=[{"group":"generated_images","files":["document/gen-1.png"]}], would_move=false"#,
+        &mut observed,
+    );
+    collect_machine_text_fragments_from_output(
+        r#"{"planned_groups":[{"group":"generated_images","files":["document/gen-1.png"]}],"would_move":false}"#,
+        &mut observed,
+    );
+    observed.sort();
+    observed.dedup();
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "return planned_groups and would_move=false",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(
+            r#"planned_groups=[{"files":["document/gen-1.png"],"group":"generated_images"}] would_move=false"#
+        )
+    );
+}
+
+#[test]
+fn machine_summary_ignores_filename_like_dotted_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"path":"tmp/nl_basic_skill_100_write_case/note.txt","target":"note.txt","result":"ok"}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "创建 note.txt，写入 alpha，再追加 beta，最后删除目录；用机器字段汇总每步状态。",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_sqlite_filename_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"sqlite_query","db_path":"/tmp/test_contract.sqlite","result":{"columns":["id"],"rows":[{"id":1}]}},"text":"test_contract.sqlite"}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "query test_contract.sqlite and summarize rows",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_projects_requested_single_field_markers_from_json_scalars() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"path":"/home/guagua/rustclaw/README.md","exists":true,"size_bytes":12345}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只返回 path、exists、size_bytes 三个机器字段。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("path=/home/guagua/rustclaw/README.md exists=true size_bytes=12345")
+    );
+}
+
+#[test]
+fn machine_summary_projects_sqlite_table_count_and_tables() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"list_tables","table_count":3,"tables":["orders","service_logs","users"],"field_value":{"table_count":3,"tables":["orders","service_logs","users"]}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "列出表名，返回 table_count 和 tables。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(r#"table_count=3 tables=["orders","service_logs","users"]"#)
+    );
+}
+
+#[test]
+fn machine_summary_projects_requested_value_template_from_structured_scalar() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"extract_field","field_path":"name","value":"rustclaw-nl-fixture","value_text":"rustclaw-nl-fixture","value_type":"string"}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Extract the name field and answer package_name=<value>.",
+        &observed,
+    );
+
+    assert_eq!(summary.as_deref(), Some("package_name=rustclaw-nl-fixture"));
+}
+
+#[test]
+fn machine_summary_rejects_requested_value_template_when_scalar_is_ambiguous() {
+    let observed = vec![
+        "value=alpha".to_string(),
+        "value=beta".to_string(),
+        "field_path=name".to_string(),
+    ];
+
+    let summary =
+        requested_machine_kv_summary_from_observations("Only answer result=<value>.", &observed);
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_projects_read_range_path_and_total_lines_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"read_range","path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md","start_line":1,"end_line":7,"total_lines":7,"excerpt":"1|# Service Notes\n2|."}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "最终只回答机器字段 path 和 total_lines。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("path=/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md total_lines=7")
+    );
+}
+
+#[test]
+fn machine_summary_requires_value_projection_for_single_field_marker() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"count_inventory","counts":{"total":2}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations("只输出 count 字段。", &observed);
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_request_option_pairs_when_listing_results() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"names":["release_checklist.md","service_notes.md"],"names_only":true,"max_entries":10}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "List only the filenames, names_only=true, max_entries=10, and do not summarize prose.",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_projects_requested_array_marker_from_json_values() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"names":["release_checklist.md","service_notes.md"]}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "List only the filenames under docs and return names.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(r#"names=["release_checklist.md","service_notes.md"]"#)
+    );
+}
+
+#[test]
+fn machine_summary_projects_task_control_lifecycle_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"count":0,"states":"none","can_poll":false,"can_cancel":false,"checkpoint_id_present":false,"field_value":{"count":0,"states":"none","can_poll":false,"can_cancel":false,"checkpoint_id_present":false}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只输出 count、states、can_poll 三个字段。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("count=0 states=none can_poll=false")
+    );
+}
+
+#[test]
+fn machine_summary_requires_values_for_task_control_presence_markers() {
+    let observed = vec![
+        "count=0".to_string(),
+        "can_poll".to_string(),
+        "checkpoint_id_present".to_string(),
+    ];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return count, can_poll, checkpoint_id_present.",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_projects_archive_member_list_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"list","member_count":2,"members":["notes.txt","nested/config.ini"],"field_value":{"member_count":2,"members":["notes.txt","nested/config.ini"]}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只返回 member_count 和 members。",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(r#"member_count=2 members=["notes.txt","nested/config.ini"]"#)
+    );
+}
+
+#[test]
+fn machine_summary_projects_archive_member_read_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"read","path":"notes.txt","member_path":"notes.txt","content_excerpt":"fixture_archive_notes","field_value":{"member_path":"notes.txt","content_excerpt":"fixture_archive_notes"}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return member_path and content_excerpt.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("member_path=notes.txt content_excerpt=fixture_archive_notes")
+    );
+}
+
+#[test]
+fn machine_summary_projects_archive_content_excerpt_with_spaces() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"read","member":"notes.txt","path":"notes.txt","content_excerpt":"fixture archive notes","field_value":{"member":"notes.txt","path":"notes.txt","content_excerpt":"fixture archive notes"}}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return member path and content_excerpt.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some(r#"member=notes.txt path=notes.txt content_excerpt="fixture archive notes""#)
+    );
+}
+
+#[test]
+fn machine_summary_ignores_action_name_markers_when_content_result_is_required() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"read_range","path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","line_count":6}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "用 read_range 读取 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 第 1 到 6 行，回答必须包含文件路径和读取到的行数。",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_skill_identity_marker_without_output_field() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"skill":"install_module","action":"install","module":"requests","dry_run":true,"commands":["python3 -m pip install --user requests"]},"text":"skill=install_module\naction=install\nmodule=requests\ndry_run=true"}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只给出 install_module 的 dry-run 计划和生态判断，不要实际安装。",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_action_identity_marker_without_output_field() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"assess_gap","recommended_mode":"manual_review","safe_defaults":{"does_not_enable_new_skill":true,"does_not_modify_runtime":true}},"text":"Need an explicit extension mode before making changes."}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "只做 assess_gap，不创建文件、不注册。",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_read_range_slice_option_pairs() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","line_count":6,"slice_mode":"range","slice_start":1,"slice_end":6}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "slice_mode=range slice_start=1 slice_end=6",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
+fn machine_summary_ignores_read_range_slice_n_option_pair() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"path":"scripts/nl_tests/fixtures/device_local/docs/archive/README.txt","requested_n":5,"total_lines":2,"excerpt":"1|Archive fixtures for NL tests."}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations("slice_n=5", &observed);
+
+    assert!(summary.is_none());
 }
 
 #[test]

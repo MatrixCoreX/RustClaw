@@ -7,7 +7,7 @@ fn recent_artifacts_judgment_is_not_hard_classified_by_observed_output() {
             "total 151792\n-rw-r--r--@ 1 testuser staff 76509771 Apr 12 16:30 model_io.log\n-rw-r--r--@ 1 testuser staff 906739 Apr 12 16:30 act_plan.log\n-rw-r--r--@ 1 testuser staff 191187 Apr 12 15:48 service_ops.log\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
             .to_string(),
         needs_clarify: false,
@@ -100,7 +100,7 @@ fn direct_answer_defers_archive_creation_success_to_synthesis() {
         "exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),
@@ -151,7 +151,7 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
             r#"{"action":"pack","format":"zip","source":"/tmp/rustclaw-workspace/scripts/skill_calls","archive":"/tmp/rustclaw-workspace/tmp/nl_archive_case.zip","output":"exit=0\nupdating: skill_calls/\n"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),
@@ -194,6 +194,57 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
 }
 
 #[test]
+fn archive_read_direct_answer_projects_member_path_and_content_excerpt() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "archive_basic",
+        r#"{"action":"read","archive":"/repo/tmp/test_bundle.zip","path":"notes.txt","member":"notes.txt","member_path":"notes.txt","content":"fixture archive notes\n","content_excerpt":"fixture archive notes"}"#,
+    ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent:
+            "Read member notes.txt from tmp/test_bundle.zip and return member_path and content_excerpt"
+                .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ArchiveRead,
+            locator_hint: "tmp/test_bundle.zip | notes.txt".to_string(),
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("member_path,content_excerpt".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some(r#"{"content_excerpt":"fixture archive notes","member_path":"notes.txt"}"#)
+    );
+}
+
+#[test]
 fn archive_pack_scalar_contract_returns_created_archive_path() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -230,6 +281,35 @@ fn archive_pack_scalar_contract_returns_created_archive_path() {
             self_extension: crate::SelfExtensionContract::default(),
         },
     };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("/tmp/rustclaw-workspace/tmp/nl_archive_case.zip")
+    );
+}
+
+#[test]
+fn archive_pack_scalar_contract_accepts_route_marker_without_semantic_enum() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "archive_basic",
+        "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n",
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route_result.route_reason = "contract:archive_pack".to_string();
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint =
+        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    assert_eq!(
+        route_result.output_contract.semantic_kind,
+        OutputSemanticKind::None
+    );
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()
@@ -628,7 +708,7 @@ fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
             "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1164,7 +1244,7 @@ fn direct_answer_formats_package_manager_detect_summary() {
         "package_manager=brew",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1209,7 +1289,7 @@ fn direct_answer_formats_package_manager_matrix_basis_summary() {
         "package_manager=apt-get",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "检测这台机器可用的包管理器，并说明依据。".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

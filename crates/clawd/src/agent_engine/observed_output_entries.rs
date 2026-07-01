@@ -118,7 +118,10 @@ pub(super) fn git_repository_state_facts_entry(
     route: Option<&crate::RouteResult>,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::GitRepositoryState,
+    ) {
         return None;
     }
     let idx = latest_successful_step_index(loop_state, |step| step.skill == "git_basic")?;
@@ -179,7 +182,10 @@ pub(super) fn execution_failed_step_guard_entry(
     route: Option<&crate::RouteResult>,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExecutionFailedStep {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ExecutionFailedStep,
+    ) {
         return None;
     }
     let mut lines = vec![
@@ -479,7 +485,10 @@ pub(super) fn route_observation_facts_entry(
 ) -> Option<String> {
     let ctx = agent_run_context?;
     let route = ctx.route_result.as_ref()?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPathSummary {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ExistenceWithPathSummary,
+    ) {
         return None;
     }
     let resolved_path = ctx

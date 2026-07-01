@@ -7,13 +7,13 @@ fn sqlite_database_kind_judgment_is_not_hard_classified_by_observed_output() {
         r#"{"columns":["name"],"rows":[]}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库"
                 .to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
+        route_reason: "normalizer:planner_execute_with_chat_finalizer".to_string(),
         route_confidence: None,
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Unknown,
@@ -54,7 +54,7 @@ fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
             r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -109,7 +109,7 @@ fn sqlite_database_kind_judgment_uses_run_cmd_table_names_without_llm() {
         "orders\nservice_logs\nusers\n",
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -161,7 +161,7 @@ fn sqlite_schema_version_uses_run_cmd_value_without_llm() {
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "schema_version=7\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "读取 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema 版本"
                 .to_string(),
@@ -209,7 +209,7 @@ fn sqlite_table_listing_uses_run_cmd_table_names_without_llm() {
         "orders\nservice_logs\nusers\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "列出 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里的表"
                 .to_string(),
@@ -262,7 +262,7 @@ fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns
             r#"{"columns":["id","name","email"],"rows":[{"email":"alice@example.com","id":1,"name":"Alice"},{"email":"bob@example.com","id":2,"name":"Bob"}]}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -317,13 +317,13 @@ fn direct_answer_lists_sqlite_table_names_without_llm_when_names_only_is_request
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
             resolved_intent:
                 "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
+            route_reason: "normalizer:planner_execute_with_chat_finalizer".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -398,6 +398,35 @@ fn direct_scalar_lists_sqlite_table_names_when_names_only_contract_is_scalar() {
         route_result: Some(route_result),
         ..AgentRunContext::default()
     };
+    assert_eq!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("orders\nusers")
+    );
+}
+
+#[test]
+fn direct_scalar_lists_sqlite_table_names_from_route_marker_without_semantic_enum() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "db_basic",
+        r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+    route_result.route_reason = "contract:sqlite_table_names_only".to_string();
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+    assert_eq!(
+        route_result.output_contract.semantic_kind,
+        OutputSemanticKind::None
+    );
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
         Some("orders\nusers")
@@ -748,11 +777,11 @@ fn sqlite_table_listing_summary_defers_to_synthesis() {
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "列一下 data/app.sqlite 里有哪些表".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
+        route_reason: "normalizer:planner_execute_with_chat_finalizer".to_string(),
         route_confidence: None,
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Unknown,
@@ -1284,7 +1313,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
             "exit=0\n09342a6a fix: expose nl execution and locator flows\n336e8d92 docs: update planner-first architecture diagrams\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Write a short release note for RustClaw.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

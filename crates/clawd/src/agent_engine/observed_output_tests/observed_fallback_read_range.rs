@@ -143,7 +143,7 @@ fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
             r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"12|# timeout note\n13|task_timeout_seconds = 3600\n14|# end"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读取 /tmp/config.toml 最后 3 行，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -363,7 +363,7 @@ fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
         "RustClaw is deployed locally and keeps task state in sqlite.",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "看一下 /tmp/README.txt，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -409,7 +409,7 @@ fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
             r##"{"text":"# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution.\n\n## Overview\nMore text."}"##,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Read README.md and summarize it in one line.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -457,7 +457,7 @@ fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
             r##"{"text":"# RustClaw\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."}"##,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读取 README.md 并用一句中文总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -763,7 +763,7 @@ fn direct_answer_passthroughs_chat_wrapped_execution_path_read_range_when_no_tra
             r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\"\n3|mode = \"test\""}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "用户提供了文件路径 /tmp/config.toml，但未说明要对该文件执行什么操作"
             .to_string(),
         needs_clarify: false,
@@ -810,7 +810,7 @@ fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
             r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "先读一下 README.md 前 4 行，再用三句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -857,7 +857,7 @@ fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
             r#"{"action":"read_range","path":"/tmp/service_notes.md","resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes."}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "service_notes.md 를 읽고 핵심만 요약해.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -952,7 +952,7 @@ fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_inte
             r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "先读一下 README.md 前 4 行".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

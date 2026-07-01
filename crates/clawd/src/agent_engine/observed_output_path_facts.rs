@@ -50,12 +50,14 @@ pub(super) fn run_cmd_semantic_listing_text_candidate(
     route: &crate::RouteResult,
     body: &str,
 ) -> Option<String> {
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FilePaths
+    if !super::output_route_policy::route_contract_marker_is_any(
+        route,
+        &[
+            crate::OutputSemanticKind::DirectoryNames,
+            crate::OutputSemanticKind::FileNames,
+            crate::OutputSemanticKind::DirectoryEntryGroups,
+            crate::OutputSemanticKind::FilePaths,
+        ],
     ) {
         return None;
     }
@@ -460,7 +462,10 @@ pub(super) fn display_path_kind(kind: &str, prefer_english: bool) -> String {
 pub(super) fn route_prefers_path_kind_fact_answer(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ExistenceWithPath,
+        )
 }
 
 pub(super) fn path_batch_fact_path_kind_candidate(

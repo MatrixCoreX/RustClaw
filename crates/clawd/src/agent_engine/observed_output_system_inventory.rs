@@ -212,12 +212,18 @@ pub(super) fn inventory_dir_direct_answer_candidate(
     prefer_english: bool,
 ) -> Option<String> {
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryEntryGroups
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::DirectoryEntryGroups,
+        )
     }) {
         return inventory_dir_grouped_names_candidate(state, value, prefer_english);
     }
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::FileNames,
+        )
     }) {
         let files = inventory_dir_names_by_kind(value, "files");
         if !files.is_empty() {
@@ -225,7 +231,10 @@ pub(super) fn inventory_dir_direct_answer_candidate(
         }
     }
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::DirectoryNames,
+        )
     }) {
         let dirs = inventory_dir_names_by_kind(value, "dirs");
         if !dirs.is_empty() {
@@ -286,6 +295,9 @@ pub(super) fn tree_summary_direct_answer_candidate(
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("tree_summary") {
         return None;
+    }
+    if let Some(answer) = tree_summary_rows_machine_answer(value) {
+        return Some(answer);
     }
     let tree = value.get("tree")?;
     let children = tree.get("children").and_then(|v| v.as_array())?;
@@ -388,6 +400,48 @@ pub(super) fn tree_summary_direct_answer_candidate(
         ));
     }
     Some(answer)
+}
+
+fn tree_summary_rows_machine_answer(value: &serde_json::Value) -> Option<String> {
+    let rows = value
+        .get("summary_rows")
+        .or_else(|| value.get("candidates"))
+        .or_else(|| value.get("results"))
+        .and_then(|rows| rows.as_array())?;
+    let lines = rows
+        .iter()
+        .filter_map(tree_summary_row_machine_line)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(lines.join("\n"))
+}
+
+fn tree_summary_row_machine_line(row: &serde_json::Value) -> Option<String> {
+    if row.get("kind").and_then(|value| value.as_str()) != Some("dir") {
+        return None;
+    }
+    let name = row
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            row.get("path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .and_then(|path| Path::new(path).file_name().and_then(|name| name.to_str()))
+        })?;
+    let file_count = row.get("file_count").and_then(|value| value.as_u64())?;
+    let truncated = row
+        .get("truncated")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    Some(format!(
+        "name={name} file_count={file_count} truncated={truncated}"
+    ))
 }
 
 pub(super) fn dir_compare_direct_answer_candidate(

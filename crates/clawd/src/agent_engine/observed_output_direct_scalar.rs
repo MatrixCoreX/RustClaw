@@ -26,24 +26,26 @@ pub(super) fn structured_scalar_candidate(
     }
     if skill == "archive_basic" {
         if let Some(route) = route {
-            match route.output_contract.semantic_kind {
-                crate::OutputSemanticKind::ArchivePack => {
-                    if let Some(path) = archive_basic_path_value_from_body(
-                        body,
-                        &["archive", "archive_path", "output_path", "path"],
-                    ) {
-                        return Some(path);
-                    }
+            if super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ArchivePack,
+            ) {
+                if let Some(path) = archive_basic_path_value_from_body(
+                    body,
+                    &["archive", "archive_path", "output_path", "path"],
+                ) {
+                    return Some(path);
                 }
-                crate::OutputSemanticKind::ArchiveUnpack => {
-                    if let Some(path) = archive_basic_path_value_from_body(
-                        body,
-                        &["dest", "dest_path", "destination", "path"],
-                    ) {
-                        return Some(path);
-                    }
+            } else if super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ArchiveUnpack,
+            ) {
+                if let Some(path) = archive_basic_path_value_from_body(
+                    body,
+                    &["dest", "dest_path", "destination", "path"],
+                ) {
+                    return Some(path);
                 }
-                _ => {}
             }
         }
         let summary = archive_list_summary_from_body(body)?;
@@ -71,22 +73,38 @@ pub(super) fn structured_scalar_candidate(
     }
     if skill == "db_basic" {
         if let Some(route) = route {
-            return match route.output_contract.semantic_kind {
-                crate::OutputSemanticKind::ScalarCount => db_basic_count_candidate(&value),
-                crate::OutputSemanticKind::SqliteTableNamesOnly => {
-                    db_basic_table_names(&value).map(|names| names.join("\n"))
-                }
-                crate::OutputSemanticKind::SqliteTableListing
-                | crate::OutputSemanticKind::SqliteDatabaseKindJudgment => None,
-                _ => db_basic_scalar_candidate(&value),
-            };
+            if super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ScalarCount,
+            ) {
+                return db_basic_count_candidate(&value);
+            }
+            if super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::SqliteTableNamesOnly,
+            ) {
+                return db_basic_table_names(&value).map(|names| names.join("\n"));
+            }
+            if super::output_route_policy::route_contract_marker_is_any(
+                route,
+                &[
+                    crate::OutputSemanticKind::SqliteTableListing,
+                    crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                ],
+            ) {
+                return None;
+            }
+            return db_basic_scalar_candidate(&value);
         }
         return db_basic_scalar_candidate(&value);
     }
     if skill == "service_control" {
         let response_shape = route.map(|route| route.output_contract.response_shape);
         let service_status_route = route.is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+            super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ServiceStatus,
+            )
         });
         if route.is_some_and(|route| {
             route.output_contract.response_shape == crate::OutputResponseShape::Scalar
@@ -164,16 +182,17 @@ pub(super) fn structured_scalar_candidate(
     if !matches!(skill, "system_basic" | "config_basic" | "fs_basic") {
         return None;
     }
+    let value = structured_observed_body_value(&value);
     if skill == "system_basic"
         && route.is_some_and(route_requests_scalar_path_only)
-        && system_basic_value_looks_like_info(&value)
+        && system_basic_value_looks_like_info(value)
     {
-        return system_basic_info_scalar_path_candidate(&value);
+        return system_basic_info_scalar_path_candidate(value);
     }
     let action = value.get("action").and_then(|v| v.as_str())?;
     match action {
         "validate_structured" => {
-            validate_structured_direct_answer_candidate(state, &value, prefer_english)
+            validate_structured_direct_answer_candidate(state, value, prefer_english)
         }
         "read_range" => route
             .filter(|route| route_allows_scalar_read_range_direct_answer(route))
@@ -334,11 +353,11 @@ pub(super) fn structured_scalar_candidate(
         }
         "path_batch_facts" => {
             if route.is_some_and(route_requests_scalar_existence) {
-                system_basic_scalar_existence_candidate(state, &value, prefer_english)
+                system_basic_scalar_existence_candidate(state, value, prefer_english)
             } else if route.is_some_and(route_requests_file_basename) {
-                system_basic_path_batch_file_basename_candidate(&value)
+                system_basic_path_batch_file_basename_candidate(value)
             } else if route.is_some_and(route_requests_scalar_path_only) {
-                system_basic_path_batch_scalar_path_candidate(&value)
+                system_basic_path_batch_scalar_path_candidate(value)
             } else {
                 None
             }
@@ -350,13 +369,13 @@ pub(super) fn structured_scalar_candidate(
             .and_then(value_scalar_text),
         "count_inventory" => count_inventory_direct_answer_candidate(
             state,
-            &value,
+            value,
             route.map(|route| route.output_contract.response_shape),
             prefer_english,
         ),
         "structured_keys" => structured_keys_direct_answer_candidate(
             state,
-            &value,
+            value,
             route.map(|route| route.resolved_intent.as_str()),
             route.map(|route| route.output_contract.response_shape),
             prefer_english,
@@ -370,7 +389,7 @@ pub(super) fn market_quote_scalar_candidate(
     value: &serde_json::Value,
 ) -> Option<String> {
     let route = route?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::MarketQuote
+    if !route_is_market_quote(route)
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
     {
         return None;
@@ -395,6 +414,64 @@ pub(super) fn market_quote_scalar_candidate(
         Some(symbol) => format!("{symbol} ${}", format_market_price(price)),
         None => format!("${}", format_market_price(price)),
     })
+}
+
+fn route_is_market_quote(route: &crate::RouteResult) -> bool {
+    route_capability_action_for_namespaces(route, &["crypto", "stock"])
+        .is_some_and(|action| action_has_any_segment(action, &["quote"]))
+}
+
+fn route_capability_action_for_namespaces<'a>(
+    route: &'a crate::RouteResult,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .filter_map(|surface| machine_context_capability_action_for_namespaces(surface, namespaces))
+        .next()
+}
+
+fn machine_context_capability_action_for_namespaces<'a>(
+    machine_context: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .filter_map(|part| capability_action_for_namespace_token(part.trim(), namespaces))
+        .next()
+}
+
+fn capability_action_for_namespace_token<'a>(
+    token: &'a str,
+    namespaces: &[&str],
+) -> Option<&'a str> {
+    let capability = token.strip_prefix("capability_ref=")?;
+    let (namespace, action) = capability.split_once('.')?;
+    if namespace.is_empty()
+        || action.is_empty()
+        || !namespaces.iter().any(|candidate| namespace == *candidate)
+        || !capability.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+    {
+        return None;
+    }
+    Some(action)
+}
+
+fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    action
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        .any(|segment| {
+            let segment = segment.trim();
+            !segment.is_empty()
+                && needles.iter().any(|needle| {
+                    segment == *needle
+                        || segment.starts_with(&format!("{needle}_"))
+                        || segment.ends_with(&format!("_{needle}"))
+                        || segment.contains(&format!("_{needle}_"))
+                })
+        })
 }
 
 pub(super) fn market_quote_output_has_scalar_price(
@@ -490,7 +567,10 @@ pub(super) fn git_basic_scalar_candidate(
     body: &str,
 ) -> Option<String> {
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::GitCommitSubject
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::GitCommitSubject,
+        )
     }) {
         return git_basic_commit_subject_candidate(body);
     }
@@ -513,7 +593,10 @@ pub(super) fn git_basic_current_branch_scalar_candidate(
     body: &str,
 ) -> Option<String> {
     if route.is_some_and(|route| {
-        route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
+        !super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::GitRepositoryState,
+        )
     }) {
         return None;
     }

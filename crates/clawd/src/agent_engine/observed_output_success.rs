@@ -164,6 +164,10 @@ fn json_object_is_direct_observation_body(value: &serde_json::Value) -> bool {
         "clawd_process_count",
         "clawd_health_port_open",
         "system_health",
+        "service_name",
+        "manager_type",
+        "requested_action",
+        "executed_actions",
     ]
     .iter()
     .any(|field| obj.contains_key(*field))

@@ -35,7 +35,10 @@ pub(super) fn content_excerpt_summary_direct_answer_candidate(
     body: &str,
 ) -> Option<String> {
     if !route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+        super::output_route_policy::route_contract_marker_is(
+            route,
+            crate::OutputSemanticKind::ContentExcerptSummary,
+        )
     }) {
         return None;
     }
@@ -121,7 +124,10 @@ pub(super) fn doc_parse_content_presence_direct_answer_candidate(
     path_hint: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentPresenceCheck {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ContentPresenceCheck,
+    ) {
         return None;
     }
     let query = content_presence_query_from_request(request_text)?;
@@ -468,8 +474,10 @@ pub(super) fn compose_content_excerpt_with_summary_answer(
     if !agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::ContentExcerptWithSummary
+            super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::ContentExcerptWithSummary,
+            )
         })
     {
         return answer.trim().to_string();

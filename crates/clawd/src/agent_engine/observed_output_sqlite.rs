@@ -62,14 +62,18 @@ fn sqlite_table_observed_output_kind(
     if !(locator_hint.ends_with(".sqlite") || locator_hint.ends_with(".db")) {
         return None;
     }
-    match route.output_contract.semantic_kind {
-        crate::OutputSemanticKind::SqliteTableListing => {
-            Some(SqliteTableObservedOutputKind::Listing)
-        }
-        crate::OutputSemanticKind::SqliteTableNamesOnly => {
-            Some(SqliteTableObservedOutputKind::NamesOnly)
-        }
-        _ => None,
+    if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteTableListing,
+    ) {
+        Some(SqliteTableObservedOutputKind::Listing)
+    } else if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteTableNamesOnly,
+    ) {
+        Some(SqliteTableObservedOutputKind::NamesOnly)
+    } else {
+        None
     }
 }
 
@@ -168,8 +172,10 @@ pub(super) fn db_basic_database_kind_judgment_candidate(
     request_text: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-    {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+    ) {
         return None;
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -274,23 +280,31 @@ pub(super) fn run_cmd_sqlite_direct_answer_candidate(
     request_text: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
-    match route.output_contract.semantic_kind {
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
-            let table_names = run_cmd_sqlite_table_names(body);
-            sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
-        }
-        crate::OutputSemanticKind::SqliteSchemaVersion => {
-            run_cmd_sqlite_schema_version(body).map(|value| format!("schema_version={value}"))
-        }
-        crate::OutputSemanticKind::SqliteTableNamesOnly => {
-            let table_names = run_cmd_sqlite_table_names(body);
-            (!table_names.is_empty()).then(|| table_names.join("\n"))
-        }
-        crate::OutputSemanticKind::SqliteTableListing => {
-            let table_names = run_cmd_sqlite_table_names(body);
-            sqlite_table_listing_markdown(&table_names)
-        }
-        _ => None,
+    if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+    ) {
+        let table_names = run_cmd_sqlite_table_names(body);
+        sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
+    } else if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteSchemaVersion,
+    ) {
+        run_cmd_sqlite_schema_version(body).map(|value| format!("schema_version={value}"))
+    } else if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteTableNamesOnly,
+    ) {
+        let table_names = run_cmd_sqlite_table_names(body);
+        (!table_names.is_empty()).then(|| table_names.join("\n"))
+    } else if super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteTableListing,
+    ) {
+        let table_names = run_cmd_sqlite_table_names(body);
+        sqlite_table_listing_markdown(&table_names)
+    } else {
+        None
     }
 }
 
@@ -300,8 +314,10 @@ pub(super) fn db_basic_database_kind_judgment_from_loop_state_candidate(
     request_text: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-    {
+    if !super::output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+    ) {
         return None;
     }
     loop_state
