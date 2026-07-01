@@ -8,17 +8,18 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Option<PlanResult> {
     let route = route_result?;
+    let kind = runtime_status_query_kind(turn_analysis)?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+        || !(route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput))
         || route.output_contract.delivery_required
         || (!run_cmd_available_for_plan(state) && !system_basic_available_for_plan(state))
     {
         return None;
     }
-    let kind = runtime_status_query_kind(turn_analysis)?;
     let action = if system_basic_available_for_plan(state) {
         let kind = runtime_status_query_system_basic_kind(kind)?;
         AgentAction::CallTool {
@@ -43,12 +44,8 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
     if let AgentAction::CallTool { tool: skill, args } | AgentAction::CallSkill { skill, args } =
         &action
     {
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return None;
         }
@@ -346,10 +343,10 @@ pub(super) fn list_dir_args_need_inventory_dir(
 ) -> bool {
     let Some(manifest) = state.skill_manifest("list_dir") else {
         return route_result.is_some_and(|route| {
-            matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::FileNames
-            )
+            route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::DirectoryNames,
+                crate::OutputSemanticKind::FileNames,
+            ])
         }) || obj.contains_key("dirs_only")
             || obj.contains_key("directories_only")
             || obj.contains_key("directory_only")
@@ -364,15 +361,14 @@ pub(super) fn list_dir_args_need_inventory_dir(
             || obj.contains_key("extension")
             || obj.contains_key("extensions");
     };
-    let route_semantic = route_result
-        .map(|route| route.output_contract.semantic_kind.as_str())
-        .unwrap_or("none");
-    if manifest
-        .runtime_rewrite_semantic_kinds
-        .iter()
-        .any(|kind| kind == route_semantic)
-    {
-        return true;
+    if let Some(route) = route_result {
+        if manifest
+            .runtime_rewrite_semantic_kinds
+            .iter()
+            .any(|kind| route_matches_semantic_kind_name(route, kind))
+        {
+            return true;
+        }
     }
     obj.keys().any(|key| {
         let normalized = normalize_schema_token(key);
@@ -381,6 +377,21 @@ pub(super) fn list_dir_args_need_inventory_dir(
             .iter()
             .any(|candidate| candidate == &normalized)
     })
+}
+
+fn route_matches_semantic_kind_name(route: &RouteResult, kind: &str) -> bool {
+    let kind = kind.trim();
+    if kind.is_empty() {
+        return false;
+    }
+    if let Some(semantic_kind) = crate::OutputSemanticKind::ALL
+        .iter()
+        .copied()
+        .find(|semantic_kind| semantic_kind.as_str() == kind)
+    {
+        return route.output_contract_marker_is(semantic_kind);
+    }
+    route.has_route_reason_machine_marker(kind)
 }
 
 pub(super) fn list_dir_runtime_mapping_from_registry(
@@ -439,14 +450,16 @@ pub(super) fn inventory_dir_args_from_list_dir_args(
         &["dir_path", "directory_path", "directory", "dir"],
     );
     obj.insert("action".to_string(), Value::String(runtime_action));
-    let route_semantic = route_result.map(|route| route.output_contract.semantic_kind);
+    let route_is_directory_names = route_result.is_some_and(|route| {
+        route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames)
+    });
+    let route_is_file_names = route_result
+        .is_some_and(|route| route.output_contract_marker_is(crate::OutputSemanticKind::FileNames));
     let directory_filter_requested = structured_directory_filter_requested(&obj);
     let file_filter_requested = structured_file_filter_requested(&obj);
-    let mut dirs_only = directory_filter_requested
-        || (route_semantic == Some(crate::OutputSemanticKind::DirectoryNames)
-            && file_filter_requested);
-    let mut files_only =
-        route_semantic == Some(crate::OutputSemanticKind::FileNames) || file_filter_requested;
+    let mut dirs_only =
+        directory_filter_requested || (route_is_directory_names && file_filter_requested);
+    let mut files_only = route_is_file_names || file_filter_requested;
     if dirs_only {
         files_only = false;
     } else if files_only {
@@ -454,22 +467,13 @@ pub(super) fn inventory_dir_args_from_list_dir_args(
     }
     obj.insert("dirs_only".to_string(), Value::Bool(dirs_only));
     obj.insert("files_only".to_string(), Value::Bool(files_only));
-    if dirs_only
-        || files_only
-        || matches!(
-            route_semantic,
-            Some(crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::FileNames)
-        )
-    {
+    if dirs_only || files_only || route_is_directory_names || route_is_file_names {
         obj.insert("names_only".to_string(), Value::Bool(true));
     } else {
         obj.entry("names_only".to_string())
             .or_insert_with(|| Value::Bool(true));
     }
-    if matches!(
-        route_semantic,
-        Some(crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::FileNames)
-    ) {
+    if route_is_directory_names || route_is_file_names {
         obj.insert("include_hidden".to_string(), Value::Bool(false));
     }
     for key in [

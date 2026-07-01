@@ -18,7 +18,7 @@ version = "0.1.7"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -215,7 +215,7 @@ fn content_evidence_doc_parse_observation_appends_synthesis() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -279,7 +279,7 @@ fn terminal_synthesize_answer_appends_delivery_respond() {
 #[test]
 fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -301,7 +301,7 @@ fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
 #[test]
 fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -325,7 +325,7 @@ fn observed_terminal_synthesis_replaces_concrete_respond_with_placeholder() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -359,7 +359,7 @@ fn observed_terminal_synthesis_keeps_service_status_concrete_respond() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -414,7 +414,7 @@ fn observed_terminal_synthesis_keeps_structurally_grounded_concrete_respond() {
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -463,7 +463,7 @@ fn observed_terminal_synthesis_keeps_identifier_grounded_summary_respond() {
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -520,7 +520,7 @@ fn observed_terminal_synthesis_drops_redundant_synthesis_for_fs_basic_interface_
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1179,7 +1179,7 @@ fn file_names_contract_enforces_file_only_after_find_entries_inventory_rewrite()
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1218,7 +1218,7 @@ fn strict_unclassified_directory_inventory_forces_metadata_for_fs_basic() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1250,7 +1250,7 @@ fn strict_unclassified_system_inventory_forces_metadata_before_fs_rewrite() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

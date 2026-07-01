@@ -5,14 +5,20 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
 ) -> Option<PlanResult> {
-    let route = route_result?;
+    let route_tokens = if let Some(route) = route_result {
+        format!(
+            "{}\n{}\n{}",
+            route.route_reason, route.resolved_intent, goal
+        )
+    } else {
+        goal.to_string()
+    };
+    if loop_state.round_no <= 1 && finalizer_language_policy_dry_run_tokens_present(&route_tokens) {
+        return Some(finalizer_language_policy_dry_run_plan(goal));
+    }
     if loop_state.has_tool_or_skill_output || loop_state.round_no > 1 {
         return None;
     }
-    let route_tokens = format!(
-        "{}\n{}\n{}",
-        route.route_reason, route.resolved_intent, goal
-    );
     if answer_verifier_contract_dry_run_tokens_present(&route_tokens) {
         return Some(build_plan_result(
             goal,
@@ -220,6 +226,43 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     None
 }
 
+fn finalizer_language_policy_dry_run_plan(goal: &str) -> PlanResult {
+    build_plan_result(
+        goal,
+        "deterministic:finalizer_language_policy_dry_run_contract",
+        PlanKind::Single,
+        &[AgentAction::Respond {
+            content: serde_json::json!({
+                "schema_version": 1,
+                "semantic_kind": "finalizer_language_policy_dry_run",
+                "would_mutate": false,
+                "message_key": "clawd.finalizer.language_policy",
+                "runtime_allowed_outputs": [
+                    "message_key",
+                    "structured_evidence"
+                ],
+                "runtime_forbidden_outputs": [
+                    "fixed_user_reply_template",
+                    "localized_reply_text",
+                    "language_phrase_branch"
+                ],
+                "structured_evidence": {
+                    "owner_layer": "runtime",
+                    "output_contract": "message_key_or_structured_evidence",
+                    "final_reply_owner": "finalizer_llm_i18n"
+                },
+                "final_reply_policy": {
+                    "owner_layer": "finalizer",
+                    "renderer": "finalizer_llm_i18n",
+                    "language_source": "request_language_hint",
+                    "input_channel": "message_key_or_structured_evidence"
+                }
+            })
+            .to_string(),
+        }],
+    )
+}
+
 fn answer_verifier_contract_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
     normalized.contains("required_evidence")
@@ -251,6 +294,18 @@ fn observed_output_projection_dry_run_tokens_present(text: &str) -> bool {
         && (normalized.contains("json field") || normalized.contains("json_field"))
         && normalized.contains("status")
         && normalized.contains("artifact_refs")
+        && has_dry_run_machine_token(&normalized)
+}
+
+fn finalizer_language_policy_dry_run_tokens_present(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    let has_evidence_token = normalized.contains("structured_evidence")
+        || normalized.contains("structured evidence")
+        || normalized.contains("evidence");
+    normalized.contains("message_key")
+        && normalized.contains("finalizer")
+        && normalized.contains("i18n")
+        && has_evidence_token
         && has_dry_run_machine_token(&normalized)
 }
 

@@ -15,7 +15,7 @@ pub(super) fn kb_chain_deterministic_plan_result(
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::CommandOutputSummary
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
         || !kb_enabled_for_planning(state)
         || !route_declares_kb_chain(route)
     {
@@ -186,10 +186,6 @@ fn kb_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
     let AgentAction::CallSkill { skill, args } = action else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed() && policy.action_matches_preferred())
+    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed() && policy.action_matches_preferred())
 }

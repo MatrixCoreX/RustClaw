@@ -19,7 +19,7 @@ pub(super) fn recent_artifacts_judgment_deterministic_plan_result(
     }
     let route = route_result?;
     if route.needs_clarify
-        || route.output_contract.semantic_kind != OutputSemanticKind::RecentArtifactsJudgment
+        || !route.output_contract_marker_is(OutputSemanticKind::RecentArtifactsJudgment)
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {
@@ -135,7 +135,7 @@ pub(super) fn normalize_recent_artifacts_listing_selectors(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != OutputSemanticKind::RecentArtifactsJudgment {
+    if !route.output_contract_marker_is(OutputSemanticKind::RecentArtifactsJudgment) {
         return actions;
     }
     actions
@@ -234,7 +234,7 @@ pub(super) fn rewrite_recent_artifacts_field_extraction_to_selected_file_reads(
                     && actions.iter().any(action_is_terminal_discussion))));
 
     if route.needs_clarify
-        || route.output_contract.semantic_kind != OutputSemanticKind::RecentArtifactsJudgment
+        || !route.output_contract_marker_is(OutputSemanticKind::RecentArtifactsJudgment)
         || !route.output_contract.requires_content_evidence
         || !should_rewrite
         || has_bounded_file_read

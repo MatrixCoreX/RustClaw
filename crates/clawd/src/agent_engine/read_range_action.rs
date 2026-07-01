@@ -121,7 +121,7 @@ pub(super) fn rewrite_config_validation_read_plan_to_validate(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigValidation
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
         || actions.iter().any(action_is_structured_config_validation)
     {
         return actions;
@@ -535,7 +535,7 @@ pub(super) fn rewrite_config_mutation_plan_only_to_config_edit_plan(
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
         || loop_state.execution_recipe.kind
             == crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
         || actions.iter().any(action_is_obvious_mutation)
@@ -813,7 +813,7 @@ pub(super) fn replace_file_paths_anchor_respond_only_with_find_entries(
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
         || !route.output_contract.requires_content_evidence
     {
         return actions;
@@ -855,7 +855,7 @@ pub(super) fn replace_scalar_path_anchor_respond_only_with_stat_paths(
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         || !route.output_contract.requires_content_evidence
     {
         return actions;
@@ -899,7 +899,7 @@ pub(super) fn rewrite_config_change_preview_to_config_edit_plan(
         return actions;
     };
     if !matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ConfigMutation | crate::OutputSemanticKind::ConfigRiskAssessment
     ) {
         return actions;
@@ -953,7 +953,7 @@ pub(super) fn rewrite_config_mutation_to_config_edit_closed_loop(
     let has_planned_mutation = actions.iter().any(action_is_obvious_mutation);
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
         || !(has_config_change_recipe || has_planned_mutation)
     {
         return actions;
@@ -1106,8 +1106,8 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::StructuredKeys
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+        || route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys)
+        || route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         || (!identifier_presence_contract
             && actions.iter().any(action_is_structured_config_validation))
         || actions.iter().any(action_is_structured_scalar_field_read)
@@ -1317,8 +1317,7 @@ pub(super) fn add_prior_structured_text_field_read_for_scalar_compare(
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::RecentScalarEqualityCheck
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         || structured_scalar_observation_units(&actions) != 1
         || executed_structured_scalar_observation_units(loop_state) > 0
     {
@@ -1359,12 +1358,8 @@ pub(super) fn add_prior_structured_text_field_read_for_scalar_compare(
         let Some((skill, args)) = planned_call_subject_and_args(&action) else {
             continue;
         };
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             continue;
         }

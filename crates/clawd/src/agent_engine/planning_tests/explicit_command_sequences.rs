@@ -6,7 +6,7 @@ fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -58,7 +58,7 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -114,7 +114,7 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
 fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_steps() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1151,7 +1151,7 @@ fn existence_with_path_path_deterministic_plan_uses_path_facts() {
 #[test]
 fn existence_with_path_retry_read_text_range_is_preserved_when_verifier_requests_excerpt() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1397,7 +1397,7 @@ fn existence_with_path_directory_auto_locator_does_not_parse_history_entries_as_
     fs::create_dir_all(root.path.join("configs")).expect("mkdir configs");
     let directory_path = root.path.join("configs").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

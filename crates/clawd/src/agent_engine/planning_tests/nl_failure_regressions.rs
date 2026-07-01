@@ -184,11 +184,11 @@ fn browser_http_summary_uses_both_observations_and_explicit_evidence_refs() {
     let state = test_state_with_enabled_skills(&["browser_web", "http_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::WebPageSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Url;
     route.output_contract.locator_hint = "https://example.com".to_string();
     route.route_reason =
-        "capability_ref=browser_web.open_extract capability_ref=http_basic.get".to_string();
+        "capability_ref=browser.open_extract capability_ref=http_basic.get".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = browser_http_url_deterministic_plan_result(
@@ -227,9 +227,9 @@ fn web_search_summary_prefers_quoted_query_over_full_instruction() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::WebSearchSummary;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.resolved_intent =
-        "Search the web for \"Rust async tutorial\" with top_k=3 and return titles".to_string();
+        "capability_ref=web.search_results \"Rust async tutorial\" top_k=3".to_string();
     route.output_contract.self_extension.list_selector.limit = Some(3);
     let loop_state = LoopState::new(1);
 
@@ -256,7 +256,7 @@ fn web_search_summary_prefers_quoted_query_over_full_instruction() {
 fn chat_wrapped_text_loop_terminal_respond_does_not_force_plan_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );

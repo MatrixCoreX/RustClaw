@@ -11,8 +11,7 @@ pub(super) fn filesystem_mutation_deterministic_plan_result(
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::FilesystemMutationResult
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
         || !fs_basic_available_for_plan(state)
     {
         return None;
@@ -94,12 +93,8 @@ fn action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
     let AgentAction::CallTool { tool, args } = action else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        tool,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    crate::contract_matrix::action_policy_for_route(Some(route), tool, args)
+        .is_some_and(|policy| policy.is_allowed())
 }
 
 fn fs_basic_available_for_plan(state: &AppState) -> bool {

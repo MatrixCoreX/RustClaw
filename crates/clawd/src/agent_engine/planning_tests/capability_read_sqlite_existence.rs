@@ -44,6 +44,86 @@ fn normalize_planned_actions_resolves_action_ref_call_capability_before_policy_g
 }
 
 #[test]
+fn normalize_planned_actions_keeps_sqlite_query_on_db_basic_despite_literal_sql() {
+    let state = test_state_with_registry();
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "db_basic".to_string(),
+        args: json!({
+            "action": "sqlite_query",
+            "db_path": "/tmp/app.sqlite",
+            "sql": "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5` on /tmp/app.sqlite and return names.",
+        Some("Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5` on /tmp/app.sqlite and return names."),
+        None,
+        actions,
+    );
+
+    assert!(normalized.iter().all(|action| {
+        !matches!(
+            action,
+            AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. }
+                if skill == "run_cmd"
+        )
+    }));
+    let args = expect_planned_call(&normalized[0], "db_basic", "sqlite_query");
+    assert_eq!(
+        args.get("db_path").and_then(Value::as_str),
+        Some("/tmp/app.sqlite")
+    );
+    assert_eq!(
+        args.get("sql").and_then(Value::as_str),
+        Some("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5")
+    );
+}
+
+#[test]
+fn normalize_planned_actions_preserves_media_poll_action_from_capability() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallCapability {
+        capability: "image.poll".to_string(),
+        args: json!({
+            "task_id": "image-task-001",
+            "job_id": "image-job-001",
+            "output_path": "document/media_dry_run/image_status_card.png",
+            "dry_run": true,
+            "mock_status": "succeeded",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "image_generate", "poll");
+    assert_eq!(
+        args.get("task_id").and_then(Value::as_str),
+        Some("image-task-001")
+    );
+    assert_eq!(
+        args.get("job_id").and_then(Value::as_str),
+        Some("image-job-001")
+    );
+    assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        args.get("mock_status").and_then(Value::as_str),
+        Some("succeeded")
+    );
+}
+
+#[test]
 fn normalize_planned_actions_applies_skill_arg_aliases_before_verifier() {
     let state = test_state_with_registry();
     let actions = vec![AgentAction::CallSkill {
@@ -208,7 +288,7 @@ fn structured_text_read_range_without_bounds_reads_broader_context() {
         tool: "fs_basic".to_string(),
         args: json!({
             "action": "read_text_range",
-            "path": "prompts/schemas/direct_answer_gate.schema.json",
+            "path": "prompts/schemas/agent_loop_decision_envelope.schema.json",
             "format": "text",
         }),
     }];
@@ -245,7 +325,7 @@ fn structured_text_full_mode_without_n_reads_broader_context() {
         tool: "fs_basic".to_string(),
         args: json!({
             "action": "read_text_range",
-            "path": "prompts/schemas/direct_answer_gate.schema.json",
+            "path": "prompts/schemas/agent_loop_decision_envelope.schema.json",
             "mode": "full",
         }),
     }];

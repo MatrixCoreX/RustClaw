@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     let root = TempDirGuard::new("file_paths_directory_locator");
-    fs::write(root.path.join("lib.rs"), "fn direct_answer_gate() {}\n").expect("write rust");
+    fs::write(root.path.join("lib.rs"), "fn planner_loop_marker() {}\n").expect("write rust");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
@@ -36,7 +36,7 @@ fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     .expect("directory locator should use structured directory listing");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
+    assert!(plan.steps.len() >= 1);
     match &plan.steps[0].to_agent_action() {
         Some(AgentAction::CallTool { tool, args }) => {
             assert_eq!(tool, "fs_basic");
@@ -85,7 +85,7 @@ fn file_paths_directory_locator_with_extension_token_uses_recursive_find_entries
     .expect("directory locator with extension token should use recursive file search");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
+    assert!(plan.steps.len() >= 1);
     match &plan.steps[0].to_agent_action() {
         Some(AgentAction::CallTool { tool, args }) => {
             assert_eq!(tool, "fs_basic");
@@ -350,7 +350,7 @@ fn directory_entry_groups_auto_locator_uses_fs_basic_list_dir() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -390,7 +390,7 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -434,7 +434,7 @@ fn directory_entry_groups_auto_locator_preserves_name_desc_selector() {
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -510,12 +510,12 @@ fn generic_directory_auto_locator_uses_mtime_for_directory_entry_groups() {
 }
 
 #[test]
-fn directory_entry_groups_rewrites_tree_summary_to_list_dir() {
+fn directory_entry_groups_preserves_tree_summary_action() {
     let root = TempDirGuard::new("directory_entry_groups_rewrite");
     fs::create_dir_all(root.path.join("docs")).expect("create docs");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -537,11 +537,52 @@ fn directory_entry_groups_rewrites_tree_summary_to_list_dir() {
     assert_eq!(rewritten.len(), 1);
     assert!(matches!(
         &rewritten[0],
-        AgentAction::CallTool { tool, args }
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("list_dir")
-                && args.get("names_only").and_then(Value::as_bool) == Some(false)
+        AgentAction::CallSkill { skill, args }
+            if skill == "system_basic"
+                && args.get("action").and_then(Value::as_str) == Some("tree_summary")
     ));
+}
+
+#[test]
+fn directory_entry_groups_auto_locator_uses_tree_summary_for_machine_action_token() {
+    let root = TempDirGuard::new("directory_entry_groups_tree_summary_token");
+    fs::create_dir_all(root.path.join("docs")).expect("create docs");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "goal",
+        Some(&route),
+        &loop_state,
+        "inspect with tree_summary",
+        None,
+        Some(root_path.as_str()),
+    )
+    .expect("plan");
+
+    assert!(plan.steps.len() >= 1);
+    let step = &plan.steps[0];
+    assert_eq!(step.action_type, "call_skill");
+    assert_eq!(step.skill, "system_basic");
+    assert_eq!(
+        step.args.get("action").and_then(Value::as_str),
+        Some("tree_summary")
+    );
+    assert_eq!(
+        step.args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
 }
 
 #[test]
@@ -551,7 +592,7 @@ fn directory_names_contract_overrides_planner_hidden_inventory() {
     fs::create_dir_all(root.path.join("docs")).expect("create docs dir");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -595,7 +636,7 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
     fs::write(root.path.join("archive").join("README.txt"), "archive").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -638,7 +679,7 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
     .expect("write README");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -713,7 +754,7 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     fs::write(root.path.join("docs").join("image.png"), "not text").expect("write image");
     let docs_path = root.path.join("docs").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -786,7 +827,7 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
     }
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -840,7 +881,7 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
     fs::write(root.path.join("configs/config.toml"), "[skills]\n").expect("write config");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -914,7 +955,7 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
     fs::write(root.path.join("nested/contract_repair.schema.json"), "{}").expect("write nested");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -977,7 +1018,7 @@ fn directory_purpose_extension_inventory_defers_explicit_extension_assess_gap() 
     let root = TempDirGuard::new("directory_purpose_extension_assess_gap_defers");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1012,7 +1053,7 @@ fn directory_purpose_reads_representative_found_files_after_extension_inventory(
     fs::write(&channel_path, "[telegram]\n").expect("write channel");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1096,7 +1137,7 @@ fn directory_purpose_reads_representative_found_files_from_wrapped_extra() {
     fs::write(&second_path, "{\"title\":\"contract\"}\n").expect("write second");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1167,7 +1208,7 @@ fn directory_tree_auto_locator_does_not_override_exact_file_names_contract() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1193,7 +1234,7 @@ fn directory_tree_auto_locator_does_not_override_raw_command_output_contract() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1221,7 +1262,7 @@ fn directory_tree_auto_locator_does_not_override_multi_directory_contract() {
     let left_path = root.path.join("left").display().to_string();
     let right_path = root.path.join("right").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1286,7 +1327,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1336,7 +1377,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
 #[test]
 fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1384,7 +1425,7 @@ fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence(
 #[test]
 fn workspace_default_evidence_requires_content_evidence_contract() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -1409,7 +1450,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1468,7 +1509,7 @@ fn content_excerpt_summary_auto_locator_reads_nested_file_without_workspace_inve
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

@@ -9,7 +9,7 @@ fn chat_wrapped_execution_route_keeps_health_check_observation_only_plan() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::OneSentence,
         )),
@@ -28,7 +28,7 @@ fn non_scalar_route_still_repairs_after_prior_observation_when_delivery_is_empty
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1381,7 +1381,7 @@ fn content_evidence_route_allows_respond_only_after_prior_observation() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_chat_wrapped(),
+            crate::AskMode::planner_execute_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),

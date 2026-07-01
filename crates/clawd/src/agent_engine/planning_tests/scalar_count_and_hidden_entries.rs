@@ -61,6 +61,104 @@ fn scalar_count_listing_plan_preserves_dirs_only_dimension_for_count_inventory()
 }
 
 #[test]
+fn scalar_count_uses_active_listing_target_when_route_is_locatorless() {
+    let root = TempDirGuard::new("scalar_count_active_listing_locatorless");
+    fs::write(root.path.join("release_checklist.md"), "release").expect("write release");
+    fs::write(root.path.join("service_notes.md"), "service").expect("write service");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.route_reason = "active_listing_target_required".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::new(1);
+    loop_state.output_vars.insert(
+        "active_listing_bound_targets".to_string(),
+        json!([root_path.clone()]).to_string(),
+    );
+
+    let normalized = replace_scalar_count_plan_with_count_inventory(
+        Some(&route),
+        &loop_state,
+        None,
+        "count active listing entries",
+        Vec::new(),
+    );
+
+    assert_eq!(normalized.len(), 1);
+    match &normalized[0] {
+        AgentAction::CallTool { tool: skill, args } => {
+            assert_eq!(skill, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("count_entries")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some(root_path.as_str())
+            );
+        }
+        other => panic!("expected fs_basic count_entries action, got {other:?}"),
+    }
+    assert_eq!(route.output_contract.locator_kind, OutputLocatorKind::None);
+    assert!(route.output_contract.locator_hint.is_empty());
+}
+
+#[test]
+fn scalar_count_uses_current_workspace_scope_target_without_route_prebind() {
+    let root = TempDirGuard::new("scalar_count_current_workspace_scope");
+    fs::write(root.path.join("release_checklist.md"), "release").expect("write release");
+    fs::write(root.path.join("service_notes.md"), "service").expect("write service");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.route_reason = "current_workspace_scope_from_current_request".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::new(1);
+    loop_state.output_vars.insert(
+        "current_workspace_scalar_count_targets".to_string(),
+        json!([root_path.clone()]).to_string(),
+    );
+
+    let normalized = replace_scalar_count_plan_with_count_inventory(
+        Some(&route),
+        &loop_state,
+        None,
+        "count current workspace entries",
+        Vec::new(),
+    );
+
+    assert_eq!(normalized.len(), 1);
+    match &normalized[0] {
+        AgentAction::CallTool { tool: skill, args } => {
+            assert_eq!(skill, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("count_entries")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some(root_path.as_str())
+            );
+        }
+        other => panic!("expected fs_basic count_entries action, got {other:?}"),
+    }
+    assert_eq!(route.output_contract.locator_kind, OutputLocatorKind::None);
+    assert!(route.output_contract.locator_hint.is_empty());
+}
+
+#[test]
 fn scalar_count_preferred_count_entries_inherits_dirs_filter_from_rejected_list_dir() {
     let root = TempDirGuard::new("scalar_count_rejected_list_dir_dirs_filter");
     fs::create_dir_all(root.path.join(".git")).expect("create git dir");
@@ -1138,7 +1236,7 @@ fn explicit_service_command_is_preserved_as_run_cmd() {
 #[test]
 fn observed_judgment_mixed_placeholder_respond_uses_synthesize_after_listing() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

@@ -10,7 +10,7 @@ use crate::{
 
 fn route_with_contract(output_contract: IntentOutputContract) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "List the newest config files and judge their artifact kind.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

@@ -10,7 +10,7 @@ fn constructed_missing_stat_path_plan_rewrites_to_exact_find_entries() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -107,7 +107,7 @@ fn file_paths_missing_stat_path_rewrites_to_selector_find_entries() {
     state.skill_rt.workspace_root = root.path.clone();
     let missing = plan_dir.join("definitely_missing_20260511.md");
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -160,7 +160,7 @@ fn constructed_directory_stat_path_plan_rewrites_to_find_entries_for_child_selec
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -208,7 +208,7 @@ fn constructed_directory_absolute_stat_path_rewrites_to_find_entries_for_child_s
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -258,7 +258,7 @@ fn split_dir_and_basename_stat_paths_rewrites_to_auto_locator_file() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -301,7 +301,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -332,7 +332,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
 #[test]
 fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_path_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -379,7 +379,7 @@ fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_
 #[test]
 fn structured_task_contract_targets_drive_multi_file_metadata_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -435,7 +435,7 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     fs::write(&second, "second file\nbeta\n").expect("write second file");
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -443,7 +443,7 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     let noisy_result_path = temp.path.join("mentioned_inside_result.toml");
     fs::write(&noisy_result_path, "ignored = true\n").expect("write noisy result file");
     let gate_context = serde_json::json!({
-        "direct_answer_gate": {
+        "planner_loop": {
             "resolved_intent": "compare the file before last and last file",
         }
     });
@@ -515,7 +515,7 @@ fn content_evidence_partial_multi_file_read_appends_missing_structural_targets()
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -592,7 +592,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -715,7 +715,7 @@ fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
 #[test]
 fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -748,7 +748,7 @@ fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered(
 #[test]
 fn normalization_order_schema_aliases_before_multi_target_coverage() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -800,7 +800,7 @@ fn normalization_order_schema_aliases_before_multi_target_coverage() {
 #[test]
 fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -909,6 +909,66 @@ fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
         &LoopState::new(2),
         &normalized
     ));
+}
+
+#[test]
+fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() {
+    let state = test_state();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "Cargo.toml | README.md".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+        &state,
+        "compare two path facts",
+        Some(&route),
+        &loop_state,
+        "Cargo.toml | README.md",
+        None,
+        None,
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn recent_scalar_equality_pair_paths_uses_compare_paths_plan() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "Cargo.toml | README.md".to_string();
+
+    let plan = path_metadata_compare_deterministic_plan_result(
+        "compare two path metadata targets",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .expect("path metadata compare plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "fs_basic", "compare_paths");
+    assert_eq!(
+        args.get("left_path").and_then(Value::as_str),
+        Some("Cargo.toml")
+    );
+    assert_eq!(
+        args.get("right_path").and_then(Value::as_str),
+        Some("README.md")
+    );
 }
 
 #[test]
@@ -1230,10 +1290,14 @@ reqwest = { version = "0.12" }
     .expect("plan round should use deterministic scalar compare plan");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan
-        .planner_notes
-        .split_whitespace()
-        .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"));
+    assert!(
+        plan.planner_notes
+            .split_whitespace()
+            .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"),
+        "planner_notes={} steps={:?}",
+        plan.planner_notes,
+        plan.steps
+    );
     assert!(matches!(
         plan.steps
             .first()

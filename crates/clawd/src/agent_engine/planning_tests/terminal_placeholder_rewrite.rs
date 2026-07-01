@@ -106,7 +106,7 @@ fn normalizer_keeps_prior_observation_synthesize_and_placeholders_concrete_respo
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some("{\"ports_snapshot\":[\"0.0.0.0:22\"]}".to_string());
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -190,7 +190,7 @@ fn normalizer_prefers_synthesized_scalar_equality_over_concrete_respond() {
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -227,7 +227,7 @@ fn normalizer_prefers_synthesized_scalar_equality_over_concrete_respond() {
 }
 
 #[test]
-fn normalizer_keeps_observation_backed_synthesize_before_respond() {
+fn normalizer_rewrites_pwd_to_runtime_status_and_preserves_observation_synthesis() {
     let state = test_state();
     let loop_state = LoopState::new(2);
     let route = route_result(
@@ -247,12 +247,31 @@ fn normalizer_keeps_observation_backed_synthesize_before_respond() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let before = actions_as_json(&actions);
 
     let normalized =
         normalize_planned_actions(&state, Some(&route), &loop_state, "执行 pwd", None, actions);
 
-    assert_eq!(actions_as_json(&normalized), before);
+    assert_eq!(
+        actions_as_json(&normalized),
+        json!([
+            {
+                "type": "call_tool",
+                "tool": "system_basic",
+                "args": {
+                    "action": "runtime_status",
+                    "kind": "current_working_directory"
+                }
+            },
+            {
+                "type": "synthesize_answer",
+                "evidence_refs": ["last_output"]
+            },
+            {
+                "type": "respond",
+                "content": "{{last_output}}"
+            }
+        ])
+    );
 }
 
 /// §F1：`has_pre_observation_structured_output_shape` 结构形态检测覆盖。
@@ -460,7 +479,7 @@ fn rewrite_terminal_placeholder_respond_inserts_synthesize_answer() {
 #[test]
 fn normalized_multi_command_failure_summary_preserves_all_observations() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -941,7 +960,7 @@ fn user_supplied_tail_command_stays_run_cmd() {
 #[test]
 fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -980,7 +999,7 @@ fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
 #[test]
 fn recent_artifacts_repaired_shell_listing_keeps_structured_selector() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1041,7 +1060,7 @@ fn recent_artifacts_repaired_shell_listing_keeps_structured_selector() {
 #[test]
 fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1079,7 +1098,7 @@ fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
 #[test]
 fn structured_find_observation_strips_redundant_shell_followup() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1132,7 +1151,7 @@ fn structured_find_observation_strips_redundant_shell_followup() {
 #[test]
 fn user_supplied_find_extension_command_stays_run_cmd() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1202,7 +1221,7 @@ fn piped_tail_command_is_not_rewritten_to_file_tool() {
 #[test]
 fn normalized_single_sequential_run_cmd_splits_for_step_status_evidence() {
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1262,7 +1281,7 @@ fn normalized_single_sequential_run_cmd_splits_for_step_status_evidence() {
 #[test]
 fn normalized_planner_introduced_and_sequence_splits_for_step_status_evidence() {
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );

@@ -604,7 +604,7 @@ fn recent_scalar_equality_repair_counts_prior_config_basic_field_extract() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -680,7 +680,7 @@ version = "0.1.0"
     let package_path_text = package_path.display().to_string();
     let cargo_path_text = cargo_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -804,7 +804,7 @@ fn structured_scalar_compare_allows_text_read_after_wrapped_inventory_evidence()
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -939,7 +939,7 @@ fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
 #[test]
 fn structured_scalar_compare_accepts_two_directory_inventory_observations() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1072,7 +1072,7 @@ fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evid
 #[test]
 fn structured_scalar_compare_free_shape_accepts_path_batch_facts_metadata_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1131,7 +1131,7 @@ fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
     state.skill_rt.locator_scan_max_files = 5000;
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1193,7 +1193,7 @@ fn quantity_compare_directory_pair_uses_deterministic_dir_compare_plan() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1235,7 +1235,7 @@ fn directory_pair_locator_uses_dir_compare_even_without_quantity_semantic() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );

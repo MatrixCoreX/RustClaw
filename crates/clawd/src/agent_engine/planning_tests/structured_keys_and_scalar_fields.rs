@@ -741,7 +741,7 @@ fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() 
 #[test]
 fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -805,7 +805,7 @@ fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd()
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -870,7 +870,7 @@ fn explicit_command_rewrite_preserves_bounded_configured_execute_prefix() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -907,7 +907,7 @@ fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -981,7 +981,7 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1021,7 +1021,7 @@ fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command(
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1068,7 +1068,7 @@ fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1346,7 +1346,7 @@ fn system_basic_check_exists_target_alias_keeps_batch_shape() {
 #[test]
 fn missing_read_range_path_uses_route_locator_hint() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_chat_wrapped(),
+        crate::AskMode::planner_execute_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

@@ -193,8 +193,13 @@ pub(super) async fn plan_round_actions(
         };
     }
 
+    let dry_run_contract_text = format!("{goal}\n{user_text}");
     return_deterministic_plan!(
-        structured_dry_run_response_deterministic_plan_result(goal, route_result, loop_state),
+        structured_dry_run_response_deterministic_plan_result(
+            &dry_run_contract_text,
+            route_result,
+            loop_state
+        ),
         "plan_deterministic_structured_dry_run_response"
     );
     return_deterministic_plan!(
@@ -521,6 +526,10 @@ pub(super) async fn plan_round_actions(
                 loop_state,
             ),
             "plan_deterministic_recent_scalar_current_workspace"
+        );
+        return_deterministic_plan!(
+            path_metadata_compare_deterministic_plan_result(goal, route_result, loop_state),
+            "plan_deterministic_path_metadata_compare"
         );
         return_deterministic_plan!(
             scalar_path_current_workspace_deterministic_plan_result(
@@ -1342,7 +1351,7 @@ fn explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
     explicit_command_request_present(command_runtime, original_user_text, route_result)
         && route_result.is_some_and(|route| {
             let scalar_path_contract =
-                route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly;
+                route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly);
             let route_preserves_explicit_command = route_reason_has_structural_marker(
                 route,
                 "explicit_command_preserves_structured_observation_contract",
@@ -1383,7 +1392,7 @@ fn plain_text_terminal_respond_fallback_actions(
         return None;
     }
     let chat_like_route = route.is_chat_gate()
-        || route.is_planner_execute_chat_wrapped()
+        || route.uses_chat_finalizer()
         || route_reason_has_structural_marker(route, "pure_chat_agent_loop_submode");
     if !chat_like_route
         || route.needs_clarify
@@ -1391,7 +1400,7 @@ fn plain_text_terminal_respond_fallback_actions(
         || route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || route.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route.output_contract.locator_hint.trim().is_empty()
         || !route_allows_model_language_terminal_respond(Some(route))

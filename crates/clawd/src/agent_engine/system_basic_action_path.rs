@@ -148,8 +148,8 @@ pub(super) fn enforce_output_contract_tool_args(
                         enforce_general_directory_inventory_args(route, obj);
                         enforce_strict_directory_metadata_inventory_args(route, obj);
                     }
-                    if route.output_contract.semantic_kind
-                        != crate::OutputSemanticKind::HiddenEntriesCheck
+                    if !route
+                        .output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck)
                     {
                         return action;
                     }
@@ -232,7 +232,7 @@ pub(super) fn rewrite_file_paths_grep_text_to_find_entries(
     route: &RouteResult,
     obj: &mut serde_json::Map<String, Value>,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
         return false;
     }
     let action_name = obj
@@ -243,8 +243,8 @@ pub(super) fn rewrite_file_paths_grep_text_to_find_entries(
     if !action_name.eq_ignore_ascii_case("grep_text") {
         return false;
     }
-    if crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
+    if crate::contract_matrix::action_policy_for_route(
+        Some(route),
         "fs_basic",
         &Value::Object(obj.clone()),
     )
@@ -291,7 +291,7 @@ pub(super) fn prune_file_paths_contract_disallowed_actions(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
         || route.output_contract.delivery_required
     {
         return actions;
@@ -457,15 +457,16 @@ pub(super) fn structural_extension_filter_for_directory_inventory(
 pub(super) fn route_allows_structural_extension_inventory_filter(route: &RouteResult) -> bool {
     !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::QuantityComparison
-                | crate::OutputSemanticKind::DirectoryPurposeSummary
-                | crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-        )
+        && (route.output_contract_is_unclassified()
+            || [
+                crate::OutputSemanticKind::QuantityComparison,
+                crate::OutputSemanticKind::DirectoryPurposeSummary,
+                crate::OutputSemanticKind::FileNames,
+                crate::OutputSemanticKind::FilePaths,
+                crate::OutputSemanticKind::DirectoryEntryGroups,
+            ]
+            .iter()
+            .any(|kind| route.output_contract_marker_is(*kind)))
 }
 
 pub(super) fn inject_structural_extension_filter_for_directory_inventory(
@@ -515,9 +516,9 @@ pub(super) fn inject_structural_extension_filter_for_directory_inventory(
                             );
                             obj.insert("files_only".to_string(), Value::Bool(true));
                             obj.insert("dirs_only".to_string(), Value::Bool(false));
-                            if route.output_contract.semantic_kind
-                                == crate::OutputSemanticKind::QuantityComparison
-                            {
+                            if route.output_contract_marker_is(
+                                crate::OutputSemanticKind::QuantityComparison,
+                            ) {
                                 obj.insert(
                                     "max_entries".to_string(),
                                     Value::Number(serde_json::Number::from(1000)),
@@ -560,10 +561,8 @@ pub(super) fn route_requests_general_directory_inventory(route: &RouteResult) ->
         return true;
     }
     route.output_contract.response_shape == crate::OutputResponseShape::Free
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::DirectoryPurposeSummary
-        )
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryPurposeSummary))
 }
 
 pub(super) fn inventory_dir_has_filter_args(obj: &serde_json::Map<String, Value>) -> bool {
@@ -581,7 +580,7 @@ pub(super) fn enforce_general_directory_inventory_args(
     }
     obj.insert("files_only".to_string(), Value::Bool(false));
     obj.insert("dirs_only".to_string(), Value::Bool(false));
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::FileNames) {
         obj.insert("names_only".to_string(), Value::Bool(true));
         info!("plan_contract_enforce_directory_entry_names_inventory");
         return;
@@ -594,7 +593,7 @@ pub(super) fn route_requires_strict_directory_metadata_inventory(route: &RouteRe
     !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract_is_unclassified()
 }
 
 pub(super) fn enforce_strict_directory_metadata_inventory_args(
@@ -614,7 +613,7 @@ pub(super) fn enforce_directory_names_inventory_args(
     route: &RouteResult,
     obj: &mut serde_json::Map<String, Value>,
 ) {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryNames {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames) {
         return;
     }
     let include_hidden = route
@@ -657,7 +656,7 @@ pub(super) fn enforce_directory_entry_groups_inventory_args(
     route: &RouteResult,
     obj: &mut serde_json::Map<String, Value>,
 ) {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups) {
         return;
     }
     let Some(include_hidden) = route
@@ -684,7 +683,7 @@ pub(super) fn enforce_file_names_inventory_args(
     route: &RouteResult,
     obj: &mut serde_json::Map<String, Value>,
 ) {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
         || route.output_contract.delivery_intent == crate::OutputDeliveryIntent::DirectoryLookup
     {
         return;
@@ -726,7 +725,7 @@ pub(super) fn requested_file_names_result_limit(
     user_text: &str,
     original_user_text: Option<&str>,
 ) -> Option<u64> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
         || route.output_contract.delivery_required
     {
         return None;
@@ -837,7 +836,7 @@ pub(super) fn requested_file_paths_result_limit(
     user_text: &str,
     original_user_text: Option<&str>,
 ) -> Option<u64> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
         || route.output_contract.delivery_required
     {
         return None;
@@ -932,7 +931,7 @@ pub(super) fn extension_from_globish_pattern(text: &str) -> Option<String> {
 }
 
 pub(super) fn should_rewrite_inventory_ext_filter_to_fs_basic(route: &RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
+    route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::CurrentWorkspace | crate::OutputLocatorKind::Path
@@ -996,13 +995,14 @@ pub(super) fn route_prefers_fs_search_name_result(route: &RouteResult) -> bool {
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         )
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ScalarPathOnly
-                | crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::FilePaths
-        )
+        && [
+            crate::OutputSemanticKind::ScalarPathOnly,
+            crate::OutputSemanticKind::FileNames,
+            crate::OutputSemanticKind::DirectoryNames,
+            crate::OutputSemanticKind::FilePaths,
+        ]
+        .iter()
+        .any(|kind| route.output_contract_marker_is(*kind))
 }
 
 pub(super) fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> bool {
@@ -1061,8 +1061,7 @@ pub(super) fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut
             changed = true;
         }
     }
-    if !is_grep_text && route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
-    {
+    if !is_grep_text && route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
         if let Some(ext) = first_ext_filter_value(obj).or_else(|| {
             obj.get("pattern")
                 .and_then(Value::as_str)
@@ -1134,7 +1133,7 @@ pub(super) fn route_needs_unscoped_workspace_text_evidence(route: &RouteResult) 
         && route.output_contract.requires_content_evidence
         && route_expects_terminal_user_answer(route)
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract_is_unclassified()
 }
 
 pub(super) fn route_needs_workspace_synthesis_evidence(route: &RouteResult) -> bool {
@@ -1143,10 +1142,8 @@ pub(super) fn route_needs_workspace_synthesis_evidence(route: &RouteResult) -> b
         && route.output_contract.requires_content_evidence
         && route_expects_terminal_user_answer(route)
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
-        )
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary))
 }
 
 pub(super) fn route_needs_workspace_summary_default_evidence(route: &RouteResult) -> bool {
@@ -1155,7 +1152,7 @@ pub(super) fn route_needs_workspace_summary_default_evidence(route: &RouteResult
         && route.output_contract.requires_content_evidence
         && route_expects_terminal_user_answer(route)
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
+        && route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
 }
 
 pub(super) fn route_needs_workspace_respond_only_default_evidence(route: &RouteResult) -> bool {
