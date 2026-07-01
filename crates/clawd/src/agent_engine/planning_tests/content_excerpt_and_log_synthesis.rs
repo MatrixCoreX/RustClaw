@@ -1626,6 +1626,50 @@ fn scalar_content_auto_locator_validates_config_contract() {
 }
 
 #[test]
+fn scalar_content_auto_locator_validates_config_capability_ref_without_semantic_kind() {
+    let root = TempDirGuard::new("scalar_content_auto_locator_config_capability_ref");
+    let config = root.path.join("config.toml");
+    fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
+    let config_path = config.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.route_reason = "capability_ref=config.validate".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = config_path.clone();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let state = test_state();
+
+    let plan = scalar_content_auto_locator_deterministic_plan_result(
+        &state,
+        "validate structured config syntax",
+        Some(&route),
+        &loop_state,
+        "validate structured config syntax",
+        Some("validate structured config syntax"),
+        Some(&config_path),
+    )
+    .expect("config validation capability_ref should use structured validation");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert!(matches!(
+        plan.steps[0].to_agent_action(),
+        Some(AgentAction::CallTool { ref tool, ref args })
+            if tool == "config_basic"
+                && args.get("action").and_then(Value::as_str) == Some("validate")
+                && args.get("path").and_then(Value::as_str) == Some(config_path.as_str())
+                && args.get("validation_profile").and_then(Value::as_str)
+                    == Some("syntax_only")
+    ));
+}
+
+#[test]
 fn scalar_content_auto_locator_uses_structured_read_field_for_structured_scalar_contract() {
     let root = TempDirGuard::new("scalar_content_auto_locator_structured_field");
     let manifest = root.path.join("Cargo.toml");
