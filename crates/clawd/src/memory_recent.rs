@@ -63,13 +63,13 @@ pub(super) fn clarify_assistant_placeholder() -> &'static str {
     "[clarification_requested]"
 }
 
-fn looks_like_structured_machine_output(text: &str) -> bool {
+fn raw_output_looks_like_structured_json(text: &str) -> bool {
     serde_json::from_str::<Value>(text)
         .map(|value| value.is_object() || value.is_array())
         .unwrap_or(false)
 }
 
-fn looks_like_linewise_json_machine_output(text: &str) -> bool {
+fn raw_output_looks_like_linewise_json(text: &str) -> bool {
     let lines = text
         .lines()
         .map(str::trim)
@@ -78,7 +78,37 @@ fn looks_like_linewise_json_machine_output(text: &str) -> bool {
     !lines.is_empty()
         && lines
             .iter()
-            .all(|line| looks_like_structured_machine_output(line))
+            .all(|line| raw_output_looks_like_structured_json(line))
+}
+
+fn value_is_machine_envelope(value: &Value) -> bool {
+    value
+        .get("output_format")
+        .and_then(Value::as_str)
+        .is_some_and(|format| format == "machine_json")
+        && value
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|owner| !owner.is_empty())
+}
+
+fn visible_text_looks_like_machine_envelope(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .map(|value| value_is_machine_envelope(&value))
+        .unwrap_or(false)
+}
+
+fn visible_text_looks_like_linewise_machine_envelope(text: &str) -> bool {
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    !lines.is_empty()
+        && lines
+            .iter()
+            .all(|line| visible_text_looks_like_machine_envelope(line))
 }
 
 fn normalize_read_range_excerpt_for_recent_turns(excerpt: &str) -> Option<String> {
@@ -103,7 +133,7 @@ fn normalize_read_range_excerpt_for_recent_turns(excerpt: &str) -> Option<String
 }
 
 fn normalize_observed_listing_for_recent_turns(text: &str) -> Option<String> {
-    if looks_like_structured_machine_output(text) || looks_like_linewise_json_machine_output(text) {
+    if raw_output_looks_like_structured_json(text) || raw_output_looks_like_linewise_json(text) {
         return None;
     }
     let lines = text
@@ -403,8 +433,8 @@ pub(super) fn extract_result_text_for_recent_turns(value: &Value) -> Option<Stri
         .chain(first_message.iter())
         .chain(final_answer.iter())
         .any(|text| {
-            looks_like_structured_machine_output(text)
-                || looks_like_linewise_json_machine_output(text)
+            visible_text_looks_like_machine_envelope(text)
+                || visible_text_looks_like_linewise_machine_envelope(text)
         });
     if should_prefer_observed {
         if let Some(observed_text) = extract_observed_step_text_for_recent_turns(value) {

@@ -680,9 +680,25 @@ fn recent_assistant_replies_context_includes_ordered_entries_for_candidate_list(
 }
 
 #[test]
-fn result_text_prefers_read_range_excerpt_over_linewise_json_text() {
+fn result_text_preserves_visible_json_answer_without_machine_envelope() {
+    let visible_json = "{\"a\":1}\n{\"b\":2}";
     let parsed = json!({
-        "text": "{\"a\":1}\n{\"b\":2}",
+        "text": visible_json
+    });
+    assert_eq!(
+        extract_result_text_for_recent_turns(&parsed).as_deref(),
+        Some(visible_json)
+    );
+}
+
+#[test]
+fn result_text_prefers_read_range_excerpt_over_linewise_machine_envelope_text() {
+    let machine_text = concat!(
+        "{\"output_format\":\"machine_json\",\"owner_layer\":\"agent_loop_control\",\"a\":1}\n",
+        "{\"output_format\":\"machine_json\",\"owner_layer\":\"agent_loop_control\",\"b\":2}"
+    );
+    let parsed = json!({
+        "text": machine_text,
         "task_journal": {
             "trace": {
                 "step_results": [{
@@ -700,7 +716,8 @@ fn result_text_prefers_read_range_excerpt_over_linewise_json_text() {
 
 #[test]
 fn result_text_prefers_read_range_excerpt_when_messages_and_final_answer_are_machine_json() {
-    let machine_text = "{\"a\":1}\n{\"b\":2}";
+    let machine_text =
+        "{\"output_format\":\"machine_json\",\"owner_layer\":\"agent_loop_control\",\"a\":1}";
     let parsed = json!({
         "text": machine_text,
         "messages": [machine_text],
