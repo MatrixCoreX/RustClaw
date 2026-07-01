@@ -704,9 +704,7 @@ pub(super) fn plain_rustclaw_main_config_validation_action_target(
     if route_result.is_none_or(|route| !route.output_contract.requires_content_evidence) {
         return None;
     }
-    if route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation
-    }) {
+    if route_result.is_some_and(route_requests_config_validation) {
         return None;
     }
     let (skill, args) = match action {
@@ -757,6 +755,15 @@ pub(super) fn plain_rustclaw_main_config_validation_action_target(
         .map(ToString::to_string)
         .or_else(|| Some("toml".to_string()));
     Some((path.to_string(), format))
+}
+
+fn route_requests_config_validation(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &["validate", "validate_config", "validate_after_change"],
+        )
 }
 
 pub(super) fn is_rustclaw_main_config_path(path: &str) -> bool {
