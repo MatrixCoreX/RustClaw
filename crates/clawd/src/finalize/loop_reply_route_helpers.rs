@@ -94,13 +94,6 @@ pub(super) fn structured_json_values_from_output(output: &str) -> Vec<serde_json
     if let Some(extra) = value.get("extra") {
         values.push(extra.clone());
     }
-    if let Some(inner) = value
-        .get("text")
-        .and_then(|text| text.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        values.push(inner);
-    }
     values
 }
 
