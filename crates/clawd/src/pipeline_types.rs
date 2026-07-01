@@ -280,7 +280,13 @@ impl OutputSemanticKind {
         self.is_registry_capability_bridge()
             || matches!(
                 self,
-                Self::ArchiveList | Self::ArchiveRead | Self::ArchivePack | Self::ArchiveUnpack
+                Self::ConfigValidation
+                    | Self::ConfigMutation
+                    | Self::ConfigRiskAssessment
+                    | Self::ArchiveList
+                    | Self::ArchiveRead
+                    | Self::ArchivePack
+                    | Self::ArchiveUnpack
             )
     }
 }
