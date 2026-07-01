@@ -70,11 +70,29 @@ def check_capability(
     return findings
 
 
+def skill_requires_planner_capabilities(skill: dict[str, Any]) -> bool:
+    enabled = skill.get("enabled", True)
+    planner_visible = skill.get("planner_visible", True)
+    return enabled is not False and planner_visible is not False
+
+
+def check_skill_capability_surface(registry_path: Path, skill: dict[str, Any]) -> list[str]:
+    if not skill_requires_planner_capabilities(skill):
+        return []
+    capabilities = skill.get("planner_capabilities") or []
+    if capabilities:
+        return []
+    skill_name = str(skill.get("name") or "unknown_skill").strip() or "unknown_skill"
+    prefix = f"{registry_path.relative_to(ROOT)}:{skill_name}"
+    return [f"{prefix}: planner_visible_enabled_skill_missing_planner_capabilities"]
+
+
 def main() -> int:
     findings: list[str] = []
     capability_count = 0
     for registry_path in REGISTRIES:
         for skill in load_registry(registry_path):
+            findings.extend(check_skill_capability_surface(registry_path, skill))
             for index, capability in enumerate(skill.get("planner_capabilities") or []):
                 capability_count += 1
                 findings.extend(
