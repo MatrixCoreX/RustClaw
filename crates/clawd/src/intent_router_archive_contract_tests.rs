@@ -111,7 +111,10 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_pack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_pack_pair_contract_repair; capability_ref=archive.pack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
     assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
     assert!(contract.requires_content_evidence);
@@ -186,7 +189,10 @@ fn archive_pack_pair_repairs_scalar_path_only_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_pack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_pack_pair_contract_repair; capability_ref=archive.pack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
     assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
     assert_eq!(
@@ -226,7 +232,10 @@ fn archive_unpack_pair_repairs_generated_file_delivery_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_unpack_pair_contract_repair; capability_ref=archive.unpack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert!(contract.requires_content_evidence);
@@ -268,7 +277,10 @@ fn archive_unpack_pair_repairs_generic_path_content_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_unpack_pair_contract_repair; capability_ref=archive.unpack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert!(contract.requires_content_evidence);
@@ -305,7 +317,10 @@ fn archive_unpack_pair_repairs_filesystem_mutation_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_unpack_pair_contract_repair; capability_ref=archive.unpack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert!(contract.requires_content_evidence);
@@ -340,7 +355,10 @@ fn archive_unpack_pair_repairs_content_excerpt_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_unpack_pair_contract_repair; capability_ref=archive.unpack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -387,7 +405,10 @@ fn archive_unpack_pair_repairs_policy_suffix_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_unpack_pair_contract_repair; capability_ref=archive.unpack")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -441,7 +462,10 @@ fn archive_read_member_repairs_content_excerpt_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_read_member_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_read_member_contract_repair; capability_ref=archive.read")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
     assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert!(contract.requires_content_evidence);
@@ -521,7 +545,10 @@ fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_read_member_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_read_member_contract_repair; capability_ref=archive.read")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
     assert_eq!(
         contract.locator_hint,
@@ -553,7 +580,10 @@ fn archive_read_member_repairs_archive_unpack_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_read_member_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_read_member_contract_repair; capability_ref=archive.read")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
     assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert_eq!(
@@ -586,7 +616,10 @@ fn archive_list_single_archive_repairs_archive_unpack_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_list_single_archive_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_list_single_archive_contract_repair; capability_ref=archive.list")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveList);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert!(contract.requires_content_evidence);
@@ -623,7 +656,10 @@ fn archive_list_single_archive_repairs_file_names_drift_contract() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_list_single_archive_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_list_single_archive_contract_repair; capability_ref=archive.list")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveList);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert!(contract.requires_content_evidence);
@@ -664,7 +700,10 @@ fn archive_list_single_archive_repairs_directory_entry_groups_without_locator_hi
         None,
     );
 
-    assert_eq!(reason, Some("archive_list_single_archive_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_list_single_archive_contract_repair; capability_ref=archive.list")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveList);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert!(contract.requires_content_evidence);
@@ -702,7 +741,10 @@ fn archive_read_nested_member_path_is_not_unpack_destination() {
         None,
     );
 
-    assert_eq!(reason, Some("archive_read_member_contract_repair"));
+    assert_eq!(
+        reason,
+        Some("archive_read_member_contract_repair; capability_ref=archive.read")
+    );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
     assert_eq!(
         contract.locator_hint,

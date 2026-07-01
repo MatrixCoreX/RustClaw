@@ -269,8 +269,12 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract.locator_kind = OutputLocatorKind::Path;
         output_contract.locator_hint = locator_hint;
         reason = Some(match semantic_kind {
-            OutputSemanticKind::ArchivePack => "archive_pack_pair_contract_repair",
-            OutputSemanticKind::ArchiveUnpack => "archive_unpack_pair_contract_repair",
+            OutputSemanticKind::ArchivePack => {
+                "archive_pack_pair_contract_repair; capability_ref=archive.pack"
+            }
+            OutputSemanticKind::ArchiveUnpack => {
+                "archive_unpack_pair_contract_repair; capability_ref=archive.unpack"
+            }
             _ => "archive_pair_contract_repair",
         });
     }
@@ -362,7 +366,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract.response_shape = OutputResponseShape::Free;
         output_contract.locator_kind = OutputLocatorKind::Path;
         output_contract.locator_hint = locator_hint;
-        reason = Some("archive_read_member_contract_repair");
+        reason = Some("archive_read_member_contract_repair; capability_ref=archive.read");
     }
 
     if let Some(locator_hint) = archive_list_contract_from_surface(output_contract, req_surface) {
@@ -394,7 +398,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
                 .list_selector
                 .target_kind_specified = true;
         }
-        reason = Some("archive_list_single_archive_contract_repair");
+        reason = Some("archive_list_single_archive_contract_repair; capability_ref=archive.list");
     }
 
     if let Some(locator_hint) =
