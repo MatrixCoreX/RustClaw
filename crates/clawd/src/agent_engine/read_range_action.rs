@@ -121,7 +121,7 @@ pub(super) fn rewrite_config_validation_read_plan_to_validate(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || !route_has_config_validation_contract(route)
         || actions.iter().any(action_is_structured_config_validation)
     {
         return actions;
@@ -536,6 +536,15 @@ fn route_has_config_change_contract(route: &RouteResult) -> bool {
                 "set_field",
                 "write_field",
             ],
+        )
+}
+
+fn route_has_config_validation_contract(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &["validate"],
         )
 }
 
