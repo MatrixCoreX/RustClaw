@@ -49,6 +49,9 @@ CONTRACT_MATRIX_FILE = SRC_ROOT / "contract_matrix.rs"
 TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
+SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
+    SRC_ROOT / "agent_engine/single_target_structured_field_rewrite.rs"
+)
 FINALIZER_OBSERVED_OUTPUT_SCAN_ROOTS: tuple[Path, ...] = (
     SRC_ROOT / "finalize",
     SRC_ROOT / "agent_engine/observed_output.rs",
@@ -298,6 +301,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
+    findings.extend(scan_sqlite_route_request_semantic_fallback())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -809,6 +813,41 @@ def scan_git_deterministic_text(rel_path: str, text: str) -> list[Finding]:
     return findings
 
 
+def scan_sqlite_route_request_semantic_fallback() -> list[Finding]:
+    return scan_sqlite_route_request_text(
+        rel(SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE),
+        SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_sqlite_route_request_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for function_name in (
+        "route_requests_sqlite_table_listing",
+        "route_requests_sqlite_schema_version",
+    ):
+        block = function_block(text, function_name)
+        if block is None:
+            continue
+        block_start, block_text = block
+        for offset, line in enumerate(block_text.splitlines(), start=0):
+            if (
+                "OutputSemanticKind::Sqlite" not in line
+                and "sqlite_schema_version_target" not in line
+                and "text_has_sqlite_schema_version_machine_token" not in line
+            ):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + offset,
+                    "sqlite_route_request_semantic_fallback",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1237,6 +1276,21 @@ def run_self_test() -> int:
         == "git_deterministic_user_text_action_selection"
     )
     assert not scan_git_deterministic_user_text_action_selection()
+    blocked_sqlite_route_request = scan_sqlite_route_request_text(
+        rel(SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE),
+        "pub(super) fn route_requests_sqlite_table_listing(route: &RouteResult) -> bool {\n"
+        "    route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing)\n"
+        "}\n"
+        "pub(super) fn route_requests_sqlite_schema_version(route: &RouteResult) -> bool {\n"
+        '    route.route_reason.contains("sqlite_schema_version_target")\n'
+        "}\n",
+    )
+    assert (
+        blocked_sqlite_route_request
+        and blocked_sqlite_route_request[0].kind
+        == "sqlite_route_request_semantic_fallback"
+    )
+    assert not scan_sqlite_route_request_semantic_fallback()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
