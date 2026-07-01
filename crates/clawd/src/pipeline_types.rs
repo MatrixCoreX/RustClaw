@@ -469,11 +469,6 @@ impl RouteResult {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_chat_gate(&mut self) {
-        self.set_ask_mode(AskMode::direct_answer());
-    }
-
-    #[cfg(test)]
     pub(crate) fn set_clarify_gate(&mut self) {
         self.set_ask_mode(AskMode::clarify());
     }

@@ -285,10 +285,10 @@ use active_observation::active_ordered_scalar_path_missing_state_patch_context;
 #[cfg(test)]
 use active_observation::prompt_has_concrete_fileish_cue;
 use active_observation::{
-    active_clarify_locator_task_prompt, active_observable_task_prompt, active_primary_task_prompt,
-    active_session_has_structured_execution_target, active_task_turn_can_reuse_semantic_patch,
-    active_text_followup_surface_is_chat_only, apply_active_observed_output_chat_repair,
-    apply_active_ordered_scalar_path_chat_repair,
+    active_clarify_locator_task_prompt, active_observable_task_prompt,
+    active_observed_output_loop_context_hint, active_ordered_scalar_path_loop_context_hint,
+    active_primary_task_prompt, active_session_has_structured_execution_target,
+    active_task_turn_can_reuse_semantic_patch, active_text_followup_surface_is_chat_only,
 };
 
 #[path = "intent_router_active_task_repair.rs"]
