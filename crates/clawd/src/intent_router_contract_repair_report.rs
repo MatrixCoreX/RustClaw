@@ -87,7 +87,7 @@ fn contract_repair_source_class(source: &str) -> &'static str {
 fn contract_repair_detail_class(detail: &str) -> &'static str {
     match detail {
         "execution_recipe_command_payload"
-        | "execution_signal_promoted_by_output_contract"
+        | "execution_signal_derived_from_output_contract"
         | "execution_recipe_enum"
         | "execution_recipe_fields_normalized"
         | "execution_recipe_health_check_observation"

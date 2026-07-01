@@ -87,7 +87,7 @@ fn classify_route_trace_repair_codes(codes: &[String]) -> Vec<String> {
 
 fn route_trace_repair_code_class(code: &str) -> &'static str {
     match code {
-        "execution_signal_promoted_by_output_contract"
+        "execution_signal_derived_from_output_contract"
         | "execution_recipe_command_payload"
         | "execution_recipe_enum"
         | "execution_recipe_health_check_observation"
