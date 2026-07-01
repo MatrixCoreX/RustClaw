@@ -123,22 +123,7 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
         }
         RegistryCapabilityResolution::None => {}
     }
-    if !registry_capability_surface_available(state) {
-        if let Some(resolved) = resolve_static_capability_action_for_state(state, &normalized, args)
-        {
-            return (Some(resolved.action), resolved.record);
-        }
-    }
     (None, CapabilityResolutionRecord::unresolved(normalized))
-}
-
-fn registry_capability_surface_available(state: &AppState) -> bool {
-    let Some(registry) = state.get_skills_registry() else {
-        return false;
-    };
-    registry.enabled_names().into_iter().any(|skill| {
-        registry.is_planner_visible(&skill) && !registry.planner_capabilities(&skill).is_empty()
-    })
 }
 
 #[derive(Debug)]
@@ -148,113 +133,6 @@ struct ResolverCandidate {
     planner_kind: PlannerCapabilityKind,
     preferred: bool,
     risk_level: SkillRiskLevel,
-}
-
-fn resolve_static_capability_action_for_state(
-    state: &AppState,
-    normalized: &str,
-    args: Value,
-) -> Option<ResolvedCapabilityAction> {
-    let Some((skill, action)) = (match normalized {
-        "fs_basic" => Some(("fs_basic", None)),
-        "filesystem.list_entries" | "filesystem.list_dir" | "fs_basic.list_dir" => {
-            Some(("fs_basic", Some("list_dir")))
-        }
-        "filesystem.count_entries" | "fs_basic.count_entries" => {
-            Some(("fs_basic", Some("count_entries")))
-        }
-        "filesystem.read_text_range"
-        | "filesystem.read_text"
-        | "filesystem.read_file"
-        | "fs_basic.read_text_range"
-        | "fs_basic.read_range"
-        | "fs_basic.read_file" => Some(("fs_basic", Some("read_text_range"))),
-        "filesystem.stat_paths" | "filesystem.stat_path" | "fs_basic.stat_paths" => {
-            Some(("fs_basic", Some("stat_paths")))
-        }
-        "filesystem.find_entries"
-        | "filesystem.find_files"
-        | "filesystem.find_paths"
-        | "fs_basic.find_entries" => Some(("fs_basic", Some("find_entries"))),
-        "filesystem.grep_text" | "filesystem.search_text" | "fs_basic.grep_text" => {
-            Some(("fs_basic", Some("grep_text")))
-        }
-        "filesystem.compare_paths" | "fs_basic.compare_paths" => {
-            Some(("fs_basic", Some("compare_paths")))
-        }
-        "filesystem.write_file" | "filesystem.write_text" | "fs_basic.write_text" => {
-            Some(("fs_basic", Some("write_text")))
-        }
-        "filesystem.append_text" | "filesystem.append_file" | "fs_basic.append_text" => {
-            Some(("fs_basic", Some("append_text")))
-        }
-        "filesystem.make_dir" | "filesystem.create_dir" | "fs_basic.make_dir" => {
-            Some(("fs_basic", Some("make_dir")))
-        }
-        "filesystem.remove_path" | "filesystem.delete_path" | "fs_basic.remove_path" => {
-            Some(("fs_basic", Some("remove_path")))
-        }
-        "config.read_field" | "config_basic.read_field" => {
-            Some(("config_basic", Some("read_field")))
-        }
-        "config.read_fields" | "config_basic.read_fields" => {
-            Some(("config_basic", Some("read_fields")))
-        }
-        "config.list_keys" | "config_basic.list_keys" => Some(("config_basic", Some("list_keys"))),
-        "config.validate" | "config_basic.validate" => Some(("config_basic", Some("validate"))),
-        "config.guard_rustclaw_config" | "config_basic.guard_rustclaw_config" => {
-            Some(("config_basic", Some("guard_rustclaw_config")))
-        }
-        "config.plan_change" | "config.plan_config_change" => {
-            Some(("config_edit", Some("plan_config_change")))
-        }
-        "config.apply_change"
-        | "config.apply_config_change"
-        | "config.write_field"
-        | "config.set_field" => Some(("config_edit", Some("apply_config_change"))),
-        "config.validate_after_change" => Some(("config_edit", Some("validate_config"))),
-        "config.guard_after_change" | "config.guard_config" => {
-            Some(("config_edit", Some("guard_config")))
-        }
-        "config.read_back" => Some(("config_edit", Some("read_back"))),
-        "config_basic" => Some(("config_basic", None)),
-        "system_basic.read_range" | "system_basic.read_text_range" => {
-            Some(("system_basic", Some("read_range")))
-        }
-        "system_basic.extract_field" => Some(("system_basic", Some("extract_field"))),
-        "system_basic.extract_fields" => Some(("system_basic", Some("extract_fields"))),
-        "config.restart_if_requested" => Some(("config_edit", Some("restart_if_requested"))),
-        "transform" | "transform.transform_data" | "data.transform" | "data.transform_records" => {
-            Some(("transform", Some("transform_data")))
-        }
-        "system.run_command" | "system.run_cmd" => Some(("run_cmd", None)),
-        _ => None,
-    }) else {
-        return None;
-    };
-    if !skill_is_globally_resolvable(state, skill) {
-        return None;
-    }
-    let args = match action {
-        Some(action) => with_action(args, action),
-        None => args,
-    };
-    let planner_kind = state
-        .get_skills_registry()
-        .as_ref()
-        .and_then(|registry| registry.planner_kind(skill))
-        .unwrap_or(PlannerCapabilityKind::Skill);
-    let action = action_for_skill(planner_kind, skill.to_string(), args);
-    Some(ResolvedCapabilityAction {
-        record: CapabilityResolutionRecord::resolved(
-            "capability_resolver_static_compat_resolved",
-            "static_compat",
-            normalized.to_string(),
-            &action,
-            planner_kind,
-        ),
-        action,
-    })
 }
 
 fn resolve_registry_capability_action(
@@ -482,38 +360,12 @@ fn risk_rank(risk: SkillRiskLevel) -> u8 {
     }
 }
 
-fn skill_is_globally_resolvable(state: &AppState, skill: &str) -> bool {
-    let enabled_skills = state.get_skills_list();
-    if !enabled_skills.is_empty() && !enabled_skills.contains(skill) {
-        return false;
-    }
-    if let Some(registry) = state.get_skills_registry() {
-        if !registry.is_planner_visible(skill) {
-            return false;
-        }
-        if let Some(manifest) = registry.manifest(skill) {
-            if !crate::skill_availability::evaluate_manifest_availability(&manifest).is_available()
-            {
-                return false;
-            }
-        }
-    }
-    true
-}
-
 fn normalize_capability_name(capability: &str) -> String {
     capability
         .trim()
         .to_ascii_lowercase()
         .replace('-', "_")
         .replace("::", ".")
-}
-
-fn with_action(args: Value, action: &str) -> Value {
-    let mut obj = args.as_object().cloned().unwrap_or_default();
-    obj.entry("action".to_string())
-        .or_insert_with(|| Value::String(action.to_string()));
-    Value::Object(obj)
 }
 
 fn normalize_run_command_args(args: Value) -> Value {

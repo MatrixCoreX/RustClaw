@@ -57,119 +57,6 @@ fn state_with_registry_toml(toml: &str) -> crate::AppState {
     state
 }
 
-fn state_without_registry_with_skills(skills: &[&str]) -> crate::AppState {
-    let state = crate::AppState::test_default_with_fixture_provider();
-    let enabled = skills
-        .iter()
-        .map(|skill| (*skill).to_string())
-        .collect::<std::collections::HashSet<_>>();
-    *state
-        .core
-        .skill_views_snapshot
-        .write()
-        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
-        registry: None,
-        skills_list: std::sync::Arc::new(enabled),
-    });
-    state
-}
-
-#[test]
-fn resolves_filesystem_list_entries_to_fs_basic() {
-    let action = resolve_static_capability_action(
-        &normalize_capability_name("filesystem.list_entries"),
-        json!({
-            "path": ".",
-            "names_only": true
-        }),
-    )
-    .expect("capability should resolve");
-    match action {
-        AgentAction::CallTool { tool, args } => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-            assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
-        }
-        other => panic!("unexpected action: {other:?}"),
-    }
-}
-
-#[test]
-fn resolves_bare_fs_basic_capability_to_fs_basic_tool() {
-    let action = resolve_static_capability_action(
-        &normalize_capability_name("fs_basic"),
-        json!({"action": "list_dir", "path": "."}),
-    )
-    .expect("bare fs_basic capability should resolve");
-    match action {
-        AgentAction::CallTool { tool, args } => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-            assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
-        }
-        other => panic!("unexpected action: {other:?}"),
-    }
-}
-
-#[test]
-fn resolves_system_run_command_to_run_cmd_skill() {
-    let action = resolve_static_capability_action(
-        &normalize_capability_name("system.run_command"),
-        json!({"cmd": "pwd"}),
-    )
-    .expect("capability should resolve");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "run_cmd");
-            assert_eq!(args.get("command").and_then(Value::as_str), Some("pwd"));
-        }
-        other => panic!("unexpected action: {other:?}"),
-    }
-}
-
-#[test]
-fn resolves_transform_capability_to_transform_skill() {
-    let action = resolve_static_capability_action(
-        &normalize_capability_name("transform"),
-        json!({"data":[{"score": 1}], "ops":[{"op":"sort","by":"score"}]}),
-    )
-    .expect("capability should resolve");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "transform");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("transform_data")
-            );
-        }
-        other => panic!("unexpected action: {other:?}"),
-    }
-}
-
-fn resolve_static_capability_action(normalized: &str, args: Value) -> Option<AgentAction> {
-    match normalized {
-        "fs_basic" => Some(AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args,
-        }),
-        "filesystem.list_entries" | "filesystem.list_dir" => Some(AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args: with_action(args, "list_dir"),
-        }),
-        "transform" | "transform.transform_data" | "data.transform" => {
-            Some(AgentAction::CallSkill {
-                skill: "transform".to_string(),
-                args: with_action(args, "transform_data"),
-            })
-        }
-        "system.run_command" | "system.run_cmd" => Some(AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: normalize_run_command_args(args),
-        }),
-        _ => None,
-    }
-}
-
 #[test]
 fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
     let mut candidates = vec![
@@ -194,7 +81,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
 
 #[test]
 fn capability_resolution_record_covers_resolved_mapping() {
-    let state = state_without_registry_with_skills(&["fs_basic"]);
+    let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
         "filesystem.list_entries",
@@ -207,13 +94,12 @@ fn capability_resolution_record_covers_resolved_mapping() {
         other => panic!("unexpected resolved action: {other:?}"),
     }
     assert_eq!(record.owner_layer, "capability_resolver");
-    assert!(matches!(
+    assert_eq!(
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"
-            | "capability_resolver_static_compat_resolved"
-    ));
+    );
     assert_eq!(record.outcome, "resolved");
-    assert!(matches!(record.source, "registry" | "static_compat"));
+    assert_eq!(record.source, "registry");
     assert_eq!(record.capability_ref, "filesystem.list_entries");
     assert!(matches!(
         record.resolved_ref.as_deref(),
@@ -223,7 +109,7 @@ fn capability_resolution_record_covers_resolved_mapping() {
 }
 
 #[test]
-fn workspace_registry_does_not_use_static_compat_for_ambiguous_bare_capability() {
+fn workspace_registry_requires_explicit_bare_capability_action() {
     let state = state_with_workspace_registry();
     let (action, record) =
         resolve_capability_action_with_record_for_state(&state, "config_basic", json!({}));
@@ -467,6 +353,38 @@ fn registry_resolves_terminal_layer_representative_capabilities() {
         assert_eq!(record.capability_ref, capability);
         assert_eq!(record.resolved_ref.as_deref(), Some(expected_ref));
     }
+}
+
+#[test]
+fn registry_resolution_preserves_media_poll_action_arg() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "image.poll",
+        json!({
+            "task_id": "image-task-001",
+            "job_id": "image-job-001",
+            "output_path": "document/media_dry_run/image_status_card.png",
+            "dry_run": true,
+            "mock_status": "succeeded",
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.resolved_ref.as_deref(), Some("skill:image_generate"));
+    let Some(AgentAction::CallSkill { skill, args }) = action else {
+        panic!("expected image_generate skill action, got {action:?}");
+    };
+    assert_eq!(skill, "image_generate");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("poll"));
+    assert_eq!(
+        args.get("task_id").and_then(Value::as_str),
+        Some("image-task-001")
+    );
+    assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
 }
 
 #[test]
