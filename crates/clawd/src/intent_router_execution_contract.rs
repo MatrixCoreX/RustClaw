@@ -20,7 +20,7 @@ fn route_reason_has_any_marker(route_reason: &str, markers: &[&str]) -> bool {
         .any(|marker| ascii_token_present(route_reason, marker))
 }
 
-pub(super) fn cleanup_executionless_route_finalize_style(
+pub(super) fn cleanup_executionless_finalize_trace(
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
@@ -43,7 +43,7 @@ pub(super) fn cleanup_executionless_route_finalize_style(
         return None;
     }
     *execution_finalize_style = ActFinalizeStyle::Plain;
-    Some("executionless_route_downgraded_to_direct_answer")
+    Some("executionless_finalize_trace_plain")
 }
 
 pub(super) fn apply_explicit_command_execution_contract_repair(

@@ -503,7 +503,7 @@ pub(crate) async fn run_intent_normalizer(
         } else {
             None
         };
-        let executionless_route_repair = cleanup_executionless_route_finalize_style(
+        let executionless_finalize_trace_cleanup = cleanup_executionless_finalize_trace(
             &mut execution_finalize_style,
             needs_clarify,
             &output_contract,
@@ -594,7 +594,7 @@ pub(crate) async fn run_intent_normalizer(
             workspace_default_clarify_repair,
             resolved_directory_clarify_repair,
             unbound_workspace_generic_content_clarify_repair,
-            executionless_route_repair,
+            executionless_finalize_trace_cleanup,
         ]
         .into_iter()
         .flatten()
@@ -999,7 +999,7 @@ pub(crate) async fn run_intent_normalizer(
                 workspace_default_clarify_repair,
                 resolved_directory_clarify_repair,
                 unbound_workspace_generic_content_clarify_repair,
-                executionless_route_repair,
+                executionless_finalize_trace_cleanup,
                 command_payload_contract_repair,
                 file_delivery_contract_repair,
                 schedule_route_contract_repair,
