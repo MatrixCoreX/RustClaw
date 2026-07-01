@@ -308,6 +308,7 @@ pub(crate) fn decide_planner_memory_use_policy(
             "planner_execution_uses_goals_preferences_and_stable_facts"
         }
         crate::RouteGateKind::Chat => "direct_answer_keeps_planner_promotion_context_stable",
+        #[cfg(test)]
         crate::RouteGateKind::Clarify => "clarify_path_keeps_planner_context_stable",
     };
     MemoryUseDecision::planner_scoped(max_chars, reason)
@@ -361,6 +362,7 @@ pub(crate) fn decide_chat_memory_use_policy(
             crate::RouteGateKind::Execute => {
                 "planner_chat_finalization_uses_stable_memory_without_long_term_summary"
             }
+            #[cfg(test)]
             crate::RouteGateKind::Clarify => {
                 "clarify_chat_path_uses_stable_memory_without_long_term_summary"
             }

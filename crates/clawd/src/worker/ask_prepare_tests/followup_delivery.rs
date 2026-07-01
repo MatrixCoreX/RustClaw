@@ -102,7 +102,7 @@ fn unresolved_file_delivery_without_locator_requires_clarify() {
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
     assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
+    assert!(route.is_execute_gate());
     assert!(!route.wants_file_delivery);
     assert!(!route.output_contract.delivery_required);
     assert_eq!(
@@ -126,7 +126,7 @@ fn generated_file_delivery_without_locator_can_choose_runtime_target() {
         resolved_intent: "create a shell script, save it, and deliver the generated file"
             .to_string(),
         needs_clarify: true,
-        route_reason: String::new(),
+        route_reason: "generated_file_delivery".to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
@@ -183,7 +183,7 @@ fn generated_file_delivery_with_filename_locator_stays_existing_file_delivery() 
         resolved_intent: "deliver a filename-scoped file target".to_string(),
         needs_clarify: false,
         route_reason:
-            "semantic_contract_requires_evidence; generated_file_delivery_allows_runtime_target"
+            "semantic_contract_requires_evidence; generated_file_delivery; generated_file_delivery_allows_runtime_target"
                 .to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
@@ -246,7 +246,7 @@ fn generated_file_delivery_current_workspace_without_locator_can_choose_runtime_
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "deliver unresolved workspace file target".to_string(),
         needs_clarify: false,
-        route_reason: "semantic_contract_requires_evidence".to_string(),
+        route_reason: "semantic_contract_requires_evidence; generated_file_delivery".to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
@@ -333,7 +333,7 @@ fn generated_file_delivery_path_kind_without_locator_requires_clarify() {
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
     assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
+    assert!(route.is_execute_gate());
     assert!(!route.wants_file_delivery);
     assert!(!route.output_contract.delivery_required);
     assert_eq!(
@@ -390,7 +390,7 @@ fn generated_file_delivery_existing_directory_locator_requires_clarify() {
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
     assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
+    assert!(route.is_execute_gate());
     assert!(!route.wants_file_delivery);
     assert!(!route.output_contract.delivery_required);
     assert_eq!(
@@ -1013,7 +1013,7 @@ fn ordered_entry_reference_binds_scalar_path_from_active_frame() {
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "return only the selected path".to_string(),
         needs_clarify: false,
-        route_reason: "normalizer selected an active ordered entry".to_string(),
+        route_reason: "normalizer selected an active ordered entry; scalar_path_only".to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
