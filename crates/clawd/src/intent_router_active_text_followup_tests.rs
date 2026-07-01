@@ -271,8 +271,8 @@ fn unresolved_deictic_observation_clarify_is_not_downgraded_to_direct_answer() {
     let state_patch = serde_json::json!({
         "deictic_reference": {"target": "unresolved_prior_object"}
     });
-    assert!(
-        !super::should_resolve_task_scope_update_clarify_with_active_task(
+    assert_eq!(
+        super::active_task_scope_update_loop_context_hint(
             "看看那个文件最后 5 行",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
@@ -281,7 +281,8 @@ fn unresolved_deictic_observation_clarify_is_not_downgraded_to_direct_answer() {
             true,
             &contract,
             Some(&state_patch),
-        )
+        ),
+        None
     );
 }
 
@@ -389,16 +390,19 @@ fn active_task_output_refinement_clarify_is_resolved() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_resolve_task_append_clarify_with_active_task(
-        "Output a two-row markdown table",
-        Some(&snapshot),
-        Some(TurnType::TaskAppend),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        true,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_append_loop_context_hint(
+            "Output a two-row markdown table",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            true,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_append_loop_context")
+    );
 }
 
 #[test]
@@ -413,16 +417,19 @@ fn active_task_append_clarify_without_output_is_resolved() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_resolve_task_append_clarify_with_active_task(
-        "控制在 80 字内，只输出正文",
-        Some(&snapshot),
-        Some(TurnType::TaskAppend),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        true,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_append_loop_context_hint(
+            "控制在 80 字内，只输出正文",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            true,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_append_loop_context")
+    );
 }
 
 #[test]
@@ -486,16 +493,19 @@ fn active_task_append_clarify_keeps_file_locator_guard() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!super::should_resolve_task_append_clarify_with_active_task(
-        "README.md",
-        Some(&snapshot),
-        Some(TurnType::TaskAppend),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        true,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_append_loop_context_hint(
+            "README.md",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            true,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        None
+    );
 }
 
 #[test]

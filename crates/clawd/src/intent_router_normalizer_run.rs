@@ -773,24 +773,19 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        if needs_clarify
-            && should_resolve_task_scope_update_clarify_with_active_task(
-                req,
-                session_snapshot,
-                turn_type,
-                target_task_policy,
-                attachment_processing_required,
-                needs_clarify,
-                &output_contract,
-                state_patch.as_ref(),
-            )
-        {
-            needs_clarify = false;
-            clarify_question.clear();
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            append_route_reason(&mut reason, "active_task_scope_update_resolves_clarify");
+        if let Some(loop_context_reason) = active_task_scope_update_loop_context_hint(
+            req,
+            session_snapshot,
+            turn_type,
+            target_task_policy,
+            attachment_processing_required,
+            needs_clarify,
+            &output_contract,
+            state_patch.as_ref(),
+        ) {
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_scope_update_resolves_clarify input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=active_task_scope_update_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
@@ -814,47 +809,37 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        if needs_clarify
-            && should_resolve_task_replace_clarify_with_active_task(
-                req,
-                session_snapshot,
-                turn_type,
-                target_task_policy,
-                attachment_processing_required,
-                needs_clarify,
-                &output_contract,
-                state_patch.as_ref(),
-            )
-        {
-            needs_clarify = false;
-            clarify_question.clear();
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            append_route_reason(&mut reason, "active_task_replace_resolves_clarify");
+        if let Some(loop_context_reason) = active_task_replace_loop_context_hint(
+            req,
+            session_snapshot,
+            turn_type,
+            target_task_policy,
+            attachment_processing_required,
+            needs_clarify,
+            &output_contract,
+            state_patch.as_ref(),
+        ) {
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_replace_resolves_clarify input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=active_task_replace_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
             );
         }
-        if needs_clarify
-            && should_resolve_task_append_clarify_with_active_task(
-                req,
-                session_snapshot,
-                turn_type,
-                target_task_policy,
-                attachment_processing_required,
-                needs_clarify,
-                &output_contract,
-                state_patch.as_ref(),
-            )
-        {
-            needs_clarify = false;
-            clarify_question.clear();
-            execution_finalize_style = ActFinalizeStyle::Plain;
-            append_route_reason(&mut reason, "active_task_append_resolves_clarify");
+        if let Some(loop_context_reason) = active_task_append_loop_context_hint(
+            req,
+            session_snapshot,
+            turn_type,
+            target_task_policy,
+            attachment_processing_required,
+            needs_clarify,
+            &output_contract,
+            state_patch.as_ref(),
+        ) {
+            append_route_reason(&mut reason, loop_context_reason);
             info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_append_resolves_clarify input={}",
+                "{} intent_normalizer task_id={} turn_analysis_hint=active_task_append_loop_context input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)

@@ -297,12 +297,10 @@ mod active_task_repair;
 use active_task_repair::unresolved_deictic_observable_target_should_clarify;
 use active_task_repair::{
     active_context_has_structured_observation_anchor, active_primary_text_context,
-    active_task_mutation_loop_context_hint, apply_active_task_scope_refinement_repair,
-    apply_active_task_structured_patch_repair, apply_missing_active_task_reuse_clarify,
-    repair_state_patch_replacement_literal_conflicts,
-    should_resolve_task_append_clarify_with_active_task,
-    should_resolve_task_replace_clarify_with_active_task,
-    should_resolve_task_scope_update_clarify_with_active_task,
+    active_task_append_loop_context_hint, active_task_mutation_loop_context_hint,
+    active_task_replace_loop_context_hint, active_task_scope_update_loop_context_hint,
+    apply_active_task_scope_refinement_repair, apply_active_task_structured_patch_repair,
+    apply_missing_active_task_reuse_clarify, repair_state_patch_replacement_literal_conflicts,
 };
 
 #[path = "intent_router_semantic_suspect.rs"]
