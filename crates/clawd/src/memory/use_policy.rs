@@ -325,11 +325,11 @@ pub(crate) fn decide_chat_memory_use_policy(
 ) -> MemoryUseDecision {
     if route_reason
         .split(';')
-        .any(|part| part.trim() == "standalone_freeform_clarify_downgraded_to_direct_answer")
+        .any(|part| part.trim() == "standalone_freeform_clarify_loop_context")
     {
         return MemoryUseDecision::disabled(
             MemoryContextMode::Chat,
-            "standalone_freeform_clarify_downgrade_uses_current_request_only",
+            "standalone_freeform_clarify_loop_context_uses_current_request_only",
         );
     }
     let prompt_cap = state.policy.memory.prompt_max_chars.max(384);

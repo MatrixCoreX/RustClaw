@@ -226,13 +226,13 @@ fn chat_memory_active_session_allows_bounded_recent_context_only() {
 }
 
 #[test]
-fn chat_memory_standalone_freeform_clarify_downgrade_is_disabled() {
+fn chat_memory_standalone_freeform_clarify_loop_context_is_disabled() {
     let state = AppState::test_default_with_fixture_provider();
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
         &crate::AskMode::direct_answer(),
-        "standalone_freeform_clarify_downgraded_to_direct_answer",
+        "standalone_freeform_clarify_loop_context",
         false,
         1200,
         ChatMemoryContextHint::Default,
@@ -244,7 +244,7 @@ fn chat_memory_standalone_freeform_clarify_downgrade_is_disabled() {
     assert!(!decision.include_knowledge_docs);
     assert_eq!(
         decision.reason,
-        "standalone_freeform_clarify_downgrade_uses_current_request_only"
+        "standalone_freeform_clarify_loop_context_uses_current_request_only"
     );
 
     let filtered = filter_structured_memory_context(full_context(), &decision);

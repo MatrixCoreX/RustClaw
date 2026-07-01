@@ -273,9 +273,9 @@ use current_turn_structural_repair::{
     apply_fs_basic_lifecycle_machine_contract_repair,
     apply_unbound_workspace_generic_content_clarify_repair,
     apply_workspace_scope_patch_to_contract, infer_missing_target_policy_from_contract,
-    is_meaningful_state_patch, should_detach_bare_acknowledgement_from_active_task,
-    should_downgrade_orphan_output_shape_clarify_to_direct_answer,
-    should_downgrade_standalone_freeform_clarify_to_direct_answer,
+    is_meaningful_state_patch, orphan_output_shape_loop_context_hint,
+    should_detach_bare_acknowledgement_from_active_task,
+    standalone_freeform_clarify_loop_context_hint,
 };
 
 #[path = "intent_router_active_observation.rs"]
