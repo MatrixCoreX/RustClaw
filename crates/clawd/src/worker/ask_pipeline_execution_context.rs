@@ -99,10 +99,6 @@ fn pure_direct_chat_current_request_route(
             crate::OutputDeliveryIntent::None
         )
         || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-        )
-        || !matches!(
             route_result.output_contract.self_extension.mode,
             crate::SelfExtensionMode::None
         )
@@ -140,18 +136,10 @@ pub(super) fn sanitize_untrusted_normalizer_answer_candidate_for_execution(
     resolved_prompt_for_execution: &mut String,
     prompt_with_memory_for_execution: &mut String,
 ) {
-    let Some(candidate) = embedded_normalizer_answer_candidate_block(&route_result.resolved_intent)
-    else {
-        return;
-    };
-    if normalizer_answer_candidate_allowed_in_execution_context(
-        &candidate,
-        prompt,
-        recent_execution_context,
-        session_snapshot,
-    ) {
+    if embedded_normalizer_answer_candidate_block(&route_result.resolved_intent).is_none() {
         return;
     }
+    let _ = (prompt, recent_execution_context, session_snapshot);
     route_result.resolved_intent =
         strip_embedded_answer_candidate_block(&route_result.resolved_intent);
     *resolved_prompt_for_execution =
@@ -185,75 +173,6 @@ fn embedded_normalizer_answer_candidate_block(text: &str) -> Option<String> {
     }
     let candidate = lines.join("\n").trim().to_string();
     (!candidate.is_empty()).then_some(candidate)
-}
-
-fn normalizer_answer_candidate_allowed_in_execution_context(
-    candidate: &str,
-    prompt: &str,
-    recent_execution_context: &str,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> bool {
-    if super::answer_candidate_is_compact_scalar_shape(candidate) {
-        return true;
-    }
-    if super::normalizer_answer_candidate_is_grounded_in_structured_observation(
-        candidate,
-        session_snapshot,
-    ) {
-        return true;
-    }
-    if super::normalizer_answer_candidate_matches_recent_execution_context(
-        candidate,
-        recent_execution_context,
-    ) {
-        return true;
-    }
-    answer_candidate_preserves_current_turn_machine_literals(candidate, prompt)
-}
-
-fn answer_candidate_preserves_current_turn_machine_literals(candidate: &str, prompt: &str) -> bool {
-    if candidate.chars().count() > 300 || candidate.lines().count() > 2 {
-        return false;
-    }
-    let literals = current_turn_machine_literals(prompt);
-    if literals.is_empty() {
-        return false;
-    }
-    let candidate = candidate.to_ascii_lowercase();
-    literals
-        .iter()
-        .all(|literal| candidate.contains(&literal.to_ascii_lowercase()))
-}
-
-fn current_turn_machine_literals(text: &str) -> Vec<String> {
-    let mut literals = Vec::new();
-    for token in text.split(|ch: char| {
-        !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/' | '.' | ':' | '\\'))
-    }) {
-        let token = token.trim_matches(|ch: char| matches!(ch, '_' | '-' | '/' | '.' | ':' | '\\'));
-        if current_turn_machine_literal(token) && !literals.iter().any(|item| item == token) {
-            literals.push(token.to_string());
-        }
-    }
-    literals
-}
-
-fn current_turn_machine_literal(token: &str) -> bool {
-    let token = token.trim();
-    if token.is_empty() {
-        return false;
-    }
-    if token.starts_with("http://") || token.starts_with("https://") {
-        return token.len() <= 240;
-    }
-    if std::path::Path::new(token).extension().is_some() {
-        return true;
-    }
-    token.contains('/')
-        || token.contains('\\')
-        || token.contains('_')
-        || token.contains('-')
-        || token.chars().any(|ch| ch.is_ascii_digit())
 }
 
 fn strip_embedded_answer_candidate_block(text: &str) -> String {

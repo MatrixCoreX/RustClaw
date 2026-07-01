@@ -13,10 +13,7 @@ pub(super) fn bare_topic_memory_expansion_route_should_force_clarify(
     if !is_bare_topic_only_prompt(prompt)
         || !route_result.is_execute_gate()
         || !route_result.output_contract.requires_content_evidence
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::RawCommandOutput
-        )
+        || !command_observation_marker_present(route_result)
         || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route_result.output_contract.locator_hint.trim().is_empty()
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)

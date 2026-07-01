@@ -61,7 +61,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -220,7 +220,7 @@ fn model_supplied_manifest_locator_from_deictic_prompt_requires_clarify() {
 }
 
 #[test]
-fn background_only_extensionless_file_locator_requires_clarify() {
+fn background_only_extensionless_file_locator_with_current_request_evidence_can_plan() {
     let root = make_temp_root("background_locator_extensionless_file");
     std::fs::write(root.join("README.md"), "# Demo\n").expect("readme");
     let state = test_state_with_root(root);
@@ -238,7 +238,7 @@ fn background_only_extensionless_file_locator_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_force_clarify(
         &state,
         "读一下那个 README 开头并用一句话总结",
         &route.resolved_intent,
@@ -260,8 +260,7 @@ fn background_only_field_selector_without_file_locator_requires_clarify() {
     let mut route = executable_filename_route();
     route.resolved_intent = "Extract app.name from a remembered config file.".to_string();
     route.route_reason =
-        "llm_semantic_contract_repair:single_path_config_field_extraction_contract_semantically_valid"
-            .to_string();
+        "single_path_config_field_extraction_contract_semantically_valid".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.display().to_string();
     route.output_contract.requires_content_evidence = true;
@@ -358,7 +357,7 @@ gen-1778122040.png
 }
 
 #[test]
-fn background_locator_clarify_downgrades_file_name_judgment_with_recent_results() {
+fn background_locator_clarify_keeps_file_name_judgment_without_machine_marker() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
     route.set_clarify_gate();
@@ -380,22 +379,22 @@ Chinese version: README.zh-CN.md
 RustClaw test fixture service notes.";
 
     assert!(
-        downgrade_background_locator_clarify_to_recent_observed_chat(
+        !downgrade_background_locator_clarify_to_recent_observed_chat(
             &mut route,
             recent_execution_context,
         )
     );
-    assert!(!route.needs_clarify);
-    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Chat);
+    assert!(route.needs_clarify);
+    assert_eq!(route.ask_mode.gate_kind(), crate::RouteGateKind::Clarify);
     assert_eq!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
+        crate::OutputResponseShape::Strict
     );
     assert_eq!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
+        crate::OutputSemanticKind::FileNames
     );
-    assert!(route
+    assert!(!route
         .route_reason
         .contains("active_observed_output_chat_repair"));
 }

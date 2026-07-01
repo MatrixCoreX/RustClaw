@@ -1,53 +1,14 @@
-pub(super) fn direct_existing_file_delivery_token(
-    route_result: &crate::RouteResult,
-) -> Option<String> {
-    let contract = &route_result.output_contract;
-    if route_result.needs_clarify
-        || !contract.delivery_required
-        || contract.response_shape != crate::OutputResponseShape::FileToken
-        || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || contract.locator_kind != crate::OutputLocatorKind::Path
-    {
-        return None;
-    }
-    if !matches!(
-        contract.semantic_kind,
-        crate::OutputSemanticKind::None | crate::OutputSemanticKind::GeneratedFileDelivery
-    ) {
-        return None;
-    }
-    if contract.semantic_kind == crate::OutputSemanticKind::GeneratedFileDelivery
-        && route_result
-            .route_reason
-            .split(';')
-            .map(str::trim)
-            .any(|part| part == "generated_file_delivery_allows_runtime_target")
-    {
-        return None;
-    }
-    let path = contract.locator_hint.trim();
-    if path.is_empty() {
-        return None;
-    }
-    let path = std::path::Path::new(path);
-    if !path.is_file() {
-        return None;
-    }
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    Some(format!("FILE:{}", path.display()))
-}
-
 pub(super) fn generated_file_delivery_uses_runtime_target(
     route_result: &crate::RouteResult,
 ) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::GeneratedFileDelivery
-        && super::route_reason_has_marker(
+    super::route_reason_has_marker(route_result, "generated_file_delivery")
+        || super::route_reason_has_marker(
             route_result,
             "generated_file_delivery_allows_runtime_target",
         )
 }
 
-pub(super) fn prebind_direct_file_delivery_locator_before_deictic_guard(
+pub(super) fn reject_direct_file_delivery_workspace_root_locator(
     state: &crate::AppState,
     recent_execution_context: &str,
     route_result: &mut crate::RouteResult,
@@ -66,150 +27,35 @@ pub(super) fn prebind_direct_file_delivery_locator_before_deictic_guard(
     else {
         return false;
     };
-    if super::locator_hint_points_to_workspace_root(&state.skill_rt.workspace_root, &path) {
-        if generated_file_delivery_uses_runtime_target(route_result) {
-            return false;
-        }
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        super::append_route_reason(
-            route_result,
-            "direct_file_delivery_workspace_root_locator_rejected",
-        );
+    if !super::locator_hint_points_to_workspace_root(&state.skill_rt.workspace_root, &path)
+        || generated_file_delivery_uses_runtime_target(route_result)
+    {
         return false;
     }
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
+    route_result.needs_clarify = true;
+    route_result.set_clarify_gate();
+    route_result.clarify_question.clear();
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
     super::append_route_reason(
         route_result,
-        "direct_file_delivery_locator_prebound_before_deictic_guard",
+        "direct_file_delivery_workspace_root_locator_rejected",
     );
     true
 }
 
-pub(super) fn prebind_file_delivery_locator_from_recent_ordered_resolved_prompt(
-    state: &crate::AppState,
-    resolved_prompt: &str,
-    recent_execution_context: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
-    if !route_result.needs_clarify
-        || !route_result.output_contract.delivery_required
-        || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
-        || !route_result.output_contract.locator_hint.trim().is_empty()
-    {
-        return false;
-    }
-    let Some(path) = super::resolve_recent_ordered_entry_target_from_resolved_prompt(
-        state,
-        resolved_prompt,
-        recent_execution_context,
-    ) else {
-        return false;
-    };
-    route_result.wants_file_delivery = true;
-    super::promote_clarify_observation_to_execute_with_locator(
-        route_result,
-        crate::OutputLocatorKind::Path,
-        path,
-        "file_delivery_locator_prebound_from_recent_ordered_resolved_prompt",
-    )
-}
-
-pub(super) fn prebind_file_delivery_locator_from_resolved_prompt_path(
-    state: &crate::AppState,
-    resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
-    if !route_result.output_contract.delivery_required
-        || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
-        || !route_result.output_contract.locator_hint.trim().is_empty()
-    {
-        return false;
-    }
-    let Some(path) = super::resolved_prompt_existing_workspace_locator(state, resolved_prompt)
-        .or_else(|| {
-            super::resolved_prompt_existing_workspace_locator(state, &route_result.resolved_intent)
-        })
-        .filter(|path| std::path::Path::new(path).is_file())
-    else {
-        return false;
-    };
-    route_result.wants_file_delivery = true;
-    if route_result.needs_clarify || route_result.is_chat_gate() {
-        return super::promote_clarify_observation_to_execute_with_locator(
-            route_result,
-            crate::OutputLocatorKind::Path,
-            path,
-            "file_delivery_locator_prebound_from_resolved_prompt_path",
-        );
-    }
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    super::append_route_reason(
-        route_result,
-        "file_delivery_locator_prebound_from_resolved_prompt_path",
-    );
-    true
-}
-
-pub(super) fn prebind_file_delivery_missing_locator_from_resolved_prompt_path(
-    state: &crate::AppState,
-    resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
-    if !route_result.output_contract.delivery_required
-        || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
-        || !route_result.output_contract.locator_hint.trim().is_empty()
-    {
-        return false;
-    }
-    let Some(path) = explicit_workspace_path_from_text_allow_missing(state, resolved_prompt)
-        .or_else(|| {
-            explicit_workspace_path_from_text_allow_missing(state, &route_result.resolved_intent)
-        })
-    else {
-        return false;
-    };
-    if std::path::Path::new(&path).is_file() {
-        return false;
-    }
-    route_result.wants_file_delivery = true;
-    if route_result.needs_clarify || route_result.is_chat_gate() {
-        return super::promote_clarify_observation_to_execute_with_locator(
-            route_result,
-            crate::OutputLocatorKind::Path,
-            path,
-            "file_delivery_missing_locator_prebound_from_resolved_prompt_path",
-        );
-    }
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    super::append_route_reason(
-        route_result,
-        "file_delivery_missing_locator_prebound_from_resolved_prompt_path",
-    );
-    true
-}
-
-pub(super) fn promote_unresolved_file_delivery_with_current_request_locator(
+pub(super) fn refine_unresolved_file_delivery_boundary_contract(
     prompt: &str,
     post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
 ) -> bool {
-    if !post_route.execution_route_result.needs_clarify
-        || !super::route_reason_has_marker(
-            &post_route.execution_route_result,
-            "unresolved_file_delivery_requires_clarify",
-        )
+    let has_missing_delivery_locator_signal = super::route_reason_has_marker(
+        &post_route.execution_route_result,
+        "unresolved_file_delivery_requires_clarify",
+    ) || super::route_reason_has_marker(
+        &post_route.execution_route_result,
+        "clarify_reason_code:missing_delivery_locator",
+    );
+    if !has_missing_delivery_locator_signal
         || !post_route
             .execution_route_result
             .output_contract
@@ -219,7 +65,7 @@ pub(super) fn promote_unresolved_file_delivery_with_current_request_locator(
     {
         return false;
     }
-    let Some(locator) = crate::intent::locator_extractor::extract_explicit_locator_for_fallback(
+    let Some(_locator) = crate::intent::locator_extractor::extract_explicit_locator_for_fallback(
         prompt,
     )
     .filter(|locator| {
@@ -228,6 +74,30 @@ pub(super) fn promote_unresolved_file_delivery_with_current_request_locator(
             crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
         )
     }) else {
+        post_route.execution_route_result.needs_clarify = true;
+        post_route.execution_route_result.set_clarify_gate();
+        post_route.execution_route_result.wants_file_delivery = true;
+        post_route
+            .execution_route_result
+            .output_contract
+            .delivery_required = true;
+        post_route
+            .execution_route_result
+            .output_contract
+            .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        post_route
+            .execution_route_result
+            .output_contract
+            .response_shape = crate::OutputResponseShape::FileToken;
+        post_route
+            .execution_route_result
+            .output_contract
+            .requires_content_evidence = true;
+        post_route.missing_locator_for_path_scoped_content = true;
+        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_unresolved_file_delivery_requires_locator",
+            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
+        );
         return false;
     };
 
@@ -248,89 +118,22 @@ pub(super) fn promote_unresolved_file_delivery_with_current_request_locator(
         .execution_route_result
         .output_contract
         .requires_content_evidence = true;
-    post_route
-        .execution_route_result
-        .output_contract
-        .locator_kind = locator.locator_kind;
-    post_route
-        .execution_route_result
-        .output_contract
-        .locator_hint = locator.locator_hint;
-    post_route.execution_route_result.needs_clarify = false;
-    post_route.execution_route_result.clarify_question.clear();
-    if post_route.execution_route_result.is_clarify_gate()
-        || post_route.execution_route_result.is_chat_gate()
-    {
-        post_route
-            .execution_route_result
-            .set_planner_execute_finalize(crate::ActFinalizeStyle::Plain);
-    }
-    post_route.missing_locator_for_path_scoped_content = false;
-    post_route.clarify_reason.clear();
+    post_route.missing_locator_for_path_scoped_content = true;
     post_route.clarify_reason_kind = crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
     post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
         "boundary_delivery_gate",
-        "post_route_file_delivery_current_request_locator_deferred_to_execution",
-        crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+        "post_route_file_delivery_current_request_locator_deferred_to_loop",
+        crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
     );
     super::append_route_reason(
         &mut post_route.execution_route_result,
-        "file_delivery_current_request_locator_deferred_to_execution",
+        "file_delivery_current_request_locator_deferred_to_loop",
     );
     true
 }
 
-fn explicit_workspace_path_from_text_allow_missing(
-    state: &crate::AppState,
-    text: &str,
-) -> Option<String> {
-    let workspace_root = state
-        .skill_rt
-        .workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| state.skill_rt.workspace_root.clone());
-    crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
-        .into_iter()
-        .filter(|locator| locator.locator_kind == crate::OutputLocatorKind::Path)
-        .find_map(|locator| {
-            let raw = locator.locator_hint.trim();
-            if raw.is_empty() {
-                return None;
-            }
-            let candidate = std::path::Path::new(raw);
-            let joined = if candidate.is_absolute() {
-                candidate.to_path_buf()
-            } else {
-                workspace_root.join(candidate)
-            };
-            let normalized = normalize_missing_path_lexically(&joined);
-            normalized
-                .starts_with(&workspace_root)
-                .then(|| normalized.display().to_string())
-        })
-}
-
-fn normalize_missing_path_lexically(path: &std::path::Path) -> std::path::PathBuf {
-    let mut out = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::Prefix(prefix) => out.push(prefix.as_os_str()),
-            std::path::Component::RootDir => out.push(component.as_os_str()),
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::Normal(part) => out.push(part),
-        }
-    }
-    out
-}
-
 fn route_requires_existing_file_delivery(route_result: &crate::RouteResult) -> bool {
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::GeneratedFileDelivery
-    ) {
+    if generated_file_delivery_uses_runtime_target(route_result) {
         return false;
     }
     route_result.wants_file_delivery
@@ -361,18 +164,6 @@ pub(super) fn unbound_existing_file_delivery_route_should_force_clarify(
 ) -> bool {
     if route_result.needs_clarify
         || has_authoritative_deictic_anchor
-        || super::route_reason_has_marker(
-            route_result,
-            "file_delivery_locator_prebound_from_resolved_prompt_path",
-        )
-        || super::route_reason_has_marker(
-            route_result,
-            "file_delivery_locator_prebound_from_recent_ordered_resolved_prompt",
-        )
-        || super::route_reason_has_marker(
-            route_result,
-            "direct_file_delivery_locator_prebound_before_deictic_guard",
-        )
         || !route_requires_existing_file_delivery(route_result)
         || current_request_has_file_delivery_locator_binding(state, prompt)
     {
@@ -408,7 +199,7 @@ pub(super) fn directory_file_delivery_without_structured_selection_should_force_
     true
 }
 
-fn route_has_structured_list_selector(route_result: &crate::RouteResult) -> bool {
+pub(super) fn route_has_structured_list_selector(route_result: &crate::RouteResult) -> bool {
     let selector = &route_result.output_contract.self_extension.list_selector;
     selector.target_kind_specified
         || selector.limit.is_some()
@@ -418,6 +209,10 @@ fn route_has_structured_list_selector(route_result: &crate::RouteResult) -> bool
             .is_some_and(|value| !value.trim().is_empty())
         || selector.include_metadata.is_some()
         || selector.include_hidden.is_some()
+        || super::route_reason_has_marker(
+            route_result,
+            "normalizer_emitted_directory_file_selector",
+        )
 }
 
 fn state_patch_has_ordered_entry_reference(
@@ -501,13 +296,10 @@ pub(super) fn active_anchor_file_delivery_without_structured_reference_should_fo
 }
 
 fn route_repaired_active_task_binding(route_result: &crate::RouteResult) -> bool {
-    route_result
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .any(|part| {
-            part.starts_with("llm_semantic_contract_repair:active_task_invalid_turn_binding")
-        })
+    super::route_reason_has_marker(
+        route_result,
+        "contract_repair_marker=active_task_invalid_turn_binding",
+    )
 }
 
 fn session_alias_binding_matches_prompt(

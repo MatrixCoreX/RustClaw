@@ -29,7 +29,7 @@ fn unbound_targeted_evidence_allows_current_workspace_scalar_count_scope() {
 }
 
 #[test]
-fn current_workspace_scalar_count_structured_locator_prebinds_root_before_unbound_guard() {
+fn current_workspace_scalar_count_structured_locator_exports_boundary_scope() {
     let root = make_temp_root("current_workspace_scalar_count_root_hint");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -76,11 +76,12 @@ fn current_workspace_scalar_count_structured_locator_prebinds_root_before_unboun
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::CurrentWorkspace
     );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "current_workspace_root_hint_prebound_for_scalar_count"
     ));
@@ -88,11 +89,17 @@ fn current_workspace_scalar_count_structured_locator_prebinds_root_before_unboun
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("\"current_workspace_scope\""));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains(&root.display().to_string()));
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn current_workspace_scalar_count_marker_from_clarify_route_executes_before_unbound_guard() {
+fn current_workspace_scalar_count_marker_from_clarify_route_exports_boundary_scope() {
     let root = make_temp_root("current_workspace_scalar_count_marker_clarify_route");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -134,21 +141,16 @@ fn current_workspace_scalar_count_marker_from_clarify_route_executes_before_unbo
         String::new(),
     );
 
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
+        crate::OutputLocatorKind::None
     );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "current_workspace_root_hint_prebound_for_scalar_count"
     ));
@@ -156,11 +158,17 @@ fn current_workspace_scalar_count_marker_from_clarify_route_executes_before_unbo
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("\"current_workspace_scope\""));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains(&root.display().to_string()));
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn current_workspace_scalar_count_one_sentence_prebinds_root_before_unbound_guard() {
+fn current_workspace_scalar_count_one_sentence_exports_boundary_scope() {
     let root = make_temp_root("current_workspace_scalar_count_one_sentence_root_hint");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -209,11 +217,12 @@ fn current_workspace_scalar_count_one_sentence_prebinds_root_before_unbound_guar
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::CurrentWorkspace
     );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "current_workspace_root_hint_prebound_for_scalar_count"
     ));
@@ -221,11 +230,17 @@ fn current_workspace_scalar_count_one_sentence_prebinds_root_before_unbound_guar
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("\"current_workspace_scope\""));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains(&root.display().to_string()));
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn clarify_current_workspace_scalar_count_with_resolved_root_promotes_to_execute() {
+fn clarify_current_workspace_scalar_count_with_resolved_root_exports_boundary_scope() {
     let root = make_temp_root("clarify_current_workspace_scalar_count_resolved_root");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -266,21 +281,16 @@ fn clarify_current_workspace_scalar_count_with_resolved_root_promotes_to_execute
         String::new(),
     );
 
-    assert!(
-        !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
-    );
-    assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::CurrentWorkspace
     );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        root.display().to_string()
-    );
-    assert!(route_reason_has_marker(
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "current_workspace_root_hint_prebound_for_scalar_count"
     ));
@@ -288,6 +298,12 @@ fn clarify_current_workspace_scalar_count_with_resolved_root_promotes_to_execute
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("\"current_workspace_scope\""));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains(&root.display().to_string()));
     let _ = std::fs::remove_dir_all(root);
 }
 

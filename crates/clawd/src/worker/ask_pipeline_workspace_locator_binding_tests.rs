@@ -1,18 +1,13 @@
 use super::super::{
     background_only_locator_route_should_force_clarify,
-    locatorless_observation_route_should_force_clarify, route_reason_has_marker,
+    locatorless_observation_route_should_force_clarify,
     unbound_model_context_target_route_should_force_clarify,
 };
 use super::{
     current_request_resolves_workspace_child_locator,
     implicit_workspace_file_locator_route_should_force_clarify,
     model_completed_workspace_file_locator_hint_should_force_clarify,
-    prebind_clarify_workspace_child_locator_from_current_request,
-    prebind_existing_workspace_locator_hint_from_current_request,
-    prebind_workspace_child_locator_from_current_request,
-    prebind_workspace_child_locator_from_resolved_prompt,
-    prebind_workspace_root_locator_from_current_request,
-    WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
+    workspace_root_name_token_present,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -72,7 +67,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -97,51 +92,6 @@ fn executable_filename_route() -> crate::RouteResult {
 }
 
 #[test]
-fn locatorless_observation_binds_existing_workspace_child_from_current_request() {
-    let root = make_temp_root("locatorless_workspace_child");
-    let prompts_dir = root.join("prompts");
-    std::fs::create_dir_all(&prompts_dir).expect("prompts dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.resolved_intent = "用户希望查看 prompts 目录下前 5 个条目的名称".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
-    };
-
-    assert!(prebind_workspace_child_locator_from_current_request(
-        &state,
-        "先列出 prompts 目录下前 5 个条目名称",
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        prompts_dir
-            .canonicalize()
-            .expect("canonical prompts")
-            .display()
-            .to_string()
-    );
-    assert!(!locatorless_observation_route_should_force_clarify(
-        &state,
-        "先列出 prompts 目录下前 5 个条目名称",
-        &route,
-        None,
-        &snapshot,
-    ));
-}
-
-#[test]
 fn workspace_project_summary_does_not_bind_bare_project_name_child_file() {
     let root = make_temp_root("workspace_summary_no_project_name_child");
     let child = root.join("rustclaw");
@@ -150,6 +100,7 @@ fn workspace_project_summary_does_not_bind_bare_project_name_child_file() {
     let mut route = executable_filename_route();
     route.resolved_intent =
         "Introduce the current workspace from README and workspace configuration.".to_string();
+    route.route_reason = "workspace_project_summary".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -166,19 +117,48 @@ fn workspace_project_summary_does_not_bind_bare_project_name_child_file() {
                 .to_string()
         )
     );
-    assert!(!prebind_workspace_child_locator_from_current_request(
-        &state,
-        "Introduce RustClaw",
-        &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::CurrentWorkspace
     );
     assert!(route.output_contract.locator_hint.is_empty());
-    assert!(!route
-        .route_reason
-        .contains("workspace_child_locator_prebound_from_current_request"));
+}
+
+#[test]
+fn kb_stats_route_does_not_bind_document_count_to_workspace_child() {
+    let root = make_temp_root("kb_stats_no_document_count_locator");
+    let document_dir = root.join("document");
+    std::fs::create_dir_all(&document_dir).expect("document dir");
+    let state = test_state_with_root(root);
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.stats namespace=nl_basic_skill_100 field=document_count field=chunk_count"
+            .to_string();
+    route.route_reason = "skill-managed KB stats; capability_ref=kb.stats".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+
+    assert_eq!(
+        current_request_resolves_workspace_child_locator(
+            &state,
+            "只返回 namespace、document_count、chunk_count"
+        ),
+        Some(
+            document_dir
+                .canonicalize()
+                .expect("canonical document")
+                .display()
+                .to_string()
+        )
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
 }
 
 #[test]
@@ -196,11 +176,6 @@ fn locatorless_observation_does_not_bind_bare_hidden_vcs_control_path() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
 
     assert!(current_request_resolves_workspace_child_locator(&state, "inspect .git").is_none());
-    assert!(!prebind_workspace_child_locator_from_current_request(
-        &state,
-        "list top-level entries except .git",
-        &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -292,23 +267,11 @@ fn implicit_workspace_directory_locator_still_allows_prebind() {
         None,
         &snapshot,
     ));
-    assert!(prebind_workspace_child_locator_from_current_request(
-        &state,
-        "先列出 prompts 目录下前 5 个条目名称",
-        &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
+        crate::OutputLocatorKind::None
     );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        prompts_dir
-            .canonicalize()
-            .expect("canonical prompts")
-            .display()
-            .to_string()
-    );
+    assert!(route.output_contract.locator_hint.is_empty());
 }
 
 #[test]
@@ -353,9 +316,6 @@ fn explicit_command_failed_step_does_not_bind_workspace_child_from_current_reque
         active_observed_facts: None,
     };
 
-    assert!(!prebind_workspace_child_locator_from_current_request(
-        &state, prompt, &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -400,127 +360,17 @@ fn command_payload_failed_step_does_not_bind_workspace_child_from_current_reques
         active_observed_facts: None,
     };
 
-    assert!(!prebind_workspace_child_locator_from_current_request(
-        &state, prompt, &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
     assert!(route.output_contract.locator_hint.is_empty());
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_force_clarify(
         &state, prompt, &route, None, &snapshot,
     ));
     assert!(!unbound_model_context_target_route_should_force_clarify(
         &state, prompt, &route, None, &snapshot,
     ));
-}
-
-#[test]
-fn clarify_observation_binds_existing_workspace_child_from_current_request() {
-    let root = make_temp_root("clarify_current_workspace_child");
-    let configs_dir = root.join("configs");
-    std::fs::create_dir_all(&configs_dir).expect("configs dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(
-            &state,
-            "先列出 configs 目录下前 5 个条目名称",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        configs_dir
-            .canonicalize()
-            .expect("canonical configs")
-            .display()
-            .to_string()
-    );
-}
-
-#[test]
-fn clarify_path_contract_binds_existing_workspace_child_from_current_request() {
-    let root = make_temp_root("clarify_path_contract_workspace_child");
-    let logs_dir = root.join("logs");
-    std::fs::create_dir_all(&logs_dir).expect("logs dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(
-            &state,
-            "先列出 logs 目录下前 5 个文件名",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_hint,
-        logs_dir
-            .canonicalize()
-            .expect("canonical logs")
-            .display()
-            .to_string()
-    );
-    assert!(route
-        .route_reason
-        .contains("workspace_child_locator_prebound_from_clarify_current_request"));
-}
-
-#[test]
-fn clarify_path_contract_binds_directory_scope_with_child_filename_token() {
-    let root = make_temp_root("clarify_path_contract_dir_scope_child_filename");
-    let logs_dir = root.join("logs");
-    std::fs::create_dir_all(&logs_dir).expect("logs dir");
-    std::fs::write(logs_dir.join("clawd.run.log"), "line\n").expect("log file");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(
-            &state,
-            "logs clawd.run.log",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_hint,
-        logs_dir
-            .canonicalize()
-            .expect("canonical logs")
-            .display()
-            .to_string()
-    );
 }
 
 #[test]
@@ -543,12 +393,7 @@ fn archive_unpack_clarify_does_not_bind_destination_directory_as_source_locator(
         destination.display()
     );
 
-    assert!(
-        !prebind_clarify_workspace_child_locator_from_current_request(&state, &prompt, &mut route,)
-    );
-    assert!(!prebind_workspace_child_locator_from_resolved_prompt(
-        &state, &prompt, &mut route,
-    ));
+    assert!(current_request_resolves_workspace_child_locator(&state, &prompt).is_some());
     assert!(route.needs_clarify);
     assert!(!route.is_execute_gate());
     assert_eq!(
@@ -563,16 +408,12 @@ fn locatorless_observation_does_not_bind_bare_workspace_child_topic() {
     let root = make_temp_root("locatorless_bare_workspace_child");
     let logs_dir = root.join("logs");
     std::fs::create_dir_all(&logs_dir).expect("logs dir");
-    let state = test_state_with_root(root);
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
 
-    assert!(!prebind_workspace_child_locator_from_current_request(
-        &state, "logs", &mut route,
-    ));
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -581,185 +422,7 @@ fn locatorless_observation_does_not_bind_bare_workspace_child_topic() {
 }
 
 #[test]
-fn clarify_observation_does_not_bind_bare_workspace_child_topic() {
-    let root = make_temp_root("clarify_bare_workspace_child");
-    let logs_dir = root.join("logs");
-    std::fs::create_dir_all(&logs_dir).expect("logs dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-
-    assert!(
-        !prebind_clarify_workspace_child_locator_from_current_request(&state, "logs", &mut route,)
-    );
-    assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-}
-
-#[test]
-fn clarify_observation_binds_workspace_child_when_semantic_kind_is_generic() {
-    let root = make_temp_root("clarify_generic_workspace_child");
-    let document_dir = root.join("document");
-    std::fs::create_dir_all(&document_dir).expect("document dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(
-            &state,
-            "列出 document 目录最近修改的 2 个文件名，只输出文件名",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        document_dir
-            .canonicalize()
-            .expect("canonical document")
-            .display()
-            .to_string()
-    );
-}
-
-#[test]
-fn clarify_observation_binds_existing_workspace_file_from_current_request_path() {
-    let root = make_temp_root("clarify_current_workspace_file");
-    let schema_path = root
-        .join("prompts")
-        .join("schemas")
-        .join("direct_answer_gate.schema.json");
-    std::fs::create_dir_all(schema_path.parent().expect("schema parent")).expect("schema dir");
-    std::fs::write(&schema_path, "{}").expect("schema file");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(
-            &state,
-            "prompts/schemas/direct_answer_gate.schema.json",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        schema_path
-            .canonicalize()
-            .expect("canonical schema")
-            .display()
-            .to_string()
-    );
-}
-
-#[test]
-fn clarify_observation_binds_existing_workspace_child_from_resolved_prompt() {
-    let root = make_temp_root("clarify_resolved_workspace_child");
-    let configs_dir = root.join("configs");
-    std::fs::create_dir_all(&configs_dir).expect("configs dir");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-
-    assert!(prebind_workspace_child_locator_from_resolved_prompt(
-        &state,
-        &format!("列出 {} 目录下前 5 个条目名称", configs_dir.display()),
-        &mut route,
-    ));
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        configs_dir
-            .canonicalize()
-            .expect("canonical configs")
-            .display()
-            .to_string()
-    );
-}
-
-#[test]
-fn clarify_observation_binds_existing_workspace_file_from_resolved_prompt_path() {
-    let root = make_temp_root("clarify_resolved_workspace_file");
-    let schema_path = root
-        .join("prompts")
-        .join("schemas")
-        .join("direct_answer_gate.schema.json");
-    std::fs::create_dir_all(schema_path.parent().expect("schema parent")).expect("schema dir");
-    std::fs::write(&schema_path, "{}").expect("schema file");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-
-    assert!(prebind_workspace_child_locator_from_resolved_prompt(
-        &state,
-        &format!("查看 {} 中的 target enum", schema_path.display()),
-        &mut route,
-    ));
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        schema_path
-            .canonicalize()
-            .expect("canonical schema")
-            .display()
-            .to_string()
-    );
-}
-
-#[test]
-fn model_locator_hint_stem_from_current_request_binds_direct_workspace_file() {
+fn model_locator_hint_stem_from_current_request_exports_workspace_file_evidence() {
     let root = make_temp_root("structured_locator_hint_stem");
     let readme = root.join("README.md");
     std::fs::write(&readme, "# Demo\n").expect("readme");
@@ -784,25 +447,21 @@ fn model_locator_hint_stem_from_current_request_binds_direct_workspace_file() {
         active_observed_facts: None,
     };
 
-    assert!(
-        prebind_existing_workspace_locator_hint_from_current_request(&state, prompt, &mut route,)
-    );
+    let resolved = current_request_resolves_workspace_child_locator(&state, prompt)
+        .expect("current request should resolve workspace child");
     assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
+        resolved,
         readme
             .canonicalize()
             .expect("canonical readme")
             .display()
             .to_string()
     );
-    assert!(route_reason_has_marker(
-        &route,
-        WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
-    ));
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+    );
+    assert_eq!(route.output_contract.locator_hint, "README");
     assert!(!background_only_locator_route_should_force_clarify(
         &state,
         prompt,
@@ -812,6 +471,38 @@ fn model_locator_hint_stem_from_current_request_binds_direct_workspace_file() {
         None,
         &snapshot,
     ));
+}
+
+#[test]
+fn model_locator_hint_with_generic_semantic_kind_stays_loop_evidence() {
+    let root = make_temp_root("structured_locator_hint_generic_semantic");
+    let readme = root.join("README.md");
+    std::fs::write(&readme, "# Demo\n").expect("readme");
+    let state = test_state_with_root(root);
+    let mut route = executable_filename_route();
+    route.resolved_intent = "Read the requested workspace locator.".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "README".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let prompt = "inspect README";
+
+    let resolved = current_request_resolves_workspace_child_locator(&state, prompt)
+        .expect("current request should resolve workspace child");
+    assert_eq!(
+        resolved,
+        readme
+            .canonicalize()
+            .expect("canonical readme")
+            .display()
+            .to_string()
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Filename
+    );
+    assert_eq!(route.output_contract.locator_hint, "README");
 }
 
 #[test]
@@ -845,48 +536,7 @@ fn model_completed_file_locator_without_current_request_match_still_requires_cla
 }
 
 #[test]
-fn clarify_bare_readme_content_summary_binds_root_readme_from_current_request() {
-    let root = make_temp_root("clarify_bare_readme_content_summary");
-    let readme = root.join("README.md");
-    std::fs::write(&readme, "# Demo\n").expect("readme");
-    std::fs::write(root.join("README.zh-CN.md"), "# Demo zh\n").expect("localized readme");
-    let state = test_state_with_root(root);
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.resolved_intent = "读取 README 并用恰好三句话总结。".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    let prompt = "读一下 README 然后用恰好三句话总结，不要多也不要少";
-
-    assert!(
-        prebind_clarify_workspace_child_locator_from_current_request(&state, prompt, &mut route,)
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        readme
-            .canonicalize()
-            .expect("canonical readme")
-            .display()
-            .to_string()
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "workspace_child_locator_prebound_from_clarify_current_request",
-    ));
-}
-
-#[test]
-fn current_project_root_name_prebinds_workspace_root_before_same_name_child() {
+fn current_project_root_name_exports_workspace_root_evidence_before_same_name_child() {
     let parent = make_temp_root("workspace_root_name_prebind_parent");
     let root = parent.join("rustclaw");
     std::fs::create_dir_all(&root).expect("workspace root");
@@ -911,23 +561,20 @@ fn current_project_root_name_prebinds_workspace_root_before_same_name_child() {
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
 
-    assert!(prebind_workspace_root_locator_from_current_request(
-        &state, prompt, &mut route,
+    assert!(workspace_root_name_token_present(
+        &state.skill_rt.workspace_root,
+        prompt,
     ));
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
+    assert!(route.needs_clarify);
+    assert!(route.is_clarify_gate());
     assert_eq!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::WorkspaceProjectSummary
+        crate::OutputSemanticKind::ContentExcerptSummary
     );
     assert_eq!(
         route.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
+        crate::OutputLocatorKind::None
     );
     assert!(route.output_contract.locator_hint.is_empty());
-    assert!(route_reason_has_marker(
-        &route,
-        "workspace_root_locator_prebound_from_current_request"
-    ));
     let _ = std::fs::remove_dir_all(parent);
 }

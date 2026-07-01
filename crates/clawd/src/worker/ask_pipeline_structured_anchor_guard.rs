@@ -4,37 +4,6 @@ use super::*;
 #[path = "ask_pipeline_structured_anchor_guard_tests.rs"]
 mod tests;
 
-pub(super) fn preserve_scalar_shape_from_normalizer_candidate_for_clarify(
-    route_result: &mut crate::RouteResult,
-) {
-    if !route_result.is_execute_gate()
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
-        || !matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Free | crate::OutputResponseShape::Strict
-        )
-    {
-        return;
-    }
-    let Some(candidate) = embedded_normalizer_answer_candidate(&route_result.resolved_intent)
-    else {
-        return;
-    };
-    if !answer_candidate_is_compact_scalar_shape(candidate) {
-        return;
-    }
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-}
-
-pub(super) fn embedded_normalizer_answer_candidate(resolved_intent: &str) -> Option<&str> {
-    resolved_intent.lines().find_map(|line| {
-        line.trim_start()
-            .strip_prefix("answer_candidate:")
-            .map(str::trim)
-            .filter(|candidate| !candidate.is_empty())
-    })
-}
-
 fn active_structured_observation_values<'a>(
     session_snapshot: &'a crate::conversation_state::ActiveSessionSnapshot,
 ) -> Vec<&'a str> {
@@ -66,85 +35,6 @@ fn active_structured_observation_values<'a>(
         .collect()
 }
 
-pub(super) fn normalizer_answer_candidate_is_grounded_in_structured_observation(
-    candidate: &str,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> bool {
-    let candidate = candidate.trim();
-    if candidate.is_empty() || candidate.contains('\n') {
-        return false;
-    }
-    active_structured_observation_values(session_snapshot)
-        .into_iter()
-        .any(|value| value == candidate)
-}
-
-fn normalizer_answer_candidate_is_existing_context_synthesis(
-    candidate: &str,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> bool {
-    let candidate = candidate.trim();
-    if candidate.is_empty()
-        || candidate.contains('\n')
-        || candidate.starts_with('{')
-        || candidate.starts_with('[')
-        || candidate.contains("FILE:")
-    {
-        return false;
-    }
-    session_snapshot
-        .conversation_state
-        .as_ref()
-        .and_then(|state| state.last_primary_task_output.as_deref())
-        .is_some_and(|output| !output.trim().is_empty())
-}
-
-fn answer_candidate_is_recent_execution_token(candidate: &str) -> bool {
-    let candidate = candidate.trim();
-    if candidate.is_empty() || candidate.contains('\n') || candidate.chars().count() > 160 {
-        return false;
-    }
-    candidate.contains('/')
-        || candidate.contains('\\')
-        || candidate.contains('_')
-        || candidate.contains('-')
-        || std::path::Path::new(candidate).extension().is_some()
-}
-
-pub(super) fn normalizer_answer_candidate_matches_recent_execution_context(
-    candidate: &str,
-    recent_execution_context: &str,
-) -> bool {
-    if !answer_candidate_is_compact_scalar_shape(candidate)
-        || !answer_candidate_is_recent_execution_token(candidate)
-    {
-        return false;
-    }
-    let context = recent_execution_context.trim();
-    if context.is_empty() || context == "<none>" {
-        return false;
-    }
-    let candidate = normalize_locator_identity_token(candidate);
-    if candidate.chars().count() < 3 {
-        return false;
-    }
-    context.lines().any(|line| {
-        let line = normalize_locator_identity_token(line);
-        line.split(|ch: char| {
-            ch.is_whitespace() || matches!(ch, '=' | ',' | ';' | '|' | '，' | '；')
-        })
-        .any(|token| {
-            let token = normalize_locator_identity_token(token);
-            token == candidate
-                || std::path::Path::new(&token)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(normalize_locator_identity_token)
-                    .is_some_and(|basename| basename == candidate)
-        })
-    })
-}
-
 pub(super) fn active_session_has_structured_observation_anchor(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
@@ -170,7 +60,6 @@ fn route_output_contract_requires_planner_execution(
         || contract.delivery_required
         || !matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         || !matches!(contract.delivery_intent, crate::OutputDeliveryIntent::None)
-        || !matches!(contract.semantic_kind, crate::OutputSemanticKind::None)
 }
 
 fn prompt_surface_has_current_turn_concrete_target(
@@ -188,7 +77,7 @@ fn prompt_surface_has_current_turn_concrete_target(
             .is_empty()
 }
 
-fn active_text_mutation_can_stay_direct_answer_without_structured_anchor_evidence(
+fn active_text_mutation_can_stay_without_structured_anchor_evidence(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -228,7 +117,7 @@ fn active_text_mutation_can_stay_direct_answer_without_structured_anchor_evidenc
     !prompt_surface_has_current_turn_concrete_target(&surface)
 }
 
-fn state_patch_direct_answer_can_stay_without_structured_anchor_evidence(
+fn state_patch_can_stay_without_structured_anchor_evidence(
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
@@ -262,7 +151,7 @@ fn state_patch_json_is_meaningful(value: &serde_json::Value) -> bool {
     }
 }
 
-pub(super) fn direct_answer_from_structured_anchor_requires_evidence(
+pub(super) fn structured_anchor_route_requires_evidence_repair(
     prompt: &str,
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
@@ -280,14 +169,12 @@ pub(super) fn direct_answer_from_structured_anchor_requires_evidence(
     {
         return false;
     }
-    if active_text_mutation_can_stay_direct_answer_without_structured_anchor_evidence(
+    if active_text_mutation_can_stay_without_structured_anchor_evidence(
         prompt,
         route_result,
         turn_analysis,
-    ) || state_patch_direct_answer_can_stay_without_structured_anchor_evidence(
-        route_result,
-        turn_analysis,
-    ) {
+    ) || state_patch_can_stay_without_structured_anchor_evidence(route_result, turn_analysis)
+    {
         return false;
     }
     if current_request_has_self_contained_structured_payload(prompt) {
@@ -296,16 +183,8 @@ pub(super) fn direct_answer_from_structured_anchor_requires_evidence(
     if resolved_intent_mentions_active_target_basename(route_result, session_snapshot) {
         return false;
     }
-    embedded_normalizer_answer_candidate(&route_result.resolved_intent).is_none_or(|candidate| {
-        !normalizer_answer_candidate_is_grounded_in_structured_observation(
-            candidate,
-            session_snapshot,
-        ) && !normalizer_answer_candidate_is_existing_context_synthesis(candidate, session_snapshot)
-            && !normalizer_answer_candidate_matches_recent_execution_context(
-                candidate,
-                recent_execution_context,
-            )
-    })
+    let _ = recent_execution_context;
+    true
 }
 
 fn resolved_intent_mentions_active_target_basename(
@@ -357,9 +236,7 @@ fn push_target_basename(out: &mut Vec<String>, target: Option<&str>) {
     }
 }
 
-pub(super) fn promote_structured_anchor_direct_answer_to_evidence(
-    route_result: &mut crate::RouteResult,
-) {
+pub(super) fn apply_structured_anchor_evidence_repair(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
     route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
     route_result.output_contract.requires_content_evidence = true;
@@ -377,25 +254,7 @@ pub(super) fn promote_structured_anchor_direct_answer_to_evidence(
     ) {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
     }
-    append_route_reason(
-        route_result,
-        "structured_anchor_direct_answer_requires_evidence",
-    );
-}
-
-pub(super) fn answer_candidate_is_compact_scalar_shape(candidate: &str) -> bool {
-    let trimmed = candidate.trim();
-    if trimmed.is_empty()
-        || trimmed.contains('\n')
-        || trimmed.chars().count() > 80
-        || trimmed
-            .chars()
-            .any(|c| matches!(c, ',' | '，' | ';' | '；' | '|' | '[' | ']' | '{' | '}'))
-    {
-        return false;
-    }
-    let token_count = trimmed.split_whitespace().count();
-    (1..=4).contains(&token_count)
+    append_route_reason(route_result, "structured_anchor_requires_evidence");
 }
 
 pub(super) fn session_has_authoritative_deictic_anchor(

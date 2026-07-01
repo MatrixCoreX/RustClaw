@@ -1,12 +1,4 @@
-use super::{
-    repair_compound_file_names_plus_content_summary_contract,
-    repair_config_validation_findings_contract,
-    repair_generic_path_content_grounded_summary_contract,
-    repair_session_alias_listing_plus_content_summary_contract,
-    repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_table_listing_contract,
-    repair_sqlite_structured_version_contract,
-    repair_summary_only_content_excerpt_with_summary_contract,
-};
+use super::{contract_repair_candidate_observations, registry_capability_contract_observation};
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -63,9 +55,101 @@ fn test_state_with_root(root: PathBuf) -> AppState {
     }
 }
 
+#[test]
+fn registry_capability_observation_records_locatorless_contract_conflict() {
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "List knowledge base namespaces capability_ref=kb.list_namespaces field=names field=count"
+            .to_string();
+    route.route_reason =
+        "llm_semantic_contract_repair changed bounded listing to directory_entry_groups"
+            .to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+
+    let observation =
+        registry_capability_contract_observation("", &route).expect("capability observation");
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DirectoryEntryGroups
+    );
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(
+        observation
+            .get("capability_refs")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(serde_json::Value::as_str),
+        Some("kb.list_namespaces")
+    );
+    assert_eq!(
+        observation
+            .get("has_conflicting_route_contract")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(observation.get("legacy_semantic_kind").is_none());
+}
+
+#[test]
+fn registry_capability_observation_keeps_spurious_delivery_as_evidence() {
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Search KB namespace capability_ref=kb.search namespace=docs query=service_status top_k=3"
+            .to_string();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "docs".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+
+    let observation =
+        registry_capability_contract_observation("", &route).expect("capability observation");
+
+    assert!(route.needs_clarify);
+    assert_eq!(route.gate_kind(), crate::RouteGateKind::Clarify);
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(route.output_contract.locator_hint, "docs");
+    assert!(route.output_contract.requires_content_evidence);
+    assert_eq!(
+        observation
+            .get("capability_refs")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(serde_json::Value::as_str),
+        Some("kb.search")
+    );
+    assert_eq!(
+        observation
+            .get("delivery_required")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        observation
+            .get("needs_clarify")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -89,258 +173,51 @@ fn executable_filename_route() -> crate::RouteResult {
     }
 }
 
-fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> bool {
-    super::super::route_reason_has_marker(route_result, marker)
+fn contract_candidate<'a>(
+    candidates: &'a [serde_json::Value],
+    source: &str,
+) -> &'a serde_json::Value {
+    candidates
+        .iter()
+        .find(|candidate| {
+            candidate.get("source").and_then(serde_json::Value::as_str) == Some(source)
+        })
+        .unwrap_or_else(|| panic!("missing contract candidate source {source}: {candidates:?}"))
 }
 
-#[test]
-fn compound_file_names_plus_content_summary_repair_relaxes_exact_names_contract() {
-    let mut route = executable_filename_route();
-    route.route_reason =
-        "llm_semantic_contract_repair:malformed_contract_listing_vs_content_synthesis_conflict:repair note"
-            .to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_compound_file_names_plus_content_summary_contract(&mut route);
-
+fn assert_candidate(
+    candidate: &serde_json::Value,
+    contract_ref: &str,
+    locator_tail: Option<&str>,
+    response_shape: Option<&str>,
+) {
     assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
+        candidate
+            .get("contract_ref")
+            .and_then(serde_json::Value::as_str),
+        Some(contract_ref)
     );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "compound_file_names_plus_content_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn session_alias_directory_and_file_targets_relax_names_contract() {
-    let root = make_temp_root("alias_compound_listing_content");
-    let dir_target = root.join("archive");
-    let file_target = root.join("release_checklist.md");
-    std::fs::create_dir_all(&dir_target).expect("archive dir");
-    std::fs::write(dir_target.join("README.txt"), "archive note\n").expect("archive readme");
-    std::fs::write(&file_target, "release checklist\n").expect("checklist");
-    let state = test_state_with_root(root.clone());
-    let snapshot = alias_snapshot(&dir_target, &file_target);
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_session_alias_listing_plus_content_summary_contract(
-        &state,
-        "alpha_dir beta_file",
-        &snapshot,
-        &mut route,
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "session_alias_listing_plus_content_summary_contract_repaired"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn session_alias_directory_and_file_targets_relax_directory_group_contract() {
-    let root = make_temp_root("alias_compound_directory_group_content");
-    let dir_target = root.join("archive");
-    let file_target = root.join("release_checklist.md");
-    std::fs::create_dir_all(&dir_target).expect("archive dir");
-    std::fs::write(dir_target.join("README.txt"), "archive note\n").expect("archive readme");
-    std::fs::write(&file_target, "release checklist\n").expect("checklist");
-    let state = test_state_with_root(root.clone());
-    let snapshot = alias_snapshot(&dir_target, &file_target);
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_session_alias_listing_plus_content_summary_contract(
-        &state,
-        "alpha_dir beta_file",
-        &snapshot,
-        &mut route,
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "session_alias_listing_plus_content_summary_contract_repaired"
-    ));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-fn alias_snapshot(
-    dir_target: &std::path::Path,
-    file_target: &std::path::Path,
-) -> crate::conversation_state::ActiveSessionSnapshot {
-    crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: Some(crate::conversation_state::ConversationState {
-            alias_bindings: vec![
-                crate::conversation_state::SessionAliasBinding {
-                    alias: "alpha_dir".to_string(),
-                    target: dir_target.display().to_string(),
-                    updated_at_ts: 1,
-                },
-                crate::conversation_state::SessionAliasBinding {
-                    alias: "beta_file".to_string(),
-                    target: file_target.display().to_string(),
-                    updated_at_ts: 2,
-                },
-            ],
-            ..crate::conversation_state::ConversationState::default()
-        }),
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
+    if let Some(locator_tail) = locator_tail {
+        assert!(
+            candidate
+                .get("locator_hint")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|locator| locator.ends_with(locator_tail)),
+            "{candidate:?}"
+        );
+    }
+    if let Some(response_shape) = response_shape {
+        assert_eq!(
+            candidate
+                .get("response_shape")
+                .and_then(serde_json::Value::as_str),
+            Some(response_shape)
+        );
     }
 }
 
 #[test]
-fn compound_file_paths_plus_content_summary_repair_uses_content_summary_contract() {
-    let mut route = executable_filename_route();
-    route.route_reason =
-        "llm_semantic_contract_repair:compound_file_paths_requires_structured_summary".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_compound_file_names_plus_content_summary_contract(&mut route);
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::CurrentWorkspace
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "compound_file_paths_summary_bound_to_current_workspace"
-    ));
-    assert!(route_reason_has_marker(
-        &route,
-        "compound_file_paths_plus_content_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn strict_file_paths_contract_does_not_repair_to_content_summary() {
-    let mut route = executable_filename_route();
-    route.route_reason =
-        "llm_semantic_contract_repair:compound_file_paths_requires_structured_summary".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_compound_file_names_plus_content_summary_contract(&mut route);
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FilePaths
-    );
-    assert!(!route_reason_has_marker(
-        &route,
-        "compound_file_paths_plus_content_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn summary_only_content_excerpt_with_summary_repair_uses_summary_contract() {
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.wants_file_delivery = false;
-
-    repair_summary_only_content_excerpt_with_summary_contract(&mut route);
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "summary_only_content_excerpt_with_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn summary_only_content_excerpt_with_summary_repair_preserves_strict_excerpt_plus_summary() {
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    repair_summary_only_content_excerpt_with_summary_contract(&mut route);
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptWithSummary
-    );
-    assert!(!route_reason_has_marker(
-        &route,
-        "summary_only_content_excerpt_with_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn generic_path_content_grounded_summary_repair_uses_content_summary_contract() {
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.wants_file_delivery = false;
-
-    let repaired = repair_generic_path_content_grounded_summary_contract(&mut route);
-
-    assert!(repaired);
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "generic_path_content_grounded_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn generic_path_content_repair_preserves_command_summary_marker_contract() {
+fn command_observation_marker_repair_preserves_command_summary_contract() {
     let mut route = executable_filename_route();
     route.route_reason =
         "explicit_command_requires_command_output_summary_execution; command_result_synthesis"
@@ -353,47 +230,11 @@ fn generic_path_content_repair_preserves_command_summary_marker_contract() {
     route.output_contract.locator_hint = "/home/guagua/rustclaw/run".to_string();
     route.wants_file_delivery = false;
 
-    let repaired = repair_generic_path_content_grounded_summary_contract(&mut route);
+    let state = test_state_with_root(make_temp_root("command_observation_candidate"));
+    let candidates = contract_repair_candidate_observations(&state, "", "", &route);
+    let candidate = contract_candidate(&candidates, "command_observation_marker");
 
-    assert!(repaired);
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-    assert!(route_reason_has_marker(
-        &route,
-        "command_observation_marker_contract_repaired"
-    ));
-    assert!(!route_reason_has_marker(
-        &route,
-        "generic_path_content_grounded_summary_contract_repaired"
-    ));
-}
-
-#[test]
-fn generic_path_content_grounded_summary_repair_preserves_strict_contract() {
-    let mut route = executable_filename_route();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-
-    let repaired = repair_generic_path_content_grounded_summary_contract(&mut route);
-
-    assert!(!repaired);
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-    assert!(!route_reason_has_marker(
-        &route,
-        "generic_path_content_grounded_summary_contract_repaired"
-    ));
+    assert_candidate(candidate, "contract:command_output_summary", None, None);
 }
 
 #[test]
@@ -403,6 +244,7 @@ fn sqlite_path_excerpt_judgment_contract_repair_uses_db_kind() {
     std::fs::write(root.join("data/db-basic-contract.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
+    route.route_reason = "excerpt_kind_judgment".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -410,36 +252,19 @@ fn sqlite_path_excerpt_judgment_contract_repair_uses_db_kind() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "data/db-basic-contract.sqlite".to_string();
 
-    assert!(repair_sqlite_path_excerpt_judgment_contract(
+    let candidates = contract_repair_candidate_observations(
         &state,
         "inspect data/db-basic-contract.sqlite",
         "",
-        &mut route,
-    ));
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-    );
-    assert!(route
-        .output_contract
-        .locator_hint
-        .ends_with("data/db-basic-contract.sqlite"));
-    assert!(route_reason_has_marker(
         &route,
-        "sqlite_path_excerpt_judgment_contract_repaired"
-    ));
-    let policy = crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        "db_basic",
-        &serde_json::json!({
-            "action": "list_tables",
-            "db_path": route.output_contract.locator_hint,
-        }),
-    )
-    .expect("db_basic policy");
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "sqlite_database_kind_judgment");
+    );
+    let candidate = contract_candidate(&candidates, "sqlite_path_excerpt_judgment");
+    assert_candidate(
+        candidate,
+        "contract:sqlite_database_kind_judgment",
+        Some("data/db-basic-contract.sqlite"),
+        None,
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -462,40 +287,50 @@ fn sqlite_structured_version_contract_repair_uses_schema_version_contract() {
         .self_extension
         .structured_field_selector = Some("sqlite.user_version".to_string());
 
-    assert!(repair_sqlite_structured_version_contract(
+    let candidates = contract_repair_candidate_observations(
         &state,
         "inspect data/skill-calls-smoke.sqlite",
         "",
-        &mut route,
-    ));
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::SqliteSchemaVersion
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
-    );
-    assert!(route
-        .output_contract
-        .locator_hint
-        .ends_with("data/skill-calls-smoke.sqlite"));
-    assert!(route_reason_has_marker(
         &route,
-        "sqlite_structured_version_contract_repaired"
-    ));
-    let policy = crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        "db_basic",
-        &serde_json::json!({
-            "action": "schema_version",
-            "db_path": route.output_contract.locator_hint,
-        }),
-    )
-    .expect("db_basic policy");
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "sqlite_schema_version");
+    );
+    let candidate = contract_candidate(&candidates, "sqlite_structured_version");
+    assert_candidate(
+        candidate,
+        "contract:sqlite_schema_version",
+        Some("data/skill-calls-smoke.sqlite"),
+        Some("scalar"),
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sqlite_structured_version_selector_overrides_spurious_semantic_kind() {
+    let root = make_temp_root("sqlite_structured_version_spurious_semantic");
+    std::fs::create_dir_all(root.join("data")).expect("data directory");
+    std::fs::write(root.join("data/app.sqlite"), "").expect("sqlite file");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "data/app.sqlite".to_string();
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("sqlite.schema_version".to_string());
+
+    let candidates =
+        contract_repair_candidate_observations(&state, "inspect data/app.sqlite", "", &route);
+    let candidate = contract_candidate(&candidates, "sqlite_structured_version");
+    assert_candidate(
+        candidate,
+        "contract:sqlite_schema_version",
+        Some("data/app.sqlite"),
+        Some("scalar"),
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -518,40 +353,53 @@ fn sqlite_structured_table_selector_repairs_to_table_listing_contract() {
         .self_extension
         .structured_field_selector = Some("sqlite.tables".to_string());
 
-    assert!(repair_sqlite_structured_table_listing_contract(
+    let candidates = contract_repair_candidate_observations(
         &state,
         "inspect data/test_contract.sqlite",
         "",
-        &mut route,
-    ));
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::SqliteTableListing
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Strict
-    );
-    assert!(route
-        .output_contract
-        .locator_hint
-        .ends_with("data/test_contract.sqlite"));
-    assert!(route_reason_has_marker(
         &route,
-        "sqlite_structured_table_listing_contract_repaired"
-    ));
-    let policy = crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        "db_basic",
-        &serde_json::json!({
-            "action": "list_tables",
-            "db_path": route.output_contract.locator_hint,
-        }),
-    )
-    .expect("db_basic policy");
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "sqlite_table_listing");
+    );
+    let candidate = contract_candidate(&candidates, "sqlite_structured_table_listing");
+    assert_candidate(
+        candidate,
+        "contract:sqlite_table_listing",
+        Some("data/test_contract.sqlite"),
+        Some("strict"),
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sqlite_route_reason_table_token_repairs_raw_command_contract() {
+    let root = make_temp_root("sqlite_route_reason_table_repair");
+    std::fs::create_dir_all(root.join("data")).expect("data directory");
+    std::fs::write(root.join("data/test_contract.sqlite"), "").expect("sqlite file");
+    let state = test_state_with_root(root.clone());
+    let mut route = executable_filename_route();
+    route.route_reason =
+        "sqlite_table_listing; semantic_contract_requires_evidence; explicit_command_requires_fresh_execution"
+            .to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+
+    let candidates = contract_repair_candidate_observations(
+        &state,
+        "Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table'` on data/test_contract.sqlite",
+        "",
+        &route,
+    );
+    let candidate = contract_candidate(&candidates, "sqlite_route_reason_table");
+    assert_candidate(
+        candidate,
+        "contract:sqlite_table_listing",
+        Some("data/test_contract.sqlite"),
+        Some("strict"),
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -578,45 +426,15 @@ fn config_validation_findings_selector_repairs_to_config_risk_contract() {
         .self_extension
         .structured_field_selector = Some("config_validation_findings".to_string());
 
-    assert!(repair_config_validation_findings_contract(
-        &state,
-        "inspect configs/config.toml",
-        "",
-        &mut route,
-    ));
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ConfigRiskAssessment
+    let candidates =
+        contract_repair_candidate_observations(&state, "inspect configs/config.toml", "", &route);
+    let candidate = contract_candidate(&candidates, "config_validation_findings");
+    assert_candidate(
+        candidate,
+        "contract:config_risk_assessment",
+        Some("configs/config.toml"),
+        Some("free"),
     );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route
-        .output_contract
-        .self_extension
-        .structured_field_selector
-        .is_none());
-    assert!(route
-        .output_contract
-        .locator_hint
-        .ends_with("configs/config.toml"));
-    assert!(route_reason_has_marker(
-        &route,
-        "config_validation_findings_contract_repaired"
-    ));
-    let policy = crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        "config_basic",
-        &serde_json::json!({
-            "action": "guard_rustclaw_config",
-            "path": route.output_contract.locator_hint,
-        }),
-    )
-    .expect("config guard policy");
-    assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.contract_match, "config_risk_assessment");
 
     let _ = std::fs::remove_dir_all(root);
 }

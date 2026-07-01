@@ -72,7 +72,7 @@ fn untrusted_multiline_answer_candidate_is_removed_from_execution_context() {
 }
 
 #[test]
-fn compact_machine_literal_answer_candidate_stays_in_execution_context() {
+fn compact_machine_literal_answer_candidate_is_removed_from_execution_context() {
     let mut route = base_route(
         crate::AskMode::direct_answer(),
         "Draft runtime note\nanswer_candidate: Use Python 3.11 for this runtime.",
@@ -90,9 +90,10 @@ fn compact_machine_literal_answer_candidate_stays_in_execution_context() {
         &mut prompt_with_memory,
     );
 
-    assert!(route.resolved_intent.contains("answer_candidate:"));
-    assert!(resolved.contains("Python 3.11"));
-    assert!(!route_reason_has_marker(
+    assert!(!route.resolved_intent.contains("answer_candidate:"));
+    assert!(!resolved.contains("answer_candidate:"));
+    assert!(prompt_with_memory.contains("Draft runtime note"));
+    assert!(route_reason_has_marker(
         &route,
         "untrusted_normalizer_answer_candidate_removed_from_execution_context"
     ));

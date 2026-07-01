@@ -57,12 +57,8 @@ pub(super) fn background_only_locator_route_should_force_clarify(
         || recent_execution_context_has_ordered_entry_target(recent_execution_context, route_result)
         || route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         || generated_file_delivery_uses_runtime_target(route_result)
-        || semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
+        || route_can_execute_without_locator(route_result)
         || task_control_route_can_plan_without_locator(route_result)
-        || route_reason_has_marker(
-            route_result,
-            WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
-        )
         || !route_has_model_supplied_concrete_locator(route_result, resolved_prompt)
     {
         return false;
@@ -72,7 +68,7 @@ pub(super) fn background_only_locator_route_should_force_clarify(
     {
         return false;
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    if route_has_quantity_comparison_machine_signal(route_result)
         && workspace_directory_pair_from_current_request(state, prompt, false).is_some()
     {
         return false;
@@ -88,14 +84,17 @@ pub(super) fn background_only_locator_route_should_force_clarify(
         )
 }
 
+fn route_has_quantity_comparison_machine_signal(route_result: &crate::RouteResult) -> bool {
+    route_reason_has_marker(route_result, "quantity_comparison")
+        || route_reason_has_marker(route_result, "quantity_compare")
+}
+
+#[cfg(test)]
 pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
     route_result: &mut crate::RouteResult,
     recent_execution_context: &str,
 ) -> bool {
     let recent_segments = recent_execution_result_segments(recent_execution_context);
-    let file_name_judgment_with_recent_results = route_result.output_contract.semantic_kind
-        == crate::OutputSemanticKind::FileNames
-        && recent_segments.len() >= 2;
     let existing_observed_synthesis_with_recent_context =
         route_reason_has_marker(route_result, "existing_observed_context_synthesis")
             && !recent_segments.is_empty();
@@ -103,19 +102,15 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
         || !route_reason_has_marker(route_result, "background_locator_requires_clarify")
         || route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
-        || (!file_name_judgment_with_recent_results
-            && !existing_observed_synthesis_with_recent_context)
+        || !existing_observed_synthesis_with_recent_context
     {
         return false;
     }
     route_result.needs_clarify = false;
     route_result.set_chat_gate();
     route_result.clarify_question.clear();
-    let response_shape = if existing_observed_synthesis_with_recent_context {
-        language_response_shape_or_default(route_result.output_contract.response_shape)
-    } else {
-        crate::OutputResponseShape::Scalar
-    };
+    let response_shape =
+        language_response_shape_or_default(route_result.output_contract.response_shape);
     route_result.output_contract = crate::IntentOutputContract {
         response_shape,
         ..Default::default()
@@ -128,6 +123,7 @@ pub(super) fn downgrade_background_locator_clarify_to_recent_observed_chat(
     true
 }
 
+#[cfg(test)]
 fn language_response_shape_or_default(
     response_shape: crate::OutputResponseShape,
 ) -> crate::OutputResponseShape {

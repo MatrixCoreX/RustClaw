@@ -1,38 +1,3 @@
-pub(super) fn post_route_promote_resolved_multifile_targets_to_execute(
-    state: &crate::AppState,
-    prompt: &str,
-    resolved_prompt: &str,
-    post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
-) -> bool {
-    let query = format!(
-        "{}\n{}\n{}",
-        prompt, resolved_prompt, post_route.execution_route_result.resolved_intent
-    );
-    if !super::promote_clarify_resolved_multifile_targets_to_execute(
-        state,
-        &query,
-        &mut post_route.execution_route_result,
-    ) {
-        return false;
-    }
-    post_route.missing_locator_for_path_scoped_content = false;
-    post_route.auto_locator_path = None;
-    post_route.auto_locator_hint = None;
-    post_route.auto_locator_resolved_direct = false;
-    post_route.fuzzy_locator_suggestions.clear();
-    post_route.clarify_reason.clear();
-    post_route.clarify_reason_kind = crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
-    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-        "post_route_resolved_multifile_targets_promoted_to_execute",
-        crate::post_route_policy::PostRoutePolicyOutcome::Execute,
-    );
-    super::append_route_reason(
-        &mut post_route.execution_route_result,
-        "post_route_resolved_multifile_targets_promoted_to_execute",
-    );
-    true
-}
-
 pub(super) fn direct_auto_locator_path(
     state: &crate::AppState,
     route_result: &crate::RouteResult,
@@ -81,7 +46,7 @@ pub(super) fn auto_locator_scalar_file_without_current_locator_should_force_clar
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
         || route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route_has_structured_scalar_field_contract(route_result)
         || !matches!(
             route_result.output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -99,6 +64,19 @@ pub(super) fn auto_locator_scalar_file_without_current_locator_should_force_clar
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     !super::structured_field_route_has_current_locator_surface(state, &surface)
+}
+
+fn route_has_structured_scalar_field_contract(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .output_contract
+        .self_extension
+        .structured_field_selector
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|selector| !selector.is_empty())
+        || super::auto_locator_binding::route_reason_has_structured_field_selector_marker(
+            route_result,
+        )
 }
 
 #[cfg(test)]

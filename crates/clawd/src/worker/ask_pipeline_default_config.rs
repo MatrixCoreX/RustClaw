@@ -1,4 +1,5 @@
 use crate::AppState;
+use serde_json::{json, Value};
 
 const RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH: &str = "configs/config.toml";
 
@@ -8,36 +9,19 @@ fn route_is_default_main_config_contract(route: &crate::RouteResult) -> bool {
         && route.schedule_kind == crate::ScheduleKind::None
         && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
         && route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ConfigRiskAssessment
-                | crate::OutputSemanticKind::ConfigValidation
-        )
+        && route_has_default_main_config_contract_marker(route)
 }
 
-fn bind_default_main_config_contract_route(
-    route: &mut crate::RouteResult,
-    reason_code: &'static str,
-) {
-    route.needs_clarify = false;
-    route.clarify_question.clear();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH.to_string();
-    route.output_contract.delivery_required = false;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route.output_contract.requires_content_evidence = true;
-    let finalize = crate::post_route_policy::content_evidence_execution_finalize_style(
-        &route.output_contract,
-        false,
-    )
-    .unwrap_or(crate::ActFinalizeStyle::ChatWrapped);
-    route.set_planner_execute_finalize(finalize);
-    super::append_route_reason(route, reason_code);
+fn route_has_default_main_config_contract_marker(route: &crate::RouteResult) -> bool {
+    super::route_reason_has_marker(route, "config_validation")
+        || super::route_reason_has_marker(route, "config_risk_assessment")
+        || super::route_reason_has_marker(route, "rustclaw_main_config_contract")
 }
 
 fn prompt_allows_default_main_config_binding(prompt: &str) -> bool {
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    !surface.has_explicit_path_or_url() && !surface.has_delivery_token_reference()
+    !crate::worker::has_explicit_path_or_url_locator_hint(prompt)
+        && !surface.has_delivery_token_reference()
 }
 
 fn locator_hint_is_default_main_config(
@@ -78,6 +62,31 @@ fn locator_hint_is_workspace_identity(
             .is_some_and(|stem| stem.eq_ignore_ascii_case(workspace_name))
 }
 
+fn locator_hint_matches_current_request_workspace_child(
+    state: &AppState,
+    prompt: &str,
+    locator_hint: &str,
+) -> bool {
+    let Some(current_request_path) =
+        super::current_request_resolves_workspace_child_locator(state, prompt)
+    else {
+        return false;
+    };
+    let hint = locator_hint.trim();
+    if hint.is_empty() {
+        return false;
+    }
+    let hint_path = std::path::Path::new(hint);
+    let hint_path = if hint_path.is_absolute() {
+        hint_path.to_path_buf()
+    } else {
+        state.skill_rt.workspace_root.join(hint_path)
+    };
+    let hint_path = hint_path.canonicalize().unwrap_or(hint_path);
+    let current_request_path = std::path::PathBuf::from(current_request_path);
+    hint_path == current_request_path
+}
+
 fn route_locator_hint_allows_default_main_config_binding(
     state: &AppState,
     prompt: &str,
@@ -89,83 +98,78 @@ fn route_locator_hint_allows_default_main_config_binding(
     {
         return true;
     }
-    prompt_allows_default_main_config_binding(prompt)
-        && locator_hint_is_workspace_identity(&state.skill_rt.workspace_root, locator_hint)
+    if !prompt_allows_default_main_config_binding(prompt) {
+        return false;
+    }
+    locator_hint_is_workspace_identity(&state.skill_rt.workspace_root, locator_hint)
+        || locator_hint_matches_current_request_workspace_child(state, prompt, locator_hint)
 }
 
-pub(super) fn prebind_config_contract_default_main_config_locator(
+pub(super) fn default_main_config_contract_observation(
     state: &AppState,
     prompt: &str,
-    route: &mut crate::RouteResult,
-) -> bool {
+    route: &crate::RouteResult,
+) -> Option<Value> {
     let default_config_path = state
         .skill_rt
         .workspace_root
         .join(RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH);
-    if !default_config_path.is_file()
-        || !route_is_default_main_config_contract(route)
+    if !route_is_default_main_config_contract(route)
         || !route_locator_hint_allows_default_main_config_binding(state, prompt, route)
     {
-        return false;
+        return None;
     }
-    bind_default_main_config_contract_route(route, "config_contract_default_main_config_prebound");
-    true
+    Some(json!({
+        "source": "boundary_contract",
+        "contract": "rustclaw_main_config",
+        "logical_path": RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH,
+        "workspace_path": default_config_path.display().to_string(),
+        "exists": default_config_path.is_file(),
+        "route_markers": default_main_config_contract_markers(route),
+    }))
 }
 
-pub(super) fn promote_config_contract_default_main_config_to_execute(
+fn default_main_config_contract_markers(route: &crate::RouteResult) -> Vec<&'static str> {
+    [
+        "config_validation",
+        "config_risk_assessment",
+        "rustclaw_main_config_contract",
+    ]
+    .into_iter()
+    .filter(|marker| super::route_reason_has_marker(route, marker))
+    .collect()
+}
+
+pub(super) fn defer_config_contract_default_main_config_after_locator_policy(
     state: &AppState,
     prompt: &str,
     post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
 ) -> bool {
-    let default_config_path = state
-        .skill_rt
-        .workspace_root
-        .join(RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH);
-    if !default_config_path.is_file() {
-        return false;
-    }
-    let route = &mut post_route.execution_route_result;
-    let route_can_accept_default_config_locator =
-        route.needs_clarify || route.is_clarify_gate() || route.is_execute_gate();
-    let locator_hint = route.output_contract.locator_hint.trim();
-    let locator_hint_is_empty = route.output_contract.locator_hint.trim().is_empty();
-    let locator_hint_is_main_config =
-        locator_hint_is_default_main_config(&state.skill_rt.workspace_root, locator_hint);
-    let locator_hint_is_workspace_identity = prompt_allows_default_main_config_binding(prompt)
-        && locator_hint_is_workspace_identity(&state.skill_rt.workspace_root, locator_hint);
-    let locator_hint_is_internal_prebound = super::route_reason_has_marker(
-        route,
-        "workspace_child_locator_prebound_from_current_request",
-    ) || super::route_reason_has_marker(
-        route,
-        "workspace_locator_hint_prebound_from_current_request",
-    ) || super::route_reason_has_marker(
-        route,
-        "workspace_root_locator_prebound_from_current_request",
-    );
-    if !route_can_accept_default_config_locator
-        || !route_is_default_main_config_contract(route)
-        || (!locator_hint_is_empty
-            && !locator_hint_is_internal_prebound
-            && !locator_hint_is_main_config
-            && !locator_hint_is_workspace_identity)
+    if default_main_config_contract_observation(state, prompt, &post_route.execution_route_result)
+        .is_none()
     {
         return false;
     }
-    bind_default_main_config_contract_route(
-        route,
-        "config_contract_default_main_config_to_planner",
-    );
-    post_route.auto_locator_path = None;
-    post_route.auto_locator_hint = None;
-    post_route.auto_locator_resolved_direct = false;
-    post_route.missing_locator_for_path_scoped_content = false;
-    post_route.fuzzy_locator_suggestions.clear();
-    post_route.clarify_reason.clear();
-    post_route.clarify_reason_kind = crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
-    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-        "post_route_config_contract_default_main_config_to_planner",
-        crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+    if prompt_allows_default_main_config_binding(prompt) {
+        if post_route.auto_locator_resolved_direct {
+            post_route.auto_locator_path = None;
+            post_route.auto_locator_hint = None;
+            post_route.auto_locator_resolved_direct = false;
+            post_route.fuzzy_locator_suggestions.clear();
+        }
+        post_route
+            .execution_route_result
+            .output_contract
+            .locator_hint
+            .clear();
+        post_route
+            .execution_route_result
+            .output_contract
+            .locator_kind = crate::OutputLocatorKind::None;
+    }
+    super::append_route_reason(
+        &mut post_route.execution_route_result,
+        "config_contract_default_main_config_deferred_to_loop",
     );
     true
 }

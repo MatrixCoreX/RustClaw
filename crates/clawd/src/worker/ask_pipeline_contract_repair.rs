@@ -1,174 +1,157 @@
-pub(super) fn repair_compound_file_names_plus_content_summary_contract(
-    route_result: &mut crate::RouteResult,
-) {
-    let repairs_file_names_contract = super::route_reason_has_marker(
-        route_result,
-        "llm_semantic_contract_repair:compound_request_requires_repair_to_file_names_plus_content_summary",
-    ) || super::route_reason_has_marker_prefix(
-        route_result,
-        "llm_semantic_contract_repair:malformed_contract_listing_vs_content_synthesis_conflict",
-    );
-    let repairs_file_paths_contract =
-        super::route_reason_has_marker_prefix(route_result, "llm_semantic_contract_repair")
-            && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths;
-    let repairs_file_paths_contract = repairs_file_paths_contract
-        && matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        );
-    if !(repairs_file_names_contract || repairs_file_paths_contract)
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::FilePaths
-        )
-        || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-    {
-        return;
-    }
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
-    let repair_marker = if repairs_file_paths_contract {
-        if route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
-            && route_result.output_contract.locator_hint.trim().is_empty()
-        {
-            route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-            super::append_route_reason(
-                route_result,
-                "compound_file_paths_summary_bound_to_current_workspace",
-            );
-        }
-        "compound_file_paths_plus_content_summary_contract_repaired"
-    } else {
-        "compound_file_names_plus_content_summary_contract_repaired"
-    };
-    super::append_route_reason(route_result, repair_marker);
-}
+use serde_json::{json, Value};
 
-pub(super) fn repair_session_alias_listing_plus_content_summary_contract(
-    state: &crate::AppState,
-    prompt: &str,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-    route_result: &mut crate::RouteResult,
-) {
-    if !matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::FilePaths
-    ) || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-    {
-        return;
-    }
-    let Some(conversation_state) = session_snapshot.conversation_state.as_ref() else {
-        return;
-    };
-    let mut distinct_targets = Vec::new();
-    let mut has_directory_target = false;
-    let mut has_file_target = false;
-    for binding in crate::conversation_state::alias_bindings_mentioned_in_prompt(
-        &conversation_state.alias_bindings,
-        prompt,
-    ) {
-        let target = binding.target.trim();
-        if target.is_empty() || distinct_targets.iter().any(|seen| seen == target) {
-            continue;
-        }
-        distinct_targets.push(target.to_string());
-        let raw_path = std::path::Path::new(target);
-        let target_path = if raw_path.is_absolute() {
-            raw_path.to_path_buf()
-        } else {
-            state.skill_rt.workspace_root.join(raw_path)
-        };
-        has_directory_target |= target_path.is_dir();
-        has_file_target |= target_path.is_file();
-    }
-    if distinct_targets.len() < 2 || !has_directory_target || !has_file_target {
-        return;
-    }
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
-    super::append_route_reason(
-        route_result,
-        "session_alias_listing_plus_content_summary_contract_repaired",
-    );
-}
-
-pub(super) fn repair_summary_only_content_excerpt_with_summary_contract(
-    route_result: &mut crate::RouteResult,
-) {
-    if route_result.output_contract.semantic_kind
-        != crate::OutputSemanticKind::ContentExcerptWithSummary
-        || route_result.output_contract.response_shape != crate::OutputResponseShape::OneSentence
-        || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || route_result.wants_file_delivery
-    {
-        return;
-    }
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    super::append_route_reason(
-        route_result,
-        "summary_only_content_excerpt_with_summary_contract_repaired",
-    );
-}
-
-pub(super) fn repair_generic_path_content_grounded_summary_contract(
-    route_result: &mut crate::RouteResult,
-) -> bool {
-    if repair_command_observation_marker_contract(route_result) {
-        return true;
-    }
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
-        || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || route_result.wants_file_delivery
+pub(super) fn registry_capability_contract_observation(
+    resolved_prompt: &str,
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
+    if route_result.wants_file_delivery
         || matches!(
             route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar
-                | crate::OutputResponseShape::Strict
-                | crate::OutputResponseShape::FileToken
-        )
-        || !matches!(
-            super::effective_auto_locator_kind(route_result),
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::CurrentWorkspace
+            crate::OutputResponseShape::FileToken
         )
     {
-        return false;
+        return None;
     }
-
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_output_contract(
-        &route_result.output_contract,
-    ) else {
-        return false;
-    };
-    if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary {
-        return false;
+    let capability_refs = registry_capability_refs_from_route(resolved_prompt, route_result);
+    if capability_refs.is_empty() {
+        return None;
     }
-
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    super::append_route_reason(
-        route_result,
-        "generic_path_content_grounded_summary_contract_repaired",
-    );
-    true
+    let has_conflicting_contract = route_result.needs_clarify
+        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None;
+    Some(json!({
+        "source": "registry_capability_ref",
+        "capability_refs": capability_refs,
+        "has_conflicting_route_contract": has_conflicting_contract,
+        "route_gate_kind": route_result.gate_kind().as_str(),
+        "needs_clarify": route_result.needs_clarify,
+        "locator_kind": route_result.output_contract.locator_kind.as_str(),
+        "locator_hint": route_result.output_contract.locator_hint.trim(),
+        "delivery_required": route_result.output_contract.delivery_required,
+        "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
+        "response_shape": route_result.output_contract.response_shape.as_str(),
+    }))
 }
 
-fn repair_command_observation_marker_contract(route_result: &mut crate::RouteResult) -> bool {
+fn registry_capability_refs_from_route(
+    resolved_prompt: &str,
+    route_result: &crate::RouteResult,
+) -> Vec<String> {
+    let mut refs = [
+        route_result.route_reason.as_str(),
+        route_result.resolved_intent.as_str(),
+        resolved_prompt,
+    ]
+    .iter()
+    .flat_map(|surface| {
+        surface
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
+            .map(str::trim)
+    })
+    .filter_map(|part| {
+        let capability = part.strip_prefix("capability_ref=")?.trim();
+        valid_capability_ref_token(capability).then_some(capability.to_string())
+    })
+    .collect::<Vec<_>>();
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+fn valid_capability_ref_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty()
+        && token.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+        && token.bytes().any(|byte| byte == b'.')
+}
+
+fn contract_marker_for_semantic_kind(semantic_kind: crate::OutputSemanticKind) -> &'static str {
+    match semantic_kind {
+        crate::OutputSemanticKind::CommandOutputSummary => "contract:command_output_summary",
+        crate::OutputSemanticKind::RawCommandOutput => "contract:raw_command_output",
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
+            "contract:sqlite_database_kind_judgment"
+        }
+        crate::OutputSemanticKind::SqliteSchemaVersion => "contract:sqlite_schema_version",
+        crate::OutputSemanticKind::SqliteTableListing => "contract:sqlite_table_listing",
+        crate::OutputSemanticKind::SqliteTableNamesOnly => "contract:sqlite_table_names_only",
+        crate::OutputSemanticKind::ConfigRiskAssessment => "contract:config_risk_assessment",
+        _ => semantic_kind.as_str(),
+    }
+}
+
+pub(super) fn contract_repair_candidate_observations(
+    state: &crate::AppState,
+    prompt: &str,
+    resolved_prompt: &str,
+    route_result: &crate::RouteResult,
+) -> Vec<Value> {
+    let mut candidates = Vec::new();
+    if let Some(candidate) = command_observation_marker_contract_candidate(route_result) {
+        candidates.push(candidate);
+    }
+    if let Some(candidate) = sqlite_path_excerpt_judgment_contract_candidate(
+        state,
+        prompt,
+        resolved_prompt,
+        route_result,
+    ) {
+        candidates.push(candidate);
+    }
+    if let Some(candidate) =
+        sqlite_structured_version_contract_candidate(state, prompt, resolved_prompt, route_result)
+    {
+        candidates.push(candidate);
+    }
+    if let Some(candidate) = sqlite_structured_table_listing_contract_candidate(
+        state,
+        prompt,
+        resolved_prompt,
+        route_result,
+    ) {
+        candidates.push(candidate);
+    }
+    if let Some(candidate) =
+        sqlite_route_reason_table_contract_candidate(state, prompt, resolved_prompt, route_result)
+    {
+        candidates.push(candidate);
+    }
+    if let Some(candidate) =
+        config_validation_findings_contract_candidate(state, prompt, resolved_prompt, route_result)
+    {
+        candidates.push(candidate);
+    }
+    candidates
+}
+
+fn contract_candidate_json(
+    source: &'static str,
+    semantic_kind: crate::OutputSemanticKind,
+    locator_hint: Option<String>,
+    response_shape: Option<crate::OutputResponseShape>,
+) -> Value {
+    json!({
+        "source": source,
+        "contract_ref": contract_marker_for_semantic_kind(semantic_kind),
+        "locator_hint": locator_hint.unwrap_or_default(),
+        "response_shape": response_shape.map(|shape| shape.as_str()).unwrap_or(""),
+    })
+}
+
+fn command_observation_marker_contract_candidate(
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
     {
-        return false;
+        return None;
     }
     let semantic_kind = if super::route_reason_has_marker(
         route_result,
@@ -187,26 +170,26 @@ fn repair_command_observation_marker_contract(route_result: &mut crate::RouteRes
     ) {
         crate::OutputSemanticKind::RawCommandOutput
     } else {
-        return false;
+        return None;
     };
 
-    route_result.output_contract.semantic_kind = semantic_kind;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
-    super::append_route_reason(route_result, "command_observation_marker_contract_repaired");
-    true
+    Some(contract_candidate_json(
+        "command_observation_marker",
+        semantic_kind,
+        None,
+        None,
+    ))
 }
 
-pub(super) fn repair_sqlite_path_excerpt_judgment_contract(
+fn sqlite_path_excerpt_judgment_contract_candidate(
     state: &crate::AppState,
     prompt: &str,
     resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
-        || route_result.output_contract.semantic_kind
-            != crate::OutputSemanticKind::ExcerptKindJudgment
+        || !super::route_reason_has_marker(route_result, "excerpt_kind_judgment")
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -217,132 +200,137 @@ pub(super) fn repair_sqlite_path_excerpt_judgment_contract(
                 | crate::OutputResponseShape::Strict
         )
     {
-        return false;
+        return None;
     }
     let Some(path) =
         sqlite_database_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
     else {
-        return false;
+        return None;
     };
-    route_result.output_contract.semantic_kind =
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    super::append_route_reason(
-        route_result,
-        "sqlite_path_excerpt_judgment_contract_repaired",
-    );
-    true
+    Some(contract_candidate_json(
+        "sqlite_path_excerpt_judgment",
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+        Some(path),
+        None,
+    ))
 }
 
-pub(super) fn repair_sqlite_structured_version_contract(
+fn sqlite_structured_version_contract_candidate(
     state: &crate::AppState,
     prompt: &str,
     resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-        )
         || !sqlite_version_selector(route_result)
     {
-        return false;
+        return None;
     }
     let Some(path) =
         sqlite_database_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
     else {
-        return false;
+        return None;
     };
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    super::append_route_reason(route_result, "sqlite_structured_version_contract_repaired");
-    true
+    Some(contract_candidate_json(
+        "sqlite_structured_version",
+        crate::OutputSemanticKind::SqliteSchemaVersion,
+        Some(path),
+        Some(crate::OutputResponseShape::Scalar),
+    ))
 }
 
-pub(super) fn repair_sqlite_structured_table_listing_contract(
+fn sqlite_structured_table_listing_contract_candidate(
     state: &crate::AppState,
     prompt: &str,
     resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-                | crate::OutputSemanticKind::StructuredKeys
-        )
         || !sqlite_table_listing_selector(route_result)
     {
-        return false;
+        return None;
     }
     let Some(path) =
         sqlite_database_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
     else {
-        return false;
+        return None;
     };
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    super::append_route_reason(
-        route_result,
-        "sqlite_structured_table_listing_contract_repaired",
-    );
-    true
+    Some(contract_candidate_json(
+        "sqlite_structured_table_listing",
+        crate::OutputSemanticKind::SqliteTableListing,
+        Some(path),
+        Some(crate::OutputResponseShape::Strict),
+    ))
 }
 
-pub(super) fn repair_config_validation_findings_contract(
+fn sqlite_route_reason_table_contract_candidate(
     state: &crate::AppState,
     prompt: &str,
     resolved_prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
     if !route_result.is_execute_gate()
         || route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ConfigValidation
-        )
+    {
+        return None;
+    }
+    let semantic_kind = if super::route_reason_has_marker(route_result, "sqlite_table_names_only") {
+        crate::OutputSemanticKind::SqliteTableNamesOnly
+    } else if super::route_reason_has_marker(route_result, "sqlite_table_listing") {
+        crate::OutputSemanticKind::SqliteTableListing
+    } else {
+        return None;
+    };
+    let Some(path) =
+        sqlite_database_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
+    else {
+        return None;
+    };
+    Some(contract_candidate_json(
+        "sqlite_route_reason_table",
+        semantic_kind,
+        Some(path),
+        Some(crate::OutputResponseShape::Strict),
+    ))
+}
+
+fn config_validation_findings_contract_candidate(
+    state: &crate::AppState,
+    prompt: &str,
+    resolved_prompt: &str,
+    route_result: &crate::RouteResult,
+) -> Option<Value> {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
         || !config_validation_findings_selector(route_result)
     {
-        return false;
+        return None;
     }
     let Some(path) =
         structured_config_locator_from_route_or_text(state, prompt, resolved_prompt, route_result)
     else {
-        return false;
+        return None;
     };
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = path;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route_result
-        .output_contract
-        .self_extension
-        .structured_field_selector = None;
-    super::append_route_reason(route_result, "config_validation_findings_contract_repaired");
-    true
+    Some(contract_candidate_json(
+        "config_validation_findings",
+        crate::OutputSemanticKind::ConfigRiskAssessment,
+        Some(path),
+        Some(crate::OutputResponseShape::Free),
+    ))
 }
 
 fn config_validation_findings_selector(route_result: &crate::RouteResult) -> bool {
@@ -458,10 +446,31 @@ fn sqlite_database_locator_from_route_or_text(
             .map(|locator| locator.locator_hint),
         );
     }
-    candidates.into_iter().find_map(|candidate| {
-        let path = super::resolve_existing_workspace_locator_hint(state, &candidate)?;
-        sqlite_database_path(&path).then_some(path)
-    })
+    candidates
+        .into_iter()
+        .find_map(|candidate| {
+            let path = super::resolve_existing_workspace_locator_hint(state, &candidate)?;
+            sqlite_database_path(&path).then_some(path)
+        })
+        .or_else(|| {
+            crate::worker::try_resolve_implicit_locator_path(
+                state,
+                prompt,
+                &format!(
+                    "{}\n{}",
+                    resolved_prompt,
+                    route_result.resolved_intent.as_str()
+                ),
+                crate::OutputLocatorKind::Path,
+                None,
+            )
+            .and_then(|resolution| match resolution {
+                crate::worker::LocatorAutoResolution::Direct(path) => {
+                    sqlite_database_path(&path).then_some(path)
+                }
+                crate::worker::LocatorAutoResolution::Fuzzy(_) => None,
+            })
+        })
 }
 
 fn sqlite_database_path(path: &str) -> bool {
@@ -471,7 +480,7 @@ fn sqlite_database_path(path: &str) -> bool {
             .and_then(|ext| ext.to_str())
             .map(str::to_ascii_lowercase)
             .as_deref(),
-        Some("sqlite" | "db")
+        Some("sqlite" | "sqlite3" | "db")
     )
 }
 

@@ -1,8 +1,4 @@
-use super::{
-    locatorless_observation_route_should_force_clarify,
-    promote_locatorless_git_capability_to_repository_state,
-    promote_locatorless_scalar_child_metadata_to_quantity_comparison,
-};
+use super::locatorless_observation_route_should_force_clarify;
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -61,7 +57,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -110,11 +106,101 @@ fn locatorless_observation_requires_clarify_without_session_anchor() {
 }
 
 #[test]
-fn locatorless_git_capability_promotes_to_repository_state_before_clarify_guards() {
+fn locatorless_kb_metadata_capability_can_plan_without_session_anchor() {
+    let state = test_state_with_root(make_temp_root("locatorless_kb_metadata"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.list_namespaces field=names field=count limit=10".to_string();
+    route.route_reason = "capability_ref=kb.list_namespaces".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "list kb namespaces",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_kb_search_capability_can_plan_without_session_anchor() {
+    let state = test_state_with_root(make_temp_root("locatorless_kb_search"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.search namespace=docs query=service_status top_k=3".to_string();
+    route.route_reason = "structured skill-managed KB search; capability_ref=kb.search".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "search kb namespace",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_registry_capability_ref_can_plan_without_guard_whitelist_growth() {
+    let state = test_state_with_root(make_temp_root("locatorless_generic_capability_ref"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Generate a short media preview. capability_ref=media_video.generate".to_string();
+    route.route_reason =
+        "registry capability route; capability_ref=media_video.generate".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "generate a short media preview",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_git_capability_plans_without_enum_promotion() {
     let state = test_state_with_root(make_temp_root("locatorless_git_capability"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Observe git repository state from the current workspace.".to_string();
-    route.route_reason = "This requires git_basic readonly observation.".to_string();
+    route.resolved_intent =
+        "Observe repository state from the current workspace. capability_ref=git_basic.status"
+            .to_string();
+    route.route_reason = "capability_ref=git_basic.status; readonly observation".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -127,12 +213,9 @@ fn locatorless_git_capability_promotes_to_repository_state_before_clarify_guards
         active_observed_facts: None,
     };
 
-    assert!(promote_locatorless_git_capability_to_repository_state(
-        &mut route,
-    ));
     assert_eq!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::GitRepositoryState
+        crate::OutputSemanticKind::None
     );
     assert!(!locatorless_observation_route_should_force_clarify(
         &state, "git", &route, None, &snapshot,
@@ -140,54 +223,16 @@ fn locatorless_git_capability_promotes_to_repository_state_before_clarify_guards
 }
 
 #[test]
-fn locatorless_scalar_child_metadata_promotes_to_quantity_comparison() {
-    let root = make_temp_root("locatorless_scalar_child_metadata");
-    std::fs::create_dir_all(root.join("target")).expect("target dir");
-    std::fs::write(root.join("target").join("artifact.bin"), b"artifact").expect("artifact");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-
-    assert!(
-        promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-            &state,
-            "inspect target size",
-            &mut route,
-        )
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::QuantityComparison
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        root.join("target")
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
-    );
-    assert!(!route.needs_clarify);
-}
-
-#[test]
 fn locatorless_rss_news_fetch_can_execute_without_session_anchor() {
     let state = test_state_with_root(make_temp_root("locatorless_rss_news_fetch"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Fetch the latest configured RSS news.".to_string();
+    route.resolved_intent =
+        "Fetch the latest configured RSS news. capability_ref=rss.latest_news".to_string();
+    route.route_reason = "capability_ref=rss.latest_news".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RssNewsFetch;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -209,11 +254,13 @@ fn locatorless_web_search_summary_can_execute_without_session_anchor() {
     let state = test_state_with_root(make_temp_root("locatorless_web_search_summary"));
     let mut route = executable_filename_route();
     route.resolved_intent =
-        "Search the web for rust async tutorial and summarize results.".to_string();
+        "Search the web for rust async tutorial and summarize results. capability_ref=web.search_results"
+            .to_string();
+    route.route_reason = "capability_ref=web.search_results".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::WebSearchSummary;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -234,11 +281,13 @@ fn locatorless_web_search_summary_can_execute_without_session_anchor() {
 fn locatorless_weather_query_can_execute_without_session_anchor() {
     let state = test_state_with_root(make_temp_root("locatorless_weather_query"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Query current weather for Beijing.".to_string();
+    route.resolved_intent =
+        "Query current weather for Beijing. capability_ref=weather.current".to_string();
+    route.route_reason = "capability_ref=weather.current".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::WeatherQuery;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -256,14 +305,109 @@ fn locatorless_weather_query_can_execute_without_session_anchor() {
 }
 
 #[test]
-fn locatorless_market_quote_can_execute_without_session_anchor() {
-    let state = test_state_with_root(make_temp_root("locatorless_market_quote"));
+fn locatorless_weather_query_without_capability_ref_requires_clarify() {
+    let state = test_state_with_root(make_temp_root("locatorless_weather_no_capability"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Query the latest quote for 600519.".to_string();
+    route.resolved_intent = "Query current weather for Beijing.".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WeatherQuery;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(locatorless_observation_route_should_force_clarify(
+        &state,
+        "check Beijing weather",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn ordinary_semantic_kind_without_capability_ref_requires_clarify() {
+    let state = test_state_with_root(make_temp_root(
+        "locatorless_ordinary_semantic_no_capability",
+    ));
+    for semantic_kind in [
+        crate::OutputSemanticKind::ServiceStatus,
+        crate::OutputSemanticKind::HiddenEntriesCheck,
+        crate::OutputSemanticKind::WorkspaceProjectSummary,
+        crate::OutputSemanticKind::RecentScalarEqualityCheck,
+        crate::OutputSemanticKind::GitCommitSubject,
+        crate::OutputSemanticKind::GitRepositoryState,
+        crate::OutputSemanticKind::ToolDiscovery,
+    ] {
+        let mut route = executable_filename_route();
+        route.resolved_intent = format!("ordinary semantic contract: {}", semantic_kind.as_str());
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = semantic_kind;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(
+            locatorless_observation_route_should_force_clarify(
+                &state,
+                "run ordinary semantic route without explicit locator",
+                &route,
+                None,
+                &snapshot,
+            ),
+            "semantic_kind={}",
+            semantic_kind.as_str()
+        );
+    }
+}
+
+#[test]
+fn locatorless_capability_ref_requires_valid_machine_token_shape() {
+    let state = test_state_with_root(make_temp_root("locatorless_capability_token_shape"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Query current weather for Beijing. capability_ref=weathercurrent".to_string();
+    route.route_reason = "capability_ref=weathercurrent".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(locatorless_observation_route_should_force_clarify(
+        &state,
+        "check Beijing weather",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_market_quote_can_execute_without_session_anchor() {
+    let state = test_state_with_root(make_temp_root("locatorless_market_quote"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Query the latest quote for 600519. capability_ref=stock.quote".to_string();
+    route.route_reason = "capability_ref=stock.quote".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -284,11 +428,13 @@ fn locatorless_market_quote_can_execute_without_session_anchor() {
 fn locatorless_image_understanding_can_execute_without_session_anchor() {
     let state = test_state_with_root(make_temp_root("locatorless_image_understanding"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Describe the attached image.".to_string();
+    route.resolved_intent =
+        "Describe the attached image. capability_ref=image_vision.describe".to_string();
+    route.route_reason = "capability_ref=image_vision.describe".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ImageUnderstanding;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -309,11 +455,14 @@ fn locatorless_image_understanding_can_execute_without_session_anchor() {
 fn locatorless_publishing_preview_can_execute_without_session_anchor() {
     let state = test_state_with_root(make_temp_root("locatorless_publishing_preview"));
     let mut route = executable_filename_route();
-    route.resolved_intent = "Draft a channel post preview and do not publish it.".to_string();
+    route.resolved_intent =
+        "Draft a channel post preview and do not publish it. capability_ref=x.draft_preview"
+            .to_string();
+    route.route_reason = "capability_ref=x.draft_preview".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::PublishingPreview;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -331,13 +480,39 @@ fn locatorless_publishing_preview_can_execute_without_session_anchor() {
 }
 
 #[test]
-fn locatorless_scalar_raw_runtime_observation_can_plan_without_state_patch() {
+fn locatorless_scalar_raw_runtime_observation_without_machine_signal_requires_clarify() {
     let state = test_state_with_root(make_temp_root("locatorless_runtime_scalar_raw"));
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(locatorless_observation_route_should_force_clarify(
+        &state,
+        "runtime scalar status query",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_scalar_runtime_observation_with_machine_marker_can_plan() {
+    let state = test_state_with_root(make_temp_root("locatorless_runtime_scalar_marker"));
+    let mut route = executable_filename_route();
+    route.route_reason = "execution_recipe_scalar_runtime_tool_observation".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
@@ -382,169 +557,6 @@ fn locatorless_inline_structured_payload_does_not_require_external_locator() {
 }
 
 #[test]
-fn locatorless_git_capability_repairs_command_summary_contract_to_repository_state() {
-    let mut route = executable_filename_route();
-    route.resolved_intent = "Observe Git repository state from the current workspace.".to_string();
-    route.route_reason = "normalizer selected git_repository_state capability".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.exact_sentence_count = Some(1);
-
-    assert!(promote_locatorless_git_capability_to_repository_state(
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::GitRepositoryState
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::OneSentence
-    );
-    assert_eq!(route.output_contract.exact_sentence_count, Some(1));
-}
-
-#[test]
-fn visible_git_skill_candidate_does_not_steal_process_status_route() {
-    let mut route = executable_filename_route();
-    route.resolved_intent = "Observe local listening ports from the host system.".to_string();
-    route.route_reason = "This requires local process status observation.".to_string();
-    route.visible_skill_candidates = vec!["process_basic".to_string(), "git_basic".to_string()];
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-
-    assert!(!promote_locatorless_git_capability_to_repository_state(
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-}
-
-#[test]
-fn locatorless_raw_file_content_does_not_promote_to_quantity_comparison() {
-    let root = make_temp_root("locatorless_raw_file_content");
-    std::fs::write(root.join("README.md"), b"line one\nline two\n").expect("readme");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-
-    assert!(
-        !promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-            &state,
-            "read README now",
-            &mut route,
-        )
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-    std::fs::remove_dir_all(root).ok();
-}
-
-#[test]
-fn locatorless_one_sentence_file_content_does_not_promote_to_quantity_comparison() {
-    let root = make_temp_root("locatorless_one_sentence_file_content");
-    std::fs::write(root.join("README.md"), b"line one\nline two\n").expect("readme");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-
-    assert!(
-        !promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-            &state,
-            "read README now",
-            &mut route,
-        )
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-    std::fs::remove_dir_all(root).ok();
-}
-
-#[test]
-fn command_payload_raw_output_does_not_promote_to_quantity_comparison() {
-    let root = make_temp_root("command_payload_not_quantity_comparison");
-    std::fs::create_dir_all(root.join("run")).expect("run dir");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.route_reason = "command_payload_requires_raw_output_execution".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-
-    assert!(
-        !promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-            &state,
-            "please run uname -a and tell me the result",
-            &mut route,
-        )
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-    std::fs::remove_dir_all(root).ok();
-}
-
-#[test]
-fn locatorless_scalar_child_metadata_preserves_bare_single_token_topic() {
-    let root = make_temp_root("locatorless_scalar_bare_topic");
-    std::fs::create_dir_all(root.join("target")).expect("target dir");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-
-    assert!(
-        !promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-            &state, "target", &mut route,
-        )
-    );
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    std::fs::remove_dir_all(root).ok();
-}
-
-#[test]
 fn locatorless_raw_command_output_still_allows_execution() {
     let mut state = test_state_with_root(make_temp_root("locatorless_raw_command"));
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
@@ -553,6 +565,31 @@ fn locatorless_raw_command_output_still_allows_execution() {
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "execute pwd, then explain what the path means in one sentence",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn locatorless_explicit_command_uses_policy_evidence_without_semantic_enum() {
+    let mut state = test_state_with_root(make_temp_root("locatorless_explicit_command_no_enum"));
+    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
