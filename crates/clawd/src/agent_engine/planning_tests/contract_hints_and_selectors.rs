@@ -1286,7 +1286,7 @@ fn service_status_without_machine_target_does_not_use_system_basic_info_fallback
 fn service_status_identity_field_prefers_system_basic_info_over_health_check() {
     let state = test_state_with_enabled_skills(&["health_check", "system_basic"]);
     let mut route = base_route_result();
-    route.resolved_intent = "Show current hostname and current user.".to_string();
+    route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
@@ -1297,7 +1297,7 @@ fn service_status_identity_field_prefers_system_basic_info_over_health_check() {
         "observe local runtime identity",
         Some(&route),
         &loop_state,
-        "show hostname and current_user",
+        "ordinary request text",
     )
     .expect("identity field request should use system_basic info");
 
