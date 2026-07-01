@@ -202,11 +202,6 @@ fn collect_web_search_candidate_title_sources_from_json(
             collect_web_search_candidate_array_title_sources(items, pairs);
         }
     }
-    if let Some(text) = value.get("text").and_then(serde_json::Value::as_str) {
-        if let Ok(nested) = serde_json::from_str::<serde_json::Value>(text.trim()) {
-            collect_web_search_candidate_title_sources_from_json(&nested, pairs);
-        }
-    }
 }
 
 fn collect_web_search_candidate_array_title_sources(
@@ -446,6 +441,10 @@ fn generated_file_machine_report_has_multi_field_payload(text: &str) -> bool {
         text.contains("task_id:") && text.contains("job_id:") && text.contains("status:");
     (has_output_path && has_planned_outputs) || (has_async_poll_result && has_task_status)
 }
+
+#[cfg(test)]
+#[path = "task_machine_kv_summary_tests.rs"]
+mod task_machine_kv_summary_tests;
 
 #[cfg(test)]
 mod tests {
