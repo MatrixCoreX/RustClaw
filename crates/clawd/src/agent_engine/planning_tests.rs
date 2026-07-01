@@ -68,6 +68,7 @@ use super::{
     rewrite_archive_basic_short_archive_to_active_bound_target,
     rewrite_archive_pack_plan_to_archive_basic, rewrite_archive_unpack_run_cmd_to_archive_basic,
     rewrite_config_change_preview_to_config_edit_plan,
+    rewrite_config_mutation_plan_only_to_config_edit_plan,
     rewrite_config_mutation_to_config_edit_closed_loop,
     rewrite_config_validation_read_plan_to_validate,
     rewrite_directory_entry_groups_tree_summary_to_list_dir,

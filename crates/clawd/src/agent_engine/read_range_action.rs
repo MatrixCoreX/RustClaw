@@ -523,6 +523,31 @@ fn normalize_config_edit_value_aliases(skill: &str, args: &mut Value) -> bool {
     true
 }
 
+fn route_has_config_change_contract(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &[
+                "apply_change",
+                "apply_config_change",
+                "plan_change",
+                "plan_config_change",
+                "set_field",
+                "write_field",
+            ],
+        )
+}
+
+fn route_has_config_risk_contract(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &["guard_after_change", "guard_config"],
+        )
+}
+
 pub(super) fn rewrite_config_mutation_plan_only_to_config_edit_plan(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
@@ -535,7 +560,7 @@ pub(super) fn rewrite_config_mutation_plan_only_to_config_edit_plan(
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
+        || !route_has_config_change_contract(route)
         || loop_state.execution_recipe.kind
             == crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
         || actions.iter().any(action_is_obvious_mutation)
@@ -898,10 +923,7 @@ pub(super) fn rewrite_config_change_preview_to_config_edit_plan(
     let Some(route) = route_result else {
         return actions;
     };
-    if !matches!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::ConfigMutation | crate::OutputSemanticKind::ConfigRiskAssessment
-    ) {
+    if !route_has_config_change_contract(route) && !route_has_config_risk_contract(route) {
         return actions;
     }
     if route_has_unresolved_clarify_or_locator_marker(route)
@@ -953,7 +975,7 @@ pub(super) fn rewrite_config_mutation_to_config_edit_closed_loop(
     let has_planned_mutation = actions.iter().any(action_is_obvious_mutation);
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
+        || !route_has_config_change_contract(route)
         || !(has_config_change_recipe || has_planned_mutation)
     {
         return actions;
