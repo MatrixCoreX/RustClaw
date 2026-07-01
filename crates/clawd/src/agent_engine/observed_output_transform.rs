@@ -6,10 +6,8 @@ pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<S
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     transform_skill_formatted_output_value_candidate(&value).or_else(|| {
         value
-            .get("text")
-            .and_then(|value| value.as_str())
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-            .and_then(|value| transform_skill_formatted_output_value_candidate(&value))
+            .get("extra")
+            .and_then(transform_skill_formatted_output_value_candidate)
     })
 }
 
@@ -152,6 +150,18 @@ mod tests {
     }
 
     #[test]
+    fn transform_output_candidate_ignores_visible_text_json_payload() {
+        let body = serde_json::json!({
+            "status": "ok",
+            "extra": {"action": "transform_data"},
+            "text": serde_json::json!({"status": "ok", "formatted": "machine_value"}).to_string()
+        })
+        .to_string();
+
+        assert!(transform_skill_formatted_output_candidate(&body).is_none());
+    }
+
+    #[test]
     fn referenced_transform_step_answer_ignores_earlier_directory_observation() {
         let state = AppState::test_default_with_fixture_provider();
         let mut loop_state = LoopState::new(3);
@@ -163,7 +173,7 @@ mod tests {
         loop_state.executed_step_results.push(ok_step(
             "step_2",
             "transform",
-            r#"{"extra":{"action":"transform_data"},"text":"{\"error\":null,\"formatted\":\"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |\\n\",\"output\":\"| name | score |\\n| --- | --- |\\n| beta | 12 |\\n| gamma | 9 |\\n| alpha | 7 |\\n\",\"result\":[{\"name\":\"beta\",\"score\":12},{\"name\":\"gamma\",\"score\":9},{\"name\":\"alpha\",\"score\":7}],\"status\":\"ok\"}"}"#,
+            r#"{"extra":{"action":"transform_data","error":null,"formatted":"| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |\n","output":"| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |\n","result":[{"name":"beta","score":12},{"name":"gamma","score":9},{"name":"alpha","score":7}],"status":"ok"}}"#,
         ));
 
         let answer = direct_answer_from_referenced_observation_i18n(
