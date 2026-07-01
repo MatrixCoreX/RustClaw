@@ -16,6 +16,86 @@ fn load_workspace_matrix() -> ContractMatrix {
     ContractMatrix::load_from_workspace(&workspace_root()).expect("load contract matrix")
 }
 
+fn route_with_machine_capability_ref(capability_ref: &str) -> RouteResult {
+    RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: capability_ref.to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: capability_ref.to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        },
+    }
+}
+
+#[test]
+fn route_capability_ref_allows_config_archive_policy_without_semantic_kind() {
+    for (capability_ref, skill, args, expected_action, expected_evidence) in [
+        (
+            "capability_ref=config.validate",
+            "config_basic",
+            serde_json::json!({"action":"validate","path":"configs/config.toml"}),
+            "config_basic.validate",
+            vec!["valid"],
+        ),
+        (
+            "capability_ref=archive.pack",
+            "archive_basic",
+            serde_json::json!({"action":"pack","source":"tmp/report","archive":"tmp/report.zip"}),
+            "archive_basic.pack",
+            vec!["path"],
+        ),
+        (
+            "capability_ref=archive.unpack",
+            "archive_basic",
+            serde_json::json!({"action":"unpack","archive":"tmp/report.zip","dest":"tmp/report"}),
+            "archive_basic.unpack",
+            vec!["path"],
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.required_evidence, expected_evidence);
+    }
+}
+
+#[test]
+fn route_policy_does_not_allow_config_action_without_capability_ref() {
+    let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
+    route.route_reason.clear();
+    route.resolved_intent.clear();
+
+    let policy = action_policy_for_route(
+        Some(&route),
+        "config_basic",
+        &serde_json::json!({"action":"validate","path":"configs/config.toml"}),
+    )
+    .expect("generic policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::RejectedNotAllowed);
+    assert_ne!(policy.contract_match, "capability_ref");
+}
+
 #[test]
 fn recent_scalar_equality_allows_structured_field_extractors() {
     let matrix = load_workspace_matrix();

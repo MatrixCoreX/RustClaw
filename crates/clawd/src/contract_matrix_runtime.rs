@@ -573,8 +573,99 @@ pub(crate) fn action_policy_for_route(
     normalized_skill: &str,
     args: &Value,
 ) -> Option<ContractActionPolicy> {
-    let output_contract = route?.effective_output_contract();
-    action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)
+    let route = route?;
+    let output_contract = route.effective_output_contract();
+    let mut policy =
+        action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)?;
+    if matches!(
+        policy.decision,
+        ActionPolicyDecision::RejectedNotAllowed | ActionPolicyDecision::RejectedNoActionsAllowed
+    ) && route_capability_ref_allows_action(route, normalized_skill, args)
+    {
+        policy.decision = ActionPolicyDecision::Allowed;
+        policy.contract_match = "capability_ref".to_string();
+        policy.contract_repair_source = "capability_ref_route_policy".to_string();
+        policy.required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+        policy.preferred_actions = vec![policy.action_key.clone()];
+    }
+    Some(policy)
+}
+
+fn route_capability_ref_allows_action(
+    route: &RouteResult,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    let Some(action) = ActionRef::from_skill_args(normalized_skill, args) else {
+        return false;
+    };
+    let action_name = action.action.as_deref().unwrap_or_default();
+    match (action.skill.as_str(), action_name) {
+        ("config_basic", "validate")
+        | ("config_edit", "validate_config")
+        | ("system_basic", "validate_structured") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config"],
+                &["validate", "validate_config", "validate_after_change"],
+            )
+        }
+        ("config_basic", "guard_rustclaw_config") | ("config_edit", "guard_config") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config"],
+                &[
+                    "guard",
+                    "guard_config",
+                    "guard_after_change",
+                    "guard_rustclaw_config",
+                ],
+            )
+        }
+        ("config_edit", "plan_config_change") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config"],
+                &["plan_change", "plan_config_change"],
+            )
+        }
+        ("config_edit", "apply_config_change") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config"],
+                &["apply_change", "apply_config_change"],
+            )
+        }
+        ("archive_basic", "list") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["archive"],
+                &["list"],
+            )
+        }
+        ("archive_basic", "read") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["archive"],
+                &["read"],
+            )
+        }
+        ("archive_basic", "pack") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["archive"],
+                &["pack"],
+            )
+        }
+        ("archive_basic", "unpack") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["archive"],
+                &["unpack"],
+            )
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn arg_policy_decision(
