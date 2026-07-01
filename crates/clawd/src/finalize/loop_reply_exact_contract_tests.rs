@@ -251,6 +251,56 @@ fn archive_pack_exact_contract_prefers_observed_archive_path_over_exit_code_resp
 }
 
 #[test]
+fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_kind() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "archive_basic",
+        r#"{"extra":{"action":"pack","archive":"/home/guagua/rustclaw/tmp/nl_archive_case.zip","format":"zip","output":"exit=0\nupdating: scripts/skill_calls/"},"text":"archive_path=/home/guagua/rustclaw/tmp/nl_archive_case.zip\nexit=0"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", "0"));
+    loop_state.last_user_visible_respond = Some("0".to_string());
+    let mut delivery_messages = vec!["0".to_string()];
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.route_reason = "capability_ref=archive.pack".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-archive-pack-capability-ref-path",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(
+        delivery_messages,
+        vec!["/home/guagua/rustclaw/tmp/nl_archive_case.zip".to_string()]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("/home/guagua/rustclaw/tmp/nl_archive_case.zip")
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);

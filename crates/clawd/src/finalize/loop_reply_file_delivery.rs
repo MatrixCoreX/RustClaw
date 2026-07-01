@@ -806,12 +806,15 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchivePack {
+    if !route_requests_archive_pack(route) {
         return None;
     }
-    if crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)?
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
+        && crate::contract_matrix::final_answer_shape_for_output_contract(
+            &route.effective_output_contract(),
+        )?
         .as_str()
-        != "created_archive_path"
+            != "created_archive_path"
     {
         return None;
     }
@@ -832,6 +835,15 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
         }
     }
     None
+}
+
+fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["pack"],
+        )
 }
 
 fn created_archive_path_from_observed_body(body: &str) -> Option<String> {
