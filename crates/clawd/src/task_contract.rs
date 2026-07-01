@@ -445,6 +445,7 @@ fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
             "start",
             "stop",
             "uninstall",
+            "unpack",
         ],
     ) {
         TaskOperation::Modify
@@ -594,32 +595,57 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
     let capability = capability_ref_for_route(route)?;
-    let fields =
-        if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
-            &["candidates"][..]
+    let fields = if capability.namespace == "config"
+        || capability.namespace == "config_basic"
+        || capability.namespace == "config_edit"
+    {
+        if action_has_any_segment(capability.action, &["guard", "risk"]) {
+            &["candidates", "count"][..]
         } else if action_has_any_segment(
             capability.action,
-            &[
-                "analyze",
-                "describe",
-                "extract",
-                "quote",
-                "read",
-                "summary",
-                "summarize",
-            ],
+            &["apply", "change", "mutate", "set", "write"],
         ) {
-            &["content_excerpt"][..]
-        } else if capability.namespace == "web"
-            || capability.namespace == "browser"
-            || capability.namespace == "rss"
-            || capability.namespace == "weather"
-            || capability.namespace == "image_vision"
-        {
-            &["content_excerpt"][..]
+            &["field_value", "path", "valid"][..]
+        } else if action_has_any_segment(capability.action, &["validate", "verify"]) {
+            &["valid"][..]
         } else {
             &["field_value"][..]
-        };
+        }
+    } else if capability.namespace == "archive" {
+        if action_has_any_segment(capability.action, &["list"]) {
+            &["candidates"][..]
+        } else if action_has_any_segment(capability.action, &["read"]) {
+            &["content_excerpt"][..]
+        } else if action_has_any_segment(capability.action, &["pack", "unpack"]) {
+            &["path"][..]
+        } else {
+            &["field_value"][..]
+        }
+    } else if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
+        &["candidates"][..]
+    } else if action_has_any_segment(
+        capability.action,
+        &[
+            "analyze",
+            "describe",
+            "extract",
+            "quote",
+            "read",
+            "summary",
+            "summarize",
+        ],
+    ) {
+        &["content_excerpt"][..]
+    } else if capability.namespace == "web"
+        || capability.namespace == "browser"
+        || capability.namespace == "rss"
+        || capability.namespace == "weather"
+        || capability.namespace == "image_vision"
+    {
+        &["content_excerpt"][..]
+    } else {
+        &["field_value"][..]
+    };
     Some(fields.iter().map(|field| (*field).to_string()).collect())
 }
 

@@ -133,6 +133,60 @@ fn existence_contract_requires_structural_path_evidence() {
 }
 
 #[test]
+fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
+    for (marker, target, operation, evidence) in [
+        (
+            "capability_ref=config.validate",
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Validate,
+            vec!["valid"],
+        ),
+        (
+            "capability_ref=config.apply_change",
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Modify,
+            vec!["field_value", "path", "valid"],
+        ),
+        (
+            "capability_ref=config.guard_after_change",
+            TaskTargetObject::ConfigKey,
+            TaskOperation::Validate,
+            vec!["candidates", "count"],
+        ),
+        (
+            "capability_ref=archive.pack",
+            TaskTargetObject::Path,
+            TaskOperation::Write,
+            vec!["path"],
+        ),
+        (
+            "capability_ref=archive.unpack",
+            TaskTargetObject::Path,
+            TaskOperation::Modify,
+            vec!["path"],
+        ),
+    ] {
+        let mut route = route_with_contract(
+            AskMode::planner_execute_plain(),
+            IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                semantic_kind: OutputSemanticKind::None,
+                ..IntentOutputContract::default()
+            },
+        );
+        route.resolved_intent = marker.to_string();
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.target_object, target, "{marker}");
+        assert_eq!(contract.operation, operation, "{marker}");
+        assert_eq!(contract.required_evidence_fields, evidence, "{marker}");
+    }
+}
+
+#[test]
 fn task_contract_splits_structured_multi_target_locator() {
     let route = route_with_contract(
         AskMode::planner_execute_plain(),
