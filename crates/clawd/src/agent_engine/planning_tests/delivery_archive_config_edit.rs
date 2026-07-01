@@ -1425,6 +1425,43 @@ fn config_validation_contract_rewrites_broad_read_to_validate() {
 }
 
 #[test]
+fn config_validation_capability_ref_rewrites_broad_read_without_semantic_kind() {
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=config.validate".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "configs/config.toml",
+                "mode": "head",
+                "n": 500,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+    ];
+
+    let rewritten = rewrite_config_validation_read_plan_to_validate(Some(&route), None, actions);
+
+    let args = expect_planned_call(&rewritten[0], "config_basic", "validate");
+    assert_eq!(
+        args.get("validation_profile").and_then(Value::as_str),
+        Some("syntax_only")
+    );
+    assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
+    );
+}
+
+#[test]
 fn config_validation_contract_normalizes_tool_read_to_validate() {
     let state = test_state();
     let mut route = route_result(
