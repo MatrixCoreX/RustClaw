@@ -176,74 +176,6 @@ fn prefer_english_for_user_text_without_state(user_text: &str) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ExecutionSummaryLanguage {
-    Zh,
-    En,
-    Ja,
-    Ko,
-}
-
-fn execution_summary_language_from_hint(hint: &str) -> ExecutionSummaryLanguage {
-    let normalized = hint.trim().to_ascii_lowercase();
-    if normalized.starts_with("ja") {
-        ExecutionSummaryLanguage::Ja
-    } else if normalized.starts_with("ko") {
-        ExecutionSummaryLanguage::Ko
-    } else if normalized.starts_with("zh") || normalized == "mixed" {
-        ExecutionSummaryLanguage::Zh
-    } else if normalized == "config_default" || normalized.is_empty() {
-        ExecutionSummaryLanguage::Zh
-    } else {
-        ExecutionSummaryLanguage::En
-    }
-}
-
-pub(super) fn execution_summary_language(
-    agent_run_context: Option<&AgentRunContext>,
-    user_text: Option<&str>,
-) -> ExecutionSummaryLanguage {
-    if let Some(original) = agent_run_context
-        .and_then(|ctx| ctx.original_user_request.as_deref())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        let hint = crate::language_policy::request_language_hint(original);
-        if hint != "config_default" {
-            return execution_summary_language_from_hint(hint);
-        }
-    }
-    user_text
-        .map(crate::language_policy::request_language_hint)
-        .map(execution_summary_language_from_hint)
-        .unwrap_or(ExecutionSummaryLanguage::Zh)
-}
-
-pub(super) fn execution_summary_prefix(language: ExecutionSummaryLanguage) -> &'static str {
-    match language {
-        ExecutionSummaryLanguage::Zh => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX,
-        ExecutionSummaryLanguage::En => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN,
-        ExecutionSummaryLanguage::Ja => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_JA,
-        ExecutionSummaryLanguage::Ko => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_KO,
-    }
-}
-
-pub(super) fn execution_summary_status_label(
-    language: ExecutionSummaryLanguage,
-    ok: bool,
-) -> &'static str {
-    match (language, ok) {
-        (ExecutionSummaryLanguage::Zh, true) => "输出",
-        (ExecutionSummaryLanguage::Zh, false) => "错误",
-        (ExecutionSummaryLanguage::En, true) => "Output",
-        (ExecutionSummaryLanguage::En, false) => "Error",
-        (ExecutionSummaryLanguage::Ja, true) => "出力",
-        (ExecutionSummaryLanguage::Ja, false) => "エラー",
-        (ExecutionSummaryLanguage::Ko, true) => "출력",
-        (ExecutionSummaryLanguage::Ko, false) => "오류",
-    }
-}
-
 pub(super) fn execution_recipe_closeout_note(
     state: Option<&AppState>,
     user_text: &str,
@@ -487,7 +419,7 @@ pub(super) fn auto_requested_success_marker<'a>(
 }
 
 pub(super) fn route_allows_model_language_final_answer(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -497,7 +429,7 @@ pub(super) fn route_prefers_language_rendered_execution_failed_step(
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+            route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
                 && route_allows_model_language_final_answer(route)
         })
 }
