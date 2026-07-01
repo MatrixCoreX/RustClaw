@@ -139,6 +139,35 @@ FORBIDDEN_SCHEMA_ORDINARY_SEMANTIC_TOKENS: tuple[str, ...] = (
     "docker_container_list",
     "docker_image_list",
     "docker_lifecycle",
+    "git_commit_subject",
+    "git_commit_title",
+    "commit_subject",
+    "commit_title",
+    "latest_commit_subject",
+    "latest_commit_title",
+    "git_repository_state",
+    "sqlite_table_listing",
+    "sqlite_tables_listing",
+    "sqlite_tables_summary",
+    "sqlite_table_names_only",
+    "sqlite_table_names",
+    "sqlite_names_only",
+    "sqlite_database_kind_judgment",
+    "sqlite_db_kind",
+    "database_kind_judgment",
+    "sqlite_schema_version",
+    "sqlite_db_schema_version",
+    "config_validation",
+    "structured_config_validation",
+    "config_mutation",
+    "structured_config_mutation",
+    "config_risk_assessment",
+    "config_risk",
+    "structured_config_risk",
+    "archive_list",
+    "archive_read",
+    "archive_pack",
+    "archive_unpack",
 )
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
@@ -869,6 +898,14 @@ def run_self_test() -> int:
         blocked_schema
         and blocked_schema[0].kind == "normalizer_schema_ordinary_semantic_token"
     )
+    blocked_schema_git = scan_schema_text(
+        "prompts/schemas/intent_normalizer.schema.json",
+        '"git_repository_state"\n',
+    )
+    assert (
+        blocked_schema_git
+        and blocked_schema_git[0].kind == "normalizer_schema_ordinary_semantic_token"
+    )
     assert not scan_intent_normalizer_schema_ordinary_semantic_tokens()
     blocked_contract_repair_schema = scan_schema_text(
         "prompts/schemas/contract_repair_judge.schema.json",
@@ -877,6 +914,24 @@ def run_self_test() -> int:
     assert (
         blocked_contract_repair_schema
         and blocked_contract_repair_schema[0].kind
+        == "normalizer_schema_ordinary_semantic_token"
+    )
+    blocked_contract_repair_schema_sqlite = scan_schema_text(
+        "prompts/schemas/contract_repair_judge.schema.json",
+        '"sqlite_schema_version"\n',
+    )
+    assert (
+        blocked_contract_repair_schema_sqlite
+        and blocked_contract_repair_schema_sqlite[0].kind
+        == "normalizer_schema_ordinary_semantic_token"
+    )
+    blocked_contract_repair_schema_archive = scan_schema_text(
+        "prompts/schemas/contract_repair_judge.schema.json",
+        '"archive_pack"\n',
+    )
+    assert (
+        blocked_contract_repair_schema_archive
+        and blocked_contract_repair_schema_archive[0].kind
         == "normalizer_schema_ordinary_semantic_token"
     )
     assert not scan_contract_repair_schema_ordinary_semantic_tokens()
