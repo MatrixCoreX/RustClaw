@@ -1,5 +1,6 @@
 use super::*;
 use crate::finalize::loop_reply::enforce_delivery_output_contract;
+use crate::finalize::loop_reply::file_delivery::async_poll_result_report_from_value;
 
 #[test]
 fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
@@ -616,7 +617,7 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
     std::fs::write(&file, "release checklist").expect("write temp file");
 
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.wants_file_delivery = false;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
     route.output_contract.delivery_required = true;
@@ -692,4 +693,33 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
             .and_then(|journal| journal.final_status),
         Some(crate::task_journal::TaskJournalFinalStatus::Success)
     );
+}
+
+#[test]
+fn async_poll_result_report_projects_requested_machine_fields() {
+    let value = serde_json::json!({
+        "extra": {
+            "task_id": "image-task-001",
+            "job_id": "image-job-001",
+            "status": "succeeded",
+            "async_poll_adapter_result": {
+                "schema_version": 1,
+                "adapter_kind": "media_job_poll",
+                "job_id": "image-job-001",
+                "status": "succeeded",
+                "final_result_json": {
+                    "task_id": "image-task-001",
+                    "dry_run": true
+                }
+            }
+        },
+        "text": "IMAGE_TASK:image-task-001"
+    });
+
+    let rendered = async_poll_result_report_from_value(&value).expect("async_poll_result_render");
+
+    assert!(rendered.contains("task_id=image-task-001"));
+    assert!(rendered.contains("job_id=image-job-001"));
+    assert!(rendered.contains("status=succeeded"));
+    assert!(rendered.contains("async_poll_adapter_result={"));
 }

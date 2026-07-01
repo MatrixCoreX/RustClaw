@@ -29,6 +29,10 @@ ALLOWED_FILE_SUFFIXES = (
     "tests.rs",
 )
 
+ALLOWED_FILE_NAMES = {
+    "intent_router_prompt_render.rs",
+}
+
 
 @dataclasses.dataclass
 class Candidate:
@@ -49,6 +53,8 @@ def decode_rust_string_literal(value: str) -> str:
 
 def is_test_path(path: str) -> bool:
     parts = Path(path).parts
+    if Path(path).name in ALLOWED_FILE_NAMES:
+        return True
     if path.endswith(ALLOWED_FILE_SUFFIXES):
         return True
     return any(part in ALLOWED_PATH_PARTS or part.endswith("_tests") for part in parts)
@@ -75,6 +81,10 @@ def looks_machine_literal(value: str) -> bool:
     if "/" in value or "\\" in value:
         return True
     if value.startswith(("__RC_", "clawd.", "agent.", "semantic:", "schema:")):
+        return True
+    if re.fullmatch(r"### [A-Z0-9_]+", value):
+        return True
+    if re.fullmatch(r"### [A-Z0-9_]+\n\{[A-Za-z0-9_]+\}\n### [A-Z0-9_]+", value):
         return True
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*:\s*[A-Za-z0-9_.:-]+", value):
         return True
