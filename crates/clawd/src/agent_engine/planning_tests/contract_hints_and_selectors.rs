@@ -918,7 +918,7 @@ fn service_status_task_id_token_uses_task_control_get_plan() {
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let task_id = "00000000-0000-4000-8000-000000000000";
-    route.resolved_intent = format!("inspect task_id={task_id}");
+    route.resolved_intent = format!("capability_ref=task_control.get task_id={task_id}");
     let loop_state = LoopState::new(1);
 
     let plan = service_status_deterministic_plan_result(
@@ -944,7 +944,7 @@ fn command_output_summary_task_id_token_uses_task_control_get_plan() {
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     let task_id = "00000000-0000-4000-8000-000000000001";
-    route.resolved_intent = format!("task_id={task_id} data.lifecycle.state");
+    route.resolved_intent = format!("capability_ref=task_control.get task_id={task_id}");
     let loop_state = LoopState::new(1);
 
     let plan = task_control_get_deterministic_plan_result(

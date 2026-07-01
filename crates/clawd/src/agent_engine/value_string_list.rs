@@ -1127,8 +1127,8 @@ pub(super) fn service_status_deterministic_plan_result(
             }
         }
     }
-    if task_control_available_for_plan(state) {
-        if let Some(task_id) = first_task_id_token(route, user_text) {
+    if task_control_available_for_plan(state) && route_mentions_task_control_get(route) {
+        if let Some(task_id) = task_control_get_task_id(route) {
             let action = AgentAction::CallSkill {
                 skill: "task_control".to_string(),
                 args: serde_json::json!({"action": "get", "task_id": task_id}),
@@ -1419,17 +1419,18 @@ pub(super) fn task_control_get_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !task_control_available_for_plan(state)
+        || !route_mentions_task_control_get(route)
     {
         return None;
     }
-    let task_id = first_task_id_token(route, user_text)?;
+    let task_id = task_control_get_task_id(route)?;
     let action = AgentAction::CallSkill {
         skill: "task_control".to_string(),
         args: serde_json::json!({"action": "get", "task_id": task_id}),
@@ -1811,15 +1812,14 @@ fn route_mentions_machine_token(route: &RouteResult, token: &str) -> bool {
         .any(|text| text.to_ascii_lowercase().contains(&token))
 }
 
-fn first_task_id_token(route: &RouteResult, user_text: &str) -> Option<String> {
-    [
-        user_text,
-        route.resolved_intent.as_str(),
-        route.route_reason.as_str(),
-        route.output_contract.locator_hint.as_str(),
-    ]
-    .into_iter()
-    .find_map(first_uuid_like_token)
+fn task_control_get_task_id(route: &RouteResult) -> Option<String> {
+    if !route_mentions_task_control_get(route) {
+        return None;
+    }
+    route_machine_value(route, &["task_id"])
+        .or_else(|| route_machine_value(route, &["id"]))
+        .filter(|value| is_uuid_like_token(value))
+        .or_else(|| first_uuid_like_token(route.output_contract.locator_hint.as_str()))
 }
 
 fn first_uuid_like_token(text: &str) -> Option<String> {

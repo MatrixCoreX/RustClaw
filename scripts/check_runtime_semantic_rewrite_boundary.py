@@ -307,6 +307,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_service_status_url_user_text_selection())
     findings.extend(scan_service_status_workspace_product_text_selection())
     findings.extend(scan_service_status_scalar_shape_health_selection())
+    findings.extend(scan_task_control_task_id_user_text_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -1004,6 +1005,47 @@ def scan_service_status_scalar_shape_health_text(rel_path: str, text: str) -> li
     return findings
 
 
+def scan_task_control_task_id_user_text_selection() -> list[Finding]:
+    return scan_task_control_task_id_user_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_task_control_task_id_user_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if (
+            "first_task_id_token(route, user_text)" not in line
+            and "fn first_task_id_token(route: &RouteResult, user_text" not in line
+        ):
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                line_no,
+                "task_control_task_id_user_text_selection",
+                line.strip(),
+            )
+        )
+    block = function_block(text, "task_control_get_task_id")
+    if block is None:
+        return findings
+    block_start, block_text = block
+    for offset, line in enumerate(block_text.splitlines(), start=0):
+        if "user_text" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                block_start + offset,
+                "task_control_task_id_user_text_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
 def function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(rf"^pub\(super\)\s+fn\s+{re.escape(function_name)}\b", re.MULTILINE)
     match = pattern.search(text)
@@ -1517,6 +1559,20 @@ def run_self_test() -> int:
         == "service_status_scalar_shape_health_selection"
     )
     assert not scan_service_status_scalar_shape_health_selection()
+    blocked_task_control_task_id = scan_task_control_task_id_user_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "fn first_task_id_token(route: &RouteResult, user_text: &str) -> Option<String> {\n"
+        "    first_task_id_token(route, user_text)\n"
+        "}\n"
+        "fn task_control_get_task_id(route: &RouteResult) -> Option<String> {\n"
+        "    user_text.trim();\n"
+        "}\n",
+    )
+    assert (
+        blocked_task_control_task_id
+        and blocked_task_control_task_id[0].kind == "task_control_task_id_user_text_selection"
+    )
+    assert not scan_task_control_task_id_user_text_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
