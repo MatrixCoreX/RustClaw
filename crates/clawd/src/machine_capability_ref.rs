@@ -75,6 +75,15 @@ pub(crate) fn route_capability_action_for_namespaces<'a>(
         .map(|capability| capability.action)
 }
 
+pub(crate) fn route_capability_ref_tokens(route: &crate::RouteResult) -> Vec<String> {
+    let mut tokens = route_capability_refs(route)
+        .map(|capability| format!("{}.{}", capability.namespace, capability.action))
+        .collect::<Vec<_>>();
+    tokens.sort();
+    tokens.dedup();
+    tokens
+}
+
 fn route_capability_refs(route: &crate::RouteResult) -> impl Iterator<Item = CapabilityRef<'_>> {
     [&route.route_reason, &route.resolved_intent]
         .into_iter()

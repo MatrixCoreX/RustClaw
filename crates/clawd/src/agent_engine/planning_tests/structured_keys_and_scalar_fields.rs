@@ -801,6 +801,38 @@ fn registry_prefers_config_basic_for_structured_keys_contract() {
 }
 
 #[test]
+fn registry_prefers_config_basic_from_capability_ref_without_semantic_kind() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.resolved_intent = "capability_ref=config.validate".to_string();
+
+    let preferred = registry_preferred_skill_names_for_route(&test_state_with_registry(), &route);
+    assert!(preferred.iter().any(|skill| skill == "config_basic"));
+}
+
+#[test]
+fn registry_prefers_archive_basic_from_capability_ref_without_semantic_kind() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/example.zip".to_string();
+    route.resolved_intent = "capability_ref=archive.pack".to_string();
+
+    let preferred = registry_preferred_skill_names_for_route(&test_state_with_registry(), &route);
+    assert!(preferred.iter().any(|skill| skill == "archive_basic"));
+}
+
+#[test]
 fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
