@@ -310,6 +310,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_task_control_task_id_user_text_selection())
     findings.extend(scan_task_control_legacy_token_fallback())
     findings.extend(scan_async_job_start_user_text_command_selection())
+    findings.extend(scan_web_search_user_text_query_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -1106,6 +1107,54 @@ def scan_async_job_start_user_text_command_text(rel_path: str, text: str) -> lis
     return findings
 
 
+def scan_web_search_user_text_query_selection() -> list[Finding]:
+    return scan_web_search_user_text_query_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_web_search_user_text_query_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for function_name in (
+        "web_search_summary_deterministic_plan_result",
+        "web_search_query_from_route",
+    ):
+        block = function_block(text, function_name)
+        if block is None:
+            continue
+        block_start, block_text = block
+        for offset, line in enumerate(block_text.splitlines(), start=0):
+            if (
+                "first_quoted_search_query" not in line
+                and "user_text.trim()" not in line
+                and "unwrap_or_else(|| user_text" not in line
+                and "nonempty_search_query(&route.resolved_intent)" not in line
+                and ".resolved_intent" not in line
+            ):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    block_start + offset,
+                    "web_search_user_text_query_selection",
+                    line.strip(),
+                )
+            )
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if "fn first_quoted_search_query" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                line_no,
+                "web_search_user_text_query_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
 def rust_private_or_pub_function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(
         rf"^(?:pub\(super\)\s+)?fn\s+{re.escape(function_name)}\b", re.MULTILINE
@@ -1670,6 +1719,24 @@ def run_self_test() -> int:
         and blocked_async_job_start[0].kind == "async_job_start_user_text_command_selection"
     )
     assert not scan_async_job_start_user_text_command_selection()
+    blocked_web_search_query = scan_web_search_user_text_query_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn web_search_summary_deterministic_plan_result(\n"
+        ") -> Option<PlanResult> {\n"
+        "    let query = web_search_query_from_route(route, user_text)\n"
+        "        .unwrap_or_else(|| user_text.trim().to_string());\n"
+        "}\n"
+        "fn web_search_query_from_route(route: &RouteResult, user_text: &str) -> Option<String> {\n"
+        "    first_quoted_search_query(user_text)\n"
+        "        .or_else(|| nonempty_search_query(&route.resolved_intent))\n"
+        "}\n"
+        "fn first_quoted_search_query(text: &str) -> Option<String> { None }\n",
+    )
+    assert (
+        blocked_web_search_query
+        and blocked_web_search_query[0].kind == "web_search_user_text_query_selection"
+    )
+    assert not scan_web_search_user_text_query_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",

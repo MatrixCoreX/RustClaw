@@ -1509,27 +1509,26 @@ pub(super) fn web_search_summary_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WebSearchSummary
+        || !route_requests_web_search_summary(route)
         || !web_search_extract_available_for_plan(state)
     {
         return None;
     }
 
-    let query = web_search_query_from_route(route, user_text)
-        .unwrap_or_else(|| user_text.trim().to_string());
+    let query = web_search_query_from_route(route)?;
     if query.is_empty() {
         return None;
     }
 
     let mut args = serde_json::json!({
         "action": "search_extract",
-        "backend": "bing_html",
+        "backend": "duckduckgo_html",
         "query": query,
     });
     if let Some(top_k) = route.output_contract.self_extension.list_selector.limit {
@@ -1542,12 +1541,8 @@ pub(super) fn web_search_summary_deterministic_plan_result(
         args,
     };
     if let AgentAction::CallSkill { skill, args } = &action {
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return None;
         }
@@ -1581,11 +1576,11 @@ pub(super) fn browser_http_url_deterministic_plan_result(
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WebPageSummary
+        || !route_requests_browser_open_extract(route)
         || !skill_available_for_plan(state, "browser_web")
         || !skill_available_for_plan(state, "http_basic")
-        || !route_mentions_any_machine_token(route, &["browser_web", "browser_web.open_extract"])
-        || !route_mentions_any_machine_token(route, &["http_basic", "http_basic.get"])
+        || !route_has_browser_open_extract_machine_ref(route)
+        || !route_has_http_get_machine_ref(route)
     {
         return None;
     }
@@ -1738,29 +1733,50 @@ fn route_requests_config_risk_preview(route: &RouteResult) -> bool {
         )
 }
 
-fn web_search_query_from_route(route: &RouteResult, user_text: &str) -> Option<String> {
+fn route_requests_web_search_summary(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["web", "browser"],
+        &["search", "results"],
+    )
+}
+
+fn route_requests_browser_open_extract(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "http"],
+        &["open", "get", "read", "extract"],
+    ) && !crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "web"],
+        &["search"],
+    )
+}
+
+fn route_has_browser_open_extract_machine_ref(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["browser", "browser_web"],
+        &["open", "extract"],
+    ) || route_mentions_any_machine_token(route, &["browser_web", "browser_web.open_extract"])
+}
+
+fn route_has_http_get_machine_ref(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["http", "http_basic"],
+        &["get", "read"],
+    ) || route_mentions_any_machine_token(route, &["http_basic", "http_basic.get"])
+}
+
+fn web_search_query_from_route(route: &RouteResult) -> Option<String> {
     route
         .output_contract
         .locator_hint
         .trim()
-        .split_once("query=")
-        .and_then(|(_, value)| nonempty_search_query(value))
-        .or_else(|| first_quoted_search_query(user_text))
-        .or_else(|| first_quoted_search_query(&route.resolved_intent))
-        .or_else(|| nonempty_search_query(&route.output_contract.locator_hint))
-        .or_else(|| nonempty_search_query(&route.resolved_intent))
-}
-
-fn first_quoted_search_query(text: &str) -> Option<String> {
-    for quote in ['"', '`', '\''] {
-        let mut parts = text.split(quote);
-        while let Some(_) = parts.next() {
-            if let Some(candidate) = parts.next().and_then(nonempty_search_query) {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+        .strip_prefix("query=")
+        .and_then(nonempty_search_query)
+        .or_else(|| route_machine_value(route, &["query", "q"]))
 }
 
 fn nonempty_search_query(value: &str) -> Option<String> {

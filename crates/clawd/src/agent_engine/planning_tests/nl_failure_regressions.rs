@@ -259,13 +259,13 @@ fn browser_http_summary_uses_both_observations_and_explicit_evidence_refs() {
 }
 
 #[test]
-fn web_search_summary_prefers_quoted_query_over_full_instruction() {
+fn web_search_summary_uses_machine_query_not_instruction_text() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.resolved_intent =
-        "capability_ref=web.search_results \"Rust async tutorial\" top_k=3".to_string();
+    route.resolved_intent = "capability_ref=web.search_results".to_string();
+    route.output_contract.locator_hint = "query=Rust async tutorial".to_string();
     route.output_contract.self_extension.list_selector.limit = Some(3);
     let loop_state = LoopState::new(1);
 
@@ -274,7 +274,7 @@ fn web_search_summary_prefers_quoted_query_over_full_instruction() {
         "search web",
         Some(&route),
         &loop_state,
-        "Search the web for \"Rust async tutorial\" with top_k=3",
+        "Search the web for \"wrong natural-language fallback\" with top_k=3",
     )
     .expect("web search summary should use search_extract");
 
@@ -286,6 +286,26 @@ fn web_search_summary_prefers_quoted_query_over_full_instruction() {
         Some("Rust async tutorial")
     );
     assert_eq!(args.get("top_k").and_then(Value::as_u64), Some(3));
+}
+
+#[test]
+fn web_search_summary_without_machine_query_defers_to_planner() {
+    let state = test_state_with_enabled_skills(&["web_search_extract"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.resolved_intent = "capability_ref=web.search_results".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = web_search_summary_deterministic_plan_result(
+        &state,
+        "search web",
+        Some(&route),
+        &loop_state,
+        "Search the web for \"Rust async tutorial\" with top_k=3",
+    );
+
+    assert!(plan.is_none());
 }
 
 #[test]
