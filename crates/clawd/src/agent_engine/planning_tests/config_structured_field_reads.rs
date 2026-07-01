@@ -1593,6 +1593,48 @@ fn preferred_docker_basic_ignores_legacy_semantic_without_capability_ref() {
 }
 
 #[test]
+fn preferred_archive_basic_uses_capability_ref_with_semantic_none() {
+    let state = test_state_with_enabled_skills(&["archive_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip|notes.txt".to_string();
+    route.route_reason = "capability_ref=archive.read".to_string();
+    let preferred = crate::contract_matrix::ActionRef {
+        skill: "archive_basic".to_string(),
+        action: None,
+    };
+
+    let action = preferred_structured_action_for_contract_hint(
+        &state,
+        &route,
+        &preferred,
+        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+        "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+    )
+    .expect("archive capability ref should choose structured read action");
+
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "archive_basic");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("read"));
+            assert_eq!(
+                args.get("archive").and_then(Value::as_str),
+                Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+            );
+            assert_eq!(
+                args.get("member").and_then(Value::as_str),
+                Some("notes.txt")
+            );
+        }
+        other => panic!("expected archive_basic action, got {other:?}"),
+    }
+}
+
+#[test]
 fn contract_hint_preferred_run_cmd_uses_docker_capability_ref_with_semantic_none() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();

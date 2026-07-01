@@ -1214,12 +1214,16 @@ pub(super) fn preferred_archive_basic_for_contract_hint(
     if !archive_basic_enabled_for_planning(state) {
         return None;
     }
-    let action = action_name.unwrap_or(match route.effective_output_contract_semantic_kind() {
-        crate::OutputSemanticKind::ArchiveRead => "read",
-        crate::OutputSemanticKind::ArchivePack => "pack",
-        crate::OutputSemanticKind::ArchiveUnpack => "unpack",
-        _ => "list",
-    });
+    let capability_action = route_capability_action_for_namespaces(route, &["archive"])
+        .filter(|action| matches!(*action, "list" | "read" | "pack" | "unpack"));
+    let action = capability_action.or(action_name).unwrap_or(
+        match route.effective_output_contract_semantic_kind() {
+            crate::OutputSemanticKind::ArchiveRead => "read",
+            crate::OutputSemanticKind::ArchivePack => "pack",
+            crate::OutputSemanticKind::ArchiveUnpack => "unpack",
+            _ => "list",
+        },
+    );
     let args = match action {
         "list" => {
             let archive = archive_list_auto_locator_target_path(Some(route), auto_locator_path)
