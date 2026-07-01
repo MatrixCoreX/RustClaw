@@ -582,7 +582,7 @@ fn structured_preference_ack_is_detached_from_active_task() {
 }
 
 #[test]
-fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
+fn orphan_output_shape_clarify_adds_loop_context_hint() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: crate::OutputResponseShape::OneSentence,
@@ -819,7 +819,7 @@ fn standalone_freeform_clarify_loop_context_preserves_observable_and_active_task
 }
 
 #[test]
-fn missing_policy_with_strict_chat_deliverable_infers_standalone_task() {
+fn missing_policy_with_strict_inline_response_contract_infers_standalone_task() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
@@ -853,7 +853,7 @@ fn missing_policy_with_strict_chat_deliverable_infers_standalone_task() {
 }
 
 #[test]
-fn missing_policy_with_non_strict_chat_does_not_promote_generic_chat() {
+fn missing_policy_with_non_strict_inline_response_does_not_infer_generic_task() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
