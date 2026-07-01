@@ -1227,9 +1227,13 @@ pub(super) fn archive_unpack_deterministic_plan_result(
         return None;
     }
     let route = route_result?;
-    if route.needs_clarify
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack
-    {
+    let route_requests_unpack = crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["archive"],
+        &["unpack"],
+    ) || route
+        .output_contract_marker_is(crate::OutputSemanticKind::ArchiveUnpack);
+    if route.needs_clarify || !route_requests_unpack {
         return None;
     }
     let (archive, dest) = archive_unpack_pair_for_route(route)?;
@@ -1293,12 +1297,13 @@ pub(super) fn archive_pack_deterministic_plan_result(
     let AgentAction::CallSkill { skill, args } = &action else {
         return None;
     };
-    if crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| !policy.is_allowed())
+    if crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| !policy.is_allowed())
+        && !crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["pack"],
+        )
     {
         return None;
     }
