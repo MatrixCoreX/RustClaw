@@ -108,6 +108,28 @@ fn route_capability_ref_overrides_bridge_semantic_policy_match() {
 }
 
 #[test]
+fn route_arg_policy_prefers_capability_ref_over_bridge_semantic_match() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+
+    let policy = arg_policy_decision_for_route(
+        Some(&route),
+        "system_basic",
+        &serde_json::json!({
+            "action": "validate_structured",
+            "path": "configs/config.toml",
+            "format": "toml",
+        }),
+    )
+    .expect("route arg policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "config_basic.validate");
+    assert_eq!(policy.contract_match, "capability_ref");
+    assert_eq!(policy.expected_target_args, vec!["path"]);
+}
+
+#[test]
 fn route_policy_does_not_allow_config_action_without_capability_ref() {
     let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
     route.route_reason.clear();
