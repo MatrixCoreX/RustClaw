@@ -1,29 +1,13 @@
 use serde_json::Value;
 
 use super::{
-    answer_candidate_value_text, answer_like_normalizer_payload_text,
-    contract_repair_report_from_before_after, normalize_decision_from_executable_output_contract,
+    answer_like_normalizer_payload_text, contract_repair_report_from_before_after,
     normalize_execution_recipe_for_schema, normalize_intent_normalizer_scalar_types_for_schema,
     normalize_intent_normalizer_top_level_for_schema, normalize_output_contract_for_schema,
     normalize_plain_intent_normalizer_text_for_schema, normalize_schema_token,
     parse_top_level_json_object_preserving_meaningful_duplicates,
-    scalar_output_contract_answer_candidate, ContractRepairReport,
+    sync_compat_decision_trace_for_schema, ContractRepairReport,
 };
-
-pub(super) fn merge_answer_candidate_into_resolved_intent(
-    resolved: String,
-    answer_candidate: &str,
-) -> String {
-    let answer = answer_candidate.trim();
-    if answer.is_empty() || resolved.contains(answer) {
-        return resolved;
-    }
-    if resolved.trim().is_empty() {
-        answer.to_string()
-    } else {
-        format!("{}\nanswer_candidate: {}", resolved.trim(), answer)
-    }
-}
 
 #[cfg(test)]
 pub(super) fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
@@ -59,19 +43,6 @@ pub(super) fn normalize_intent_normalizer_raw_for_schema_with_report(
         );
     };
     let answer_like_payload = answer_like_normalizer_payload_text(obj);
-    let explicit_answer_candidate = obj
-        .get("answer_candidate")
-        .and_then(answer_candidate_value_text)
-        .or_else(|| scalar_output_contract_answer_candidate(obj));
-    if let Some(candidate) = explicit_answer_candidate {
-        let should_insert = obj
-            .get("answer_candidate")
-            .and_then(Value::as_str)
-            .is_none_or(|value| value.trim().is_empty());
-        if should_insert {
-            obj.insert("answer_candidate".to_string(), Value::String(candidate));
-        }
-    }
     match obj.get("resolved_user_intent") {
         Some(Value::String(value)) if value.trim().is_empty() && !req.trim().is_empty() => {
             obj.insert(
@@ -140,7 +111,7 @@ pub(super) fn normalize_intent_normalizer_raw_for_schema_with_report(
         }
     }
     normalize_output_contract_for_schema(obj);
-    normalize_decision_from_executable_output_contract(obj);
+    sync_compat_decision_trace_for_schema(obj);
     let report = contract_repair_report_from_before_after(&before, &value);
     (
         serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),

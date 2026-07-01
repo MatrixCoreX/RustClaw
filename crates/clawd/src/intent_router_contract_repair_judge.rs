@@ -4,8 +4,8 @@ use tracing::info;
 
 use super::{
     append_route_reason, is_meaningful_state_patch, normalize_schema_token,
-    output_contract_structured_config_path, parse_first_layer_decision_text, parse_output_contract,
-    parse_output_delivery_intent, parse_output_response_shape, parse_target_task_policy,
+    output_contract_structured_config_path, parse_output_contract, parse_output_delivery_intent,
+    parse_output_response_shape, parse_output_semantic_kind, parse_target_task_policy,
     parse_turn_type, ContractRepairReport, FirstLayerDecision, IntentExecutionRecipeOut,
     IntentNormalizerOut, IntentOutputContract, IntentOutputContractOut, OutputDeliveryIntent,
     OutputLocatorKind, OutputResponseShape, OutputSemanticKind, TargetTaskPolicy, TurnType,
@@ -29,8 +29,15 @@ pub(super) struct ContractRepairJudgeOut {
     #[serde(default)]
     pub(super) reason: String,
     #[serde(default)]
-    pub(super) confidence: f64,
+    pub(super) repair_target: String,
     #[serde(default)]
+    pub(super) confidence: f64,
+    /// Compatibility field accepted by the prompt schema.
+    ///
+    /// Repair authority comes from `needs_clarify`, `output_contract`, execution
+    /// recipe, and machine markers; this field must not drive runtime routing.
+    #[serde(default)]
+    #[allow(dead_code)]
     pub(super) decision: String,
     #[serde(default)]
     pub(super) needs_clarify: bool,
@@ -154,10 +161,6 @@ pub(super) fn apply_contract_repair_judge_output(
     if !repair.apply || repair.confidence < 0.60 {
         return false;
     }
-    let original_decision = parse_first_layer_decision_text(&out.decision);
-    let Some(mut decision) = parse_first_layer_decision_text(&repair.decision) else {
-        return false;
-    };
     let Some(mut output_contract) = repair.output_contract else {
         return false;
     };
@@ -182,7 +185,6 @@ pub(super) fn apply_contract_repair_judge_output(
     let mut clarify_question = repair.clarify_question;
 
     if repaired_active_continuation {
-        decision = FirstLayerDecision::DirectAnswer;
         needs_clarify = false;
         clarify_question.clear();
         output_contract.response_shape = OutputResponseShape::OneSentence.as_str().to_string();
@@ -194,7 +196,6 @@ pub(super) fn apply_contract_repair_judge_output(
         output_contract.locator_hint.clear();
         execution_recipe = IntentExecutionRecipeOut::default();
     } else if missing_turn_binding_for_content_read {
-        decision = FirstLayerDecision::Clarify;
         needs_clarify = true;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
@@ -207,7 +208,6 @@ pub(super) fn apply_contract_repair_judge_output(
         &repair.reason,
         EXECUTION_FAILED_STEP_CONTRACT_MARKER,
     ) {
-        decision = FirstLayerDecision::PlannerExecute;
         needs_clarify = false;
         clarify_question.clear();
         output_contract.response_shape = OutputResponseShape::Strict.as_str().to_string();
@@ -221,7 +221,6 @@ pub(super) fn apply_contract_repair_judge_output(
         execution_recipe = IntentExecutionRecipeOut::default();
     } else if generated_file_delivery_repair_allows_runtime_target(&repair.reason, &output_contract)
     {
-        decision = FirstLayerDecision::PlannerExecute;
         needs_clarify = false;
         clarify_question.clear();
         output_contract.response_shape = OutputResponseShape::FileToken.as_str().to_string();
@@ -236,10 +235,8 @@ pub(super) fn apply_contract_repair_judge_output(
     }
 
     if !contract_repair_judge_output_is_schema_backed(
-        original_decision,
         out.output_contract.as_ref(),
         out.wants_file_delivery,
-        decision,
         needs_clarify,
         &output_contract,
         &execution_recipe,
@@ -248,6 +245,8 @@ pub(super) fn apply_contract_repair_judge_output(
         return false;
     }
 
+    let decision =
+        contract_repair_trace_decision(needs_clarify, &output_contract, &execution_recipe);
     out.decision = decision.as_str().to_string();
     out.needs_clarify = needs_clarify;
     out.clarify_question = clarify_question;
@@ -255,6 +254,12 @@ pub(super) fn apply_contract_repair_judge_output(
         out.resolved_user_intent = repair.resolved_user_intent;
     }
     out.wants_file_delivery = repaired_contract_wants_file_delivery(&output_contract);
+    append_contract_repair_machine_tokens(
+        &mut out.reason,
+        &repair.repair_target,
+        &output_contract,
+        &repair.reason,
+    );
     out.output_contract = Some(output_contract);
     out.execution_recipe = Some(execution_recipe);
     if repaired_active_continuation {
@@ -285,13 +290,9 @@ pub(super) fn apply_contract_repair_judge_output(
     } else if parse_target_task_policy(&repaired_target_task_policy).is_some() {
         out.target_task_policy = repaired_target_task_policy;
     }
-    if repair.reason.trim().is_empty() {
-        append_route_reason(&mut out.reason, "llm_semantic_contract_repair");
-    } else {
-        append_route_reason(
-            &mut out.reason,
-            &format!("llm_semantic_contract_repair:{}", repair.reason.trim()),
-        );
+    append_route_reason(&mut out.reason, "contract_repair_applied");
+    if !repair.reason.trim().is_empty() {
+        append_route_reason(&mut out.reason, "contract_repair_note_present");
     }
     if preserved_structured_config_keys {
         append_route_reason(&mut out.reason, "structured_config_key_contract_preserved");
@@ -309,11 +310,39 @@ pub(super) fn apply_contract_repair_judge_output(
     true
 }
 
+fn append_contract_repair_machine_tokens(
+    reason: &mut String,
+    repair_target: &str,
+    output_contract: &IntentOutputContractOut,
+    repair_reason: &str,
+) {
+    let explicit_target = parse_output_semantic_kind(repair_target);
+    let output_target = parse_output_semantic_kind(&output_contract.semantic_kind);
+    let target = if explicit_target != OutputSemanticKind::None {
+        explicit_target
+    } else {
+        output_target
+    };
+    if target != OutputSemanticKind::None {
+        append_route_reason(
+            reason,
+            &format!("contract_repair_target={}", target.as_str()),
+        );
+    }
+    if repair_reason_has_machine_marker(
+        repair_reason,
+        ACTIVE_TASK_INVALID_BINDING_CONTINUATION_MARKER,
+    ) {
+        append_route_reason(
+            reason,
+            "contract_repair_marker=active_task_invalid_turn_binding",
+        );
+    }
+}
+
 fn contract_repair_judge_output_is_schema_backed(
-    original_decision: Option<FirstLayerDecision>,
     original_output_contract: Option<&IntentOutputContractOut>,
     original_wants_file_delivery: bool,
-    repaired_decision: FirstLayerDecision,
     needs_clarify: bool,
     output_contract: &IntentOutputContractOut,
     execution_recipe: &IntentExecutionRecipeOut,
@@ -322,26 +351,37 @@ fn contract_repair_judge_output_is_schema_backed(
     if contract_repair_reason_has_allowed_machine_override(reason) {
         return true;
     }
-    if original_decision.is_some_and(|decision| decision == repaired_decision) {
-        return true;
-    }
-    if matches!(repaired_decision, FirstLayerDecision::Clarify) {
+    if needs_clarify {
         return needs_clarify;
     }
-    if matches!(repaired_decision, FirstLayerDecision::PlannerExecute) {
-        return repaired_contract_has_execution_signal(output_contract)
-            || repaired_recipe_has_execution_signal(execution_recipe);
+    let repaired_execution_signal = repaired_contract_has_execution_signal(output_contract)
+        || repaired_recipe_has_execution_signal(execution_recipe);
+    if repaired_execution_signal {
+        return true;
     }
-    if matches!(repaired_decision, FirstLayerDecision::DirectAnswer) {
-        return !needs_clarify
-            && original_contract_has_execution_signal(
-                original_output_contract,
-                original_wants_file_delivery,
-            )
-            && !repaired_contract_has_execution_signal(output_contract)
-            && !repaired_recipe_has_execution_signal(execution_recipe);
+    if original_contract_has_execution_signal(
+        original_output_contract,
+        original_wants_file_delivery,
+    ) {
+        return true;
     }
     false
+}
+
+fn contract_repair_trace_decision(
+    needs_clarify: bool,
+    output_contract: &IntentOutputContractOut,
+    execution_recipe: &IntentExecutionRecipeOut,
+) -> FirstLayerDecision {
+    if needs_clarify {
+        FirstLayerDecision::Clarify
+    } else if repaired_contract_has_execution_signal(output_contract)
+        || repaired_recipe_has_execution_signal(execution_recipe)
+    {
+        FirstLayerDecision::PlannerExecute
+    } else {
+        FirstLayerDecision::DirectAnswer
+    }
 }
 
 fn contract_repair_reason_has_allowed_machine_override(reason: &str) -> bool {
@@ -363,11 +403,7 @@ fn repaired_contract_has_execution_signal(output_contract: &IntentOutputContract
         || contract.delivery_required
         || contract.locator_kind != OutputLocatorKind::None
         || contract.delivery_intent != OutputDeliveryIntent::None
-        || contract.semantic_kind != OutputSemanticKind::None
-        || matches!(
-            contract.response_shape,
-            OutputResponseShape::Scalar | OutputResponseShape::FileToken
-        )
+        || matches!(contract.response_shape, OutputResponseShape::FileToken)
 }
 
 fn original_contract_has_execution_signal(
@@ -383,11 +419,7 @@ fn original_contract_has_execution_signal(
         || contract.delivery_required
         || contract.locator_kind != OutputLocatorKind::None
         || contract.delivery_intent != OutputDeliveryIntent::None
-        || contract.semantic_kind != OutputSemanticKind::None
-        || matches!(
-            contract.response_shape,
-            OutputResponseShape::Scalar | OutputResponseShape::FileToken
-        )
+        || matches!(contract.response_shape, OutputResponseShape::FileToken)
 }
 
 fn repaired_recipe_has_execution_signal(execution_recipe: &IntentExecutionRecipeOut) -> bool {
@@ -405,7 +437,7 @@ fn generated_file_delivery_repair_allows_runtime_target(
         return false;
     }
     let contract = parse_output_contract(Some(output_contract.clone()), true);
-    contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery
+    contract.semantic_kind_is(OutputSemanticKind::GeneratedFileDelivery)
         && contract.delivery_required
         && contract.delivery_intent == OutputDeliveryIntent::FileSingle
         && contract.response_shape == OutputResponseShape::FileToken
@@ -424,7 +456,6 @@ pub(super) fn clear_spurious_generated_file_delivery_attachment_processing(
         || output_contract.response_shape == OutputResponseShape::FileToken
         || output_contract.delivery_intent == OutputDeliveryIntent::FileSingle;
     if delivery_signal
-        && output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery
         && output_contract.delivery_required
         && output_contract.response_shape == OutputResponseShape::FileToken
         && output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
@@ -451,8 +482,8 @@ fn preserve_structured_config_key_contract_during_repair(
     };
     let current_contract = parse_output_contract(Some(current.clone()), false);
     let repaired_contract = parse_output_contract(Some(repair.clone()), false);
-    if current_contract.semantic_kind != OutputSemanticKind::StructuredKeys
-        || repaired_contract.semantic_kind != OutputSemanticKind::None
+    if !current_contract.semantic_kind_is(OutputSemanticKind::StructuredKeys)
+        || !repaired_contract.semantic_kind_is_unclassified()
         || current_contract.delivery_required
         || repaired_contract.delivery_required
         || !matches!(current_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -487,8 +518,8 @@ fn preserve_structured_scalar_field_contract_during_repair(
     };
     let current_contract = parse_output_contract(Some(current.clone()), false);
     let repaired_contract = parse_output_contract(Some(repair.clone()), false);
-    if current_contract.semantic_kind != OutputSemanticKind::None
-        || repaired_contract.semantic_kind != OutputSemanticKind::ContentExcerptSummary
+    if !current_contract.semantic_kind_is_unclassified()
+        || !repaired_contract.semantic_kind_is(OutputSemanticKind::ContentExcerptSummary)
         || !matches!(
             current_contract.response_shape,
             OutputResponseShape::Scalar | OutputResponseShape::Strict

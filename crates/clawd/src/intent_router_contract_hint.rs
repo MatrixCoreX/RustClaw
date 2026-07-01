@@ -4,12 +4,18 @@ use super::{
     archive_list_contract_from_surface, archive_pair_contract_from_surface,
     archive_read_contract_from_surface, execution_finalize_style_for_contract,
     explicit_surface_path_fact_targets, output_semantic_kind_requires_fresh_evidence,
-    parse_output_semantic_kind, ActFinalizeStyle, FirstLayerDecision, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-    RouteDecision, ScheduleKind,
+    parse_output_semantic_kind, ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
 };
 
+pub(crate) fn contract_test_hint_runtime_enabled() -> bool {
+    cfg!(test)
+}
+
 pub(crate) fn contract_test_hint_value(req: &str, wanted_key: &str) -> Option<String> {
+    if !contract_test_hint_runtime_enabled() {
+        return None;
+    }
     let hint_block = req
         .split_once("[CONTRACT_TEST_HINT]")?
         .1
@@ -31,7 +37,8 @@ pub(crate) fn contract_test_hint_value(req: &str, wanted_key: &str) -> Option<St
 pub(crate) fn contract_test_hint_semantic_kind(req: &str) -> Option<OutputSemanticKind> {
     let semantic_kind =
         parse_output_semantic_kind(&contract_test_hint_value(req, "semantic_kind")?);
-    (semantic_kind != OutputSemanticKind::None).then_some(semantic_kind)
+    (semantic_kind != OutputSemanticKind::None && !semantic_kind.is_registry_capability_bridge())
+        .then_some(semantic_kind)
 }
 
 pub(crate) fn request_without_contract_test_hint(req: &str) -> String {
@@ -49,6 +56,18 @@ pub(crate) fn request_without_contract_test_hint(req: &str) -> String {
     out
 }
 
+fn contract_hint_requires_content_evidence(semantic_kind: OutputSemanticKind) -> bool {
+    output_semantic_kind_requires_fresh_evidence(semantic_kind)
+}
+
+fn contract_hint_output_semantic_kind(semantic_kind: OutputSemanticKind) -> OutputSemanticKind {
+    semantic_kind
+}
+
+fn contract_hint_skips_locator_defaults(semantic_kind: OutputSemanticKind) -> bool {
+    matches!(semantic_kind, OutputSemanticKind::ToolDiscovery)
+}
+
 pub(super) fn apply_structured_contract_hint_repair(
     output_contract: &mut IntentOutputContract,
     req: &str,
@@ -57,14 +76,13 @@ pub(super) fn apply_structured_contract_hint_repair(
     wants_file_delivery: &mut bool,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     let semantic_kind = contract_test_hint_semantic_kind(req)?;
     let surface_req = request_without_contract_test_hint(req);
-    output_contract.semantic_kind = semantic_kind;
+    output_contract.semantic_kind = contract_hint_output_semantic_kind(semantic_kind);
     output_contract.requires_content_evidence =
-        output_semantic_kind_requires_fresh_evidence(semantic_kind);
+        contract_hint_requires_content_evidence(semantic_kind);
     output_contract.delivery_required = false;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.response_shape = response_shape_for_contract_hint_fallback(semantic_kind);
@@ -80,36 +98,25 @@ pub(super) fn apply_structured_contract_hint_repair(
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
         }
-        OutputSemanticKind::PackageManagerDetection => {
-            output_contract.locator_kind = OutputLocatorKind::None;
-            output_contract.locator_hint.clear();
-        }
         OutputSemanticKind::ToolDiscovery => {
             output_contract.locator_kind = OutputLocatorKind::None;
             output_contract.locator_hint.clear();
         }
-        OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerLogs
-        | OutputSemanticKind::DockerContainerLifecycle => {
-            if output_contract.locator_hint.trim().is_empty() {
-                output_contract.locator_kind = OutputLocatorKind::None;
-            }
-        }
         _ => {}
     }
-    apply_contract_hint_locator_defaults(
-        output_contract,
-        &surface_req,
-        req_surface,
-        workspace_root,
-    );
+    if !contract_hint_skips_locator_defaults(semantic_kind) {
+        apply_contract_hint_locator_defaults(
+            output_contract,
+            &surface_req,
+            req_surface,
+            workspace_root,
+        );
+    }
     if output_contract.requires_content_evidence
-        || output_contract.semantic_kind == OutputSemanticKind::ToolDiscovery
+        || output_contract.semantic_kind_is(OutputSemanticKind::ToolDiscovery)
     {
         *needs_clarify = false;
         clarify_question.clear();
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style =
             crate::post_route_policy::content_evidence_execution_finalize_style(
                 output_contract,
@@ -131,21 +138,23 @@ pub(super) fn contract_hint_fallback_decision(
     let mut wants_file_delivery = false;
     let mut output_contract = IntentOutputContract {
         response_shape: response_shape_for_contract_hint_fallback(semantic_kind),
-        requires_content_evidence: output_semantic_kind_requires_fresh_evidence(semantic_kind),
+        requires_content_evidence: contract_hint_requires_content_evidence(semantic_kind),
         delivery_required: false,
         locator_kind: OutputLocatorKind::None,
         delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind,
+        semantic_kind: contract_hint_output_semantic_kind(semantic_kind),
         locator_hint: String::new(),
         ..Default::default()
     };
     apply_contract_hint_delivery_defaults(&mut output_contract, &mut wants_file_delivery);
-    apply_contract_hint_locator_defaults(
-        &mut output_contract,
-        &surface_req,
-        req_surface,
-        workspace_root,
-    );
+    if !contract_hint_skips_locator_defaults(semantic_kind) {
+        apply_contract_hint_locator_defaults(
+            &mut output_contract,
+            &surface_req,
+            req_surface,
+            workspace_root,
+        );
+    }
 
     let resolved_user_intent = if surface_req.trim().is_empty() {
         req.trim().to_string()
@@ -186,16 +195,7 @@ fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> Output
         | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::ConfigMutation
         | OutputSemanticKind::ConfigRiskAssessment
-        | OutputSemanticKind::RssNewsFetch
-        | OutputSemanticKind::WebPageSummary
-        | OutputSemanticKind::WebSearchSummary
-        | OutputSemanticKind::WeatherQuery
-        | OutputSemanticKind::MarketQuote
-        | OutputSemanticKind::ImageUnderstanding
-        | OutputSemanticKind::PublishingPreview
-        | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::SqliteDatabaseKindJudgment
-        | OutputSemanticKind::DockerContainerLifecycle
         | OutputSemanticKind::ArchiveUnpack => OutputResponseShape::OneSentence,
         OutputSemanticKind::ScalarCount
         | OutputSemanticKind::ScalarPathOnly
@@ -220,10 +220,8 @@ fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> Output
         | OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::ArchiveList
-        | OutputSemanticKind::ArchiveRead
-        | OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerLogs => OutputResponseShape::Strict,
+        | OutputSemanticKind::ArchiveRead => OutputResponseShape::Strict,
+        _ => OutputResponseShape::Strict,
     }
 }
 
@@ -231,7 +229,7 @@ fn apply_contract_hint_delivery_defaults(
     output_contract: &mut IntentOutputContract,
     wants_file_delivery: &mut bool,
 ) {
-    if output_contract.semantic_kind != OutputSemanticKind::GeneratedFileDelivery {
+    if !output_contract.semantic_kind_is(OutputSemanticKind::GeneratedFileDelivery) {
         return;
     }
     output_contract.delivery_required = true;
@@ -249,12 +247,7 @@ fn apply_contract_hint_locator_defaults(
     match output_contract.semantic_kind {
         OutputSemanticKind::RawCommandOutput
         | OutputSemanticKind::CommandOutputSummary
-        | OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::PackageManagerDetection
-        | OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerLogs
-        | OutputSemanticKind::DockerContainerLifecycle => {
+        | OutputSemanticKind::ServiceStatus => {
             output_contract.locator_kind = OutputLocatorKind::None;
             output_contract.locator_hint.clear();
         }
@@ -301,7 +294,7 @@ fn apply_path_locator_defaults_for_contract_hint(
             return;
         }
     }
-    if output_contract.semantic_kind == OutputSemanticKind::ArchiveRead {
+    if output_contract.semantic_kind_is(OutputSemanticKind::ArchiveRead) {
         if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface)
         {
             output_contract.locator_kind = OutputLocatorKind::Path;
@@ -309,10 +302,10 @@ fn apply_path_locator_defaults_for_contract_hint(
             return;
         }
     }
-    if matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::ArchiveList | OutputSemanticKind::ArchiveUnpack
-    ) {
+    if output_contract.semantic_kind_is_any(&[
+        OutputSemanticKind::ArchiveList,
+        OutputSemanticKind::ArchiveUnpack,
+    ]) {
         if let Some(locator_hint) = archive_list_contract_from_surface(output_contract, req_surface)
         {
             output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
@@ -321,7 +314,7 @@ fn apply_path_locator_defaults_for_contract_hint(
             return;
         }
     }
-    if output_contract.semantic_kind == OutputSemanticKind::QuantityComparison {
+    if output_contract.semantic_kind_is(OutputSemanticKind::QuantityComparison) {
         if let Some((left, right)) = req_surface.locator_target_pair.as_ref() {
             output_contract.locator_kind = OutputLocatorKind::Path;
             output_contract.locator_hint = format!("{} | {}", left.trim(), right.trim());

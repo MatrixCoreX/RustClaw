@@ -1,9 +1,9 @@
 use serde_json::json;
 
 use super::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
-    TargetTaskPolicy, TurnAnalysis, TurnType,
+    ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy,
+    TurnAnalysis, TurnType,
 };
 
 pub(super) fn structural_alias_binding_fallback_decision(
@@ -192,10 +192,8 @@ fn schedule_intent_is_complete_enough_for_direct_use(
 
 pub(super) fn apply_schedule_route_contract_repair(
     schedule_kind: ScheduleKind,
-    needs_clarify: bool,
     output_contract: &mut IntentOutputContract,
     wants_file_delivery: &mut bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if matches!(schedule_kind, ScheduleKind::None) {
@@ -226,21 +224,12 @@ pub(super) fn apply_schedule_route_contract_repair(
         output_contract.locator_hint.clear();
         changed = true;
     }
-    if !matches!(output_contract.semantic_kind, OutputSemanticKind::None) {
+    if !output_contract.semantic_kind_is_unclassified() {
         output_contract.semantic_kind = OutputSemanticKind::None;
         changed = true;
     }
     if matches!(output_contract.response_shape, OutputResponseShape::Free) {
         output_contract.response_shape = OutputResponseShape::OneSentence;
-        changed = true;
-    }
-    if !needs_clarify
-        && !matches!(
-            *legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
-    {
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         changed = true;
     }
     if !matches!(*execution_finalize_style, ActFinalizeStyle::Plain) {

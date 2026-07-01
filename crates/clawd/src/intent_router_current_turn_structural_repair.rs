@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::path::Path;
 
-use crate::{ActFinalizeStyle, FirstLayerDecision};
+use crate::ActFinalizeStyle;
 
 use super::{
     active_primary_task_prompt, archive_list_contract_from_surface,
@@ -14,12 +14,11 @@ use super::{
     extension_inventory_locator_hint_should_use_workspace,
     file_paths_missing_file_locator_parent_dir,
     generated_file_delivery_existing_content_summary_repair,
-    generated_file_delivery_filename_only_existing_target_repair, locator_hint_is_unset_or_broad,
-    locator_hint_points_to_workspace_root, output_semantic_kind_requires_fresh_evidence,
-    planner_execute_inline_structured_payload_context,
-    planner_execute_inline_structured_transform_contract_context,
-    quoted_literal_content_presence_contract_repair, scope_patch_hint_value,
-    should_preserve_existing_observed_context_synthesis_contract,
+    generated_file_delivery_filename_only_existing_target_repair,
+    inline_structured_payload_contract_context, inline_structured_transform_contract_context,
+    locator_hint_is_unset_or_broad, locator_hint_points_to_workspace_root,
+    machine_context_has_capability_ref, quoted_literal_content_presence_contract_repair,
+    scope_patch_hint_value, should_preserve_existing_observed_context_synthesis_contract,
     structural_config_value_after_field, structured_config_keys_contract_from_surface,
     structured_field_pair_contract_from_quantity_comparison,
     structured_field_value_contract_from_quantity_comparison,
@@ -29,17 +28,69 @@ use super::{
     OutputScalarCountTargetKind, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 
+const FRESH_EVIDENCE_CONTRACT_MARKERS: &[&str] = &[
+    "raw_command_output",
+    "service_status",
+    "hidden_entries_check",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "file_paths",
+    "directory_purpose_summary",
+    "content_excerpt_summary",
+    "document_heading",
+    "content_presence_check",
+    "excerpt_kind_judgment",
+    "recent_artifacts_judgment",
+    "workspace_project_summary",
+    "scalar_count",
+    "recent_scalar_equality_check",
+    "execution_failed_step",
+    "generated_file_delivery",
+    "generated_file_path_report",
+    "filesystem_mutation_result",
+    "existence_with_path",
+    "existence_with_path_summary",
+    "git_commit_subject",
+    "git_repository_state",
+    "structured_keys",
+    "config_validation",
+    "config_mutation",
+    "config_risk_assessment",
+    "sqlite_table_listing",
+    "sqlite_table_names_only",
+    "sqlite_database_kind_judgment",
+    "sqlite_schema_version",
+    "archive_list",
+    "archive_read",
+    "archive_pack",
+    "archive_unpack",
+];
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
+}
+
+fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
+    markers
+        .iter()
+        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+}
+
 pub(super) fn should_detach_bare_acknowledgement_from_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
 ) -> bool {
     matches!(turn_type, Some(TurnType::PreferenceOrMemory))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
-        && matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
@@ -51,13 +102,13 @@ pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
+    needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
     attachment_processing_required: bool,
 ) -> bool {
-    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+    needs_clarify
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(
             turn_type,
@@ -71,7 +122,7 @@ pub(super) fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && matches!(
             output_contract.response_shape,
             OutputResponseShape::Free
@@ -84,7 +135,7 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
+    needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
@@ -92,7 +143,7 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
 ) -> bool {
-    matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+    needs_clarify
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(turn_type, None | Some(TurnType::TaskRequest))
         && matches!(
@@ -108,14 +159,13 @@ pub(super) fn should_downgrade_standalone_freeform_clarify_to_direct_answer(
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && matches!(output_contract.response_shape, OutputResponseShape::Free)
 }
 
 pub(super) fn infer_missing_target_policy_from_contract(
     target_task_policy: Option<TargetTaskPolicy>,
     turn_type: Option<TurnType>,
-    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -126,7 +176,6 @@ pub(super) fn infer_missing_target_policy_from_contract(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
     {
         return target_task_policy;
     }
@@ -137,7 +186,7 @@ pub(super) fn infer_missing_target_policy_from_contract(
             && !output_contract.delivery_required
             && matches!(output_contract.locator_kind, OutputLocatorKind::None)
             && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-            && matches!(output_contract.semantic_kind, OutputSemanticKind::None);
+            && output_contract.semantic_kind_is_unclassified();
 
     if strict_chat_deliverable {
         Some(TargetTaskPolicy::Standalone)
@@ -157,6 +206,7 @@ pub(super) fn is_meaningful_state_patch(value: &Value) -> bool {
 }
 
 pub(super) fn apply_workspace_scope_patch_to_contract(
+    route_reason: &str,
     output_contract: &mut IntentOutputContract,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -164,7 +214,7 @@ pub(super) fn apply_workspace_scope_patch_to_contract(
 ) -> Option<String> {
     if !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
-        || output_contract.semantic_kind != OutputSemanticKind::WorkspaceProjectSummary
+        || !route_reason_has_machine_marker(route_reason, "workspace_project_summary")
     {
         return None;
     }
@@ -178,17 +228,18 @@ pub(super) fn apply_workspace_scope_patch_to_contract(
 }
 
 pub(super) fn apply_current_turn_structural_contract_repair(
+    route_reason: &str,
     output_contract: &mut IntentOutputContract,
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    legacy_normalizer_decision: FirstLayerDecision,
     answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
 ) -> Option<&'static str> {
     let mut reason = None;
     if should_preserve_existing_observed_context_synthesis_contract(
+        route_reason,
         output_contract,
         req_surface,
         turn_type,
@@ -196,7 +247,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     ) {
         output_contract.requires_content_evidence = false;
         reason = Some("existing_observed_context_synthesis");
-    } else if output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind) {
+    } else if route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS) {
         output_contract.requires_content_evidence = true;
         reason = Some("semantic_contract_requires_evidence");
     }
@@ -222,12 +273,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         });
     }
 
-    if planner_execute_inline_structured_payload_context(
-        req,
-        req_surface,
-        legacy_normalizer_decision,
-        output_contract,
-    ) {
+    if inline_structured_payload_contract_context(req, req_surface, output_contract) {
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -243,12 +289,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("inline_structured_payload_context_execute");
     }
 
-    if planner_execute_inline_structured_transform_contract_context(
-        req_surface,
-        legacy_normalizer_decision,
-        output_contract,
-        answer_candidate,
-    ) {
+    if inline_structured_transform_contract_context(req_surface, output_contract) {
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -264,10 +305,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("inline_structured_transform_contract_repair");
     }
 
-    if matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) && output_contract.delivery_required
+    if output_contract.delivery_required
         && matches!(
             output_contract.response_shape,
             OutputResponseShape::FileToken
@@ -277,9 +315,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             OutputDeliveryIntent::FileSingle
         )
         && !matches!(output_contract.locator_kind, OutputLocatorKind::Filename)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && output_contract.locator_hint.trim().is_empty()
-        && answer_candidate.trim().is_empty()
         && !req_surface.has_delivery_token_reference()
     {
         output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
@@ -358,12 +395,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("archive_list_single_archive_contract_repair");
     }
 
-    if let Some(locator_hint) = config_mutation_contract_from_surface(
-        output_contract,
-        req,
-        req_surface,
-        legacy_normalizer_decision,
-    ) {
+    if let Some(locator_hint) =
+        config_mutation_contract_from_surface(output_contract, req, req_surface)
+    {
         output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
@@ -375,12 +409,12 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     if let Some(repair_reason) =
-        apply_fs_basic_lifecycle_machine_contract_repair(output_contract, req)
+        apply_fs_basic_lifecycle_machine_contract_repair(output_contract, route_reason)
     {
         reason = Some(repair_reason);
     }
     if let Some(repair_reason) =
-        apply_media_generation_path_report_machine_contract_repair(output_contract, req)
+        apply_media_generation_path_report_machine_contract_repair(output_contract, route_reason)
     {
         reason = Some(repair_reason);
     }
@@ -396,7 +430,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_config_keys_overrides_file_names");
     }
 
-    if output_contract.semantic_kind == OutputSemanticKind::ScalarPathOnly
+    if route_reason_has_machine_marker(route_reason, "scalar_path_only")
         && req_surface.has_structured_target_refinement()
         && !surface_has_directory_scoped_filename_lookup(req, req_surface, workspace_root)
     {
@@ -405,7 +439,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_file_scalar_repair");
     }
 
-    if output_contract.semantic_kind == OutputSemanticKind::StructuredKeys
+    if route_reason_has_machine_marker(route_reason, "structured_keys")
         && req_surface.dotted_field_selector.is_some()
     {
         output_contract.semantic_kind = OutputSemanticKind::None;
@@ -440,7 +474,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_field_selector_requires_scalar_value");
     }
 
-    if output_contract.semantic_kind == OutputSemanticKind::ConfigValidation
+    if route_reason_has_machine_marker(route_reason, "config_validation")
         && req_surface
             .dotted_field_selector
             .as_deref()
@@ -452,20 +486,32 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("config_validation_field_selector_requires_scalar_value");
     }
 
-    if let Some(locator_hint) =
-        structured_identifier_presence_contract_from_surface(output_contract, req, workspace_root)
-    {
-        output_contract.semantic_kind = OutputSemanticKind::None;
-        output_contract.requires_content_evidence = true;
-        output_contract.delivery_required = false;
-        output_contract.delivery_intent = OutputDeliveryIntent::None;
-        output_contract.response_shape = OutputResponseShape::Scalar;
-        output_contract.locator_kind = OutputLocatorKind::Path;
-        output_contract.locator_hint = locator_hint;
-        reason = Some("structured_identifier_presence_requires_content_evidence");
+    let field_value_repair_already_selected = matches!(
+        reason,
+        Some(
+            "structured_field_selector_requires_scalar_value"
+                | "config_validation_field_selector_requires_scalar_value"
+        )
+    );
+    if !field_value_repair_already_selected {
+        if let Some(locator_hint) = structured_identifier_presence_contract_from_surface(
+            output_contract,
+            req,
+            workspace_root,
+        ) {
+            output_contract.semantic_kind = OutputSemanticKind::None;
+            output_contract.requires_content_evidence = true;
+            output_contract.delivery_required = false;
+            output_contract.delivery_intent = OutputDeliveryIntent::None;
+            output_contract.response_shape = OutputResponseShape::Scalar;
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = locator_hint;
+            reason = Some("structured_identifier_presence_requires_content_evidence");
+        }
     }
 
-    if output_contract.semantic_kind == OutputSemanticKind::StructuredKeys
+    if route_reason_has_machine_marker(route_reason, "structured_keys")
+        && !field_value_repair_already_selected
         && matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
         && matches!(
@@ -480,10 +526,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_keys_scalar_response_requires_field_value");
     }
 
-    if current_workspace_generic_summary_needs_semantic_contract(
-        output_contract,
-        legacy_normalizer_decision,
-    ) {
+    if current_workspace_generic_summary_needs_semantic_contract(output_contract) {
         if current_turn_extension_inventory_file_paths_repair_applies(
             output_contract,
             req,
@@ -511,7 +554,11 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         }
     }
 
-    if output_contract.semantic_kind == OutputSemanticKind::WorkspaceProjectSummary
+    if (route_reason_has_machine_marker(route_reason, "workspace_project_summary")
+        || matches!(
+            reason,
+            Some("current_workspace_summary_semantic_contract_repair")
+        ))
         && !matches!(
             output_contract.locator_kind,
             OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
@@ -550,29 +597,27 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("quoted_literal_content_presence_contract_repair");
     }
 
-    let scalar_direct_answer =
-        matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
-            && !answer_candidate.trim().is_empty()
-            && !req_surface.has_structured_target_refinement();
-
     if matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
-        && !scalar_direct_answer
+        && scalar_locator_surface_should_require_evidence(
+            output_contract,
+            req_surface,
+            answer_candidate,
+        )
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
     {
         output_contract.requires_content_evidence = true;
         reason = reason.or(Some("scalar_locator_requires_evidence"));
     }
 
-    if matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) && !output_contract.requires_content_evidence
+    if !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && req_surface.inline_json_shape.is_none()
+        && !finalizer_language_policy_dry_run_contract_context(route_reason, req, answer_candidate)
+        && planner_locator_surface_should_require_evidence(req_surface, answer_candidate)
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
         && !req_surface.is_structural_locator_only_reply()
     {
@@ -582,13 +627,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
 
     if output_contract.requires_content_evidence
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
-        && !semantic_kind_uses_locatorless_system_observation(output_contract.semantic_kind)
-        && !planner_execute_inline_structured_payload_context(
-            req,
-            req_surface,
-            legacy_normalizer_decision,
-            output_contract,
-        )
+        && !contract_uses_locatorless_system_observation(route_reason)
+        && !inline_structured_payload_contract_context(req, req_surface, output_contract)
     {
         let filename_candidates = req_surface.filename_candidates_excluding_field_selectors();
         if let Some(locator) =
@@ -621,10 +661,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
                 | OutputLocatorKind::Filename
                 | OutputLocatorKind::CurrentWorkspace
         )
-        && matches!(
-            output_contract.semantic_kind,
-            OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary
-        )
+        && (route_reason_has_machine_marker(route_reason, "existence_with_path")
+            || route_reason_has_machine_marker(route_reason, "existence_with_path_summary"))
         && explicit_surface_path_facts_fallback_decision(req, req_surface, workspace_root).is_some()
     {
         output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -659,15 +697,15 @@ fn command_summary_declares_fs_basic_lifecycle(
     output_contract: &IntentOutputContract,
     machine_context: &str,
 ) -> bool {
-    output_contract.semantic_kind == OutputSemanticKind::CommandOutputSummary
+    route_reason_has_machine_marker(machine_context, "command_output_summary")
         && output_contract.requires_content_evidence
         && matches!(output_contract.locator_kind, OutputLocatorKind::Path)
         && !output_contract.locator_hint.trim().is_empty()
-        && machine_context.contains("fs_basic.make_dir")
-        && machine_context.contains("write_text")
-        && machine_context.contains("append_text")
-        && machine_context.contains("read_text_range")
-        && machine_context.contains("remove_path")
+        && machine_context_has_token(machine_context, "fs_basic.make_dir")
+        && machine_context_has_token(machine_context, "write_text")
+        && machine_context_has_token(machine_context, "append_text")
+        && machine_context_has_token(machine_context, "read_text_range")
+        && machine_context_has_token(machine_context, "remove_path")
 }
 
 pub(super) fn apply_media_generation_path_report_machine_contract_repair(
@@ -699,44 +737,56 @@ fn generic_contract_declares_media_generation_path_report(
     output_contract: &IntentOutputContract,
     machine_context: &str,
 ) -> bool {
-    matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::CommandOutputSummary
-            | OutputSemanticKind::FilesystemMutationResult
-            | OutputSemanticKind::PublishingPreview
-            | OutputSemanticKind::None
-    ) && media_generation_machine_context_has_capability(machine_context)
+    (output_contract.semantic_kind_is_unclassified()
+        || route_reason_has_any_machine_marker(
+            machine_context,
+            &[
+                "command_output_summary",
+                "filesystem_mutation_result",
+                "service_status",
+            ],
+        ))
+        && media_generation_machine_context_has_capability(machine_context)
         && media_generation_machine_context_has_path_report(output_contract, machine_context)
 }
 
 fn media_generation_machine_context_has_capability(machine_context: &str) -> bool {
     const MEDIA_GENERATION_CAPABILITY_TOKENS: &[&str] = &[
         "image.generate",
+        "image.poll",
+        "image.cancel",
         "image.edit",
+        "image_edit.poll",
+        "image_edit.cancel",
         "audio.synthesize",
+        "audio.poll",
+        "audio.cancel",
         "video.generate",
+        "video.poll",
+        "video.cancel",
         "music.generate",
+        "music.poll",
+        "music.cancel",
         "image_generate",
         "image_edit",
         "audio_synthesize",
         "video_generate",
         "music_generate",
     ];
-    let context = machine_context.to_ascii_lowercase();
     MEDIA_GENERATION_CAPABILITY_TOKENS
         .iter()
-        .any(|token| context.contains(token))
+        .any(|token| machine_context_has_token(machine_context, token))
 }
 
 fn media_generation_machine_context_has_path_report(
     output_contract: &IntentOutputContract,
     machine_context: &str,
 ) -> bool {
-    let context = machine_context.to_ascii_lowercase();
-    let declares_path_report =
-        context.contains("output_path") || context.contains("planned_outputs");
+    let declares_path_report = machine_context_has_token(machine_context, "output_path")
+        || machine_context_has_token(machine_context, "planned_outputs");
     declares_path_report
-        || context.contains("dry_run") && output_contract.requires_content_evidence
+        || machine_context_has_token(machine_context, "dry_run")
+            && output_contract.requires_content_evidence
         || (matches!(
             output_contract.locator_kind,
             OutputLocatorKind::Path
@@ -745,23 +795,122 @@ fn media_generation_machine_context_has_path_report(
         ) && !output_contract.locator_hint.trim().is_empty())
 }
 
-fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        OutputSemanticKind::RawCommandOutput
-            | OutputSemanticKind::CommandOutputSummary
-            | OutputSemanticKind::ServiceStatus
-            | OutputSemanticKind::PackageManagerDetection
-            | OutputSemanticKind::ToolDiscovery
-            | OutputSemanticKind::DockerPs
-            | OutputSemanticKind::DockerImages
-            | OutputSemanticKind::DockerLogs
-            | OutputSemanticKind::DockerContainerLifecycle
-            | OutputSemanticKind::WeatherQuery
-            | OutputSemanticKind::MarketQuote
-            | OutputSemanticKind::ImageUnderstanding
-            | OutputSemanticKind::PublishingPreview
-    )
+fn scalar_locator_surface_should_require_evidence(
+    output_contract: &IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    answer_candidate: &str,
+) -> bool {
+    output_contract.requires_content_evidence
+        || req_surface.has_structured_target_refinement()
+        || surface_has_structured_document_locator_candidate(req_surface)
+        || answer_candidate.trim().is_empty()
+}
+
+fn planner_locator_surface_should_require_evidence(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    answer_candidate: &str,
+) -> bool {
+    req_surface.has_structured_target_refinement()
+        || surface_has_structured_document_locator_candidate(req_surface)
+        || answer_candidate.trim().is_empty()
+}
+
+fn surface_has_structured_document_locator_candidate(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    req_surface
+        .filename_candidates_excluding_field_selectors()
+        .iter()
+        .any(|candidate| {
+            Path::new(candidate)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_ascii_lowercase)
+                .is_some_and(|ext| {
+                    matches!(
+                        ext.as_str(),
+                        "cfg"
+                            | "conf"
+                            | "csv"
+                            | "env"
+                            | "ini"
+                            | "json"
+                            | "jsonl"
+                            | "lock"
+                            | "sql"
+                            | "toml"
+                            | "xml"
+                            | "yaml"
+                            | "yml"
+                    )
+                })
+        })
+}
+
+fn machine_context_has_token(machine_context: &str, token: &str) -> bool {
+    let needle = token.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return false;
+    }
+    if needle.contains('=') {
+        return machine_context
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+            .map(|part| part.trim().to_ascii_lowercase())
+            .any(|part| part == needle);
+    }
+    machine_context
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+        .map(normalize_machine_context_token_part)
+        .any(|part| part == needle)
+}
+
+fn normalize_machine_context_token_part(part: &str) -> String {
+    part.trim().trim_matches('.').trim().to_ascii_lowercase()
+}
+
+fn finalizer_language_policy_dry_run_contract_context(
+    route_reason: &str,
+    req: &str,
+    answer_candidate: &str,
+) -> bool {
+    machine_context_has_any_token(route_reason, req, answer_candidate, &["dry_run", "dry-run"])
+        && machine_context_has_any_token(route_reason, req, answer_candidate, &["message_key"])
+        && machine_context_has_any_token(route_reason, req, answer_candidate, &["finalizer"])
+        && machine_context_has_any_token(route_reason, req, answer_candidate, &["i18n"])
+        && machine_context_has_any_token(
+            route_reason,
+            req,
+            answer_candidate,
+            &["structured_evidence", "evidence"],
+        )
+}
+
+fn machine_context_has_any_token(
+    route_reason: &str,
+    req: &str,
+    answer_candidate: &str,
+    tokens: &[&str],
+) -> bool {
+    tokens.iter().any(|token| {
+        machine_context_has_token(route_reason, token)
+            || machine_context_has_token(req, token)
+            || machine_context_has_token(answer_candidate, token)
+    })
+}
+
+pub(super) fn contract_uses_locatorless_system_observation(route_reason: &str) -> bool {
+    if [
+        "raw_command_output",
+        "command_output_summary",
+        "service_status",
+        "tool_discovery",
+    ]
+    .iter()
+    .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+    {
+        return true;
+    }
+    machine_context_has_capability_ref(route_reason)
 }
 
 pub(super) fn apply_unbound_workspace_generic_content_clarify_repair(
@@ -770,18 +919,13 @@ pub(super) fn apply_unbound_workspace_generic_content_clarify_repair(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if *needs_clarify
-        || !matches!(
-            *legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
         || !output_contract.requires_content_evidence
         || output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        || !output_contract.semantic_kind_is_unclassified()
         || matches!(
             output_contract.response_shape,
             OutputResponseShape::FileToken
@@ -799,7 +943,6 @@ pub(super) fn apply_unbound_workspace_generic_content_clarify_repair(
     output_contract.locator_hint.clear();
     *needs_clarify = true;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("unbound_workspace_generic_content_requires_clarify")
 }

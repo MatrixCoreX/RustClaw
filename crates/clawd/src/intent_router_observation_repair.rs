@@ -1,107 +1,50 @@
 use serde_json::Value;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use super::{
     execution_finalize_style_for_contract, is_bare_path_only_input_for_clarify,
-    output_semantic_kind_requires_fresh_evidence, state_patch_deictic_reference_requires_clarify,
-    state_patch_requests_filename_only_output,
-    surface_has_unbound_scope_plus_single_filename_target, ActFinalizeStyle, FirstLayerDecision,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, TargetTaskPolicy, TurnType,
+    machine_context_has_capability_ref, state_patch_deictic_reference_requires_clarify,
+    surface_has_unbound_scope_plus_single_filename_target, ActFinalizeStyle, IntentOutputContract,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, TargetTaskPolicy, TurnType,
 };
 
-fn clean_answer_candidate_path_token(answer_candidate: &str) -> Option<String> {
-    let token = answer_candidate
-        .trim()
-        .trim_matches('`')
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim();
-    if token.is_empty() || token.contains('\n') {
-        None
-    } else {
-        Some(token.to_string())
-    }
+const WORKSPACE_DEFAULT_OBSERVATION_MARKERS: &[&str] = &[
+    "hidden_entries_check",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "file_paths",
+    "directory_purpose_summary",
+    "workspace_project_summary",
+    "existence_with_path",
+    "existence_with_path_summary",
+    "git_commit_subject",
+    "git_repository_state",
+];
+
+const LOCATORLESS_DEFAULT_OBSERVATION_MARKERS: &[&str] = &["service_status", "tool_discovery"];
+
+const EXISTING_OBSERVED_CONTEXT_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_presence_check",
+    "excerpt_kind_judgment",
+    "recent_artifacts_judgment",
+    "execution_failed_step",
+];
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
 }
 
-fn existing_answer_candidate_path(answer_candidate: &str, workspace_root: &Path) -> Option<String> {
-    let token = clean_answer_candidate_path_token(answer_candidate)?;
-    let path = Path::new(&token);
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        workspace_root.join(path)
-    };
-    candidate.exists().then_some(token)
-}
-
-fn answer_candidate_has_path_context(path: &str) -> bool {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        return true;
-    }
-    let mut normal_components = 0usize;
-    for component in path.components() {
-        match component {
-            Component::Normal(_) => normal_components += 1,
-            Component::CurDir
-            | Component::ParentDir
-            | Component::RootDir
-            | Component::Prefix(_) => {
-                return true;
-            }
-        }
-    }
-    normal_components > 1
-}
-
-pub(super) fn apply_answer_candidate_path_evidence_repair(
-    output_contract: &mut IntentOutputContract,
-    answer_candidate: &str,
-    state_patch: Option<&Value>,
-    workspace_root: &Path,
-    needs_clarify: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-) -> Option<&'static str> {
-    if needs_clarify
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
-        || output_contract.requires_content_evidence
-        || output_contract.delivery_required
-        || output_contract.response_shape != OutputResponseShape::Scalar
-        || output_contract.locator_kind != OutputLocatorKind::None
-        || output_contract.delivery_intent != OutputDeliveryIntent::None
-    {
-        return None;
-    }
-    if state_patch_requests_filename_only_output(state_patch)
-        || state_patch_deictic_reference_requires_clarify(state_patch)
-    {
-        return None;
-    }
-    let path = existing_answer_candidate_path(answer_candidate, workspace_root)?;
-    if !answer_candidate_has_path_context(&path) {
-        return None;
-    }
-    output_contract.requires_content_evidence = true;
-    output_contract.locator_kind = OutputLocatorKind::Path;
-    output_contract.locator_hint = path;
-    output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    Some("answer_candidate_path_requires_evidence")
-}
-
-pub(super) fn semantic_kind_can_use_existing_observed_context(kind: OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        OutputSemanticKind::ContentExcerptSummary
-            | OutputSemanticKind::ContentPresenceCheck
-            | OutputSemanticKind::ExcerptKindJudgment
-            | OutputSemanticKind::RecentArtifactsJudgment
-            | OutputSemanticKind::ExecutionFailedStep
-            | OutputSemanticKind::PublishingPreview
-    )
+fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
+    markers
+        .iter()
+        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
 }
 
 pub(super) fn apply_deictic_missing_locator_state_patch_clarify_repair(
@@ -109,7 +52,6 @@ pub(super) fn apply_deictic_missing_locator_state_patch_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !state_patch_deictic_reference_requires_clarify(state_patch) {
@@ -122,12 +64,12 @@ pub(super) fn apply_deictic_missing_locator_state_patch_clarify_repair(
     if clarify_question.trim().is_empty() {
         clarify_question.clear();
     }
-    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("state_patch_deictic_missing_locator_clarify")
 }
 
 pub(super) fn should_preserve_existing_observed_context_synthesis_contract(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     turn_type: Option<TurnType>,
@@ -135,7 +77,7 @@ pub(super) fn should_preserve_existing_observed_context_synthesis_contract(
 ) -> bool {
     matches!(turn_type, Some(TurnType::TaskAppend))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
-        && semantic_kind_can_use_existing_observed_context(output_contract.semantic_kind)
+        && route_reason_has_any_machine_marker(route_reason, EXISTING_OBSERVED_CONTEXT_MARKERS)
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(
@@ -150,6 +92,7 @@ pub(super) fn should_preserve_existing_observed_context_synthesis_contract(
 }
 
 pub(super) fn apply_spurious_structured_observation_clarify_repair(
+    route_reason: &str,
     output_contract: &mut IntentOutputContract,
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
@@ -157,7 +100,6 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify || is_bare_path_only_input_for_clarify(req, req_surface) {
@@ -166,7 +108,12 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     if state_patch_deictic_reference_requires_clarify(state_patch) {
         return None;
     }
-    if surface_has_unbound_scope_plus_single_filename_target(output_contract, req, req_surface) {
+    if surface_has_unbound_scope_plus_single_filename_target(
+        route_reason,
+        output_contract,
+        req,
+        req_surface,
+    ) {
         return None;
     }
     let has_current_turn_locator = req_surface.has_explicit_path_or_url()
@@ -177,11 +124,10 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     let has_observable_answer_shape = matches!(
         output_contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::Strict | OutputResponseShape::FileToken
-    ) || output_semantic_kind_requires_fresh_evidence(
-        output_contract.semantic_kind,
     ) || req_surface.has_structured_target_refinement()
         || req_surface.locator_target_pair.is_some();
     if surface_locator_is_insufficient_for_clarify_repair(
+        route_reason,
         output_contract,
         req_surface,
         has_observable_answer_shape,
@@ -232,7 +178,6 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
@@ -240,6 +185,7 @@ pub(super) fn apply_spurious_structured_observation_clarify_repair(
 }
 
 fn surface_locator_is_insufficient_for_clarify_repair(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     has_observable_answer_shape: bool,
@@ -250,48 +196,26 @@ fn surface_locator_is_insufficient_for_clarify_repair(
     {
         return false;
     }
-    if matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::ArchivePack | OutputSemanticKind::ArchiveUnpack
-    ) {
+    if route_reason_has_machine_marker(route_reason, "archive_pack")
+        || route_reason_has_machine_marker(route_reason, "archive_unpack")
+    {
         return true;
     }
     !output_contract.requires_content_evidence && !has_observable_answer_shape
 }
 
-fn semantic_kind_can_use_workspace_default_for_observation(kind: OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        OutputSemanticKind::HiddenEntriesCheck
-            | OutputSemanticKind::FileNames
-            | OutputSemanticKind::DirectoryNames
-            | OutputSemanticKind::DirectoryEntryGroups
-            | OutputSemanticKind::FilePaths
-            | OutputSemanticKind::DirectoryPurposeSummary
-            | OutputSemanticKind::WorkspaceProjectSummary
-            | OutputSemanticKind::ExistenceWithPath
-            | OutputSemanticKind::ExistenceWithPathSummary
-            | OutputSemanticKind::GitCommitSubject
-            | OutputSemanticKind::GitRepositoryState
-            | OutputSemanticKind::DockerPs
-            | OutputSemanticKind::DockerImages
-            | OutputSemanticKind::DockerLogs
-            | OutputSemanticKind::DockerContainerLifecycle
-    )
-}
-
 pub(super) fn apply_workspace_default_observation_clarify_repair(
+    route_reason: &str,
     output_contract: &mut IntentOutputContract,
     workspace_root: &Path,
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
         || !output_contract.requires_content_evidence
-        || !semantic_kind_can_use_workspace_default_for_observation(output_contract.semantic_kind)
+        || !route_reason_has_any_machine_marker(route_reason, WORKSPACE_DEFAULT_OBSERVATION_MARKERS)
     {
         return None;
     }
@@ -304,33 +228,19 @@ pub(super) fn apply_workspace_default_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
     Some("workspace_default_observation_clarify_repair")
 }
 
-fn semantic_kind_can_use_locatorless_default_for_observation(kind: OutputSemanticKind) -> bool {
-    matches!(
-        kind,
-        OutputSemanticKind::ServiceStatus
-            | OutputSemanticKind::PackageManagerDetection
-            | OutputSemanticKind::ToolDiscovery
-            | OutputSemanticKind::WeatherQuery
-            | OutputSemanticKind::MarketQuote
-            | OutputSemanticKind::WebSearchSummary
-            | OutputSemanticKind::DockerPs
-            | OutputSemanticKind::DockerImages
-    )
-}
-
 pub(super) fn apply_locatorless_observation_clarify_repair(
+    route_reason: &str,
     output_contract: &mut IntentOutputContract,
+    machine_context: &str,
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
@@ -339,7 +249,10 @@ pub(super) fn apply_locatorless_observation_clarify_repair(
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(output_contract.locator_kind, OutputLocatorKind::None)
         || !output_contract.locator_hint.trim().is_empty()
-        || !semantic_kind_can_use_locatorless_default_for_observation(output_contract.semantic_kind)
+        || (!route_reason_has_any_machine_marker(
+            route_reason,
+            LOCATORLESS_DEFAULT_OBSERVATION_MARKERS,
+        ) && !machine_context_has_capability_ref(machine_context))
     {
         return None;
     }
@@ -348,7 +261,6 @@ pub(super) fn apply_locatorless_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));

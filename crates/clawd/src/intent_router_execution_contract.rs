@@ -1,12 +1,26 @@
 use super::{
     ascii_token_present, execution_finalize_style_for_contract, ActFinalizeStyle,
-    FirstLayerDecision, IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind,
-    ScheduleKind, SelfExtensionMode, SelfExtensionTrigger,
+    IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind, ScheduleKind,
+    SelfExtensionMode, SelfExtensionTrigger,
 };
 
-pub(super) fn downgrade_executionless_route_to_direct_answer(
-    legacy_normalizer_decision: &mut FirstLayerDecision,
+const EXPLICIT_COMMAND_STRUCTURED_OBSERVATION_MARKERS: &[&str] = &[
+    "directory_entry_groups",
+    "file_names",
+    "directory_names",
+    "file_paths",
+    "directory_purpose_summary",
+    "scalar_path_only",
+];
+
+fn route_reason_has_any_marker(route_reason: &str, markers: &[&str]) -> bool {
+    markers
+        .iter()
+        .any(|marker| ascii_token_present(route_reason, marker))
+}
+
+pub(super) fn cleanup_executionless_route_finalize_style(
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
@@ -14,12 +28,7 @@ pub(super) fn downgrade_executionless_route_to_direct_answer(
     schedule_kind: ScheduleKind,
     _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<&'static str> {
-    if needs_clarify
-        || !matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
-    {
+    if needs_clarify {
         return None;
     }
     if !matches!(execution_finalize_style, ActFinalizeStyle::ChatWrapped) {
@@ -33,7 +42,6 @@ pub(super) fn downgrade_executionless_route_to_direct_answer(
     ) {
         return None;
     }
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("executionless_route_downgraded_to_direct_answer")
 }
@@ -45,7 +53,6 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     needs_clarify: &mut bool,
     clarify_question: &mut String,
     output_contract: &mut IntentOutputContract,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     let Some(explicit_command_segment) =
@@ -56,18 +63,15 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     else {
         return None;
     };
-    if matches!(
-        *legacy_normalizer_decision,
-        FirstLayerDecision::DirectAnswer
-    ) && !output_contract.requires_content_evidence
+    if !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
     {
         return None;
     }
-    if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery
+    if ascii_token_present(route_reason, "generated_file_delivery")
         && output_contract.delivery_required
         && output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
         && output_contract.response_shape == OutputResponseShape::FileToken
@@ -75,11 +79,10 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
         *needs_clarify = false;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_preserves_generated_file_delivery_execution");
     }
-    if output_contract.semantic_kind == OutputSemanticKind::GeneratedFilePathReport
+    if ascii_token_present(route_reason, "generated_file_path_report")
         && !output_contract.delivery_required
         && output_contract.delivery_intent == OutputDeliveryIntent::None
         && output_contract.response_shape == OutputResponseShape::Scalar
@@ -87,15 +90,16 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
         *needs_clarify = false;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_preserves_generated_file_path_report_execution");
     }
-    if explicit_command_structured_observation_contract_should_be_preserved(output_contract) {
+    if explicit_command_structured_observation_contract_should_be_preserved(
+        route_reason,
+        output_contract,
+    ) {
         *needs_clarify = false;
         clarify_question.clear();
         output_contract.requires_content_evidence = true;
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_preserves_structured_observation_contract");
     }
@@ -106,31 +110,27 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     ) {
         *needs_clarify = false;
         clarify_question.clear();
-        *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
         return Some("explicit_command_directory_listing_selector_contract_repair");
     }
     let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
         output_contract,
-        *legacy_normalizer_decision,
         *needs_clarify,
         ascii_token_present(route_reason, "command_result_synthesis"),
     );
     *needs_clarify = false;
     clarify_question.clear();
     output_contract.requires_content_evidence = true;
-    output_contract.semantic_kind =
-        if output_contract.semantic_kind == OutputSemanticKind::ExecutionFailedStep {
-            output_contract.response_shape = OutputResponseShape::Strict;
-            OutputSemanticKind::ExecutionFailedStep
-        } else if preserve_command_summary_contract {
-            OutputSemanticKind::CommandOutputSummary
-        } else {
-            OutputSemanticKind::RawCommandOutput
-        };
+    output_contract.semantic_kind = if ascii_token_present(route_reason, "execution_failed_step") {
+        output_contract.response_shape = OutputResponseShape::Strict;
+        OutputSemanticKind::ExecutionFailedStep
+    } else if preserve_command_summary_contract {
+        OutputSemanticKind::CommandOutputSummary
+    } else {
+        OutputSemanticKind::RawCommandOutput
+    };
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some(if preserve_command_summary_contract {
         "explicit_command_requires_command_output_summary_execution"
@@ -144,7 +144,6 @@ pub(super) fn apply_command_payload_contract_repair(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !command_payload_declared || output_contract.delivery_required {
@@ -152,7 +151,6 @@ pub(super) fn apply_command_payload_contract_repair(
     }
     let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
         output_contract,
-        *legacy_normalizer_decision,
         *needs_clarify,
         false,
     );
@@ -179,7 +177,6 @@ pub(super) fn apply_command_payload_contract_repair(
     output_contract.locator_hint.clear();
     *needs_clarify = false;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some(if preserve_command_summary_contract {
         "command_payload_requires_command_output_summary_execution"
@@ -193,7 +190,6 @@ pub(super) fn apply_file_delivery_contract_repair(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !wants_file_delivery
@@ -204,8 +200,7 @@ pub(super) fn apply_file_delivery_contract_repair(
         )
         || matches!(
             output_contract.semantic_kind,
-            OutputSemanticKind::GeneratedFileDelivery
-                | OutputSemanticKind::ContentExcerptSummary
+            OutputSemanticKind::ContentExcerptSummary
                 | OutputSemanticKind::ContentExcerptWithSummary
                 | OutputSemanticKind::ArchivePack
                 | OutputSemanticKind::ArchiveUnpack
@@ -227,68 +222,12 @@ pub(super) fn apply_file_delivery_contract_repair(
     output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
     output_contract.response_shape = OutputResponseShape::FileToken;
     output_contract.semantic_kind = OutputSemanticKind::None;
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some("file_delivery_request_preserves_delivery_contract")
 }
 
-pub(super) fn restore_declared_publishing_preview_contract(
-    declared_semantic_kind: OutputSemanticKind,
-    structural_contract_repair: Option<&'static str>,
-    schedule_kind: ScheduleKind,
-    output_contract: &mut IntentOutputContract,
-    needs_clarify: &mut bool,
-    clarify_question: &mut String,
-    wants_file_delivery: &mut bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-) -> Option<&'static str> {
-    if declared_semantic_kind != OutputSemanticKind::PublishingPreview
-        || matches!(
-            structural_contract_repair,
-            Some("media_generation_path_report_contract_repair")
-        )
-        || !matches!(schedule_kind, ScheduleKind::None)
-    {
-        return None;
-    }
-    if output_contract.semantic_kind == OutputSemanticKind::PublishingPreview
-        && output_contract.requires_content_evidence
-        && !output_contract.delivery_required
-        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
-        && output_contract.locator_hint.trim().is_empty()
-        && matches!(
-            *legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
-    {
-        return None;
-    }
-
-    *needs_clarify = false;
-    clarify_question.clear();
-    *wants_file_delivery = false;
-    output_contract.semantic_kind = OutputSemanticKind::PublishingPreview;
-    output_contract.requires_content_evidence = true;
-    output_contract.delivery_required = false;
-    output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.locator_hint.clear();
-    if matches!(
-        output_contract.response_shape,
-        OutputResponseShape::FileToken
-    ) {
-        output_contract.response_shape = OutputResponseShape::Free;
-    }
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
-    *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
-    Some("declared_publishing_preview_contract_preserved")
-}
-
 fn command_output_summary_contract_from_structured_fields(
     output_contract: &IntentOutputContract,
-    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     command_result_synthesis_marker: bool,
 ) -> bool {
@@ -300,10 +239,6 @@ fn command_output_summary_contract_from_structured_fields(
         OutputResponseShape::OneSentence
     ) || command_result_synthesis_marker);
     !needs_clarify
-        && matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
         && output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -334,7 +269,6 @@ pub(super) fn route_has_structured_execution_signal(
         || !matches!(output_contract.locator_kind, OutputLocatorKind::None)
         || !output_contract.locator_hint.trim().is_empty()
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(output_contract.semantic_kind, OutputSemanticKind::None)
         || matches!(
             output_contract.response_shape,
             OutputResponseShape::FileToken
@@ -354,25 +288,23 @@ pub(super) fn route_has_structured_execution_signal(
 }
 
 fn explicit_command_structured_observation_contract_should_be_preserved(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
     if output_contract.delivery_required
         || output_contract.delivery_intent != OutputDeliveryIntent::None
         || output_contract.locator_kind == OutputLocatorKind::None
+        || !route_reason_has_any_marker(
+            route_reason,
+            EXPLICIT_COMMAND_STRUCTURED_OBSERVATION_MARKERS,
+        )
     {
         return false;
     }
-    match output_contract.semantic_kind {
-        OutputSemanticKind::DirectoryEntryGroups
-        | OutputSemanticKind::FileNames
-        | OutputSemanticKind::DirectoryNames
-        | OutputSemanticKind::FilePaths
-        | OutputSemanticKind::DirectoryPurposeSummary => true,
-        OutputSemanticKind::ScalarPathOnly => {
-            output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
-        }
-        _ => false,
+    if ascii_token_present(route_reason, "scalar_path_only") {
+        return output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace;
     }
+    true
 }
 
 fn repair_explicit_directory_listing_selector_contract(
@@ -547,40 +479,18 @@ fn selector_bool_machine_token(text: &str, key: &str) -> Option<bool> {
     })
 }
 
-pub(super) fn direct_answer_decision_should_be_overridden_by_executable_contract(
-    needs_clarify: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
-    output_contract: &IntentOutputContract,
-    wants_file_delivery: bool,
-    schedule_kind: ScheduleKind,
-    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    direct_answer_contract_repair: Option<&'static str>,
-) -> bool {
-    !needs_clarify
-        && matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
-        && structured_execution_signal_for_effective_route(
-            output_contract,
-            wants_file_delivery,
-            schedule_kind,
-            execution_recipe_hint,
-            direct_answer_contract_repair,
-        )
-}
-
 pub(super) fn structured_execution_signal_for_effective_route(
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    direct_answer_contract_repair: Option<&'static str>,
 ) -> bool {
-    direct_answer_contract_repair.is_none()
-        && route_has_structured_execution_signal(
-            output_contract,
-            wants_file_delivery,
-            schedule_kind,
-            execution_recipe_hint,
-        )
+    route_has_structured_execution_signal(
+        output_contract,
+        wants_file_delivery,
+        schedule_kind,
+        execution_recipe_hint,
+    )
 }
 
 pub(super) fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> bool {
@@ -618,19 +528,10 @@ pub(super) fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticK
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::SqliteDatabaseKindJudgment
             | OutputSemanticKind::SqliteSchemaVersion
-            | OutputSemanticKind::WeatherQuery
-            | OutputSemanticKind::MarketQuote
-            | OutputSemanticKind::ImageUnderstanding
-            | OutputSemanticKind::PublishingPreview
-            | OutputSemanticKind::PackageManagerDetection
             | OutputSemanticKind::ArchiveList
             | OutputSemanticKind::ArchiveRead
             | OutputSemanticKind::ArchivePack
             | OutputSemanticKind::ArchiveUnpack
-            | OutputSemanticKind::DockerPs
-            | OutputSemanticKind::DockerImages
-            | OutputSemanticKind::DockerLogs
-            | OutputSemanticKind::DockerContainerLifecycle
     )
 }
 

@@ -16,13 +16,13 @@ fn normalizer_schema_normalization_preserves_direct_answer_decision() {
 }
 
 #[test]
-fn normalizer_schema_normalization_preserves_planner_and_direct_decisions() {
+fn normalizer_schema_normalization_ignores_legacy_planner_decision_without_machine_signal() {
     let raw = r#"{"resolved_user_intent":"check then explain","needs_clarify":false,"decision":"planner_execute"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
 
     let raw = r#"{"resolved_user_intent":"not an execution request","needs_clarify":false,"decision":"direct_answer"}"#;
@@ -31,6 +31,67 @@ fn normalizer_schema_normalization_preserves_planner_and_direct_decisions() {
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
         Some("direct_answer")
+    );
+}
+
+#[test]
+fn normalizer_schema_normalization_derives_missing_decision_from_output_contract_signal() {
+    let raw = r#"{
+          "resolved_user_intent":"machine-contract-only",
+          "needs_clarify":false,
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"path",
+            "delivery_intent":"none",
+            "semantic_kind":"file_names",
+            "locator_hint":"document"
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value.get("decision").and_then(|v| v.as_str()),
+        Some("planner_execute")
+    );
+}
+
+#[test]
+fn normalizer_schema_normalization_derives_invalid_decision_from_execution_recipe_signal() {
+    let raw = r#"{
+          "resolved_user_intent":"machine-recipe-only",
+          "needs_clarify":false,
+          "decision":"unknown",
+          "output_contract":{"response_shape":"free"},
+          "execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"current_repo"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value.get("decision").and_then(|v| v.as_str()),
+        Some("planner_execute")
+    );
+}
+
+#[test]
+fn normalizer_schema_normalization_derives_clarify_from_needs_clarify_signal() {
+    let raw = r#"{
+          "resolved_user_intent":"missing-required-machine-field",
+          "needs_clarify":true,
+          "decision":"direct_answer",
+          "output_contract":{"response_shape":"free"},
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value.get("decision").and_then(|v| v.as_str()),
+        Some("clarify")
     );
 }
 
@@ -61,6 +122,74 @@ fn normalizer_schema_normalization_preserves_filesystem_mutation_result_contract
 }
 
 #[test]
+fn normalizer_schema_normalization_demotes_capability_owned_weather_semantic_kind() {
+    let raw = r#"{
+          "resolved_user_intent":"capability_ref=weather.current place=Tokyo forecast_days=2",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"free",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"weather_query",
+            "locator_hint":""
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "weather in Tokyo");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|value| value.as_str()),
+        Some("none")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+}
+
+#[test]
+fn normalizer_schema_normalization_demotes_registry_bridge_without_capability_ref() {
+    let raw = r#"{
+          "resolved_user_intent":"weather place=Tokyo",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"free",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"weather_query",
+            "locator_hint":""
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "weather in Tokyo");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|value| value.as_str()),
+        Some("none")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_preserves_object_resolved_intent() {
     let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"decision":"direct_answer"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
@@ -79,7 +208,7 @@ fn normalizer_schema_normalization_accepts_percent_confidence() {
     assert_eq!(value.get("confidence").and_then(|v| v.as_f64()), Some(1.0));
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
 }
 
@@ -252,10 +381,45 @@ fn contract_repair_report_marks_structured_alias_repair() {
     assert!(report
         .detail_csv()
         .contains("output_contract_semantic_kind_normalized"));
-    assert!(report
+    assert!(!report
         .detail_csv()
         .contains("decision_promoted_by_output_contract"));
     assert_eq!(report.class_csv(), "schema_normalization");
+}
+
+#[test]
+fn contract_repair_report_marks_execution_signal_promoted_by_output_contract() {
+    let before = serde_json::json!({
+        "output_contract": {
+            "response_shape": "free",
+            "requires_content_evidence": false,
+            "delivery_required": false,
+            "locator_kind": "none",
+            "delivery_intent": "none",
+            "semantic_kind": "none",
+            "locator_hint": ""
+        }
+    });
+    let after = serde_json::json!({
+        "output_contract": {
+            "response_shape": "strict",
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "semantic_kind": "file_names",
+            "locator_hint": "logs"
+        }
+    });
+
+    let report = super::contract_repair_report_from_before_after(&before, &after);
+
+    assert!(report
+        .detail_csv()
+        .contains("execution_signal_promoted_by_output_contract"));
+    assert!(!report
+        .detail_csv()
+        .contains("decision_promoted_by_output_contract"));
 }
 
 #[test]

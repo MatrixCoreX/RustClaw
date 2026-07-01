@@ -1,11 +1,9 @@
 use serde_json::Value;
 
-use crate::FirstLayerDecision;
-
 use super::{
-    canonical_first_layer_decision_token, execution_recipe_value_declares_command_payload,
+    execution_recipe_value_declares_command_payload,
     execution_recipe_value_declares_health_check_observation,
-    execution_recipe_value_declares_package_manager_detection,
+    execution_recipe_value_declares_package_detect_manager_capability,
     execution_recipe_value_declares_scalar_runtime_tool_observation,
     execution_recipe_value_declares_service_status_observation,
     execution_recipe_value_declares_structured_read_observation,
@@ -104,10 +102,10 @@ pub(super) fn contract_repair_report_from_before_after(
     let before_recipe = before_obj.and_then(|obj| obj.get("execution_recipe"));
     if execution_recipe_value_declares_command_payload(before_recipe) {
         report.add("command_payload", "execution_recipe_command_payload");
-    } else if execution_recipe_value_declares_package_manager_detection(before_recipe) {
+    } else if execution_recipe_value_declares_package_detect_manager_capability(before_recipe) {
         report.add(
             "structured_recipe",
-            "execution_recipe_package_manager_detection",
+            "execution_recipe_package_detect_manager_capability",
         );
     } else if execution_recipe_value_declares_scalar_runtime_tool_observation(
         before_recipe,
@@ -237,25 +235,13 @@ pub(super) fn contract_repair_report_from_before_after(
             "output_contract_requires_evidence_repaired",
         );
     }
-    if output_contract_has_executable_shape(after_contract) {
-        let before_decision = before_obj
-            .and_then(|obj| obj.get("decision"))
-            .and_then(scalar_json_value_text)
-            .and_then(|value| canonical_first_layer_decision_token(&value));
-        let after_decision = after_obj
-            .and_then(|obj| obj.get("decision"))
-            .and_then(scalar_json_value_text)
-            .and_then(|value| canonical_first_layer_decision_token(&value));
-        if matches!(
-            before_decision,
-            None | Some(FirstLayerDecision::DirectAnswer)
-        ) && matches!(after_decision, Some(FirstLayerDecision::PlannerExecute))
-        {
-            report.add(
-                "structured_contract",
-                "decision_promoted_by_output_contract",
-            );
-        }
+    if !output_contract_has_executable_shape(before_contract)
+        && output_contract_has_executable_shape(after_contract)
+    {
+        report.add(
+            "structured_contract",
+            "execution_signal_promoted_by_output_contract",
+        );
     }
     if execution_recipe_schema_field_changed(
         before_recipe,
@@ -562,13 +548,8 @@ fn execution_recipe_value_has_untrusted_text(value: Option<&Value>) -> bool {
 }
 
 fn normalizer_object_declares_executable_route(obj: &serde_json::Map<String, Value>) -> bool {
-    obj.get("decision")
-        .and_then(scalar_json_value_text)
-        .and_then(|text| canonical_first_layer_decision_token(&text))
-        .is_some_and(|decision| decision == crate::FirstLayerDecision::PlannerExecute)
-        || obj
-            .get("execution_recipe")
-            .is_some_and(|value| output_recipe_value_declares_execution(Some(value)))
+    obj.get("execution_recipe")
+        .is_some_and(|value| output_recipe_value_declares_execution(Some(value)))
 }
 
 fn schema_text_is_neutral_none(raw: &str) -> bool {
@@ -660,37 +641,6 @@ pub(super) fn scalar_json_value_text(value: &Value) -> Option<String> {
         Value::Number(number) => Some(number.to_string()),
         Value::Bool(value) => Some(value.to_string()),
         _ => None,
-    }
-}
-
-pub(super) fn answer_candidate_value_text(value: &Value) -> Option<String> {
-    scalar_json_value_text(value).or_else(|| {
-        let obj = value.as_object()?;
-        for key in ["content", "value", "text", "answer", "result", "scalar"] {
-            if let Some(text) = obj.get(key).and_then(answer_candidate_value_text) {
-                return Some(text);
-            }
-        }
-        if obj.len() == 1 {
-            return obj.values().next().and_then(answer_candidate_value_text);
-        }
-        None
-    })
-}
-
-pub(super) fn scalar_output_contract_answer_candidate(
-    obj: &serde_json::Map<String, Value>,
-) -> Option<String> {
-    if normalizer_object_declares_executable_route(obj) {
-        return None;
-    }
-    let raw = obj
-        .get("output_contract")
-        .and_then(scalar_json_value_text)?;
-    if output_contract_scalar_looks_like_schema_token(&raw) {
-        None
-    } else {
-        Some(raw)
     }
 }
 

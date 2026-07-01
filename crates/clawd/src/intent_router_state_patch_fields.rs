@@ -53,7 +53,11 @@ pub(super) fn append_state_patch_structured_field_selector_to_resolved_intent(
     mut resolved_user_intent: String,
     state_patch: Option<&Value>,
 ) -> String {
-    let Some(selector) = structured_field_selector_from_state_patch(state_patch) else {
+    let selector = structured_field_selector_from_state_patch(state_patch).or_else(|| {
+        state_patch_targets_task_lifecycle_fields(state_patch)
+            .then(|| "task_lifecycle.*".to_string())
+    });
+    let Some(selector) = selector else {
         return resolved_user_intent;
     };
     let token = format!("structured_field_selector={selector}");
@@ -149,7 +153,10 @@ pub(super) fn apply_state_patch_structured_field_selector(
     output_contract: &mut IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> Option<String> {
-    let selector = structured_field_selector_from_state_patch(state_patch)?;
+    let selector = structured_field_selector_from_state_patch(state_patch).or_else(|| {
+        state_patch_targets_task_lifecycle_fields(state_patch)
+            .then(|| "task_lifecycle.*".to_string())
+    })?;
     if output_contract
         .self_extension
         .structured_field_selector
@@ -171,7 +178,83 @@ pub(super) fn apply_state_patch_structured_field_selector(
     Some(selector)
 }
 
+pub(super) fn state_patch_targets_task_lifecycle_fields(state_patch: Option<&Value>) -> bool {
+    structured_field_selector_from_state_patch(state_patch)
+        .as_deref()
+        .is_some_and(structured_field_selector_targets_task_lifecycle)
+        || required_machine_fields_target_task_lifecycle(state_patch)
+}
+
 fn structured_field_selector_targets_task_lifecycle(selector: &str) -> bool {
     let selector = selector.trim();
     selector == "task_lifecycle.*" || selector.starts_with("task_lifecycle.")
+}
+
+fn required_machine_fields_target_task_lifecycle(value: Option<&Value>) -> bool {
+    let mut fields = Vec::new();
+    collect_required_machine_fields(value, &mut fields);
+    if fields
+        .iter()
+        .any(|field| machine_field_targets_task_lifecycle(field))
+    {
+        return true;
+    }
+    fields
+        .iter()
+        .filter(|field| short_task_lifecycle_machine_field(field))
+        .take(2)
+        .count()
+        >= 2
+}
+
+fn collect_required_machine_fields(value: Option<&Value>, out: &mut Vec<String>) {
+    match value {
+        Some(Value::Object(map)) => {
+            for (key, value) in map {
+                if normalize_schema_token(key) == "required_machine_fields" {
+                    collect_machine_field_strings(value, out);
+                } else {
+                    collect_required_machine_fields(Some(value), out);
+                }
+            }
+        }
+        Some(Value::Array(items)) => {
+            for value in items {
+                collect_required_machine_fields(Some(value), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_machine_field_strings(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => out.push(text.trim().to_ascii_lowercase()),
+        Value::Array(items) => {
+            for item in items {
+                collect_machine_field_strings(item, out);
+            }
+        }
+        Value::Object(map) => {
+            for value in map.values() {
+                collect_machine_field_strings(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn machine_field_targets_task_lifecycle(field: &str) -> bool {
+    let field = field.trim();
+    field == "task_lifecycle.*"
+        || field.starts_with("task_lifecycle.")
+        || field == "/task_lifecycle"
+        || field.starts_with("/task_lifecycle/")
+}
+
+fn short_task_lifecycle_machine_field(field: &str) -> bool {
+    matches!(
+        field.trim(),
+        "can_poll" | "can_cancel" | "checkpoint_id" | "next_check_after"
+    )
 }

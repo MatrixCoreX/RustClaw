@@ -1,26 +1,23 @@
 use std::path::Path;
 
 use super::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind,
 };
 
 pub(super) fn archive_pair_contract_from_surface(
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> Option<(OutputSemanticKind, String)> {
-    let generated_delivery_contract = output_contract.semantic_kind
-        == OutputSemanticKind::GeneratedFileDelivery
-        || (output_contract.semantic_kind == OutputSemanticKind::None
-            && (output_contract.delivery_required
-                || matches!(
-                    output_contract.response_shape,
-                    OutputResponseShape::FileToken
-                )
-                || matches!(
-                    output_contract.delivery_intent,
-                    OutputDeliveryIntent::FileSingle
-                )));
+    let generated_delivery_contract = output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+        || matches!(
+            output_contract.delivery_intent,
+            OutputDeliveryIntent::FileSingle
+        );
     let (left, right) = req_surface.locator_target_pair.as_ref()?;
     let left_is_archive = contract_repair_supported_archive_path(left);
     let right_is_archive = contract_repair_supported_archive_path(right);
@@ -37,16 +34,15 @@ pub(super) fn archive_pair_contract_from_surface(
     }?;
     let structural_operation_pair =
         archive_pair_has_structural_operation_shape(inferred_kind.0, left, right);
-    let already_archive_contract = output_contract.semantic_kind == inferred_kind.0;
+    let already_archive_contract = output_contract.semantic_kind_is(inferred_kind.0);
     let scalar_or_drift_contract = structural_operation_pair
         && !matches!(output_contract.response_shape, OutputResponseShape::Strict)
-        && matches!(
-            output_contract.semantic_kind,
-            OutputSemanticKind::None
-                | OutputSemanticKind::ScalarPathOnly
-                | OutputSemanticKind::ContentExcerptSummary
-                | OutputSemanticKind::FilesystemMutationResult
-        );
+        && output_contract.semantic_kind_is_any(&[
+            OutputSemanticKind::None,
+            OutputSemanticKind::ScalarPathOnly,
+            OutputSemanticKind::ContentExcerptSummary,
+            OutputSemanticKind::FilesystemMutationResult,
+        ]);
     if structural_operation_pair
         && (already_archive_contract || generated_delivery_contract || scalar_or_drift_contract)
     {
@@ -403,7 +399,6 @@ pub(super) fn apply_archive_unpack_missing_archive_locator_clarify(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !matches!(
@@ -420,7 +415,6 @@ pub(super) fn apply_archive_unpack_missing_archive_locator_clarify(
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();

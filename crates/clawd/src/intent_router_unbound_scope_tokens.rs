@@ -76,11 +76,12 @@ pub(super) fn single_unbound_scope_identifier_outside_filename(
 }
 
 pub(super) fn surface_has_unbound_scope_plus_single_filename_target(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
-    if output_contract.semantic_kind != OutputSemanticKind::ExistenceWithPath
+    if !route_reason_has_machine_marker(route_reason, "existence_with_path")
         || output_contract.delivery_required
         || req_surface.has_explicit_path_or_url()
         || req_surface.locator_target_pair.is_some()
@@ -93,4 +94,13 @@ pub(super) fn surface_has_unbound_scope_plus_single_filename_target(
         return false;
     }
     single_unbound_scope_identifier_outside_filename(req, &filenames[0]).is_some()
+}
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
 }

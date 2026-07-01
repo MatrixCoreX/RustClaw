@@ -1,9 +1,9 @@
 use serde_json::Value;
 
 use super::{
-    canonical_first_layer_decision_token, coerce_output_contract_value_for_schema,
-    is_meaningful_state_patch, normalize_output_locator_kind_for_schema,
-    parse_output_semantic_kind, scalar_json_value_text, FirstLayerDecision, OutputSemanticKind,
+    coerce_output_contract_value_for_schema, is_meaningful_state_patch,
+    normalize_output_locator_kind_for_schema, parse_output_semantic_kind, scalar_json_value_text,
+    OutputSemanticKind,
 };
 
 pub(super) fn mark_output_contract_requires_content_evidence(
@@ -36,6 +36,45 @@ pub(super) fn force_output_contract_semantic_kind(
             Value::String(semantic_kind.as_str().to_string()),
         );
     }
+}
+
+fn is_machine_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'=' | b':')
+}
+
+fn machine_context_has_exact_token(context: &str, expected: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    let bytes = context.as_bytes();
+    let mut offset = 0;
+    while let Some(found) = context[offset..].find(expected) {
+        let start = offset + found;
+        let end = start + expected.len();
+        let left_ok = start == 0 || !is_machine_token_byte(bytes[start - 1]);
+        let right_ok = end == bytes.len() || !is_machine_token_byte(bytes[end]);
+        if left_ok && right_ok {
+            return true;
+        }
+        offset = end;
+    }
+    false
+}
+
+fn append_resolved_intent_machine_token(obj: &mut serde_json::Map<String, Value>, token: &str) {
+    let current = obj
+        .get("resolved_user_intent")
+        .and_then(scalar_json_value_text)
+        .unwrap_or_default();
+    if machine_context_has_exact_token(&current, token) {
+        return;
+    }
+    let next = if current.trim().is_empty() {
+        token.to_string()
+    } else {
+        format!("{} {}", current.trim(), token)
+    };
+    obj.insert("resolved_user_intent".to_string(), Value::String(next));
 }
 
 pub(super) fn normalize_output_contract_for_structured_read_recipe(
@@ -92,9 +131,10 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
     }
 }
 
-pub(super) fn normalize_output_contract_for_package_manager_detection(
+pub(super) fn normalize_output_contract_for_package_detect_manager_capability(
     obj: &mut serde_json::Map<String, Value>,
 ) {
+    append_resolved_intent_machine_token(obj, PACKAGE_DETECT_MANAGER_CAPABILITY_REF);
     let value = obj
         .entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
@@ -118,13 +158,12 @@ pub(super) fn normalize_output_contract_for_package_manager_detection(
     contract.insert("locator_hint".to_string(), Value::String(String::new()));
     contract.insert(
         "semantic_kind".to_string(),
-        Value::String(
-            OutputSemanticKind::PackageManagerDetection
-                .as_str()
-                .to_string(),
-        ),
+        Value::String(OutputSemanticKind::None.as_str().to_string()),
     );
 }
+
+const PACKAGE_DETECT_MANAGER_CAPABILITY_REF: &str =
+    concat!("capability_ref=", "package", ".", "detect_manager");
 
 pub(super) fn normalize_output_contract_for_service_status_recipe(
     obj: &mut serde_json::Map<String, Value>,
@@ -217,28 +256,6 @@ pub(super) fn normalize_output_contract_for_command_payload(
         );
     }
     contract.insert("delivery_required".to_string(), Value::Bool(false));
-}
-
-pub(super) fn mark_decision_planner_execute_from_execution_recipe(
-    obj: &mut serde_json::Map<String, Value>,
-) {
-    if obj
-        .get("needs_clarify")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let current = obj
-        .get("decision")
-        .and_then(scalar_json_value_text)
-        .and_then(|value| canonical_first_layer_decision_token(&value));
-    if current.is_none() || matches!(current, Some(FirstLayerDecision::DirectAnswer)) {
-        obj.insert(
-            "decision".to_string(),
-            Value::String(FirstLayerDecision::PlannerExecute.as_str().to_string()),
-        );
-    }
 }
 
 pub(super) fn promote_misnested_turn_analysis_from_execution_recipe(

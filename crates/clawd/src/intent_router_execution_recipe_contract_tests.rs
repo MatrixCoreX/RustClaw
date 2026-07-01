@@ -230,8 +230,7 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
           },
           "execution_recipe":{
             "kind":"skill",
-            "name":"package_manager",
-            "action":"detect"
+            "capability":"package.detect_manager"
           }
         }"#;
 
@@ -267,11 +266,25 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
         value
             .pointer("/output_contract/semantic_kind")
             .and_then(|value| value.as_str()),
-        Some("package_manager_detection")
+        Some("none")
+    );
+    assert!(value
+        .get("resolved_user_intent")
+        .and_then(|value| value.as_str())
+        .is_some_and(|intent| intent.contains("capability_ref=package.detect_manager")));
+    assert!(!value
+        .get("resolved_user_intent")
+        .and_then(|value| value.as_str())
+        .is_some_and(|intent| intent.contains("package.detect_manager_extra")));
+    assert_eq!(
+        value
+            .pointer("/output_contract/requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
     assert!(report
         .detail_csv()
-        .contains("execution_recipe_package_manager_detection"));
+        .contains("execution_recipe_package_detect_manager_capability"));
     assert!(!report
         .detail_csv()
         .contains("execution_recipe_untrusted_text_ignored"));
@@ -311,8 +324,12 @@ fn package_manager_capability_recipe_wins_over_scalar_runtime_shape() {
         value
             .pointer("/output_contract/semantic_kind")
             .and_then(|value| value.as_str()),
-        Some("package_manager_detection")
+        Some("none")
     );
+    assert!(value
+        .get("resolved_user_intent")
+        .and_then(|value| value.as_str())
+        .is_some_and(|intent| intent.contains("capability_ref=package.detect_manager")));
     assert_eq!(
         value
             .pointer("/output_contract/locator_kind")
@@ -321,7 +338,7 @@ fn package_manager_capability_recipe_wins_over_scalar_runtime_shape() {
     );
     assert!(report
         .detail_csv()
-        .contains("execution_recipe_package_manager_detection"));
+        .contains("execution_recipe_package_detect_manager_capability"));
     assert!(!report
         .detail_csv()
         .contains("execution_recipe_scalar_runtime_tool_observation"));

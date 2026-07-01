@@ -114,6 +114,7 @@ pub(crate) enum OutputSemanticKind {
     WeatherQuery,
     MarketQuote,
     ImageUnderstanding,
+    PhotoOrganization,
     PublishingPreview,
     PackageManagerDetection,
     ToolDiscovery,
@@ -173,6 +174,7 @@ impl OutputSemanticKind {
         Self::WeatherQuery,
         Self::MarketQuote,
         Self::ImageUnderstanding,
+        Self::PhotoOrganization,
         Self::PublishingPreview,
         Self::PackageManagerDetection,
         Self::ToolDiscovery,
@@ -232,6 +234,7 @@ impl OutputSemanticKind {
             Self::WeatherQuery => "weather_query",
             Self::MarketQuote => "market_quote",
             Self::ImageUnderstanding => "image_understanding",
+            Self::PhotoOrganization => "photo_organization",
             Self::PublishingPreview => "publishing_preview",
             Self::PackageManagerDetection => "package_manager_detection",
             Self::ToolDiscovery => "tool_discovery",
@@ -250,6 +253,25 @@ impl OutputSemanticKind {
         matches!(
             self,
             Self::ContentExcerptSummary | Self::ContentExcerptWithSummary
+        )
+    }
+
+    pub(crate) fn is_registry_capability_bridge(self) -> bool {
+        matches!(
+            self,
+            Self::RssNewsFetch
+                | Self::WebPageSummary
+                | Self::WebSearchSummary
+                | Self::WeatherQuery
+                | Self::MarketQuote
+                | Self::ImageUnderstanding
+                | Self::PhotoOrganization
+                | Self::PublishingPreview
+                | Self::PackageManagerDetection
+                | Self::DockerPs
+                | Self::DockerImages
+                | Self::DockerLogs
+                | Self::DockerContainerLifecycle
         )
     }
 }
@@ -348,6 +370,23 @@ pub(crate) struct IntentOutputContract {
     pub(crate) self_extension: SelfExtensionContract,
 }
 
+impl IntentOutputContract {
+    pub(crate) fn semantic_kind_is(&self, semantic_kind: OutputSemanticKind) -> bool {
+        self.semantic_kind == semantic_kind
+    }
+
+    pub(crate) fn semantic_kind_is_any(&self, semantic_kinds: &[OutputSemanticKind]) -> bool {
+        semantic_kinds
+            .iter()
+            .copied()
+            .any(|semantic_kind| self.semantic_kind_is(semantic_kind))
+    }
+
+    pub(crate) fn semantic_kind_is_unclassified(&self) -> bool {
+        self.semantic_kind_is(OutputSemanticKind::None)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResumeBehavior {
     None,
@@ -406,6 +445,8 @@ pub(crate) struct RouteResult {
     pub(crate) clarify_question: String,
     pub(crate) route_reason: String,
     pub(crate) route_confidence: Option<f64>,
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) visible_skill_candidates: Vec<String>,
     pub(crate) risk_ceiling: RiskCeiling,
     pub(crate) resume_behavior: ResumeBehavior,
@@ -426,6 +467,7 @@ impl RouteResult {
         self.ask_mode.legacy_route_label_for_trace()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_chat_gate(&mut self) {
         self.set_ask_mode(AskMode::direct_answer());
     }
@@ -446,8 +488,8 @@ impl RouteResult {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 
-    pub(crate) fn legacy_first_layer_decision_for_trace(&self) -> FirstLayerDecision {
-        self.ask_mode.legacy_first_layer_decision_for_trace()
+    pub(crate) fn route_trace_decision_for_legacy_journal(&self) -> FirstLayerDecision {
+        self.ask_mode.route_trace_decision_for_legacy_journal()
     }
 
     pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
@@ -462,12 +504,12 @@ impl RouteResult {
         matches!(self.gate_kind(), crate::RouteGateKind::Execute)
     }
 
-    pub(crate) fn is_planner_execute_chat_wrapped(&self) -> bool {
+    pub(crate) fn uses_chat_finalizer(&self) -> bool {
         self.ask_mode.finalize_chat_wrapped()
     }
 
     pub(crate) fn uses_pure_chat_agent_loop_submode(&self) -> bool {
-        self.is_planner_execute_chat_wrapped()
+        self.uses_chat_finalizer()
             || self.has_route_reason_machine_marker("pure_chat_agent_loop_submode")
     }
 
@@ -478,6 +520,84 @@ impl RouteResult {
                     .rsplit_once(':')
                     .is_some_and(|(_, suffix)| suffix.trim() == marker)
         })
+    }
+
+    pub(crate) fn output_contract_marker_is(&self, semantic_kind: OutputSemanticKind) -> bool {
+        if self.explicit_output_contract_marker_kind().is_some() {
+            return self.has_route_reason_machine_marker(semantic_kind.as_str());
+        }
+        self.output_contract.semantic_kind == semantic_kind
+            || self.has_route_reason_machine_marker(semantic_kind.as_str())
+    }
+
+    pub(crate) fn output_contract_marker_is_any(
+        &self,
+        semantic_kinds: &[OutputSemanticKind],
+    ) -> bool {
+        semantic_kinds
+            .iter()
+            .copied()
+            .any(|semantic_kind| self.output_contract_marker_is(semantic_kind))
+    }
+
+    pub(crate) fn has_any_output_contract_marker(&self) -> bool {
+        OutputSemanticKind::ALL
+            .iter()
+            .copied()
+            .filter(|semantic_kind| *semantic_kind != OutputSemanticKind::None)
+            .any(|semantic_kind| self.has_route_reason_machine_marker(semantic_kind.as_str()))
+    }
+
+    pub(crate) fn output_contract_marker_kind(&self) -> Option<OutputSemanticKind> {
+        if let Some(semantic_kind) = self.explicit_output_contract_marker_kind() {
+            return Some(semantic_kind);
+        }
+        if self.output_contract.semantic_kind != OutputSemanticKind::None {
+            return Some(self.output_contract.semantic_kind);
+        }
+        OutputSemanticKind::ALL
+            .iter()
+            .copied()
+            .find(|semantic_kind| {
+                *semantic_kind != OutputSemanticKind::None
+                    && self.has_route_reason_machine_marker(semantic_kind.as_str())
+            })
+    }
+
+    fn explicit_output_contract_marker_kind(&self) -> Option<OutputSemanticKind> {
+        self.route_reason
+            .split(';')
+            .map(str::trim)
+            .rev()
+            .find_map(|part| {
+                let marker = part
+                    .strip_prefix("output_contract_kind=")
+                    .or_else(|| part.strip_prefix("contract:"))?
+                    .trim();
+                OutputSemanticKind::ALL
+                    .iter()
+                    .copied()
+                    .find(|semantic_kind| {
+                        *semantic_kind != OutputSemanticKind::None
+                            && semantic_kind.as_str() == marker
+                    })
+            })
+    }
+
+    pub(crate) fn effective_output_contract_semantic_kind(&self) -> OutputSemanticKind {
+        self.output_contract_marker_kind()
+            .unwrap_or(OutputSemanticKind::None)
+    }
+
+    pub(crate) fn effective_output_contract(&self) -> IntentOutputContract {
+        let mut contract = self.output_contract.clone();
+        contract.semantic_kind = self.effective_output_contract_semantic_kind();
+        contract
+    }
+
+    pub(crate) fn output_contract_is_unclassified(&self) -> bool {
+        self.output_contract.semantic_kind == OutputSemanticKind::None
+            && !self.has_any_output_contract_marker()
     }
 
     pub(crate) fn is_clarify_gate(&self) -> bool {

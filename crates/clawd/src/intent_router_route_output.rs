@@ -2,25 +2,36 @@ use serde_json::json;
 
 use super::{
     apply_state_patch_structured_field_selector, execution_finalize_style_for_contract,
-    first_layer_decision_gate_record, route_has_structured_execution_signal,
-    IntentNormalizerOutput, RouteDecision, TurnAnalysis,
+    route_has_structured_execution_signal, route_trace_record,
+    state_patch_targets_task_lifecycle_fields, IntentNormalizerOutput, RouteDecision, TurnAnalysis,
 };
 use crate::{
-    ActFinalizeStyle, AppState, AskMode, ClaimedTask, FirstLayerDecision, ResumeBehavior,
-    RiskCeiling, RouteResult,
+    ActFinalizeStyle, AppState, AskMode, ClaimedTask, FirstLayerDecision, OutputSemanticKind,
+    ResumeBehavior, RiskCeiling, RouteResult,
 };
 
-fn ask_mode_from_normalizer_hint(
-    normalizer_hint: FirstLayerDecision,
+fn ask_mode_from_machine_route_state(
+    needs_clarify: bool,
+    output_contract: &crate::IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: crate::ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     finalize_style: ActFinalizeStyle,
 ) -> AskMode {
-    match normalizer_hint {
-        FirstLayerDecision::Clarify => AskMode::clarify(),
-        FirstLayerDecision::DirectAnswer => AskMode::direct_answer(),
-        FirstLayerDecision::PlannerExecute => AskMode::Act {
-            finalize: finalize_style,
-        },
+    if needs_clarify {
+        return AskMode::clarify();
     }
+    if route_has_structured_execution_signal(
+        output_contract,
+        wants_file_delivery,
+        schedule_kind,
+        execution_recipe_hint,
+    ) {
+        return AskMode::Act {
+            finalize: finalize_style,
+        };
+    }
+    AskMode::direct_answer()
 }
 
 pub(super) fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
@@ -55,19 +66,11 @@ pub(crate) fn route_result_from_normalizer(
     let mut output_contract = normalizer_out.output_contract.clone();
     let (agent_display_name_hint, sanitized_agent_display_name_hint) =
         sanitize_normalizer_agent_display_name_hint(state, task, normalizer_out);
-    let sanitized_answer_candidate =
-        normalizer_answer_candidate_matches_backend_metadata(state, task, normalizer_out);
     let mut route_reason = normalizer_out.reason.clone();
     if sanitized_agent_display_name_hint {
         super::append_route_reason(
             &mut route_reason,
             "agent_display_name_hint_backend_metadata_removed",
-        );
-    }
-    if sanitized_answer_candidate {
-        super::append_route_reason(
-            &mut route_reason,
-            "normalizer_answer_candidate_backend_metadata_removed",
         );
     }
     apply_state_patch_structured_field_selector(
@@ -77,16 +80,51 @@ pub(crate) fn route_result_from_normalizer(
             .as_ref()
             .and_then(|analysis| analysis.state_patch.as_ref()),
     );
+    let mut needs_clarify = normalizer_out.needs_clarify;
+    let mut clarify_question = normalizer_out.clarify_question.clone();
+    let execution_finalize_style = normalizer_out.execution_finalize_style;
+    if route_targets_task_lifecycle_query(normalizer_out, &route_reason) {
+        output_contract.response_shape = crate::OutputResponseShape::Free;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.locator_kind = crate::OutputLocatorKind::None;
+        output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+        output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        output_contract.locator_hint.clear();
+        if output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref()
+            .is_none_or(|selector| selector.trim().is_empty())
+        {
+            output_contract.self_extension.structured_field_selector =
+                Some("task_lifecycle.*".to_string());
+        }
+        needs_clarify = false;
+        clarify_question.clear();
+        super::append_route_reason(&mut route_reason, "capability_ref=task_control.list");
+        super::append_route_reason(
+            &mut route_reason,
+            "task_lifecycle_machine_fields_bound_to_task_control",
+        );
+    }
+    let ask_mode = ask_mode_from_machine_route_state(
+        needs_clarify,
+        &output_contract,
+        normalizer_out.wants_file_delivery,
+        normalizer_out.schedule_kind,
+        normalizer_out.execution_recipe_hint,
+        execution_finalize_style,
+    );
+    demote_output_contract_semantic_to_route_marker(&mut output_contract, &mut route_reason);
     RouteResult {
-        ask_mode: ask_mode_from_normalizer_hint(
-            normalizer_out.legacy_first_layer_decision,
-            normalizer_out.execution_finalize_style,
-        ),
+        ask_mode,
         resolved_intent: normalizer_out.resolved_user_intent.clone(),
-        needs_clarify: normalizer_out.needs_clarify,
-        clarify_question: normalizer_out.clarify_question.clone(),
+        needs_clarify,
+        clarify_question,
         route_reason,
         route_confidence: Some(normalizer_out.confidence),
+        #[cfg(test)]
         visible_skill_candidates: state.planner_available_skills_for_task(task),
         risk_ceiling: RiskCeiling::Unknown,
         resume_behavior: normalizer_out.resume_behavior,
@@ -99,19 +137,70 @@ pub(crate) fn route_result_from_normalizer(
     }
 }
 
-fn normalizer_answer_candidate_matches_backend_metadata(
-    state: &AppState,
-    task: &ClaimedTask,
+fn route_targets_task_lifecycle_query(
     normalizer_out: &IntentNormalizerOutput,
+    route_reason: &str,
 ) -> bool {
-    normalizer_answer_candidate_from_resolved_intent(&normalizer_out.resolved_user_intent)
-        .is_some_and(|candidate| normalizer_text_matches_backend_metadata(state, task, candidate))
+    if normalizer_out
+        .turn_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .is_some_and(|patch| state_patch_targets_task_lifecycle_fields(Some(patch)))
+    {
+        return true;
+    }
+    let fields = [
+        task_lifecycle_machine_field_count(&normalizer_out.resolved_user_intent),
+        task_lifecycle_machine_field_count(route_reason),
+    ]
+    .into_iter()
+    .sum::<usize>();
+    fields >= 2
 }
 
-fn normalizer_answer_candidate_from_resolved_intent(resolved_intent: &str) -> Option<&str> {
-    let (_intent, candidate) = resolved_intent.rsplit_once("\nanswer_candidate:")?;
-    let candidate = candidate.trim();
-    (!candidate.is_empty()).then_some(candidate)
+fn task_lifecycle_machine_field_count(text: &str) -> usize {
+    let mut fields = std::collections::BTreeSet::new();
+    for token in text
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.')))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        match token {
+            "task_lifecycle.can_poll" | "can_poll" => {
+                fields.insert("can_poll");
+            }
+            "task_lifecycle.can_cancel" | "can_cancel" => {
+                fields.insert("can_cancel");
+            }
+            "task_lifecycle.checkpoint_id" | "checkpoint_id" => {
+                fields.insert("checkpoint_id");
+            }
+            "task_lifecycle.next_check_after" | "next_check_after" => {
+                fields.insert("next_check_after");
+            }
+            _ => {}
+        }
+    }
+    fields.len()
+}
+
+fn demote_output_contract_semantic_to_route_marker(
+    output_contract: &mut crate::IntentOutputContract,
+    route_reason: &mut String,
+) {
+    let semantic_kind = output_contract.semantic_kind;
+    if semantic_kind == OutputSemanticKind::None {
+        return;
+    }
+    super::append_route_reason(
+        route_reason,
+        &format!("contract:{}", semantic_kind.as_str()),
+    );
+    super::append_route_reason(
+        route_reason,
+        "normalizer_semantic_contract_demoted_to_route_marker",
+    );
+    output_contract.semantic_kind = OutputSemanticKind::None;
 }
 
 fn sanitize_normalizer_agent_display_name_hint(
@@ -216,7 +305,6 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     } else {
         FirstLayerDecision::DirectAnswer
     };
-    let mut legacy_normalizer_decision = legacy_normalizer_decision;
     let mut execution_finalize_style =
         execution_finalize_style_for_contract(&decision.output_contract);
     if let Some(finalize_style) =
@@ -225,7 +313,6 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
             decision.needs_clarify,
         )
     {
-        legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
         execution_finalize_style = finalize_style;
     }
     let reason = if decision.reason.trim().is_empty() {
@@ -238,8 +325,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     } else {
         decision.resolved_user_intent
     };
-    let first_layer_gate_record = first_layer_decision_gate_record(
-        None,
+    let trace_record = route_trace_record(
         legacy_normalizer_decision,
         decision.needs_clarify,
         &decision.output_contract,
@@ -260,10 +346,10 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
-        legacy_first_layer_decision: legacy_normalizer_decision,
+        route_trace_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,
         fallback_source,
-        first_layer_gate_record,
+        route_trace_record: trace_record,
     }
 }

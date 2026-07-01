@@ -2,21 +2,17 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::{
-    locator_hint_points_to_workspace_root, FirstLayerDecision, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    locator_hint_points_to_workspace_root, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
 };
 
 pub(super) fn current_workspace_generic_summary_needs_semantic_contract(
     output_contract: &IntentOutputContract,
-    legacy_normalizer_decision: FirstLayerDecision,
 ) -> bool {
-    matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) && output_contract.requires_content_evidence
+    output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && matches!(
             output_contract.response_shape,
             OutputResponseShape::Free | OutputResponseShape::OneSentence
@@ -34,7 +30,7 @@ pub(super) fn current_turn_extension_inventory_file_paths_repair_applies(
 ) -> bool {
     if output_contract.delivery_required
         || !output_contract.requires_content_evidence
-        || output_contract.semantic_kind != OutputSemanticKind::None
+        || !output_contract.semantic_kind_is_unclassified()
         || req_surface.has_filename_candidates()
         || req_surface.has_structured_target_refinement()
         || !matches!(
@@ -128,7 +124,7 @@ pub(super) fn file_paths_missing_file_locator_parent_dir(
     workspace_root: &Path,
 ) -> Option<String> {
     if output_contract.delivery_required
-        || output_contract.semantic_kind != OutputSemanticKind::FilePaths
+        || !output_contract.semantic_kind_is(OutputSemanticKind::FilePaths)
         || !matches!(
             output_contract.locator_kind,
             OutputLocatorKind::Path | OutputLocatorKind::Filename
@@ -171,7 +167,7 @@ pub(super) fn existence_with_path_mixed_locator_summary_repair(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
     if output_contract.delivery_required
-        || output_contract.semantic_kind != OutputSemanticKind::ExistenceWithPath
+        || !output_contract.semantic_kind_is(OutputSemanticKind::ExistenceWithPath)
         || !output_contract.requires_content_evidence
         || !matches!(
             output_contract.response_shape,
@@ -202,7 +198,7 @@ pub(super) fn quoted_literal_content_presence_contract_repair(
 ) -> bool {
     if output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || output_contract.semantic_kind != OutputSemanticKind::ExistenceWithPath
+        || !output_contract.semantic_kind_is(OutputSemanticKind::ExistenceWithPath)
         || req_surface.single_quoted_literal().is_none()
         || req_surface.has_structured_target_refinement()
     {
@@ -225,7 +221,7 @@ pub(super) fn structured_config_keys_contract_from_surface(
 ) -> Option<String> {
     if output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(output_contract.semantic_kind, OutputSemanticKind::FileNames)
+        || !output_contract.semantic_kind_is(OutputSemanticKind::FileNames)
     {
         return None;
     }
@@ -269,12 +265,8 @@ pub(super) fn config_mutation_contract_from_surface(
     output_contract: &IntentOutputContract,
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    legacy_normalizer_decision: FirstLayerDecision,
 ) -> Option<String> {
-    if !matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute | FirstLayerDecision::DirectAnswer
-    ) || output_contract.delivery_required
+    if output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(
             output_contract.semantic_kind,
@@ -526,38 +518,28 @@ fn structural_config_value_candidate_tokens(text: &str) -> impl Iterator<Item = 
     .filter(|token| !token.is_empty())
 }
 
-pub(super) fn planner_execute_inline_structured_payload_context(
+pub(super) fn inline_structured_payload_contract_context(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) && req_surface.inline_json_shape.is_some()
+    req_surface.inline_json_shape.is_some()
         && !crate::intent::surface_signals::inline_json_transform_request(req)
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && output_contract.locator_hint.trim().is_empty()
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && output_contract.semantic_kind_is_unclassified()
         && !req_surface.has_explicit_path_or_url()
         && !req_surface.has_delivery_token_reference()
         && req_surface.locator_target_pair.is_none()
 }
 
-pub(super) fn planner_execute_inline_structured_transform_contract_context(
+pub(super) fn inline_structured_transform_contract_context(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
-    answer_candidate: &str,
 ) -> bool {
-    matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) && req_surface.inline_json_shape.is_some()
-        && answer_candidate.trim().is_empty()
+    req_surface.inline_json_shape.is_some()
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
@@ -582,7 +564,7 @@ pub(super) fn generated_file_delivery_filename_only_existing_target_repair(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
 ) -> Option<String> {
-    if output_contract.semantic_kind != OutputSemanticKind::GeneratedFileDelivery
+    if !output_contract.semantic_kind_is(OutputSemanticKind::GeneratedFileDelivery)
         || !output_contract.delivery_required
         || output_contract.delivery_intent != OutputDeliveryIntent::FileSingle
         || output_contract.response_shape != OutputResponseShape::FileToken
@@ -604,7 +586,7 @@ pub(super) fn generated_file_delivery_existing_content_summary_repair(
     output_contract: &IntentOutputContract,
     workspace_root: &Path,
 ) -> Option<String> {
-    if output_contract.semantic_kind != OutputSemanticKind::GeneratedFileDelivery
+    if !output_contract.semantic_kind_is(OutputSemanticKind::GeneratedFileDelivery)
         || !output_contract.delivery_required
         || output_contract.delivery_intent != OutputDeliveryIntent::FileSingle
         || output_contract.response_shape != OutputResponseShape::FileToken

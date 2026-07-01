@@ -1,6 +1,6 @@
 use crate::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputSemanticKind,
+    ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputSemanticKind,
 };
 
 fn reason_text_has_marker(reason: &str, marker: &str) -> bool {
@@ -17,7 +17,6 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
     output_contract: &mut IntentOutputContract,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if *needs_clarify
@@ -34,7 +33,6 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
@@ -44,7 +42,7 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::OutputResponseShape;
+    use crate::{FirstLayerDecision, OutputResponseShape};
 
     #[test]
     fn missing_read_target_mutation_contract_forces_clarify() {
@@ -60,7 +58,7 @@ mod tests {
         };
         let mut needs_clarify = false;
         let mut clarify_question = String::new();
-        let mut decision = FirstLayerDecision::PlannerExecute;
+        let decision = FirstLayerDecision::PlannerExecute;
         let mut finalize_style = ActFinalizeStyle::ChatWrapped;
 
         let reason = apply_missing_read_target_mutation_clarify(
@@ -68,13 +66,12 @@ mod tests {
             &mut contract,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut decision,
             &mut finalize_style,
         );
 
         assert_eq!(reason, Some("missing_read_target_mutation_clarify"));
         assert!(needs_clarify);
-        assert_eq!(decision, FirstLayerDecision::Clarify);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert_eq!(finalize_style, ActFinalizeStyle::Plain);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert!(contract.locator_hint.is_empty());

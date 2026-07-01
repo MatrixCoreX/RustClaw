@@ -1,11 +1,10 @@
 use std::path::Path;
 
 use super::{
-    current_request_mentions_workspace_identity, parse_first_layer_decision_text,
-    parse_output_delivery_intent, parse_output_locator_kind, parse_output_response_shape,
-    parse_output_semantic_kind, FirstLayerDecision, IntentExecutionRecipeOut, IntentNormalizerOut,
-    IntentOutputContractOut, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind,
+    current_request_mentions_workspace_identity, parse_output_delivery_intent,
+    parse_output_locator_kind, parse_output_response_shape, parse_output_semantic_kind,
+    IntentExecutionRecipeOut, IntentNormalizerOut, IntentOutputContractOut, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
 };
 
 #[cfg(test)]
@@ -37,7 +36,9 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     let Some(contract) = out.output_contract.as_ref() else {
         return None;
     };
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    let structured_execution_signal =
+        normalizer_output_has_structured_execution_signal(out, contract);
+    if structured_execution_signal
         && contract.requires_content_evidence
         && !out.wants_file_delivery
         && !contract.delivery_required
@@ -52,7 +53,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("command_output_summary_needs_failure_contract_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && contract.requires_content_evidence
         && matches!(
             parse_output_semantic_kind(&contract.semantic_kind),
@@ -61,7 +62,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("file_names_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && contract.requires_content_evidence
         && matches!(
             parse_output_semantic_kind(&contract.semantic_kind),
@@ -70,7 +71,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("file_paths_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && contract.requires_content_evidence
         && matches!(
             parse_output_semantic_kind(&contract.semantic_kind),
@@ -79,7 +80,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("directory_entry_groups_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && contract.requires_content_evidence
         && matches!(
             parse_output_semantic_kind(&contract.semantic_kind),
@@ -88,11 +89,10 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("existence_summary_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && !out.wants_file_delivery
         && !contract.delivery_required
         && contract.requires_content_evidence
-        && out.answer_candidate.trim().is_empty()
         && matches!(
             parse_output_delivery_intent(&contract.delivery_intent),
             OutputDeliveryIntent::None
@@ -116,7 +116,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("raw_command_output_locator_needs_semantic_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && !out.wants_file_delivery
         && !contract.delivery_required
         && matches!(
@@ -131,7 +131,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("multi_path_generic_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && !out.wants_file_delivery
         && !contract.delivery_required
         && contract.requires_content_evidence
@@ -154,7 +154,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("single_path_generic_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && !out.wants_file_delivery
         && !contract.delivery_required
         && contract.requires_content_evidence
@@ -176,11 +176,10 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("single_path_scalar_count_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+    if structured_execution_signal
         && !out.wants_file_delivery
         && !contract.delivery_required
         && contract.requires_content_evidence
-        && out.answer_candidate.trim().is_empty()
         && matches!(
             parse_output_delivery_intent(&contract.delivery_intent),
             OutputDeliveryIntent::None
@@ -204,33 +203,10 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
     {
         return Some("locatorless_generic_evidence_contract_needs_semantic_shape_review");
     }
-    if parse_first_layer_decision_text(&out.decision) != Some(FirstLayerDecision::DirectAnswer) {
+    if structured_execution_signal {
         return None;
     }
-    if out.wants_file_delivery {
-        return Some("chat_route_with_file_delivery_request");
-    }
-    if contract.requires_content_evidence {
-        return Some("chat_route_requires_content_evidence");
-    }
-    if contract.delivery_required {
-        return Some("chat_route_requires_delivery");
-    }
-    if !matches!(
-        parse_output_semantic_kind(&contract.semantic_kind),
-        OutputSemanticKind::None | OutputSemanticKind::FileBasename
-    ) {
-        return Some("chat_route_has_observable_semantic_kind");
-    }
-    if !matches!(
-        parse_output_locator_kind(&contract.locator_kind),
-        OutputLocatorKind::None
-    ) && !contract.locator_hint.trim().is_empty()
-    {
-        return Some("chat_route_has_observable_locator");
-    }
-    if out.answer_candidate.trim().is_empty()
-        && contract.exact_sentence_count.is_none()
+    if contract.exact_sentence_count.is_none()
         && matches!(
             parse_output_response_shape(&contract.response_shape),
             OutputResponseShape::Free
@@ -247,6 +223,35 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
         return Some("workspace_identity_chat_route_needs_semantic_review");
     }
     None
+}
+
+fn normalizer_output_has_structured_execution_signal(
+    out: &IntentNormalizerOut,
+    contract: &IntentOutputContractOut,
+) -> bool {
+    out.wants_file_delivery
+        || schedule_kind_declares_boundary(&out.schedule_kind)
+        || contract.requires_content_evidence
+        || contract.delivery_required
+        || !matches!(
+            parse_output_delivery_intent(&contract.delivery_intent),
+            OutputDeliveryIntent::None
+        )
+        || !matches!(
+            parse_output_locator_kind(&contract.locator_kind),
+            OutputLocatorKind::None
+        )
+        || !contract.locator_hint.trim().is_empty()
+        || matches!(
+            parse_output_response_shape(&contract.response_shape),
+            OutputResponseShape::FileToken
+        )
+        || normalizer_execution_recipe_declares_active_profile(out.execution_recipe.as_ref())
+}
+
+fn schedule_kind_declares_boundary(raw: &str) -> bool {
+    let token = raw.trim();
+    !token.is_empty() && !token.eq_ignore_ascii_case("none")
 }
 
 fn raw_command_locator_contract_has_observable_target(

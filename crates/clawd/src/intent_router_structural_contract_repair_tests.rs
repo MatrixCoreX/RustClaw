@@ -23,11 +23,11 @@ fn structural_contract_repair_routes_file_field_scalar_to_evidence() {
         .nth(2)
         .expect("workspace root");
     let reason = super::apply_current_turn_structural_contract_repair(
+        "scalar_path_only",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -71,11 +71,11 @@ fn structural_contract_repair_file_paths_missing_file_locator_uses_parent_dir() 
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -111,11 +111,11 @@ fn structural_contract_repair_promotes_mixed_existence_and_content_summary() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -153,11 +153,11 @@ fn structural_contract_repair_promotes_strict_mixed_existence_and_content_summar
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -195,11 +195,11 @@ fn structural_contract_repair_keeps_single_existence_path_verdict() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -228,11 +228,11 @@ fn structural_contract_repair_preserves_directory_scoped_scalar_path_lookup() {
         .nth(2)
         .expect("workspace root");
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -259,11 +259,11 @@ fn structural_contract_repair_keeps_workspace_summary_on_workspace_root_name() {
     };
     let workspace_root = std::path::Path::new("/tmp/rustclaw");
     let _ = super::apply_current_turn_structural_contract_repair(
+        "workspace_project_summary",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -289,11 +289,11 @@ fn structural_contract_repair_preserves_chat_workspace_name_without_evidence() {
         self_extension: crate::SelfExtensionContract::default(),
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/tmp/rustclaw"),
-        FirstLayerDecision::DirectAnswer,
         "RustClaw 是一个面向自然语言自动化的本地 agent 项目。",
         None,
         None,
@@ -324,11 +324,11 @@ fn structural_contract_repair_preserves_file_path_only_delivery() {
         .nth(2)
         .expect("workspace root");
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -359,11 +359,11 @@ fn structural_contract_repair_promotes_file_token_delivery_to_generated_artifact
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "generated_file_delivery",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -397,11 +397,11 @@ fn structural_contract_repair_keeps_filename_delivery_out_of_generated_artifact(
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -439,11 +439,11 @@ fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_exi
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "generated_file_delivery",
         &mut contract,
         req,
         &surface,
         &workspace,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -480,11 +480,11 @@ fn structural_contract_repair_keeps_new_filename_generated_delivery() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "generated_file_delivery",
         &mut contract,
         req,
         &surface,
         &workspace,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -528,11 +528,11 @@ fn structural_contract_repair_converts_existing_generated_delivery_with_counted_
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         &req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -565,6 +565,7 @@ fn semantic_contract_repair_ignores_invented_answer_candidate_for_observation() 
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
@@ -572,7 +573,6 @@ fn semantic_contract_repair_ignores_invented_answer_candidate_for_observation() 
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "没有 (路径未找到)",
         None,
         None,
@@ -602,11 +602,11 @@ fn semantic_contract_repair_promotes_empty_path_locator_for_multi_path_facts() {
     };
 
     super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -638,11 +638,11 @@ fn semantic_contract_repair_replaces_combined_path_hint_for_multi_path_facts() {
         };
 
     super::apply_current_turn_structural_contract_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -662,6 +662,7 @@ fn scalar_file_contract_repair_ignores_invented_answer_candidate() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -669,7 +670,6 @@ fn scalar_file_contract_repair_ignores_invented_answer_candidate() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "rustclaw",
         None,
         None,
@@ -697,6 +697,7 @@ fn dotted_structured_field_repair_overrides_structured_keys_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "structured_keys",
         &mut contract,
         req,
         &surface,
@@ -704,7 +705,6 @@ fn dotted_structured_field_repair_overrides_structured_keys_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -739,6 +739,7 @@ fn dotted_structured_field_repair_overrides_config_validation_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "config_validation",
         &mut contract,
         req,
         &surface,
@@ -746,7 +747,6 @@ fn dotted_structured_field_repair_overrides_config_validation_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -778,6 +778,7 @@ fn dotted_structured_field_repair_overrides_quantity_comparison_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -785,7 +786,6 @@ fn dotted_structured_field_repair_overrides_quantity_comparison_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -817,6 +817,7 @@ fn structured_field_pair_repair_overrides_quantity_comparison_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -824,7 +825,6 @@ fn structured_field_pair_repair_overrides_quantity_comparison_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -862,6 +862,7 @@ fn structured_config_keys_repair_overrides_file_names_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -869,7 +870,6 @@ fn structured_config_keys_repair_overrides_file_names_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -898,6 +898,7 @@ fn structured_identifier_presence_repair_overrides_file_existence_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -905,7 +906,6 @@ fn structured_identifier_presence_repair_overrides_file_existence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -937,6 +937,7 @@ fn structured_identifier_presence_repair_overrides_config_validation_contract() 
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -944,7 +945,6 @@ fn structured_identifier_presence_repair_overrides_config_validation_contract() 
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -976,6 +976,7 @@ fn structured_identifier_presence_repair_overrides_content_presence_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -983,7 +984,6 @@ fn structured_identifier_presence_repair_overrides_content_presence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1015,6 +1015,7 @@ fn quoted_literal_presence_repair_overrides_path_existence_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1022,7 +1023,6 @@ fn quoted_literal_presence_repair_overrides_path_existence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1056,6 +1056,7 @@ fn scalar_structured_keys_contract_repairs_to_field_value_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "structured_keys",
         &mut contract,
         req,
         &surface,
@@ -1063,7 +1064,6 @@ fn scalar_structured_keys_contract_repairs_to_field_value_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1095,6 +1095,7 @@ fn current_workspace_scalar_structured_keys_contract_repairs_to_field_value_cont
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "structured_keys",
         &mut contract,
         req,
         &surface,
@@ -1102,7 +1103,6 @@ fn current_workspace_scalar_structured_keys_contract_repairs_to_field_value_cont
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1129,6 +1129,7 @@ fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1136,7 +1137,6 @@ fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1149,6 +1149,35 @@ fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
 }
 
 #[test]
+fn finalizer_language_policy_dry_run_keeps_locatorless_contract() {
+    let req = "Dry-run only: finalizer/LLM/i18n may render user language, but runtime returns message_key or structured_evidence.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn inline_json_payload_context_is_not_repaired_as_path_content() {
     let req = r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -1158,6 +1187,7 @@ fn inline_json_payload_context_is_not_repaired_as_path_content() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1165,7 +1195,6 @@ fn inline_json_payload_context_is_not_repaired_as_path_content() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1191,6 +1220,7 @@ fn inline_json_transform_repairs_misclassified_content_excerpt_contract() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1198,7 +1228,6 @@ fn inline_json_transform_repairs_misclassified_content_excerpt_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1223,6 +1252,7 @@ fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1230,7 +1260,6 @@ fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        FirstLayerDecision::DirectAnswer,
         "acknowledged",
         None,
         None,
@@ -1240,128 +1269,6 @@ fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
-}
-
-#[test]
-fn answer_candidate_existing_relative_path_routes_to_evidence() {
-    let workspace = make_temp_workspace_with_child("answer_candidate_path", "docs");
-    let relative = "docs/report.md";
-    std::fs::write(workspace.join(relative), "report").expect("write report");
-    let mut contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        ..IntentOutputContract::default()
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-
-    let reason = super::apply_answer_candidate_path_evidence_repair(
-        &mut contract,
-        &format!("`{relative}`"),
-        None,
-        &workspace,
-        false,
-        &mut decision,
-        &mut finalize_style,
-    );
-
-    assert_eq!(reason, Some("answer_candidate_path_requires_evidence"));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
-    assert_eq!(contract.locator_hint, relative);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::ScalarPathOnly);
-    std::fs::remove_dir_all(workspace).ok();
-}
-
-#[test]
-fn answer_candidate_existing_bare_filename_stays_chat_without_evidence_repair() {
-    let workspace = make_temp_workspace_with_child("answer_candidate_bare_filename", "docs");
-    std::fs::write(workspace.join("README.md"), "readme").expect("write readme");
-    let mut contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        ..IntentOutputContract::default()
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-
-    let reason = super::apply_answer_candidate_path_evidence_repair(
-        &mut contract,
-        "README.md",
-        None,
-        &workspace,
-        false,
-        &mut decision,
-        &mut finalize_style,
-    );
-
-    assert_eq!(reason, None);
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    std::fs::remove_dir_all(workspace).ok();
-}
-
-#[test]
-fn answer_candidate_plain_scalar_stays_chat_without_evidence() {
-    let workspace = make_temp_workspace_with_child("answer_candidate_scalar", "docs");
-    let mut contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        ..IntentOutputContract::default()
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-
-    let reason = super::apply_answer_candidate_path_evidence_repair(
-        &mut contract,
-        "my_abcd",
-        None,
-        &workspace,
-        false,
-        &mut decision,
-        &mut finalize_style,
-    );
-
-    assert_eq!(reason, None);
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    std::fs::remove_dir_all(workspace).ok();
-}
-
-#[test]
-fn deictic_filename_answer_candidate_stays_chat_without_path_evidence_repair() {
-    let workspace = make_temp_workspace_with_child("answer_candidate_deictic", "docs");
-    std::fs::write(workspace.join("README.md"), "readme").expect("write readme");
-    let mut contract = IntentOutputContract {
-        exact_sentence_count: None,
-        response_shape: OutputResponseShape::Scalar,
-        ..IntentOutputContract::default()
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize_style = crate::ActFinalizeStyle::Plain;
-    let patch = serde_json::json!({"output_format":"filename_only"});
-
-    let reason = super::apply_answer_candidate_path_evidence_repair(
-        &mut contract,
-        "README.md",
-        Some(&patch),
-        &workspace,
-        false,
-        &mut decision,
-        &mut finalize_style,
-    );
-
-    assert_eq!(reason, None);
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    std::fs::remove_dir_all(workspace).ok();
 }
 
 #[test]
@@ -1376,11 +1283,11 @@ fn structural_contract_repair_does_not_bind_workspace_child_mentions() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         &workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -1404,11 +1311,11 @@ fn structural_contract_repair_does_not_bind_case_mismatched_product_name() {
         ..IntentOutputContract::default()
     };
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         &workspace_root,
-        FirstLayerDecision::DirectAnswer,
         "",
         None,
         None,
@@ -1421,8 +1328,8 @@ fn structural_contract_repair_does_not_bind_case_mismatched_product_name() {
 }
 
 #[test]
-fn executionless_chat_wrapped_execute_is_downgraded_to_direct_answer() {
-    let mut decision = FirstLayerDecision::PlannerExecute;
+fn executionless_chat_wrapped_execute_uses_plain_finalizer_before_final_gate() {
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -1430,8 +1337,7 @@ fn executionless_chat_wrapped_execute_is_downgraded_to_direct_answer() {
         ..IntentOutputContract::default()
     };
 
-    let reason = super::downgrade_executionless_route_to_direct_answer(
-        &mut decision,
+    let reason = super::cleanup_executionless_route_finalize_style(
         &mut finalize_style,
         false,
         &contract,
@@ -1444,7 +1350,7 @@ fn executionless_chat_wrapped_execute_is_downgraded_to_direct_answer() {
         reason,
         Some("executionless_route_downgraded_to_direct_answer")
     );
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
 }
 
@@ -1469,6 +1375,22 @@ fn parse_output_semantic_kind_accepts_generated_file_path_report() {
     assert_eq!(
         super::normalize_output_semantic_kind_for_schema("write_then_report_path"),
         OutputSemanticKind::GeneratedFilePathReport.as_str()
+    );
+}
+
+#[test]
+fn parse_output_semantic_kind_accepts_photo_organization() {
+    assert_eq!(
+        super::parse_output_semantic_kind("photo_organization"),
+        OutputSemanticKind::PhotoOrganization
+    );
+    assert_eq!(
+        super::parse_output_semantic_kind("photo_source_candidates"),
+        OutputSemanticKind::PhotoOrganization
+    );
+    assert_eq!(
+        super::normalize_output_semantic_kind_for_schema("photo_organize"),
+        OutputSemanticKind::PhotoOrganization.as_str()
     );
 }
 

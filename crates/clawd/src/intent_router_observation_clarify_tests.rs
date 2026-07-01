@@ -19,9 +19,10 @@ fn structured_observation_clarify_repair_routes_concrete_file_request_to_act() {
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供 package.json 文件内容".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -32,14 +33,13 @@ fn structured_observation_clarify_repair_routes_concrete_file_request_to_act() {
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("structured_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
     assert_eq!(contract.locator_hint, "package.json");
@@ -60,9 +60,10 @@ fn structured_observation_clarify_repair_fills_file_delivery_filename_locator() 
     let mut needs_clarify = true;
     let mut clarify_question =
         "请提供 definitely_missing_named_file_phase0_runtime_20260515.txt 的完整路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -73,14 +74,13 @@ fn structured_observation_clarify_repair_fills_file_delivery_filename_locator() 
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("structured_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
     assert_eq!(
         contract.locator_hint,
@@ -105,9 +105,10 @@ fn structured_observation_clarify_repair_routes_multi_filename_request_to_worksp
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供具体的文件夹路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -115,17 +116,57 @@ fn structured_observation_clarify_repair_routes_multi_filename_request_to_worksp
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("structured_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
     assert_eq!(contract.locator_hint, workspace_root.display().to_string());
+}
+
+#[test]
+fn structured_observation_clarify_repair_requires_machine_shape_not_semantic_kind_alone() {
+    let surface = crate::intent::surface_signals::PromptSurfaceSignals {
+        filename_candidates: vec!["README.md".to_string()],
+        single_filename_candidate: Some("README.md".to_string()),
+        ..Default::default()
+    };
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+    let mut needs_clarify = true;
+    let mut clarify_question = "provide the missing target".to_string();
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+    let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
+        &mut contract,
+        "README.md",
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        None,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut finalize_style,
+    );
+
+    assert_eq!(reason, None);
+    assert!(needs_clarify);
+    assert_eq!(clarify_question, "provide the missing target");
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
 }
 
 #[test]
@@ -143,22 +184,22 @@ fn workspace_default_observation_clarify_repair_routes_listing_without_absolute_
     };
     let mut needs_clarify = true;
     let mut clarify_question = "Please provide the full UI directory path.".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_workspace_default_observation_clarify_repair(
+        "file_names",
         &mut contract,
         workspace_root,
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("workspace_default_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
     assert_eq!(contract.locator_hint, workspace_root.display().to_string());
 }
@@ -179,15 +220,15 @@ fn workspace_default_observation_clarify_repair_keeps_unbound_scalar_count_clari
     };
     let mut needs_clarify = true;
     let mut clarify_question = "provide the missing directory target".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_workspace_default_observation_clarify_repair(
+        "",
         &mut contract,
         workspace_root,
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -200,7 +241,7 @@ fn workspace_default_observation_clarify_repair_keeps_unbound_scalar_count_clari
 }
 
 #[test]
-fn workspace_default_observation_clarify_repair_routes_docker_contract_to_act() {
+fn workspace_default_observation_clarify_repair_ignores_legacy_docker_contract_marker() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -215,22 +256,22 @@ fn workspace_default_observation_clarify_repair_routes_docker_contract_to_act() 
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_workspace_default_observation_clarify_repair(
+        "docker_container_lifecycle",
         &mut contract,
         workspace_root,
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
-    assert_eq!(reason, Some("workspace_default_observation_clarify_repair"));
-    assert!(!needs_clarify);
-    assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(reason, None);
+    assert!(needs_clarify);
+    assert!(!clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(
         contract.semantic_kind,
         OutputSemanticKind::DockerContainerLifecycle
@@ -249,26 +290,84 @@ fn locatorless_observation_clarify_repair_routes_service_status_to_act() {
     };
     let mut needs_clarify = true;
     let mut clarify_question = "Please provide the service target.".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_locatorless_observation_clarify_repair(
+        "service_status",
         &mut contract,
+        "",
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("locatorless_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ServiceStatus);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn locatorless_observation_clarify_repair_accepts_capability_ref_with_semantic_none() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+    let mut needs_clarify = true;
+    let mut clarify_question = "Please provide the target.".to_string();
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+    let reason = super::apply_locatorless_observation_clarify_repair(
+        "",
+        &mut contract,
+        "capability_ref=weather.current place=Beijing",
+        None,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut finalize_style,
+    );
+
+    assert_eq!(reason, Some("locatorless_observation_clarify_repair"));
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+}
+
+#[test]
+fn locatorless_observation_clarify_repair_accepts_any_capability_ref_machine_token() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        semantic_kind: OutputSemanticKind::None,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+    let mut needs_clarify = true;
+    let mut clarify_question = "Please provide the target.".to_string();
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+    let reason = super::apply_locatorless_observation_clarify_repair(
+        "",
+        &mut contract,
+        "capability_ref=weather.current_extra place=Beijing",
+        None,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut finalize_style,
+    );
+
+    assert_eq!(reason, Some("locatorless_observation_clarify_repair"));
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
 }
 
 #[test]
@@ -286,7 +385,6 @@ fn deictic_missing_locator_state_patch_forces_boundary_clarify_contract() {
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_deictic_missing_locator_state_patch_clarify_repair(
@@ -294,7 +392,6 @@ fn deictic_missing_locator_state_patch_forces_boundary_clarify_contract() {
         Some(&patch),
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -303,7 +400,6 @@ fn deictic_missing_locator_state_patch_forces_boundary_clarify_contract() {
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
 }
 
@@ -332,7 +428,7 @@ fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let surface_req = super::request_without_contract_test_hint(req);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
@@ -345,7 +441,6 @@ fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
         &mut wants_file_delivery,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -360,7 +455,7 @@ fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
 }
 
 #[test]
-fn structured_contract_hint_repair_keeps_package_manager_locatorless() {
+fn structured_contract_hint_repair_ignores_legacy_package_manager_semantic_hint() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -384,7 +479,7 @@ fn structured_contract_hint_repair_keeps_package_manager_locatorless() {
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let surface_req = super::request_without_contract_test_hint(req);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
@@ -397,20 +492,16 @@ fn structured_contract_hint_repair_keeps_package_manager_locatorless() {
         &mut wants_file_delivery,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
-    assert_eq!(reason, Some("structured_contract_hint_repair"));
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::PackageManagerDetection
-    );
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
-    assert!(!needs_clarify);
-    assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(reason, None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "model-supplied-background-locator");
+    assert!(needs_clarify);
+    assert!(!clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::Clarify);
 }
 
 #[test]
@@ -436,7 +527,7 @@ fn structured_contract_hint_repair_keeps_tool_discovery_context_only() {
     };
     let mut needs_clarify = true;
     let mut clarify_question = "provide locator".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let surface_req = super::request_without_contract_test_hint(req);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
@@ -449,7 +540,6 @@ fn structured_contract_hint_repair_keeps_tool_discovery_context_only() {
         &mut wants_file_delivery,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -461,7 +551,7 @@ fn structured_contract_hint_repair_keeps_tool_discovery_context_only() {
     assert!(contract.locator_hint.is_empty());
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
 }
 
 #[test]
@@ -494,7 +584,7 @@ fn structured_contract_hint_repair_sets_generated_file_delivery_defaults() {
     let mut wants_file_delivery = false;
     let mut needs_clarify = true;
     let mut clarify_question = "请提供要发送的文件路径或文件名。".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_structured_contract_hint_repair(
@@ -505,7 +595,6 @@ fn structured_contract_hint_repair_sets_generated_file_delivery_defaults() {
         &mut wants_file_delivery,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -525,7 +614,7 @@ fn structured_contract_hint_repair_sets_generated_file_delivery_defaults() {
     assert!(contract
         .locator_hint
         .contains("tmp/contract_matrix_generated_note.txt"));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
 }
 
 #[test]
@@ -562,11 +651,11 @@ fn current_turn_contract_repair_does_not_path_bind_package_manager_hint() {
         ..IntentOutputContract::default()
     };
     let _ = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         &surface_req,
         &surface,
         workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::Standalone),
@@ -624,7 +713,7 @@ fn contract_hint_fallback_recovers_git_route_without_nl_tokens() {
 }
 
 #[test]
-fn contract_hint_fallback_keeps_package_manager_locatorless() {
+fn contract_hint_fallback_ignores_legacy_package_manager_semantic_hint() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -641,19 +730,9 @@ fn contract_hint_fallback_keeps_package_manager_locatorless() {
         &surface,
         workspace_root,
         "normalizer_parse_failed_contract_hint",
-    )
-    .expect("contract hint fallback");
+    );
 
-    assert!(!decision.needs_clarify);
-    assert_eq!(
-        decision.output_contract.semantic_kind,
-        OutputSemanticKind::PackageManagerDetection
-    );
-    assert_eq!(
-        decision.output_contract.locator_kind,
-        OutputLocatorKind::None
-    );
-    assert!(decision.output_contract.locator_hint.is_empty());
+    assert!(decision.is_none());
 }
 
 #[test]
@@ -777,14 +856,16 @@ fn structured_observation_clarify_repair_routes_two_explicit_targets_to_act() {
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
         semantic_kind: OutputSemanticKind::FileNames,
         ..IntentOutputContract::default()
     };
     let mut needs_clarify = true;
     let mut clarify_question = "您希望我执行文件大小比较操作吗？".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -792,14 +873,13 @@ fn structured_observation_clarify_repair_routes_two_explicit_targets_to_act() {
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, Some("structured_observation_clarify_repair"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(
@@ -821,12 +901,13 @@ fn resolved_directory_observation_clarify_repair_routes_existing_workspace_dir_t
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
         semantic_kind: OutputSemanticKind::FileNames,
         ..IntentOutputContract::default()
     };
     let mut needs_clarify = true;
     let mut clarify_question = "Should I use document or docs?".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_resolved_directory_observation_clarify_repair(
@@ -837,7 +918,6 @@ fn resolved_directory_observation_clarify_repair_routes_existing_workspace_dir_t
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -847,7 +927,7 @@ fn resolved_directory_observation_clarify_repair_routes_existing_workspace_dir_t
     );
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(
@@ -882,7 +962,7 @@ fn resolved_directory_observation_clarify_repair_recovers_empty_extension_listin
     };
     let mut needs_clarify = true;
     let mut clarify_question = "Please provide the directory path.".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_resolved_directory_observation_clarify_repair(
@@ -893,7 +973,6 @@ fn resolved_directory_observation_clarify_repair_recovers_empty_extension_listin
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -903,7 +982,7 @@ fn resolved_directory_observation_clarify_repair_recovers_empty_extension_listin
     );
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -935,7 +1014,7 @@ fn resolved_directory_observation_clarify_repair_preserves_non_locator_semantics
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供要查看的 schema 文件的路径或名称。".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_resolved_directory_observation_clarify_repair(
@@ -946,7 +1025,6 @@ fn resolved_directory_observation_clarify_repair_preserves_non_locator_semantics
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -972,7 +1050,7 @@ fn resolved_directory_observation_clarify_repair_preserves_bare_locator_only_rep
     };
     let mut needs_clarify = true;
     let mut clarify_question = "What should I do with docs?".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_resolved_directory_observation_clarify_repair(
@@ -983,7 +1061,6 @@ fn resolved_directory_observation_clarify_repair_preserves_bare_locator_only_rep
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1013,7 +1090,6 @@ fn unbound_workspace_generic_content_repair_clarifies_short_topic() {
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_unbound_workspace_generic_content_clarify_repair(
@@ -1022,7 +1098,6 @@ fn unbound_workspace_generic_content_repair_clarifies_short_topic() {
         &surface,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1032,7 +1107,6 @@ fn unbound_workspace_generic_content_repair_clarifies_short_topic() {
     );
     assert!(needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
@@ -1053,7 +1127,6 @@ fn unbound_workspace_generic_content_repair_preserves_structured_semantic() {
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_unbound_workspace_generic_content_clarify_repair(
@@ -1062,13 +1135,11 @@ fn unbound_workspace_generic_content_repair_preserves_structured_semantic() {
         &surface,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, None);
     assert!(!needs_clarify);
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(
         contract.semantic_kind,
         OutputSemanticKind::QuantityComparison
@@ -1092,7 +1163,6 @@ fn unbound_workspace_generic_content_repair_preserves_concrete_locator_surface()
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_unbound_workspace_generic_content_clarify_repair(
@@ -1101,13 +1171,11 @@ fn unbound_workspace_generic_content_repair_preserves_concrete_locator_surface()
         &surface,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
     assert_eq!(reason, None);
     assert!(!needs_clarify);
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
 }
 
@@ -1122,9 +1190,10 @@ fn structured_observation_clarify_repair_preserves_named_target_without_clean_lo
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供 README 的具体内容或文件路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1135,7 +1204,6 @@ fn structured_observation_clarify_repair_preserves_named_target_without_clean_lo
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1157,11 +1225,12 @@ fn structured_observation_clarify_repair_preserves_deictic_bare_target_clarify()
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请确认具体 README 路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let patch = serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}});
 
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1172,7 +1241,6 @@ fn structured_observation_clarify_repair_preserves_deictic_bare_target_clarify()
         Some(&patch),
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1196,10 +1264,11 @@ fn structured_observation_clarify_repair_preserves_unbound_scope_filename_target
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供 case_only 目录的完整路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "existence_with_path",
         &mut contract,
         req,
         &surface,
@@ -1210,7 +1279,6 @@ fn structured_observation_clarify_repair_preserves_unbound_scope_filename_target
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1234,10 +1302,11 @@ fn structured_observation_clarify_repair_preserves_version_correction_clarify() 
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请确认要修正哪段内容".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1248,7 +1317,6 @@ fn structured_observation_clarify_repair_preserves_version_correction_clarify() 
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1272,11 +1340,12 @@ fn structured_observation_clarify_repair_preserves_deictic_with_destination_path
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供压缩包路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let patch = serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}});
 
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1287,7 +1356,6 @@ fn structured_observation_clarify_repair_preserves_deictic_with_destination_path
         Some(&patch),
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -1311,10 +1379,11 @@ fn structured_observation_clarify_repair_preserves_deictic_destination_without_p
     };
     let mut needs_clarify = true;
     let mut clarify_question = "请提供压缩包路径".to_string();
-    let mut decision = FirstLayerDecision::Clarify;
+    let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
     let reason = super::apply_spurious_structured_observation_clarify_repair(
+        "",
         &mut contract,
         req,
         &surface,
@@ -1325,7 +1394,6 @@ fn structured_observation_clarify_repair_preserves_deictic_destination_without_p
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 

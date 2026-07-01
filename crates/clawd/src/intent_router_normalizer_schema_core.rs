@@ -1,26 +1,21 @@
 use serde_json::Value;
 
-use crate::FirstLayerDecision;
-
 use super::{
-    answer_candidate_value_text, canonical_first_layer_decision_token,
     execution_recipe_value_declares_command_payload,
-    execution_recipe_value_declares_package_manager_detection,
+    execution_recipe_value_declares_package_detect_manager_capability,
     execution_recipe_value_declares_scalar_runtime_tool_observation,
     execution_recipe_value_declares_service_status_observation,
     execution_recipe_value_declares_structured_read_observation,
     execution_recipe_value_declares_structured_scalar_extraction,
     execution_recipe_value_locator_hint, execution_recipe_value_structured_locator_hint,
-    force_output_contract_semantic_kind, mark_decision_planner_execute_from_execution_recipe,
-    mark_output_contract_requires_content_evidence, normalize_output_contract_for_command_payload,
-    normalize_output_contract_for_package_manager_detection, normalize_output_contract_for_schema,
-    normalize_output_contract_for_service_status_recipe,
-    normalize_output_contract_for_structured_read_recipe, normalize_output_locator_kind_for_schema,
-    normalize_output_semantic_kind_for_schema, normalize_schema_token,
+    force_output_contract_semantic_kind, mark_output_contract_requires_content_evidence,
+    normalize_output_contract_for_command_payload,
+    normalize_output_contract_for_package_detect_manager_capability,
+    normalize_output_contract_for_schema, normalize_output_contract_for_service_status_recipe,
+    normalize_output_contract_for_structured_read_recipe, normalize_schema_token,
     normalizer_object_declares_tool_action_payload, output_recipe_value_declares_execution,
-    parse_output_semantic_kind, promote_misnested_turn_analysis_from_execution_recipe,
-    request_uses_filename_only_schema_token, scalar_json_value_text,
-    scalar_runtime_status_kind_from_execution_recipe,
+    promote_misnested_turn_analysis_from_execution_recipe, request_uses_filename_only_schema_token,
+    scalar_json_value_text, scalar_runtime_status_kind_from_execution_recipe,
     scalar_runtime_status_kind_from_output_contract, upsert_runtime_status_query_state_patch,
     OutputSemanticKind,
 };
@@ -39,6 +34,7 @@ pub(super) fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: 
     normalize_intent_normalizer_scalar_types_for_schema(&mut obj);
     normalize_execution_recipe_for_schema(&mut obj, req);
     normalize_output_contract_for_schema(&mut obj);
+    sync_compat_decision_trace_for_schema(&mut obj);
     serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| raw.to_string())
 }
 
@@ -55,16 +51,7 @@ pub(super) fn normalize_intent_normalizer_scalar_types_for_schema(
 }
 
 fn normalize_answer_candidate_field(obj: &mut serde_json::Map<String, Value>) {
-    match obj.get("answer_candidate") {
-        Some(Value::String(_)) => {}
-        Some(Value::Null) | None => {
-            obj.insert("answer_candidate".to_string(), Value::String(String::new()));
-        }
-        Some(value) => {
-            let text = answer_candidate_value_text(value).unwrap_or_default();
-            obj.insert("answer_candidate".to_string(), Value::String(text));
-        }
-    }
+    obj.insert("answer_candidate".to_string(), Value::String(String::new()));
 }
 
 fn normalize_string_field_with_default(
@@ -175,15 +162,9 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
         .or_insert_with(|| Value::String(String::new()));
     obj.entry("confidence".to_string())
         .or_insert_with(|| Value::from(0.8));
-    normalize_string_field_with_default(obj, "decision", "");
-    let canonical_decision = obj
-        .get("decision")
-        .and_then(|v| v.as_str())
-        .and_then(canonical_first_layer_decision_token);
-    let decision = canonical_decision.unwrap_or(crate::FirstLayerDecision::DirectAnswer);
     obj.insert(
         "decision".to_string(),
-        Value::String(decision.as_str().to_string()),
+        Value::String(crate::FirstLayerDecision::DirectAnswer.as_str().to_string()),
     );
     obj.entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
@@ -207,6 +188,95 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "attachment_processing_required", false);
+}
+
+pub(super) fn sync_compat_decision_trace_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    let decision = compat_decision_trace_from_machine_fields(obj);
+    obj.insert(
+        "decision".to_string(),
+        Value::String(decision.as_str().to_string()),
+    );
+}
+
+fn compat_decision_trace_from_machine_fields(
+    obj: &serde_json::Map<String, Value>,
+) -> crate::FirstLayerDecision {
+    if obj
+        .get("needs_clarify")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return crate::FirstLayerDecision::Clarify;
+    }
+    if normalizer_object_declares_tool_action_payload(obj)
+        || schema_machine_token_field_is_not_none(obj, "schedule_kind")
+        || obj
+            .get("wants_file_delivery")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || output_contract_has_execution_signal(obj.get("output_contract"))
+        || normalized_execution_recipe_has_execution_signal(obj.get("execution_recipe"))
+    {
+        return crate::FirstLayerDecision::PlannerExecute;
+    }
+    crate::FirstLayerDecision::DirectAnswer
+}
+
+fn output_contract_has_execution_signal(value: Option<&Value>) -> bool {
+    let Some(contract) = value.and_then(Value::as_object) else {
+        return false;
+    };
+    contract
+        .get("requires_content_evidence")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || contract
+            .get("delivery_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || schema_machine_token_field_is_not_none(contract, "locator_kind")
+        || contract
+            .get("locator_hint")
+            .and_then(scalar_json_value_text)
+            .is_some_and(|value| !value.trim().is_empty())
+        || schema_machine_token_field_is_not_none(contract, "delivery_intent")
+        || contract
+            .get("response_shape")
+            .and_then(scalar_json_value_text)
+            .is_some_and(|value| normalize_schema_token(&value) == "file_token")
+        || self_extension_has_execution_signal(contract.get("self_extension"))
+}
+
+fn self_extension_has_execution_signal(value: Option<&Value>) -> bool {
+    let Some(contract) = value.and_then(Value::as_object) else {
+        return false;
+    };
+    schema_machine_token_field_is_not_none(contract, "mode")
+        || schema_machine_token_field_is_not_none(contract, "trigger")
+        || contract
+            .get("execute_now")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn normalized_execution_recipe_has_execution_signal(value: Option<&Value>) -> bool {
+    let Some(recipe) = value.and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(kind) = recipe.get("kind").and_then(scalar_json_value_text) else {
+        return false;
+    };
+    !matches!(
+        crate::execution_recipe::parse_execution_recipe_kind_text(&kind),
+        crate::execution_recipe::ExecutionRecipeKind::None
+    )
+}
+
+fn schema_machine_token_field_is_not_none(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
+    obj.get(key)
+        .and_then(scalar_json_value_text)
+        .map(|value| normalize_schema_token(&value))
+        .is_some_and(|token| !token.is_empty() && token != "none")
 }
 
 fn normalize_schedule_kind_for_schema(obj: &mut serde_json::Map<String, Value>) {
@@ -234,19 +304,6 @@ fn should_promote_schedule_type_token_to_create(
     obj: &serde_json::Map<String, Value>,
     normalized_schedule_kind: &str,
 ) -> bool {
-    let decision_allows_execution = obj
-        .get("decision")
-        .and_then(|value| value.as_str())
-        .and_then(canonical_first_layer_decision_token)
-        .is_some_and(|decision| {
-            matches!(
-                decision,
-                FirstLayerDecision::PlannerExecute | FirstLayerDecision::Clarify
-            )
-        });
-    if !decision_allows_execution {
-        return false;
-    }
     if is_schedule_type_token(normalized_schedule_kind) {
         return true;
     }
@@ -538,61 +595,6 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
     }
 }
 
-pub(super) fn normalize_decision_from_executable_output_contract(
-    obj: &mut serde_json::Map<String, Value>,
-) {
-    if obj
-        .get("needs_clarify")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let current_decision = obj
-        .get("decision")
-        .and_then(Value::as_str)
-        .and_then(canonical_first_layer_decision_token)
-        .unwrap_or(FirstLayerDecision::DirectAnswer);
-    if current_decision != FirstLayerDecision::DirectAnswer {
-        return;
-    }
-    let Some(contract) = obj
-        .get("output_contract")
-        .and_then(|value| value.as_object())
-    else {
-        return;
-    };
-    let has_executable_contract = contract
-        .get("locator_kind")
-        .and_then(|value| value.as_str())
-        .map(normalize_output_locator_kind_for_schema)
-        .is_some_and(|kind| kind != "none")
-        || contract
-            .get("semantic_kind")
-            .and_then(|value| value.as_str())
-            .map(normalize_output_semantic_kind_for_schema)
-            .is_some_and(|kind| {
-                !matches!(
-                    parse_output_semantic_kind(kind),
-                    OutputSemanticKind::None | OutputSemanticKind::FileBasename
-                )
-            })
-        || contract
-            .get("delivery_required")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
-        || contract
-            .get("requires_content_evidence")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-    if has_executable_contract {
-        obj.insert(
-            "decision".to_string(),
-            Value::String(FirstLayerDecision::PlannerExecute.as_str().to_string()),
-        );
-    }
-}
-
 pub(super) fn normalize_execution_recipe_for_schema(
     obj: &mut serde_json::Map<String, Value>,
     req: &str,
@@ -600,7 +602,6 @@ pub(super) fn normalize_execution_recipe_for_schema(
     promote_misnested_turn_analysis_from_execution_recipe(obj);
     if normalizer_object_declares_tool_action_payload(obj) {
         mark_output_contract_requires_content_evidence(obj);
-        mark_decision_planner_execute_from_execution_recipe(obj);
     }
     let execution_recipe_value = obj.get("execution_recipe").cloned();
     let execution_recipe = execution_recipe_value.as_ref();
@@ -608,10 +609,8 @@ pub(super) fn normalize_execution_recipe_for_schema(
         mark_output_contract_requires_content_evidence(obj);
         let locator_hint = execution_recipe_value_locator_hint(execution_recipe);
         normalize_output_contract_for_command_payload(obj, locator_hint.as_deref());
-        mark_decision_planner_execute_from_execution_recipe(obj);
-    } else if execution_recipe_value_declares_package_manager_detection(execution_recipe) {
-        normalize_output_contract_for_package_manager_detection(obj);
-        mark_decision_planner_execute_from_execution_recipe(obj);
+    } else if execution_recipe_value_declares_package_detect_manager_capability(execution_recipe) {
+        normalize_output_contract_for_package_detect_manager_capability(obj);
     } else if execution_recipe_value_declares_scalar_runtime_tool_observation(
         execution_recipe,
         obj.get("output_contract"),
@@ -624,7 +623,6 @@ pub(super) fn normalize_execution_recipe_for_schema(
         {
             upsert_runtime_status_query_state_patch(obj, kind);
         }
-        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if execution_recipe_value_declares_structured_read_observation(execution_recipe) {
         let locator_hint = execution_recipe_value_structured_locator_hint(execution_recipe);
         let scalar_extraction =
@@ -635,13 +633,10 @@ pub(super) fn normalize_execution_recipe_for_schema(
             scalar_extraction,
             request_uses_filename_only_schema_token(req),
         );
-        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if execution_recipe_value_declares_service_status_observation(execution_recipe) {
         normalize_output_contract_for_service_status_recipe(obj);
-        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if output_recipe_value_declares_execution(obj.get("execution_recipe")) {
         mark_output_contract_requires_content_evidence(obj);
-        mark_decision_planner_execute_from_execution_recipe(obj);
     }
     let value = obj
         .entry("execution_recipe".to_string())
