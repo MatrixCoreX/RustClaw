@@ -159,6 +159,9 @@ mod git_state_tests;
 #[path = "loop_reply_markdown_scalar_tests.rs"]
 mod markdown_scalar_tests;
 
+#[path = "loop_reply_markdown_scalar_text_boundary_tests.rs"]
+mod markdown_scalar_text_boundary_tests;
+
 #[path = "loop_reply_matrix_shape_tests.rs"]
 mod matrix_shape_tests;
 
