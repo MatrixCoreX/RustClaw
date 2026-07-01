@@ -5,6 +5,14 @@ pub(crate) struct CapabilityRef<'a> {
 }
 
 impl<'a> CapabilityRef<'a> {
+    pub(crate) fn namespace(self) -> &'a str {
+        self.namespace
+    }
+
+    pub(crate) fn action(self) -> &'a str {
+        self.action
+    }
+
     fn parse(token: &'a str) -> Option<Self> {
         let capability = token.trim().strip_prefix("capability_ref=")?;
         let (namespace, action) = capability.split_once('.')?;
@@ -82,6 +90,10 @@ pub(crate) fn route_capability_ref_tokens(route: &crate::RouteResult) -> Vec<Str
     tokens.sort();
     tokens.dedup();
     tokens
+}
+
+pub(crate) fn route_first_capability_ref(route: &crate::RouteResult) -> Option<CapabilityRef<'_>> {
+    route_capability_refs(route).next()
 }
 
 fn route_capability_refs(route: &crate::RouteResult) -> impl Iterator<Item = CapabilityRef<'_>> {
