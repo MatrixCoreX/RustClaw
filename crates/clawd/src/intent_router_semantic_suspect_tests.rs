@@ -99,7 +99,7 @@ fn semantic_suspect_treats_semantic_kind_alone_as_descriptive() {
 }
 
 #[test]
-fn semantic_suspect_reviews_workspace_identity_free_chat_route() {
+fn semantic_suspect_reviews_workspace_identity_free_plain_response() {
     let req = "Write a long article about RustClaw";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
     let out = super::IntentNormalizerOut {
@@ -144,12 +144,12 @@ fn semantic_suspect_reviews_workspace_identity_free_chat_route() {
             req,
             std::path::Path::new("/tmp/rustclaw")
         ),
-        Some("workspace_identity_chat_route_needs_semantic_review")
+        Some("workspace_identity_plain_response_needs_boundary_review")
     );
 }
 
 #[test]
-fn semantic_suspect_keeps_workspace_identity_one_sentence_chat_route() {
+fn semantic_suspect_keeps_workspace_identity_one_sentence_plain_response() {
     let req = "你好，用一句话说明 RustClaw 适合帮我做什么";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
     let out = super::IntentNormalizerOut {

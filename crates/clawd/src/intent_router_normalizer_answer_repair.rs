@@ -49,7 +49,7 @@ pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
             &state.skill_rt.workspace_root,
             Some(&state.policy.command_intent),
         ) {
-            if detail == "workspace_identity_chat_route_needs_semantic_review" {
+            if detail == "workspace_identity_plain_response_needs_boundary_review" {
                 if let Some(context) =
                     workspace_identity_semantic_repair_context(req, &state.skill_rt.workspace_root)
                 {
