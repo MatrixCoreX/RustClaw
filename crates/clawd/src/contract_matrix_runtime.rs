@@ -416,7 +416,7 @@ pub(crate) fn contract_trace_action_key_for_output_contract(
     Some(action.as_key())
 }
 
-pub(crate) fn preferred_action_refs_for_output_contract(
+fn preferred_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
     bundled_contract_matrix()
@@ -436,7 +436,7 @@ pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<Action
     preferred_action_refs_for_output_contract(&output_contract)
 }
 
-pub(crate) fn allowed_action_refs_for_output_contract(
+fn allowed_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
     bundled_contract_matrix()
