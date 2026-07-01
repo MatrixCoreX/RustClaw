@@ -85,11 +85,12 @@ fn value_has_structured_listing_observation(value: &serde_json::Value) -> bool {
     {
         return true;
     }
-    value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .is_some_and(|nested| value_has_structured_listing_observation(&nested))
+    false
+}
+
+#[cfg(test)]
+pub(super) fn structured_listing_observation_for_test(value: &serde_json::Value) -> bool {
+    value_has_structured_listing_observation(value)
 }
 
 pub(super) fn directory_entry_groups_prefers_observed_groups(
