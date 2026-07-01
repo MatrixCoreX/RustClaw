@@ -1173,9 +1173,7 @@ pub(super) fn service_status_deterministic_plan_result(
             }
         }
     }
-    if process_basic_available_for_plan(state)
-        && !request_mentions_workspace_product(state, user_text)
-    {
+    if process_basic_available_for_plan(state) {
         if let Some(port) = service_status_process_port_filter(route) {
             return Some(build_plan_result(
                 goal,
@@ -1250,9 +1248,7 @@ pub(super) fn service_status_deterministic_plan_result(
             }],
         ));
     }
-    if health_check_available_for_plan(state)
-        && request_mentions_workspace_product(state, user_text)
-    {
+    if health_check_available_for_plan(state) && route_requests_health_check(route) {
         return Some(build_plan_result(
             goal,
             "deterministic:service_status_health_check",
@@ -1709,6 +1705,23 @@ fn web_search_extract_available_for_plan(state: &AppState) -> bool {
 fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains(skill)
+}
+
+fn route_requests_health_check(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(route, &["system"], &["health"])
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["health_check"],
+            &["check", "run"],
+        )
+        || route_mentions_any_machine_token(
+            route,
+            &[
+                "system.health_check",
+                "health_check.check",
+                "health_check.run",
+            ],
+        )
 }
 
 fn route_requests_config_risk_preview(route: &RouteResult) -> bool {

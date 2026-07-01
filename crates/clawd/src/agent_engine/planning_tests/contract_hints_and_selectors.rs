@@ -1098,12 +1098,38 @@ fn web_search_summary_contract_uses_web_search_extract_plan() {
 }
 
 #[test]
-fn service_status_workspace_product_request_uses_health_check_plan() {
-    let mut state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
-    let tmp = TempDirGuard::new("rustclaw");
-    let project_root = tmp.path.join("rustclaw");
-    fs::create_dir_all(&project_root).expect("project root");
-    state.skill_rt.workspace_root = project_root;
+fn service_status_health_check_capability_uses_health_check_plan() {
+    let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=system.health_check".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "check local project service health",
+        Some(&route),
+        &loop_state,
+        "health request",
+    )
+    .expect("system health capability should use health_check plan");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "health_check");
+            assert!(args.as_object().is_some_and(|obj| obj.is_empty()));
+        }
+        other => panic!("expected health_check action, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_status_workspace_product_text_without_capability_defers_to_planner() {
+    let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
@@ -1115,19 +1141,10 @@ fn service_status_workspace_product_request_uses_health_check_plan() {
         "check local project service health",
         Some(&route),
         &loop_state,
-        "检查本地 RustClaw 服务健康状态，简短输出状态",
-    )
-    .expect("workspace product status should use health_check plan");
+        "check RustClaw health",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "health_check");
-            assert!(args.as_object().is_some_and(|obj| obj.is_empty()));
-        }
-        other => panic!("expected health_check action, got {other:?}"),
-    }
+    assert!(plan.is_none());
 }
 
 #[test]
