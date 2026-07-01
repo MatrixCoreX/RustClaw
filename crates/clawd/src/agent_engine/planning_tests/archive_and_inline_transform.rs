@@ -7,7 +7,7 @@ fn archive_read_contract_recovers_explicit_archive_path_when_locator_hint_is_emp
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let request = format!("读取 {archive} 里的 notes.txt 内容片段，并简短总结。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = request.clone();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -41,7 +41,7 @@ fn archive_read_contract_prefers_complete_request_path_over_basename_locator_hin
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let request = format!("读取 {archive} 里的 notes.txt 内容片段，并简短总结。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = request.clone();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -74,7 +74,7 @@ fn archive_read_structural_member_target_plans_direct_read_without_semantic_labe
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         format!("Read the notes.txt content from archive {archive} and output only it");
     route.output_contract.requires_content_evidence = true;
@@ -135,7 +135,7 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = format!(
         "archive.list archive.read database.list_tables archive={archive} member=notes.txt db_path={db_path}"
     );
@@ -183,13 +183,11 @@ fn archive_database_aggregate_handles_content_excerpt_fallback_route() {
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "llm_failed_existing_path_observation_fallback; explicit_existing_path_observation"
             .to_string();
-    route.route_reason =
-        "workspace_locator_hint_prebound_from_current_request; auto_locator_suppressed_multiple_explicit_paths"
-            .to_string();
+    route.route_reason = "auto_locator_suppressed_multiple_explicit_paths".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -295,7 +293,7 @@ fn inline_json_transform_deterministic_plan_uses_current_payload() {
 }
 
 #[test]
-fn inline_json_transform_derives_group_sum_from_structured_candidate() {
+fn inline_json_transform_does_not_derive_group_sum_from_answer_candidate() {
     let state = test_state_with_enabled_skills(&["transform"]);
     let loop_state = LoopState::new(1);
     let current = r#"对这个 JSON 数组按 team 分组求 amount 总和，只输出 JSON：[{"team":"A","amount":3},{"team":"A","amount":4},{"team":"B","amount":2}]"#;
@@ -310,40 +308,13 @@ fn inline_json_transform_derives_group_sum_from_structured_candidate() {
         &loop_state,
         current,
         Some(&route),
-    )
-    .expect("inline transform should derive group sum");
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let step = &plan.steps[0];
-    assert_eq!(step.action_type, "call_skill");
-    assert_eq!(step.skill, "transform");
-    let op = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(Value::as_object)
-        .expect("group op");
-    assert_eq!(op.get("op").and_then(Value::as_str), Some("group"));
-    assert_eq!(
-        op.get("by")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(Value::as_str),
-        Some("team")
-    );
-    assert_eq!(
-        op.get("aggregations")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("field"))
-            .and_then(Value::as_str),
-        Some("amount")
-    );
+    assert!(plan.is_none());
 }
 
 #[test]
-fn contextual_inline_payload_derives_default_numeric_sort_table() {
+fn contextual_inline_payload_does_not_guess_default_numeric_sort_table() {
     let state = test_state_with_enabled_skills(&["transform"]);
     let loop_state = LoopState::new(1);
     let current = r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
@@ -359,29 +330,13 @@ fn contextual_inline_payload_derives_default_numeric_sort_table() {
         &loop_state,
         current,
         Some(&route),
-    )
-    .expect("contextual inline payload should produce deterministic transform");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("output_format").and_then(Value::as_str),
-        Some("md_table")
     );
-    let op = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(Value::as_object)
-        .expect("sort op");
-    assert_eq!(op.get("op").and_then(Value::as_str), Some("sort"));
-    assert_eq!(op.get("by").and_then(Value::as_str), Some("score"));
-    assert_eq!(op.get("order").and_then(Value::as_str), Some("desc"));
+
+    assert!(plan.is_none());
 }
 
 #[test]
-fn repaired_inline_transform_contract_derives_default_numeric_sort_table() {
+fn repaired_inline_transform_contract_does_not_guess_default_numeric_sort_table() {
     let state = test_state_with_enabled_skills(&["transform"]);
     let loop_state = LoopState::new(1);
     let current = r#"Sort this JSON array by score descending and output only a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
@@ -398,25 +353,9 @@ fn repaired_inline_transform_contract_derives_default_numeric_sort_table() {
         &loop_state,
         current,
         Some(&route),
-    )
-    .expect("repaired inline transform contract should produce deterministic transform");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("output_format").and_then(Value::as_str),
-        Some("md_table")
     );
-    let op = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(Value::as_object)
-        .expect("sort op");
-    assert_eq!(op.get("op").and_then(Value::as_str), Some("sort"));
-    assert_eq!(op.get("by").and_then(Value::as_str), Some("score"));
-    assert_eq!(op.get("order").and_then(Value::as_str), Some("desc"));
+
+    assert!(plan.is_none());
 }
 
 #[test]
@@ -482,7 +421,7 @@ fn inline_json_transform_derives_single_object_rename_without_answer_candidate()
 }
 
 #[test]
-fn inline_json_transform_derives_scalar_sum_after_context_json() {
+fn inline_json_transform_does_not_derive_scalar_sum_from_answer_candidate() {
     let state = test_state_with_enabled_skills(&["transform"]);
     let loop_state = LoopState::new(1);
     let current = r#"计算这个 JSON 数组里 value 的总和，只输出数字：[ {"value": 4}, {"value": 6}, {"value": 5} ]"#;
@@ -502,23 +441,9 @@ Structured inline transform request:
         &loop_state,
         "",
         Some(&route),
-    )
-    .expect("context JSON should not steal scalar aggregate transform");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("result_shape").and_then(Value::as_str),
-        Some("scalar")
     );
-    let op = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(Value::as_object)
-        .expect("aggregate op");
-    assert_eq!(op.get("op").and_then(Value::as_str), Some("aggregate"));
+
+    assert!(plan.is_none());
 }
 
 #[test]
@@ -643,11 +568,18 @@ fn lightweight_prompt_includes_registry_planner_metadata() {
     assert!(quick_index.contains("semantic_tags: archive_list"));
     assert!(quick_index.contains("preferred_over_run_cmd: true"));
     assert!(quick_index.contains("validation_actions: list"));
+    assert!(quick_index.contains("planner_capabilities: archive.list"));
+    assert!(quick_index.contains("optional=format"));
+    assert!(quick_index.contains("risk=high"));
+    assert!(quick_index.contains("output_contract: kind=text"));
+    assert!(quick_index.contains("required=text"));
     assert!(playbooks.contains("### archive_basic"));
     assert!(playbooks.contains("Registry metadata: planner_kind: tool"));
     assert!(playbooks.contains("semantic_tags: archive_list"));
     assert!(playbooks.contains("preferred_over_run_cmd: true"));
     assert!(playbooks.contains("validation_actions: list"));
+    assert!(playbooks.contains("planner_capabilities: archive.list"));
+    assert!(playbooks.contains("output_contract: kind=text"));
     assert!(playbooks.contains("### service_control"));
     assert!(playbooks.contains("semantic_tags: service_status"));
 }
@@ -786,7 +718,7 @@ fn planning_prompt_class_uses_lightweight_execution_for_pwd_only_route() {
 #[test]
 fn planning_prompt_class_uses_lightweight_execution_for_content_evidence_reads() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.route_reason = "llm_contract:generic_filename_read_range".to_string();
     route.resolved_intent = "先读一下 README.md 前 4 行".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
@@ -823,7 +755,7 @@ fn planning_prompt_class_uses_lightweight_for_concrete_path_content_excerpt() {
 #[test]
 fn planning_prompt_class_keeps_open_for_unbounded_chat_wrapped_but_light_for_later_rounds() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
     assert_eq!(
         classify_planning_prompt_class(Some(&route), &route.resolved_intent, &LoopState::default())
@@ -852,7 +784,7 @@ fn planning_prompt_class_uses_lightweight_for_bounded_observation_summary_later_
     route.resolved_intent =
         "Run pwd, inspect clawd process and listening ports, then summarize observed results."
             .to_string();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -870,7 +802,7 @@ fn planning_prompt_class_uses_lightweight_for_bounded_observation_summary_later_
 #[test]
 fn planning_prompt_class_keeps_open_planning_for_current_workspace_drafting() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Write a short RustClaw setup note for the current workspace project".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;

@@ -1,8 +1,8 @@
 use super::*;
 use claw_core::skill_registry::{
     Capability, CapabilityExecutionMode, CapabilityIsolationProfile, OutputKind,
-    PlannerCapabilityEffect, PlannerCapabilityKind, PlannerCapabilityMapping, SkillKind,
-    SkillManifest,
+    PlannerCapabilityEffect, PlannerCapabilityKind, PlannerCapabilityMapping, RegistryDedupScope,
+    SkillKind, SkillManifest, SkillRiskLevel,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -48,7 +48,7 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
 
 #[test]
 fn quick_index_includes_planner_capability_metadata() {
-    let manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
+    let mut manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
         name: "filesystem.list_entries".to_string(),
         action: Some("list_dir".to_string()),
         effect: Some(PlannerCapabilityEffect::Observe),
@@ -57,8 +57,8 @@ fn quick_index_includes_planner_capability_metadata() {
         risk_level: None,
         preferred: true,
         once_per_task: None,
-        dedup_scope: None,
-        idempotent: None,
+        dedup_scope: Some(RegistryDedupScope::Args),
+        idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncPreferred),
         async_adapter_kind: Some("local_process_poll".to_string()),
         isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
@@ -67,13 +67,28 @@ fn quick_index_includes_planner_capability_metadata() {
         external_publish: Some(false),
         credential_access: Some(false),
     }]);
+    manifest.risk_level = Some(SkillRiskLevel::Medium);
+    manifest.output_schema = Some(json!({
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+            "text": { "type": "string" },
+            "extra": { "type": "object" }
+        }
+    }));
 
     let text = quick_index_planner_capabilities(&manifest);
+    let output_contract = quick_index_output_contract(&manifest);
 
     assert!(text.contains("planner_capabilities: filesystem.list_entries"));
     assert!(text.contains("action=list_dir"));
     assert!(text.contains("effect=observe"));
     assert!(text.contains("required=path"));
+    assert!(text.contains("optional=limit"));
+    assert!(text.contains("risk=medium"));
+    assert!(text.contains("preferred=true"));
+    assert!(text.contains("dedup_scope=args"));
+    assert!(text.contains("idempotent=true"));
     assert!(text.contains("execution_mode=async_preferred"));
     assert!(text.contains("async_adapter_kind=local_process_poll"));
     assert!(text.contains("isolation_profile=read_only"));
@@ -81,6 +96,9 @@ fn quick_index_includes_planner_capability_metadata() {
     assert!(text.contains("filesystem_write=false"));
     assert!(text.contains("external_publish=false"));
     assert!(text.contains("credential_access=false"));
+    assert!(output_contract.contains("output_contract: kind=text"));
+    assert!(output_contract.contains("required=text"));
+    assert!(output_contract.contains("fields=extra|text"));
 }
 
 #[test]
@@ -200,6 +218,86 @@ fn loop_state_does_not_count_alias_block_lines_as_current_mentions() {
         vec!["/tmp/docs/archive".to_string()],
         "context alias block entries not mentioned by the user must not become required targets"
     );
+}
+
+#[test]
+fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
+    let mut loop_state = LoopState::new(2);
+    let observation = json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "active_bound_targets": [
+            {
+                "source": "active_followup_frame",
+                "op_kind": "list",
+                "target": "/tmp/work/docs",
+                "ordered_entry_count": 3
+            },
+            {
+                "source": "active_observed_facts",
+                "target": "/tmp/work/README.md",
+                "ordered_entry_count": 0,
+                "observed_entry_count": 1
+            },
+            {
+                "source": "active_followup_frame",
+                "op_kind": "list",
+                "target": "",
+                "ordered_targets": ["/tmp/work/selected.log"],
+                "ordered_entry_count": 1
+            }
+        ],
+        "current_workspace_scope": {
+            "source": "current_workspace_scope",
+            "target": "/tmp/work",
+            "semantic_kind": "scalar_count",
+            "response_shape": "scalar"
+        }
+    });
+    let ctx = AgentRunContext {
+        user_request: Some(format!(
+            "planner request\n\n### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS\n",
+            observation
+        )),
+        ..AgentRunContext::default()
+    };
+
+    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
+
+    let raw = loop_state
+        .output_vars
+        .get("active_bound_targets")
+        .expect("boundary observation should seed active targets");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("active targets must be JSON encoded");
+    assert_eq!(
+        targets,
+        vec![
+            "/tmp/work/README.md".to_string(),
+            "/tmp/work/docs".to_string(),
+            "/tmp/work/selected.log".to_string(),
+        ]
+    );
+    let raw = loop_state
+        .output_vars
+        .get("active_listing_bound_targets")
+        .expect("listing observations should seed active listing targets");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("active listing targets must be JSON encoded");
+    assert_eq!(
+        targets,
+        vec![
+            "/tmp/work/README.md".to_string(),
+            "/tmp/work/docs".to_string(),
+        ]
+    );
+    let raw = loop_state
+        .output_vars
+        .get("current_workspace_scalar_count_targets")
+        .expect("current workspace scope should seed scalar count target");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("workspace scalar targets must be JSON encoded");
+    assert_eq!(targets, vec!["/tmp/work".to_string()]);
 }
 
 #[test]
