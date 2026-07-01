@@ -442,9 +442,10 @@ fn apply_default_creation_targets(
 
 fn route_requires_generated_file_path_write(route: Option<&crate::RouteResult>) -> bool {
     route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::GeneratedFilePathReport
-            && route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-            && !route.output_contract.delivery_required
+        let contract = route.effective_output_contract();
+        route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+            && contract.response_shape == crate::OutputResponseShape::Scalar
+            && !contract.delivery_required
     })
 }
 
@@ -1197,9 +1198,10 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
 fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
     route_result
         .map(|route| {
-            route.output_contract.semantic_kind != crate::OutputSemanticKind::None
-                || route.output_contract.requires_content_evidence
-                || route.output_contract.delivery_required
+            let contract = route.effective_output_contract();
+            !route.output_contract_is_unclassified()
+                || contract.requires_content_evidence
+                || contract.delivery_required
         })
         .unwrap_or(false)
 }
@@ -1711,14 +1713,11 @@ pub(crate) fn verify_plan(
     let route_contract_missing = input
         .route_result
         .filter(|_| route_requires_contract(input.route_result))
-        .is_some_and(|route| {
-            crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-                .is_none()
-        });
+        .is_some_and(|route| crate::contract_matrix::final_answer_shape_for_route(route).is_none());
     if route_contract_missing {
         let semantic_kind = input
             .route_result
-            .map(|route| route.output_contract.semantic_kind.as_str())
+            .map(|route| route.effective_output_contract_semantic_kind().as_str())
             .unwrap_or("unknown");
         issues.push(VerifyIssue {
             step_id: "route".to_string(),

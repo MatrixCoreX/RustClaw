@@ -92,7 +92,8 @@ pub(crate) fn bundled_contract_matrix() -> Option<&'static ContractMatrix> {
 }
 
 pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<String> {
-    compact_prompt_line_for_output_contract(&route.output_contract)
+    let output_contract = route.effective_output_contract();
+    compact_prompt_line_for_output_contract(&output_contract)
 }
 
 pub(crate) fn compact_prompt_line_for_output_contract(
@@ -138,6 +139,13 @@ pub(crate) fn compact_prompt_line_for_output_contract(
 pub(crate) fn required_evidence_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Vec<String>> {
+    required_evidence_for_output_contract_with_route_reason(output_contract, None)
+}
+
+fn required_evidence_for_output_contract_with_route_reason(
+    output_contract: &IntentOutputContract,
+    route_reason: Option<&str>,
+) -> Option<Vec<String>> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let mut fields = matched
@@ -154,7 +162,7 @@ pub(crate) fn required_evidence_for_output_contract(
     {
         fields.insert("path".to_string());
     }
-    if output_contract.semantic_kind == OutputSemanticKind::QuantityComparison
+    if output_contract_requires_quantity_path_metadata(output_contract, route_reason)
         && matches!(
             output_contract.locator_kind,
             crate::OutputLocatorKind::Path
@@ -168,6 +176,31 @@ pub(crate) fn required_evidence_for_output_contract(
     Some(fields.into_iter().collect())
 }
 
+fn output_contract_requires_quantity_path_metadata(
+    output_contract: &IntentOutputContract,
+    route_reason: Option<&str>,
+) -> bool {
+    output_contract.semantic_kind_is(OutputSemanticKind::QuantityComparison)
+        || route_reason_has_machine_marker(
+            route_reason,
+            OutputSemanticKind::QuantityComparison.as_str(),
+        )
+        || route_reason_has_machine_marker(route_reason, "quantity_compare")
+}
+
+fn route_reason_has_machine_marker(route_reason: Option<&str>, marker: &str) -> bool {
+    route_reason
+        .unwrap_or_default()
+        .split(';')
+        .map(str::trim)
+        .any(|part| {
+            part == marker
+                || part
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        })
+}
+
 pub(crate) fn final_answer_shape_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
@@ -179,15 +212,20 @@ pub(crate) fn final_answer_shape_for_output_contract(
     matched.final_answer_shape_kind()
 }
 
+pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalAnswerShape> {
+    let output_contract = route.effective_output_contract();
+    final_answer_shape_for_output_contract(&output_contract)
+}
+
 fn final_answer_shape_override_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
-    if output_contract.semantic_kind == OutputSemanticKind::HiddenEntriesCheck
+    if output_contract.semantic_kind_is(OutputSemanticKind::HiddenEntriesCheck)
         && output_contract.response_shape == OutputResponseShape::Scalar
     {
         return Some(FinalAnswerShape::Scalar);
     }
-    if output_contract.semantic_kind == OutputSemanticKind::StructuredKeys
+    if output_contract.semantic_kind_is(OutputSemanticKind::StructuredKeys)
         && output_contract.response_shape != OutputResponseShape::Strict
     {
         return Some(FinalAnswerShape::ValidationVerdict);
@@ -196,11 +234,16 @@ fn final_answer_shape_override_for_output_contract(
 }
 
 pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
-    trace_snapshot_for_output_contract(&route.output_contract)
+    let output_contract = route.effective_output_contract();
+    trace_snapshot_for_output_contract_with_route_reason(
+        &output_contract,
+        Some(route.route_reason.as_str()),
+    )
 }
 
 pub(crate) fn runtime_contract_snapshot_for_route(route: &RouteResult) -> Option<Value> {
-    runtime_contract_snapshot_for_output_contract(&route.output_contract)
+    let output_contract = route.effective_output_contract();
+    runtime_contract_snapshot_for_output_contract(&output_contract)
 }
 
 pub(crate) fn runtime_contract_snapshot_for_output_contract(
@@ -238,6 +281,13 @@ pub(crate) fn runtime_contract_snapshot_for_output_contract(
 pub(crate) fn trace_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
+    trace_snapshot_for_output_contract_with_route_reason(output_contract, None)
+}
+
+fn trace_snapshot_for_output_contract_with_route_reason(
+    output_contract: &IntentOutputContract,
+    route_reason: Option<&str>,
+) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
@@ -265,7 +315,10 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "artifact_kind": matched.artifact_kind(),
         "channel_visibility": matched.channel_visibility(),
         "evidence_profile": matched.evidence_profile(),
-        "required_evidence": required_evidence_for_output_contract(output_contract)
+        "required_evidence": required_evidence_for_output_contract_with_route_reason(
+            output_contract,
+            route_reason,
+        )
             .unwrap_or_else(|| matched.required_evidence()),
         "evidence_expression": matched
             .evidence_expression()
@@ -358,6 +411,11 @@ pub(crate) fn preferred_action_refs_for_output_contract(
         .unwrap_or_default()
 }
 
+pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
+    let output_contract = route.effective_output_contract();
+    preferred_action_refs_for_output_contract(&output_contract)
+}
+
 pub(crate) fn allowed_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
@@ -371,6 +429,11 @@ pub(crate) fn allowed_action_refs_for_output_contract(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub(crate) fn allowed_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
+    let output_contract = route.effective_output_contract();
+    allowed_action_refs_for_output_contract(&output_contract)
 }
 
 fn policy_action_ref_for_match(
@@ -470,7 +533,7 @@ pub(crate) fn action_policy_for_output_contract(
     args: &Value,
 ) -> Option<ContractActionPolicy> {
     let output_contract = output_contract?;
-    if output_contract.semantic_kind == OutputSemanticKind::None
+    if output_contract.semantic_kind_is_unclassified()
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
     {
@@ -505,13 +568,22 @@ pub(crate) fn action_policy_for_output_contract(
     })
 }
 
+pub(crate) fn action_policy_for_route(
+    route: Option<&RouteResult>,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ContractActionPolicy> {
+    let output_contract = route?.effective_output_contract();
+    action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)
+}
+
 pub(crate) fn arg_policy_decision(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
     resolved_args: &Value,
 ) -> Option<ContractArgPolicy> {
     let output_contract = output_contract?;
-    if output_contract.semantic_kind == OutputSemanticKind::None
+    if output_contract.semantic_kind_is_unclassified()
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
     {

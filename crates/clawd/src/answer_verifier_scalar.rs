@@ -5,15 +5,13 @@ pub(super) fn matrix_scalar_answer_is_grounded_in_successful_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    let Some(shape) =
-        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-    else {
+    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
         return false;
     };
     if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
         && (!scalar_answer_is_strict_for_shape(shape, candidate_answer)
             || route.output_contract.response_shape != crate::OutputResponseShape::Scalar)
     {
@@ -70,7 +68,7 @@ pub(super) fn quantity_comparison_answer_is_grounded_in_successful_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -103,7 +101,7 @@ pub(super) fn recent_scalar_equality_answer_is_grounded_in_successful_observatio
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentScalarEqualityCheck
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         || route.output_contract.delivery_required
     {
         return false;
@@ -312,7 +310,7 @@ pub(super) fn directory_purpose_summary_answer_is_grounded_in_successful_observa
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryPurposeSummary) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -336,7 +334,7 @@ pub(super) fn workspace_project_summary_answer_is_grounded_in_successful_observa
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -359,7 +357,7 @@ pub(super) fn recent_artifacts_judgment_answer_is_grounded_in_successful_observa
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentArtifactsJudgment
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         || route.output_contract.delivery_required
     {
         return false;
@@ -795,7 +793,7 @@ pub(super) fn markdown_heading_answer_is_grounded_in_read_observation(
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::OneSentence
         )
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::None

@@ -340,7 +340,7 @@ pub(crate) fn verify_output_contract(
 
     // 默认契约（response_shape=Free + semantic_kind=None）不强制任何形状，直接 Pass。
     if matches!(contract.response_shape, OutputResponseShape::Free)
-        && matches!(contract.semantic_kind, OutputSemanticKind::None)
+        && contract.semantic_kind_is_unclassified()
     {
         return OutputContractVerdict::Pass;
     }

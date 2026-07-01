@@ -169,7 +169,7 @@ pub(super) fn raw_bounded_read_answer_is_exact_successful_observation(
 ) -> bool {
     if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
     {
         return false;
     }
@@ -326,7 +326,7 @@ pub(super) fn existence_with_path_answer_is_grounded_in_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath) {
         return false;
     }
     let candidate_answer = candidate_answer.trim();
@@ -451,7 +451,7 @@ pub(super) fn execution_failed_step_answer_is_grounded_in_failed_observation(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExecutionFailedStep {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep) {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -609,7 +609,7 @@ pub(super) fn scalar_answer_value_is_grounded_in_successful_observation(
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileBasename
+    if route.output_contract_marker_is(crate::OutputSemanticKind::FileBasename)
         && observed_single_path_values(route, journal)
             .iter()
             .filter_map(|path| {
@@ -630,7 +630,7 @@ pub(super) fn scalar_answer_value_is_grounded_in_successful_observation(
         return true;
     }
     if route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract_is_unclassified()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && journal.step_results.iter().any(|step| {
@@ -728,17 +728,16 @@ pub(super) fn successful_observed_evidence_items_for_route(
 }
 
 pub(super) fn route_requires_strict_extractor_eligibility(route: &RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-        .is_some_and(|shape| {
-            matches!(
-                shape.class(),
-                crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
-                    | crate::contract_matrix::FinalAnswerShapeClass::StrictList
-                    | crate::contract_matrix::FinalAnswerShapeClass::Table
-                    | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
-                    | crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
-            )
-        })
+    crate::contract_matrix::final_answer_shape_for_route(route).is_some_and(|shape| {
+        matches!(
+            shape.class(),
+            crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
+                | crate::contract_matrix::FinalAnswerShapeClass::StrictList
+                | crate::contract_matrix::FinalAnswerShapeClass::Table
+                | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
+                | crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
+        )
+    })
 }
 
 pub(super) fn observed_evidence_is_strict_shape_eligible(evidence: &serde_json::Value) -> bool {
