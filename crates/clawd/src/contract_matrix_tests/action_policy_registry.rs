@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn publishing_preview_allows_x_preview_without_locator() {
+fn publishing_preview_semantic_no_longer_owns_x_preview_policy() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
             semantic_kind: OutputSemanticKind::PublishingPreview,
@@ -12,25 +12,16 @@ fn publishing_preview_allows_x_preview_without_locator() {
         }),
         "x",
         &serde_json::json!({"action":"preview","text":"RustClaw release notes","dry_run":true}),
-    )
-    .expect("policy decision");
+    );
 
+    let policy = policy.expect("generic policy decision");
     assert!(policy.is_allowed(), "{policy:?}");
-    assert_eq!(policy.action_key, "x.preview");
-    assert_eq!(policy.contract_match, "publishing_preview");
-    assert_eq!(policy.required_evidence, vec!["field_value"]);
+    assert_eq!(policy.contract_match, "none");
 }
 
 #[test]
 fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
     let cases = [
-        (
-            OutputSemanticKind::PackageManagerDetection,
-            "package_manager",
-            serde_json::json!({"action":"detect","dry_run":true}),
-            "package_manager.detect",
-            "package_manager_detection",
-        ),
         (
             OutputSemanticKind::SqliteTableListing,
             "db_basic",
@@ -44,20 +35,6 @@ fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
             serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
             "db_basic.schema_version",
             "sqlite_schema_version",
-        ),
-        (
-            OutputSemanticKind::DockerContainerLifecycle,
-            "docker_basic",
-            serde_json::json!({"action":"restart","container":"rustclaw_api","dry_run":true}),
-            "docker_basic.restart",
-            "docker_container_lifecycle",
-        ),
-        (
-            OutputSemanticKind::DockerContainerLifecycle,
-            "package_manager",
-            serde_json::json!({"action":"detect"}),
-            "package_manager.detect",
-            "docker_container_lifecycle",
         ),
         (
             OutputSemanticKind::CommandOutputSummary,
@@ -107,6 +84,41 @@ fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
 }
 
 #[test]
+fn registry_bridge_semantic_contracts_no_longer_allow_actions() {
+    for (semantic_kind, skill, args) in [
+        (
+            OutputSemanticKind::PackageManagerDetection,
+            "package_manager",
+            serde_json::json!({"action":"detect","dry_run":true}),
+        ),
+        (
+            OutputSemanticKind::DockerContainerLifecycle,
+            "docker_basic",
+            serde_json::json!({"action":"restart","container":"rustclaw_api","dry_run":true}),
+        ),
+    ] {
+        let policy = action_policy_for_output_contract(
+            Some(&IntentOutputContract {
+                semantic_kind,
+                requires_content_evidence: true,
+                response_shape: OutputResponseShape::OneSentence,
+                locator_kind: OutputLocatorKind::None,
+                ..IntentOutputContract::default()
+            }),
+            skill,
+            &args,
+        );
+
+        let policy = policy.expect("generic policy decision");
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(
+            policy.contract_match, "none",
+            "{semantic_kind:?} should not own {skill} policy through old matrix"
+        );
+    }
+}
+
+#[test]
 fn generic_inline_transform_allows_transform_without_locator() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -128,6 +140,53 @@ fn generic_inline_transform_allows_transform_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "transform.transform_data");
+    assert_eq!(policy.contract_match, "generic_inline_transform");
+    assert_eq!(policy.required_evidence, vec!["field_value"]);
+}
+
+#[test]
+fn generic_inline_transform_allows_kb_namespace_catalog_capability() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Strict,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "kb",
+        &serde_json::json!({"action": "list_namespaces"}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "kb.list_namespaces");
+    assert_eq!(policy.contract_match, "generic_inline_transform");
+    assert_eq!(policy.required_evidence, vec!["field_value"]);
+}
+
+#[test]
+fn generic_inline_transform_allows_kb_search_capability() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::Strict,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "kb",
+        &serde_json::json!({
+            "action": "search",
+            "namespace": "docs",
+            "query": "service status",
+            "top_k": 3
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "kb.search");
     assert_eq!(policy.contract_match, "generic_inline_transform");
     assert_eq!(policy.required_evidence, vec!["field_value"]);
 }
@@ -649,13 +708,9 @@ fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contrac
 
 #[test]
 fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ConfigValidation,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        }),
+    let route = route_with_machine_capability_ref("capability_ref=config.validate");
+    let policy = action_policy_for_route(
+        Some(&route),
         "system_basic",
         &serde_json::json!({
             "action": "validate_structured",
@@ -667,7 +722,7 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "config_basic.validate");
-    assert_eq!(policy.contract_match, "config_validation");
+    assert_eq!(policy.contract_match, "capability_ref");
 }
 
 #[test]
@@ -794,13 +849,9 @@ fn command_output_summary_allows_task_control_get_observation() {
 
 #[test]
 fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
-    let policy = action_policy_for_output_contract(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ConfigValidation,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        }),
+    let route = route_with_machine_capability_ref("capability_ref=config.guard_config");
+    let policy = action_policy_for_route(
+        Some(&route),
         "config_edit",
         &serde_json::json!({
             "action": "guard_config",
@@ -812,27 +863,22 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
 
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
-    assert_eq!(policy.contract_match, "config_validation");
+    assert_eq!(policy.contract_match, "capability_ref");
 }
 
 #[test]
 fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
-    let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigMutation,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Path,
-        locator_hint: "configs/config.toml".to_string(),
-        ..IntentOutputContract::default()
-    };
-
-    for action in [
-        "plan_config_change",
-        "apply_config_change",
-        "validate_config",
-        "read_back",
+    for (capability_ref, action) in [
+        ("capability_ref=config.plan_change", "plan_config_change"),
+        ("capability_ref=config.apply_change", "apply_config_change"),
+        (
+            "capability_ref=config.validate_after_change",
+            "validate_config",
+        ),
     ] {
-        let policy = action_policy_for_output_contract(
-            Some(&contract),
+        let route = route_with_machine_capability_ref(capability_ref);
+        let policy = action_policy_for_route(
+            Some(&route),
             "config_edit",
             &serde_json::json!({
                 "action": action,
@@ -844,22 +890,15 @@ fn config_mutation_contract_allows_plan_apply_validate_and_read_back() {
         .expect("policy decision");
 
         assert_eq!(policy.decision, ActionPolicyDecision::Allowed, "{action}");
-        assert_eq!(policy.contract_match, "config_mutation");
+        assert_eq!(policy.contract_match, "capability_ref");
     }
 }
 
 #[test]
 fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
-    let contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ConfigRiskAssessment,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Path,
-        locator_hint: "configs/config.toml".to_string(),
-        ..IntentOutputContract::default()
-    };
-
-    let preview_policy = action_policy_for_output_contract(
-        Some(&contract),
+    let preview_route = route_with_machine_capability_ref("capability_ref=config.plan_change");
+    let preview_policy = action_policy_for_route(
+        Some(&preview_route),
         "config_edit",
         &serde_json::json!({
             "action": "plan_config_change",
@@ -871,10 +910,11 @@ fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
     .expect("preview policy decision");
     assert_eq!(preview_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(preview_policy.action_key, "config_edit.plan_config_change");
-    assert_eq!(preview_policy.contract_match, "config_risk_assessment");
+    assert_eq!(preview_policy.contract_match, "capability_ref");
 
-    let git_policy = action_policy_for_output_contract(
-        Some(&contract),
+    let git_route = route_with_machine_capability_ref("capability_ref=git.status");
+    let git_policy = action_policy_for_route(
+        Some(&git_route),
         "git_basic",
         &serde_json::json!({
             "action": "status",
@@ -884,7 +924,7 @@ fn config_risk_assessment_allows_preview_and_git_status_as_observations() {
     .expect("git policy decision");
     assert_eq!(git_policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(git_policy.action_key, "git_basic.status");
-    assert_eq!(git_policy.contract_match, "config_risk_assessment");
+    assert_eq!(git_policy.contract_match, "capability_ref");
 }
 
 #[test]
@@ -1046,13 +1086,9 @@ fn arg_policy_allows_concrete_bound_target() {
 
 #[test]
 fn arg_policy_uses_virtual_equivalent_target_groups() {
-    let policy = arg_policy_decision(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ConfigValidation,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        }),
+    let route = route_with_machine_capability_ref("capability_ref=config.validate");
+    let policy = arg_policy_decision_for_route(
+        Some(&route),
         "system_basic",
         &serde_json::json!({
             "action": "validate_structured",
@@ -1064,18 +1100,15 @@ fn arg_policy_uses_virtual_equivalent_target_groups() {
 
     assert!(policy.is_allowed());
     assert_eq!(policy.action_key, "config_basic.validate");
+    assert_eq!(policy.contract_match, "capability_ref");
     assert_eq!(policy.expected_target_args, vec!["path"]);
 }
 
 #[test]
 fn arg_policy_uses_virtual_guard_equivalent_target_groups() {
-    let policy = arg_policy_decision(
-        Some(&IntentOutputContract {
-            semantic_kind: OutputSemanticKind::ConfigValidation,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Path,
-            ..IntentOutputContract::default()
-        }),
+    let route = route_with_machine_capability_ref("capability_ref=config.guard_config");
+    let policy = arg_policy_decision_for_route(
+        Some(&route),
         "config_edit",
         &serde_json::json!({
             "action": "guard_config",
@@ -1086,6 +1119,7 @@ fn arg_policy_uses_virtual_guard_equivalent_target_groups() {
 
     assert!(policy.is_allowed());
     assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
+    assert_eq!(policy.contract_match, "capability_ref");
     assert_eq!(policy.expected_target_args, vec!["path"]);
 }
 
@@ -1192,12 +1226,6 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
             "fs_basic.count_entries",
         ),
         (
-            OutputSemanticKind::ConfigValidation,
-            "system_basic",
-            json!({"action":"validate_structured", "path":"configs/config.toml", "format":"toml"}),
-            "config_basic.validate",
-        ),
-        (
             OutputSemanticKind::FilePaths,
             "fs_search",
             json!({"action":"find_ext", "root":"scripts", "ext":"sh"}),
@@ -1220,12 +1248,6 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
             "fs_search",
             json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
             "fs_basic.grep_text",
-        ),
-        (
-            OutputSemanticKind::ConfigRiskAssessment,
-            "config_guard",
-            json!({"path":"configs/config.toml"}),
-            "config_guard",
         ),
         (
             OutputSemanticKind::ContentExcerptSummary,
@@ -1260,6 +1282,35 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
             policy.decision
         );
         assert_eq!(policy.action_key, expected_action_key);
+    }
+}
+
+#[test]
+fn route_capability_refs_cover_config_virtual_tool_canonicalizations() {
+    for (capability_ref, skill, args, expected_action_key) in [
+        (
+            "capability_ref=config.validate",
+            "system_basic",
+            json!({"action":"validate_structured", "path":"configs/config.toml", "format":"toml"}),
+            "config_basic.validate",
+        ),
+        (
+            "capability_ref=config.guard",
+            "config_guard",
+            json!({"path":"configs/config.toml"}),
+            "config_edit.guard_config",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("missing policy for {capability_ref}"));
+        assert!(
+            policy.is_allowed(),
+            "{capability_ref} should allow {skill} as {expected_action_key}, got {:?}",
+            policy.decision
+        );
+        assert_eq!(policy.action_key, expected_action_key);
+        assert_eq!(policy.contract_match, "capability_ref");
     }
 }
 

@@ -1097,7 +1097,9 @@ impl ContractMatrix {
         output: &IntentOutputContract,
     ) -> Option<MatchedContract<'_>> {
         if output.semantic_kind != OutputSemanticKind::None
-            && !output.semantic_kind.is_registry_capability_bridge()
+            && !output
+                .semantic_kind
+                .is_normalizer_schema_capability_bridge()
         {
             return self
                 .semantic_contract(output.semantic_kind)

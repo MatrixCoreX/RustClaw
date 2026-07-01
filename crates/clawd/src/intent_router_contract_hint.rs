@@ -37,8 +37,9 @@ pub(crate) fn contract_test_hint_value(req: &str, wanted_key: &str) -> Option<St
 pub(crate) fn contract_test_hint_semantic_kind(req: &str) -> Option<OutputSemanticKind> {
     let semantic_kind =
         parse_output_semantic_kind(&contract_test_hint_value(req, "semantic_kind")?);
-    (semantic_kind != OutputSemanticKind::None && !semantic_kind.is_registry_capability_bridge())
-        .then_some(semantic_kind)
+    (semantic_kind != OutputSemanticKind::None
+        && !semantic_kind.is_normalizer_schema_capability_bridge())
+    .then_some(semantic_kind)
 }
 
 pub(crate) fn request_without_contract_test_hint(req: &str) -> String {

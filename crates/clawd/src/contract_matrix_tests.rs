@@ -335,35 +335,37 @@ fn content_excerpt_summary_allows_runtime_equivalent_config_guard() {
 
 #[test]
 fn archive_list_allows_compound_readonly_archive_and_db_observations() {
-    let output_contract = IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ArchiveList,
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::Path,
-        ..IntentOutputContract::default()
-    };
-    for (skill, args, expected_action) in [
+    for (capability_ref, skill, args, expected_action, expected_evidence) in [
         (
+            "capability_ref=archive.list",
             "archive_basic",
             serde_json::json!({"action":"list","archive":"tmp/test_bundle.zip"}),
             "archive_basic.list",
+            vec!["candidates"],
         ),
         (
+            "capability_ref=archive.read",
             "archive_basic",
             serde_json::json!({"action":"read","archive":"tmp/test_bundle.zip","member":"notes.txt"}),
             "archive_basic.read",
+            vec!["content_excerpt"],
         ),
         (
+            "capability_ref=database.list_tables",
             "db_basic",
             serde_json::json!({"action":"list_tables","db_path":"data/test_contract.sqlite"}),
             "db_basic.list_tables",
+            vec!["candidates"],
         ),
     ] {
-        let policy = action_policy_for_output_contract(Some(&output_contract), skill, &args)
-            .expect("archive list policy decision");
+        let route = route_with_machine_capability_ref(capability_ref);
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("route policy decision for {expected_action}"));
         assert!(policy.is_allowed(), "{policy:?}");
         assert!(policy.action_matches_preferred(), "{policy:?}");
         assert_eq!(policy.action_key, expected_action);
-        assert_eq!(policy.contract_match, "archive_list");
+        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.required_evidence, expected_evidence);
     }
 }
 
@@ -907,23 +909,53 @@ fn configured_legacy_text_observation_extractors_extend_default_structured_extra
             && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
     }));
 
-    let archive_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::ArchiveList,
-        ..IntentOutputContract::default()
-    })
-    .expect("archive trace snapshot");
-    let archive_extractors = archive_snapshot
-        .get("observation_extractors")
-        .and_then(Value::as_array)
-        .expect("archive observation extractors");
-    assert!(archive_extractors.iter().any(|item| {
-        item.get("source").and_then(Value::as_str) == Some("archive_basic.list")
-            && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
-    }));
-    assert!(archive_extractors.iter().any(|item| {
-        item.get("source").and_then(Value::as_str) == Some("archive_basic")
-            && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
-    }));
+    let archive_route = route_with_machine_capability_ref("capability_ref=archive.list");
+    let archive_trace = action_trace_for_route(&archive_route, "archive_basic.list")
+        .expect("archive route action trace");
+    assert_eq!(
+        archive_trace
+            .get("observation_extractor")
+            .and_then(|item| item.get("source"))
+            .and_then(Value::as_str),
+        Some("archive_basic.list")
+    );
+    assert_eq!(
+        archive_trace
+            .get("observation_extractor")
+            .and_then(|item| item.get("extractor_kind"))
+            .and_then(Value::as_str),
+        Some("structured_json")
+    );
+    assert_eq!(
+        archive_trace.get("contract_match").and_then(Value::as_str),
+        Some("capability_ref")
+    );
+}
+
+#[test]
+fn normalizer_schema_capability_bridges_fall_back_to_generic_contracts() {
+    let matrix = load_workspace_matrix();
+
+    for kind in OutputSemanticKind::ALL
+        .iter()
+        .filter(|kind| kind.is_normalizer_schema_capability_bridge())
+    {
+        let output_contract = IntentOutputContract {
+            semantic_kind: *kind,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        };
+        let matched = matrix
+            .match_output_contract(&output_contract)
+            .unwrap_or_else(|| panic!("generic match for {}", kind.as_str()));
+        assert_ne!(
+            matched.match_name(),
+            kind.as_str(),
+            "{} must not directly own matrix policy after normalizer bridge demotion",
+            kind.as_str()
+        );
+    }
 }
 
 #[test]
@@ -1443,7 +1475,7 @@ fn contract_matrix_evidence_matches_task_contract_defaults() {
     let matrix = load_workspace_matrix();
 
     for kind in OutputSemanticKind::ALL {
-        if kind.is_registry_capability_bridge() {
+        if kind.is_normalizer_schema_capability_bridge() {
             continue;
         }
         let output_contract = IntentOutputContract {

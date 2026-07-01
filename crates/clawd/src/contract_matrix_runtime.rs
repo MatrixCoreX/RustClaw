@@ -776,6 +776,11 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 ],
             )
         }
+        ("config_guard", "") => crate::machine_capability_ref::route_has_capability_action(
+            route,
+            &["config"],
+            &["guard", "risk"],
+        ),
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
@@ -818,6 +823,32 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 &["unpack"],
             )
         }
+        ("db_basic", "list_tables") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["database", "db", "sqlite"],
+                &["list_tables", "list"],
+            )
+        }
+        ("db_basic", "schema_version") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["database", "db", "sqlite"],
+                &["schema_version"],
+            )
+        }
+        ("db_basic", "sqlite_query") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["database", "db", "sqlite"],
+                &["query", "sqlite_query"],
+            )
+        }
+        ("git_basic", "status") => crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["git"],
+            &["status", "repository_state"],
+        ),
         _ => false,
     }
 }
