@@ -115,13 +115,7 @@
             "existence_with_path",
             "existence_with_path_summary",
             "recent_scalar_equality_check",
-            "git_commit_subject",
-            "git_repository_state",
-            "structured_keys",
-            "sqlite_table_listing",
-            "sqlite_table_names_only",
-            "sqlite_database_kind_judgment",
-            "sqlite_schema_version"
+            "structured_keys"
           ]
         },
         "locator_hint": {
