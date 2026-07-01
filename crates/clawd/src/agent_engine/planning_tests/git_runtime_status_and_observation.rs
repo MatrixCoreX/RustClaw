@@ -108,14 +108,14 @@ fn git_repository_state_remote_request_plans_git_remote_action() {
         true,
         OutputResponseShape::Strict,
     );
-    route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.resolved_intent = "capability_ref=git.remote".to_string();
 
     let plan = git_repository_state_deterministic_plan_result(
-        "列出当前仓库 remote 名称和 URL",
+        "git remote capability",
         Some(&route),
         &loop_state,
-        "列出当前仓库 remote 名称和 URL",
+        "ordinary request text",
     )
     .expect("git repository state plan");
 
@@ -142,28 +142,28 @@ fn git_repository_state_contract_without_machine_token_defers_to_planner() {
         "semantic contract only",
         Some(&route),
         &loop_state,
-        "检查这个仓库当前是否有未提交改动，用一句话说明。",
+        "git status",
     );
 
     assert!(plan.is_none());
 }
 
 #[test]
-fn git_repository_state_status_token_plans_git_status_action() {
+fn git_repository_state_status_capability_ref_plans_git_status_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
-    route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.resolved_intent = "capability_ref=git.status".to_string();
 
     let plan = git_repository_state_deterministic_plan_result(
-        "semantic contract only",
+        "git status capability",
         Some(&route),
         &loop_state,
-        "git status",
+        "ordinary request text",
     )
     .expect("git repository state plan");
 
