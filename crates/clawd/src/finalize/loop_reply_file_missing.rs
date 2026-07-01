@@ -183,11 +183,6 @@ fn output_value_has_missing_file_evidence(value: &serde_json::Value) -> bool {
     value
         .get("extra")
         .is_some_and(output_value_has_missing_file_evidence)
-        || value
-            .get("text")
-            .and_then(|text| text.as_str())
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-            .is_some_and(|inner| output_value_has_missing_file_evidence(&inner))
 }
 
 pub(super) fn has_missing_file_search_evidence(loop_state: &LoopState) -> bool {
@@ -381,13 +376,6 @@ fn missing_file_path_from_output_value(value: &serde_json::Value) -> Option<Stri
     value
         .get("extra")
         .and_then(missing_file_path_from_output_value)
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(|text| text.as_str())
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-                .and_then(|inner| missing_file_path_from_output_value(&inner))
-        })
 }
 
 pub(super) fn missing_file_path_from_loop(

@@ -53,6 +53,67 @@ fn missing_file_search_evidence_detects_missing_path_facts() {
 }
 
 #[test]
+fn missing_file_search_evidence_detects_missing_path_facts_from_machine_extra() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            serde_json::json!({
+                "status": "ok",
+                "text": "path facts",
+                "extra": {
+                    "action": "path_batch_facts",
+                    "facts": [{
+                        "exists": false,
+                        "path": "/tmp/definitely-missing.txt"
+                    }],
+                    "include_missing": true
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    assert!(has_missing_file_search_evidence(&loop_state));
+}
+
+#[test]
+fn missing_file_search_evidence_ignores_json_hidden_in_visible_text() {
+    let hidden_payload = serde_json::json!({
+        "action": "path_batch_facts",
+        "facts": [{
+            "exists": false,
+            "path": "/tmp/definitely-missing.txt"
+        }],
+        "include_missing": true
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            serde_json::json!({
+                "status": "ok",
+                "text": hidden_payload
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    assert!(!has_missing_file_search_evidence(&loop_state));
+}
+
+#[test]
 fn latest_file_delivery_observation_treats_missing_path_facts_as_terminal_missing() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(StepExecutionResult {
@@ -172,6 +233,26 @@ fn missing_file_search_evidence_detects_wrapped_fs_basic_find_name_zero_matches(
         missing_file_path_from_output(&output).as_deref(),
         Some("document/definitely_missing_text_match_case_001.txt")
     );
+}
+
+#[test]
+fn missing_file_path_from_output_ignores_json_hidden_in_visible_text() {
+    let hidden_payload = serde_json::json!({
+        "action": "find_name",
+        "count": 0,
+        "exact": false,
+        "patterns": ["definitely_missing_text_match_case_001.txt"],
+        "results": [],
+        "root": "document"
+    })
+    .to_string();
+    let output = serde_json::json!({
+        "status": "ok",
+        "text": hidden_payload
+    })
+    .to_string();
+
+    assert_eq!(missing_file_path_from_output(&output), None);
 }
 
 #[tokio::test]
