@@ -59,12 +59,12 @@ pub(super) fn build_normalizer_output_with_final_gate(
     } else if !needs_clarify && bare_path_only {
         append_route_reason(&mut reason, "bare_path_no_verb");
         info!(
-                "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true path_token={}",
+                "{} intent_normalizer task_id={} bare_path_no_verb_boundary_hint needs_clarify=false path_token={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req.trim())
             );
-        (true, String::new())
+        (false, String::new())
     } else {
         (needs_clarify, clarify_question)
     };
