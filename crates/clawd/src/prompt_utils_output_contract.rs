@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-fn default_direct_answer_gate_contract() -> Value {
+fn default_output_contract() -> Value {
     json!({
         "response_shape": "free",
         "exact_sentence_count": null,
@@ -18,11 +18,7 @@ fn default_direct_answer_gate_contract() -> Value {
     })
 }
 
-fn default_direct_answer_gate_reference_resolution() -> Value {
-    json!({ "target": "none" })
-}
-
-pub(super) fn normalize_schema_token_for_gate(raw: &str) -> String {
+pub(super) fn normalize_schema_token_for_contract(raw: &str) -> String {
     raw.trim()
         .to_ascii_lowercase()
         .replace([' ', '-'], "_")
@@ -30,7 +26,7 @@ pub(super) fn normalize_schema_token_for_gate(raw: &str) -> String {
         .to_string()
 }
 
-fn gate_locator_hint_is_path_like(hint: &str) -> bool {
+fn locator_hint_is_path_like(hint: &str) -> bool {
     let hint = hint.trim();
     hint.starts_with('/')
         || hint.starts_with("./")
@@ -40,14 +36,14 @@ fn gate_locator_hint_is_path_like(hint: &str) -> bool {
         || hint.contains('\\')
 }
 
-pub(super) fn normalize_direct_answer_gate_locator_kind(
+pub(super) fn normalize_output_contract_locator_kind(
     raw: &str,
     locator_hint: &str,
 ) -> &'static str {
-    match normalize_schema_token_for_gate(raw).as_str() {
+    match normalize_schema_token_for_contract(raw).as_str() {
         "path" | "file_path" | "directory" | "directory_path" | "dir" => "path",
         "file" | "file_locator" => {
-            if gate_locator_hint_is_path_like(locator_hint) {
+            if locator_hint_is_path_like(locator_hint) {
                 "path"
             } else {
                 "filename"
@@ -60,8 +56,8 @@ pub(super) fn normalize_direct_answer_gate_locator_kind(
     }
 }
 
-fn normalize_direct_answer_gate_response_shape(raw: &str) -> &'static str {
-    match normalize_schema_token_for_gate(raw).as_str() {
+fn normalize_output_contract_response_shape(raw: &str) -> &'static str {
+    match normalize_schema_token_for_contract(raw).as_str() {
         "one_sentence" | "single_sentence" | "sentence" | "short_sentence" => "one_sentence",
         "strict" | "exact" | "exact_text" | "strict_text" | "exact_format" | "one_line"
         | "single_line" | "line_only" | "list" | "array" | "string_list" => "strict",
@@ -71,9 +67,9 @@ fn normalize_direct_answer_gate_response_shape(raw: &str) -> &'static str {
     }
 }
 
-fn direct_answer_gate_semantic_token_requests_scalar_shape(raw: &str) -> bool {
+fn output_contract_semantic_token_requests_scalar_shape(raw: &str) -> bool {
     matches!(
-        normalize_schema_token_for_gate(raw).as_str(),
+        normalize_schema_token_for_contract(raw).as_str(),
         "scalar"
             | "scalar_value"
             | "scalar_only"
@@ -85,8 +81,8 @@ fn direct_answer_gate_semantic_token_requests_scalar_shape(raw: &str) -> bool {
     )
 }
 
-pub(super) fn normalize_direct_answer_gate_delivery_intent(raw: &str) -> &'static str {
-    match normalize_schema_token_for_gate(raw).as_str() {
+pub(super) fn normalize_output_contract_delivery_intent(raw: &str) -> &'static str {
+    match normalize_schema_token_for_contract(raw).as_str() {
         "file_single" | "single_file" | "file" | "deliver_file" | "file_delivery" => "file_single",
         "directory_lookup" | "dir_lookup" | "directory" | "list_directory" => "directory_lookup",
         "directory_batch_files" | "batch_directory_delivery" | "dir_batch" => {
@@ -96,8 +92,8 @@ pub(super) fn normalize_direct_answer_gate_delivery_intent(raw: &str) -> &'stati
     }
 }
 
-pub(super) fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
-    match normalize_schema_token_for_gate(raw).as_str() {
+pub(super) fn normalize_output_contract_semantic_kind(raw: &str) -> &'static str {
+    match normalize_schema_token_for_contract(raw).as_str() {
         "none" => "none",
         "raw" | "raw_output" | "command_output" | "shell_output" | "terminal_output" => {
             "raw_command_output"
@@ -205,9 +201,6 @@ pub(super) fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static 
         "config_risk_assessment" | "config_risk" | "structured_config_risk" | "config_guard" => {
             "config_risk_assessment"
         }
-        "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
-            "package_manager_detection"
-        }
         "tool_discovery"
         | "capability_discovery"
         | "capability_inventory"
@@ -220,52 +213,13 @@ pub(super) fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static 
         "archive_list" => "archive_list",
         "archive_pack" => "archive_pack",
         "archive_unpack" => "archive_unpack",
-        "docker_ps" => "docker_ps",
-        "docker_images" => "docker_images",
-        "docker_logs" => "docker_logs",
-        "docker_container_lifecycle" => "docker_container_lifecycle",
         _ => "none",
     }
 }
 
-fn normalize_direct_answer_gate_reference_target(raw: &str) -> &'static str {
-    match normalize_schema_token_for_gate(raw).as_str() {
-        "current_action_result" => "current_action_result",
-        "current_turn_locator" => "current_turn_locator",
-        "comparison_result" => "comparison_result",
-        "unresolved_prior_object" => "unresolved_prior_object",
-        "missing_locator" => "missing_locator",
-        "ambiguous_locator" => "ambiguous_locator",
-        _ => "none",
-    }
-}
-
-fn canonicalize_direct_answer_gate_reference_resolution(value: Value) -> (Value, bool) {
+pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
     let Value::Object(mut map) = value else {
-        return (default_direct_answer_gate_reference_resolution(), true);
-    };
-    let original_len = map.len();
-    map.retain(|key, _| key == "target");
-    let mut normalized = map.len() != original_len;
-    match map.get("target").and_then(Value::as_str) {
-        Some(raw) => {
-            let canonical = normalize_direct_answer_gate_reference_target(raw);
-            if canonical != raw {
-                map.insert("target".to_string(), Value::String(canonical.to_string()));
-                normalized = true;
-            }
-        }
-        None => {
-            map.insert("target".to_string(), Value::String("none".to_string()));
-            normalized = true;
-        }
-    }
-    (Value::Object(map), normalized)
-}
-
-pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, bool) {
-    let Value::Object(mut map) = value else {
-        return (default_direct_answer_gate_contract(), true);
+        return (default_output_contract(), true);
     };
     let original_len = map.len();
     let allowed_keys = [
@@ -281,10 +235,10 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
-    let defaults = default_direct_answer_gate_contract();
+    let defaults = default_output_contract();
     let default_obj = defaults
         .as_object()
-        .expect("default direct answer gate contract is object");
+        .expect("default output contract is object");
     for key in allowed_keys {
         if !map.contains_key(key) {
             if let Some(default_value) = default_obj.get(key) {
@@ -299,7 +253,7 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
         .unwrap_or_default()
         .to_string();
     if let Some(Value::String(raw)) = map.get("response_shape").cloned() {
-        let canonical = normalize_direct_answer_gate_response_shape(&raw);
+        let canonical = normalize_output_contract_response_shape(&raw);
         if canonical != raw {
             map.insert(
                 "response_shape".to_string(),
@@ -309,7 +263,7 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
         }
     }
     if let Some(Value::String(raw)) = map.get("locator_kind").cloned() {
-        let canonical = normalize_direct_answer_gate_locator_kind(&raw, &locator_hint);
+        let canonical = normalize_output_contract_locator_kind(&raw, &locator_hint);
         if canonical != raw {
             map.insert(
                 "locator_kind".to_string(),
@@ -319,7 +273,7 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
         }
     }
     if let Some(Value::String(raw)) = map.get("delivery_intent").cloned() {
-        let canonical = normalize_direct_answer_gate_delivery_intent(&raw);
+        let canonical = normalize_output_contract_delivery_intent(&raw);
         if canonical != raw {
             map.insert(
                 "delivery_intent".to_string(),
@@ -331,8 +285,8 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
     let mut semantic_token_requests_scalar_shape = false;
     if let Some(Value::String(raw)) = map.get("semantic_kind").cloned() {
         semantic_token_requests_scalar_shape =
-            direct_answer_gate_semantic_token_requests_scalar_shape(&raw);
-        let canonical = normalize_direct_answer_gate_semantic_kind(&raw);
+            output_contract_semantic_token_requests_scalar_shape(&raw);
+        let canonical = normalize_output_contract_semantic_kind(&raw);
         if canonical != raw {
             map.insert(
                 "semantic_kind".to_string(),
@@ -381,72 +335,5 @@ pub(super) fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, 
         }
     };
     map.insert("self_extension".to_string(), self_extension);
-    (Value::Object(map), normalized)
-}
-
-pub(super) fn canonicalize_direct_answer_gate_object(
-    mut map: serde_json::Map<String, Value>,
-) -> (Value, bool) {
-    let original_len = map.len();
-    let allowed_keys = [
-        "decision",
-        "reason",
-        "confidence",
-        "clarify_question",
-        "resolved_user_intent",
-        "reference_resolution",
-        "output_contract",
-        "state_patch",
-    ];
-    map.retain(|key, _| allowed_keys.contains(&key.as_str()));
-    let mut normalized = map.len() != original_len;
-    if let Some(output_contract) = map.remove("output_contract") {
-        let (output_contract, contract_normalized) =
-            canonicalize_direct_answer_gate_contract(output_contract);
-        normalized |= contract_normalized;
-        map.insert("output_contract".to_string(), output_contract);
-    } else {
-        map.insert(
-            "output_contract".to_string(),
-            default_direct_answer_gate_contract(),
-        );
-        normalized = true;
-    }
-    if let Some(reference_resolution) = map.remove("reference_resolution") {
-        let (reference_resolution, reference_normalized) =
-            canonicalize_direct_answer_gate_reference_resolution(reference_resolution);
-        normalized |= reference_normalized;
-        map.insert("reference_resolution".to_string(), reference_resolution);
-    } else {
-        map.insert(
-            "reference_resolution".to_string(),
-            default_direct_answer_gate_reference_resolution(),
-        );
-        normalized = true;
-    }
-    if let Some(state_patch) = map.remove("state_patch") {
-        let (state_patch, state_patch_normalized) = match state_patch {
-            Value::Null | Value::Object(_) => (state_patch, false),
-            Value::String(raw) => {
-                let normalized_token = normalize_schema_token_for_gate(&raw);
-                if normalized_token.is_empty()
-                    || matches!(normalized_token.as_str(), "none" | "null")
-                {
-                    (Value::Null, true)
-                } else if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
-                    if parsed.is_object() {
-                        (parsed, true)
-                    } else {
-                        (Value::Null, true)
-                    }
-                } else {
-                    (Value::Null, true)
-                }
-            }
-            _ => (Value::Null, true),
-        };
-        normalized |= state_patch_normalized;
-        map.insert("state_patch".to_string(), state_patch);
-    }
     (Value::Object(map), normalized)
 }

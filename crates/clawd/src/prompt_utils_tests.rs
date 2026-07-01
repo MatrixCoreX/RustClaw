@@ -149,112 +149,6 @@ fn validate_against_schema_preserves_structured_respond_intent_fields() {
 }
 
 #[test]
-fn validate_against_schema_projects_normalizer_shaped_direct_answer_gate_output() {
-    let raw = r#"{
-        "resolved_user_intent": "List current listening ports and highlight notable ports",
-        "resume_behavior": "none",
-        "schedule_kind": "none",
-        "schedule_intent": null,
-        "wants_file_delivery": false,
-        "should_refresh_long_term_memory": false,
-        "agent_display_name_hint": "",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "reason": "Fresh system state observation is required.",
-        "confidence": 0.94,
-        "decision": "planner_execute",
-        "reference_resolution": {"target": "none"},
-        "output_contract": {
-            "response_shape": "free",
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "none",
-            "delivery_intent": "none",
-            "semantic_kind": "none",
-            "locator_hint": "",
-            "self_extension": {
-                "mode": "none",
-                "trigger": "none",
-                "execute_now": false,
-                "ignored": true
-            },
-            "ignored_contract_field": "drop"
-        },
-        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
-        "turn_type": "task_request",
-        "target_task_policy": "standalone",
-        "should_interrupt_active_run": false,
-        "state_patch": null,
-        "attachment_processing_required": false
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
-            .expect("normalizer-shaped gate output should project to gate schema");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated.value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/requires_content_evidence")
-            .and_then(|v| v.as_bool()),
-        Some(true)
-    );
-    assert!(validated.value.get("execution_recipe").is_none());
-    assert!(validated
-        .value
-        .pointer("/output_contract/ignored_contract_field")
-        .is_none());
-    assert!(validated
-        .value
-        .pointer("/output_contract/self_extension/ignored")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_defaults_missing_direct_answer_gate_reference_resolution() {
-    let raw = r#"{
-        "decision": "planner_execute",
-        "reason": "Fresh file content is required.",
-        "confidence": 0.93,
-        "clarify_question": "",
-        "resolved_user_intent": "Inspect the current workspace schema for a target enum",
-        "output_contract": {
-            "response_shape": "free",
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "current_workspace",
-            "delivery_intent": "none",
-            "semantic_kind": "content_presence_check",
-            "locator_hint": "",
-            "self_extension": {
-                "mode": "none",
-                "trigger": "none",
-                "execute_now": false
-            }
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
-            .expect("missing reference_resolution should be normalized to none");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/reference_resolution/target")
-            .and_then(|v| v.as_str()),
-        Some("none")
-    );
-    assert_eq!(
-        validated.value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
-}
-
-#[test]
 fn validate_against_schema_normalizes_contract_repair_confidence_label() {
     let raw = r#"{
         "apply": true,
@@ -297,104 +191,6 @@ fn validate_against_schema_normalizes_contract_repair_confidence_label() {
             .and_then(|v| v.as_str()),
         Some("config_risk_assessment")
     );
-}
-
-#[test]
-fn validate_against_schema_normalizes_direct_answer_gate_file_locator_alias() {
-    let raw = r#"{
-        "decision": "planner_execute",
-        "reason": "fresh file content is required",
-        "confidence": 0.95,
-        "clarify_question": "",
-        "resolved_user_intent": "Read the last lines from /tmp/clawd.log",
-        "reference_resolution": {"target": "none"},
-        "output_contract": {
-            "response_shape": "free",
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "file",
-            "delivery_intent": "none",
-            "semantic_kind": "tail_lines",
-            "locator_hint": "/tmp/clawd.log",
-            "self_extension": {
-                "mode": "none",
-                "trigger": "none",
-                "execute_now": false
-            }
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
-            .expect("gate file locator alias should be normalized");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/locator_kind")
-            .and_then(|v| v.as_str()),
-        Some("path")
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/semantic_kind")
-            .and_then(|v| v.as_str()),
-        Some("content_excerpt_summary")
-    );
-}
-
-#[test]
-fn validate_against_schema_preserves_direct_answer_gate_semantic_enums() {
-    let semantic_kinds = [
-        "service_status",
-        "directory_entry_groups",
-        "directory_purpose_summary",
-        "excerpt_kind_judgment",
-        "recent_artifacts_judgment",
-        "config_validation",
-        "config_mutation",
-        "config_risk_assessment",
-        "package_manager_detection",
-        "tool_discovery",
-    ];
-
-    for semantic_kind in semantic_kinds {
-        let raw = json!({
-            "decision": "planner_execute",
-            "reason": "fresh observation is required",
-            "confidence": 0.95,
-            "clarify_question": "",
-            "resolved_user_intent": "Inspect a concrete workspace target",
-            "reference_resolution": {"target": "none"},
-            "output_contract": {
-                "response_shape": "strict",
-                "requires_content_evidence": true,
-                "delivery_required": false,
-                "locator_kind": "path",
-                "delivery_intent": "none",
-                "semantic_kind": semantic_kind,
-                "locator_hint": "logs",
-                "self_extension": {
-                    "mode": "none",
-                    "trigger": "none",
-                    "execute_now": false
-                }
-            }
-        })
-        .to_string();
-        let validated =
-            super::validate_against_schema::<Value>(&raw, super::PromptSchemaId::DirectAnswerGate)
-                .expect("canonical semantic kind should pass gate schema");
-
-        assert_eq!(
-            validated
-                .value
-                .pointer("/output_contract/semantic_kind")
-                .and_then(|v| v.as_str()),
-            Some(semantic_kind)
-        );
-    }
 }
 
 #[test]
@@ -465,6 +261,7 @@ fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
     let raw = r#"{
         "apply": true,
         "reason": "semantic repair",
+        "repair_target": "directory_purpose_summary",
         "confidence": 0.92,
         "decision":"planner_execute",
         "needs_clarify": false,
@@ -500,6 +297,10 @@ fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
 
     assert!(validated.schema_normalized);
     assert!(validated.value.get("agent_display_name_hint").is_none());
+    assert_eq!(
+        validated.value.get("repair_target").and_then(Value::as_str),
+        Some("directory_purpose_summary")
+    );
     assert_eq!(
         validated
             .value

@@ -1,433 +1,93 @@
 #!/usr/bin/env python3
-"""Guard pre-planner exits against untracked semantic route growth."""
+"""Guard removed pre-planner/direct-answer gate inventory from returning.
+
+The old script used to require an inventory for pre-planner semantic exits.
+After the agent-loop migration, those exits are deleted. This check keeps the
+historical script entry point but now enforces the new invariant: no production
+Rust module may reintroduce the old inventory files or direct-answer gate
+promotion tokens.
+"""
 
 from __future__ import annotations
 
-import re
+import argparse
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVENTORY_PATH = ROOT / "crates/clawd/src/ask_flow_pre_planner_exit.rs"
-LOOP_CONTROL_PATH = ROOT / "crates/clawd/src/agent_engine/loop_control.rs"
-GATE_EXECUTION_PATH = ROOT / "crates/clawd/src/ask_flow_gate_execution.rs"
 SRC_ROOT = ROOT / "crates/clawd/src"
 
-REASON_RE = re.compile(r'reason_code:\s*"([^"]+)"')
-ITEM_RE = re.compile(
-    r"PrePlannerExitInventoryItem\s*\{(?P<body>.*?)\n\s*\}",
-    re.DOTALL,
+REMOVED_FILES = (
+    "crates/clawd/src/ask_flow_pre_planner_exit.rs",
+    "crates/clawd/src/ask_flow_gate_execution.rs",
+    "crates/clawd/src/ask_flow_gate_policy.rs",
+    "crates/clawd/src/ask_flow_gate_contract.rs",
+    "crates/clawd/src/ask_flow_chat_helpers.rs",
 )
-INVENTORY_ARRAY_RE = re.compile(
-    r"PRE_PLANNER_EXIT_INVENTORY:[^=]+=\s*&\[(?P<body>.*?)\n\];",
-    re.DOTALL,
+
+FORBIDDEN_PRODUCTION_TOKENS = (
+    "PRE_PLANNER_EXIT_INVENTORY",
+    "with_pre_planner_exit_snapshot",
+    "pre_planner_exit_for_reason",
+    "direct_answer_gate_planner_promotion_reason_code",
+    "direct_answer_gate_boundary_class",
+    "direct_answer_gate_ownership_class",
+    "direct_answer_gate_boundary_class_is_boundary_owned",
 )
-FIELD_STRING_RE = re.compile(r'(?P<name>\w+):\s*"(?P<value>[^"]*)"')
-KIND_RE = re.compile(r"kind:\s*PrePlannerExitKind::(?P<kind>\w+)")
-ORDER_RE = re.compile(r"migration_order:\s*(?P<order>\d+)")
-NL_REFS_RE = re.compile(r"nl_gate_refs:\s*&\[(?P<refs>.*?)\]", re.DOTALL)
-CALL_NAME = "with_pre_planner_exit_snapshot"
-KNOWN_KINDS = {
-    "BoundarySafety",
-    "ContractBoundary",
-    "EvidenceProjection",
-    "MachineFactFastPath",
-    "CompatTrace",
-    "AgentLoopActivation",
-}
-KNOWN_DELETION_GATES = {
-    "keep_boundary",
-    "keep_contract_boundary",
-    "keep_evidence_projection",
-    "keep_machine_fact_fast_path",
-    "keep_structured_agent_loop_activation_gate",
-    "delete_after_agent_loop_default",
-    "delete_after_selected_class_release_gate",
-    "test_fixture_only",
-}
-KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES = {
-    "not_observed_in_planner_shadow",
-    "locator_binding_fallback",
-    "evidence_backed_direct_candidate",
-    "fallback_safety_filter",
-    "contract_execution_boundary",
-    "evidence_projection_execution",
-    "agent_loop_activation_boundary",
-    "clarify_boundary",
-    "legacy_unclassified_gate_observed",
-}
-DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES = {
-    "not_observed_in_planner_shadow",
-    "locator_binding_fallback",
-    "evidence_backed_direct_candidate",
-    "fallback_safety_filter",
-    "contract_execution_boundary",
-    "evidence_projection_execution",
-    "agent_loop_activation_boundary",
-    "clarify_boundary",
-}
-KNOWN_DIRECT_ANSWER_OWNERSHIP_CLASSES = {
-    "fallback_safety_check",
-    "contract_boundary",
-    "evidence_projection",
-    "agent_loop_activation",
-    "semantic_policy_candidate",
-}
-DIRECT_ANSWER_PROMOTION_REASON_CODE_OUTPUTS = {
-    "direct_answer_gate_contract_boundary_execute",
-    "direct_answer_gate_evidence_projection_execute",
-}
 
 
-def rust_files() -> list[Path]:
-    return sorted(SRC_ROOT.rglob("*.rs"))
+def rel(path: Path) -> str:
+    return path.resolve().relative_to(ROOT).as_posix()
 
 
-def load_inventory() -> set[str]:
-    raw = INVENTORY_PATH.read_text(encoding="utf-8")
-    return set(REASON_RE.findall(raw))
+def is_test_path(path: Path) -> bool:
+    rel_path = rel(path)
+    parts = Path(rel_path).parts
+    if rel_path.endswith(("_tests.rs", "tests.rs")):
+        return True
+    return any(part == "tests" or part.endswith("_tests") for part in parts)
 
 
-def rust_string_values(raw: str) -> list[str]:
-    return re.findall(r'"([^"]+)"', raw)
+def production_rust_files() -> list[Path]:
+    return sorted(
+        path for path in SRC_ROOT.rglob("*.rs") if path.is_file() and not is_test_path(path)
+    )
 
 
-def parse_inventory_items() -> list[dict[str, object]]:
-    raw = INVENTORY_PATH.read_text(encoding="utf-8")
-    array_match = INVENTORY_ARRAY_RE.search(raw)
-    if not array_match:
-        return []
-    array_body = array_match.group("body")
-    array_offset = array_match.start("body")
-    items: list[dict[str, object]] = []
-    for match in ITEM_RE.finditer(array_body):
-        body = match.group("body")
-        fields = {
-            field.group("name"): field.group("value")
-            for field in FIELD_STRING_RE.finditer(body)
-        }
-        kind = KIND_RE.search(body)
-        order = ORDER_RE.search(body)
-        refs_match = NL_REFS_RE.search(body)
-        refs = rust_string_values(refs_match.group("refs")) if refs_match else []
-        items.append(
-            {
-                "line": raw.count("\n", 0, array_offset + match.start()) + 1,
-                "reason_code": fields.get("reason_code", ""),
-                "kind": kind.group("kind") if kind else "",
-                "migration_target": fields.get("migration_target", ""),
-                "migration_stage": fields.get("migration_stage", ""),
-                "migration_order": int(order.group("order")) if order else -1,
-                "nl_gate_refs": refs,
-                "deletion_gate": fields.get("deletion_gate", ""),
-                "owner_layer": fields.get("owner_layer", ""),
-            }
-        )
-    return items
-
-
-def validate_inventory_items(items: list[dict[str, object]]) -> list[str]:
+def scan_repo() -> list[str]:
     findings: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        line = item["line"]
-        reason = str(item["reason_code"])
-        kind = str(item["kind"])
-        stage = str(item["migration_stage"])
-        target = str(item["migration_target"])
-        owner = str(item["owner_layer"])
-        deletion_gate = str(item.get("deletion_gate", ""))
-        order = int(item["migration_order"])
-        refs = item["nl_gate_refs"]
-        assert isinstance(refs, list)
-        prefix = f"{INVENTORY_PATH.relative_to(ROOT)}:{line}"
-        if not reason:
-            findings.append(f"{prefix}: missing_reason_code")
-        elif reason in seen:
-            findings.append(f"{prefix}: duplicate_reason_code={reason}")
-        seen.add(reason)
-        if kind not in KNOWN_KINDS:
-            findings.append(f"{prefix}: unknown_kind={kind or '<missing>'}")
-        if not stage:
-            findings.append(f"{prefix}: missing_migration_stage")
-        if not target:
-            findings.append(f"{prefix}: missing_migration_target")
-        if not owner:
-            findings.append(f"{prefix}: missing_owner_layer")
-        if deletion_gate not in KNOWN_DELETION_GATES:
-            findings.append(
-                f"{prefix}: invalid_deletion_gate={deletion_gate or '<missing>'}"
-            )
-        if order < 0:
-            findings.append(f"{prefix}: missing_migration_order")
-        if kind == "AgentLoopActivation":
-            if deletion_gate != "keep_structured_agent_loop_activation_gate":
-                findings.append(
-                    f"{prefix}: agent_loop_activation_requires_structured_gate"
-                )
-            if target != "agent_loop_authority":
-                findings.append(
-                    f"{prefix}: agent_loop_activation_requires_agent_loop_authority"
-                )
-            if owner not in {
-                "ask_flow_planner_promotion",
-                "ask_flow_chat_fallback",
-                "direct_answer_gate",
-            }:
-                findings.append(
-                    f"{prefix}: agent_loop_activation_requires_known_owner"
-                )
-        if kind == "ContractBoundary":
-            if deletion_gate != "keep_contract_boundary":
-                findings.append(f"{prefix}: contract_boundary_requires_keep_gate")
-            if target != "planner_loop_contract_boundary":
-                findings.append(
-                    f"{prefix}: contract_boundary_requires_contract_target"
-                )
-        if kind == "EvidenceProjection":
-            if deletion_gate != "keep_evidence_projection":
-                findings.append(f"{prefix}: evidence_projection_requires_keep_gate")
-            if "evidence_projection" not in target:
-                findings.append(
-                    f"{prefix}: evidence_projection_requires_projection_target"
-                )
-        for ref in refs:
-            if not re.fullmatch(r"[a-z0-9_]+", str(ref)):
-                findings.append(f"{prefix}: invalid_nl_gate_ref={ref}")
+    for removed in REMOVED_FILES:
+        path = ROOT / removed
+        if path.exists():
+            findings.append(f"{removed}: removed_pre_planner_file_returned")
+    for path in production_rust_files():
+        raw = path.read_text(encoding="utf-8")
+        for token in FORBIDDEN_PRODUCTION_TOKENS:
+            if token in raw:
+                findings.append(f"{rel(path)}: forbidden_pre_planner_token:{token}")
     return findings
 
 
-def function_body(raw: str, fn_name: str, next_fn_name: str) -> str:
-    start = raw.find(f"fn {fn_name}")
-    end = raw.find(f"fn {next_fn_name}", start + 1)
-    if start < 0 or end < 0:
-        return ""
-    return raw[start:end]
-
-
-def returned_class_tokens(body: str) -> set[str]:
-    values = set(re.findall(r'return\s+"([^"]+)"', body))
-    fallback = re.search(r'\n\s*"([^"]+)"\s*\n\}', body)
-    if fallback:
-        values.add(fallback.group(1))
-    return values
-
-
-def validate_direct_answer_boundary_classes() -> list[str]:
-    findings: list[str] = []
-    raw = LOOP_CONTROL_PATH.read_text(encoding="utf-8")
-    class_body = function_body(
-        raw,
-        "direct_answer_gate_boundary_class",
-        "direct_answer_gate_ownership_class",
-    )
-    owner_body = function_body(
-        raw,
-        "direct_answer_gate_ownership_class",
-        "direct_answer_gate_boundary_class_is_boundary_owned",
-    )
-    owned_body = function_body(
-        raw,
-        "direct_answer_gate_boundary_class_is_boundary_owned",
-        "route_reason_has_marker",
-    )
-    if not class_body:
-        findings.append("loop_control.rs: missing_direct_answer_gate_boundary_class")
-        return findings
-    class_tokens = returned_class_tokens(class_body)
-    unknown_classes = sorted(class_tokens - KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES)
-    if unknown_classes:
-        findings.append(
-            "loop_control.rs: unknown_direct_answer_boundary_class="
-            + ",".join(unknown_classes)
-        )
-    missing_classes = sorted(KNOWN_DIRECT_ANSWER_BOUNDARY_CLASSES - class_tokens)
-    if missing_classes:
-        findings.append(
-            "loop_control.rs: missing_direct_answer_boundary_class_return="
-            + ",".join(missing_classes)
-        )
-    if not owner_body:
-        findings.append("loop_control.rs: missing_direct_answer_gate_ownership_class")
-    else:
-        owner_tokens = set(re.findall(r'=>\s*"([^"]+)"', owner_body))
-        unknown_owners = sorted(owner_tokens - KNOWN_DIRECT_ANSWER_OWNERSHIP_CLASSES)
-        if unknown_owners:
-            findings.append(
-                "loop_control.rs: unknown_direct_answer_ownership_class="
-                + ",".join(unknown_owners)
-            )
-    if not owned_body:
-        findings.append("loop_control.rs: missing_direct_answer_boundary_owned_check")
-    else:
-        owned_tokens = set(rust_string_values(owned_body))
-        unknown_owned = sorted(owned_tokens - DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES)
-        if unknown_owned:
-            findings.append(
-                "loop_control.rs: boundary_owned_contains_unexpected_class="
-                + ",".join(unknown_owned)
-            )
-        missing_owned = sorted(DIRECT_ANSWER_BOUNDARY_OWNED_CLASSES - owned_tokens)
-        if missing_owned:
-            findings.append(
-                "loop_control.rs: boundary_owned_missing_class="
-                + ",".join(missing_owned)
-            )
-    return findings
-
-
-def promotion_reason_tag_literals(raw: str) -> set[str]:
-    tags: set[str] = set()
-    for value in rust_string_values(raw):
-        if value in DIRECT_ANSWER_PROMOTION_REASON_CODE_OUTPUTS:
-            continue
-        if not value.endswith("_execute"):
-            continue
-        if value.startswith("direct_answer_gate_") or value.startswith(
-            "inline_structured_payload_context"
-        ):
-            tags.add(value)
-    return tags
-
-
-def validate_direct_answer_promotion_reason_tags() -> list[str]:
-    findings: list[str] = []
-    raw = GATE_EXECUTION_PATH.read_text(encoding="utf-8")
-    body = function_body(
-        raw,
-        "direct_answer_gate_planner_promotion_reason_code",
-        "direct_answer_gate_structured_contract_execute",
-    )
-    if not body:
-        findings.append(
-            f"{GATE_EXECUTION_PATH.relative_to(ROOT)}: missing_promotion_reason_code_function"
-        )
-        return findings
-    used_tags = promotion_reason_tag_literals(raw)
-    classified_tags = promotion_reason_tag_literals(body)
-    missing = sorted(used_tags - classified_tags)
-    if missing:
-        findings.append(
-            "{}: unclassified_direct_answer_promotion_reason_tags={}".format(
-                GATE_EXECUTION_PATH.relative_to(ROOT),
-                ",".join(missing),
-            )
-        )
-    return findings
-
-
-def skip_rust_string(raw: str, index: int) -> int:
-    quote = raw[index]
-    index += 1
-    while index < len(raw):
-        if raw[index] == "\\":
-            index += 2
-            continue
-        if raw[index] == quote:
-            return index + 1
-        index += 1
-    return index
-
-
-def call_span(raw: str, name_index: int) -> tuple[int, int] | None:
-    open_index = raw.find("(", name_index + len(CALL_NAME))
-    if open_index < 0:
-        return None
-    depth = 0
-    index = open_index
-    while index < len(raw):
-        ch = raw[index]
-        if ch in {'"', "'"}:
-            index = skip_rust_string(raw, index)
-            continue
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0:
-                return open_index, index + 1
-        index += 1
-    return None
-
-
-def rust_string_literals(raw: str) -> list[str]:
-    values: list[str] = []
-    index = 0
-    while index < len(raw):
-        ch = raw[index]
-        if ch != '"':
-            index += 1
-            continue
-        start = index + 1
-        index += 1
-        buf: list[str] = []
-        while index < len(raw):
-            if raw[index] == "\\":
-                if index + 1 < len(raw):
-                    buf.append(raw[index + 1])
-                index += 2
-                continue
-            if raw[index] == '"':
-                values.append("".join(buf) if buf else raw[start:index])
-                index += 1
-                break
-            buf.append(raw[index])
-            index += 1
-    return values
-
-
-def find_exit_reasons(path: Path) -> list[tuple[int, str | None]]:
-    raw = path.read_text(encoding="utf-8")
-    results: list[tuple[int, str | None]] = []
-    search_start = 0
-    while True:
-        name_index = raw.find(CALL_NAME, search_start)
-        if name_index < 0:
-            return results
-        line_start = raw.rfind("\n", 0, name_index) + 1
-        if re.search(r"\bfn\s+$", raw[line_start:name_index]):
-            search_start = name_index + len(CALL_NAME)
-            continue
-        line = raw.count("\n", 0, name_index) + 1
-        span = call_span(raw, name_index)
-        if span is None:
-            results.append((line, None))
-            search_start = name_index + len(CALL_NAME)
-            continue
-        literals = rust_string_literals(raw[span[0] : span[1]])
-        results.append((line, literals[-1] if literals else None))
-        search_start = span[1]
-
-
-def main() -> int:
-    inventory = load_inventory()
-    findings: list[str] = []
-    items = parse_inventory_items()
-    findings.extend(validate_inventory_items(items))
-    findings.extend(validate_direct_answer_boundary_classes())
-    findings.extend(validate_direct_answer_promotion_reason_tags())
-    observed = 0
-    for path in rust_files():
-        for line, reason in find_exit_reasons(path):
-            observed += 1
-            rel = path.relative_to(ROOT)
-            if not reason:
-                findings.append(f"{rel}:{line}: missing_literal_reason")
-            elif reason not in inventory:
-                findings.append(f"{rel}:{line}: unknown_reason={reason}")
-    if findings:
-        print("PRE_PLANNER_EXIT_INVENTORY_CHECK findings={}".format(len(findings)))
-        for finding in findings:
-            print(finding)
-        return 1
-    print(
-        "PRE_PLANNER_EXIT_INVENTORY_CHECK ok calls={} inventory={} items={}".format(
-            observed, len(inventory), len(items)
-        )
-    )
+def run_self_test() -> int:
+    assert "direct_answer_gate_boundary_class" in FORBIDDEN_PRODUCTION_TOKENS
+    assert "crates/clawd/src/ask_flow_pre_planner_exit.rs" in REMOVED_FILES
+    print("SELF_TEST_OK")
     return 0
 
 
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+    findings = scan_repo()
+    print(f"PRE_PLANNER_EXIT_REMOVAL_CHECK findings={len(findings)}")
+    for finding in findings:
+        print(f"  - {finding}")
+    return 1 if findings else 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -7,15 +7,15 @@ use crate::AppState;
 
 #[path = "prompt_utils_contract_repair_judge.rs"]
 mod contract_repair_judge;
-#[path = "prompt_utils_direct_answer_gate.rs"]
-mod direct_answer_gate;
+#[path = "prompt_utils_output_contract.rs"]
+mod output_contract;
 #[path = "prompt_utils_schema.rs"]
 mod schema_validation;
 use contract_repair_judge::canonicalize_contract_repair_judge_object;
-use direct_answer_gate::{
-    canonicalize_direct_answer_gate_contract, canonicalize_direct_answer_gate_object,
-    normalize_direct_answer_gate_delivery_intent, normalize_direct_answer_gate_locator_kind,
-    normalize_direct_answer_gate_semantic_kind, normalize_schema_token_for_gate,
+use output_contract::{
+    canonicalize_output_contract, normalize_output_contract_delivery_intent,
+    normalize_output_contract_locator_kind, normalize_output_contract_semantic_kind,
+    normalize_schema_token_for_contract,
 };
 use schema_validation::validate_schema_value;
 
@@ -82,7 +82,6 @@ pub(crate) fn log_prompt_render_with_version(
 pub(crate) enum PromptSchemaId {
     IntentNormalizer,
     ContractRepairJudge,
-    DirectAnswerGate,
     AnswerVerifier,
     UserResponseContractValidator,
     PlanResult,
@@ -99,7 +98,6 @@ impl PromptSchemaId {
         match self {
             Self::IntentNormalizer => "intent_normalizer",
             Self::ContractRepairJudge => "contract_repair_judge",
-            Self::DirectAnswerGate => "direct_answer_gate",
             Self::AnswerVerifier => "answer_verifier",
             Self::UserResponseContractValidator => "user_response_contract_validator",
             Self::PlanResult => "plan_result",
@@ -119,7 +117,6 @@ impl PromptSchemaId {
 
         static INTENT_NORMALIZER: OnceLock<Value> = OnceLock::new();
         static CONTRACT_REPAIR_JUDGE: OnceLock<Value> = OnceLock::new();
-        static DIRECT_ANSWER_GATE: OnceLock<Value> = OnceLock::new();
         static ANSWER_VERIFIER: OnceLock<Value> = OnceLock::new();
         static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
         static PLAN_RESULT: OnceLock<Value> = OnceLock::new();
@@ -139,11 +136,6 @@ impl PromptSchemaId {
             Self::ContractRepairJudge => CONTRACT_REPAIR_JUDGE.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/contract_repair_judge.schema.json"
-                ))
-            }),
-            Self::DirectAnswerGate => DIRECT_ANSWER_GATE.get_or_init(|| {
-                parse_schema(include_str!(
-                    "../../../prompts/schemas/direct_answer_gate.schema.json"
                 ))
             }),
             Self::AnswerVerifier => ANSWER_VERIFIER.get_or_init(|| {
@@ -371,10 +363,12 @@ fn canonicalize_schedule_intent_fields(
         "timezone",
         "target_job_id",
         "raw",
+        "mode",
         "reason",
         "clarify_question",
     ] {
-        normalized |= canonicalize_string_field(&mut map, field, "");
+        let default = if field == "mode" { "execute" } else { "" };
+        normalized |= canonicalize_string_field(&mut map, field, default);
     }
     if !map.contains_key("needs_clarify") {
         map.insert("needs_clarify".to_string(), Value::Bool(false));
@@ -626,9 +620,6 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
         (PromptSchemaId::PlanResult, Value::Object(map)) => canonicalize_plan_result_object(map),
         (PromptSchemaId::ScheduleIntent, Value::Object(map)) => {
             canonicalize_schedule_intent_schema_object(map)
-        }
-        (PromptSchemaId::DirectAnswerGate, Value::Object(map)) => {
-            canonicalize_direct_answer_gate_object(map)
         }
         (PromptSchemaId::ContractRepairJudge, Value::Object(map)) => {
             canonicalize_contract_repair_judge_object(map)

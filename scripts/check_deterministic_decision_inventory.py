@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Guard deterministic decision inventory coverage for runtime convergence.
+"""Guard deterministic decision inventory coverage after agent-loop migration.
 
 The inventory is intentionally module-scoped. It is not a semantic router and
 does not inspect user language. Its job is to ensure every production module in
 the convergence plan's target file families has an explicit owner-category
-classification and, when semantic migration debt is acknowledged, a non-runtime
-migration target.
+classification. Deleted pre-planner semantic routing files are intentionally not
+part of this inventory.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class BranchInventoryEntry:
 
 INVENTORY: tuple[InventoryEntry, ...] = (
     InventoryEntry(
-        name="ask_flow_boundary_and_pre_planner",
+        name="ask_flow_boundary_and_media_preparation",
         patterns=("crates/clawd/src/ask_flow*.rs",),
         categories=(
             "contract_boundary",
@@ -149,38 +149,6 @@ INVENTORY: tuple[InventoryEntry, ...] = (
 
 
 BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
-    BranchInventoryEntry(
-        name="pre_planner_exit_reason_table",
-        path="crates/clawd/src/ask_flow_pre_planner_exit.rs",
-        category="contract_boundary",
-        input_fields=("reason_code", "RouteResult", "IntentOutputContract"),
-        output_fields=("decision_source", "semantic_control_state", "migration_stage"),
-        tokens=("PRE_PLANNER_EXIT_INVENTORY", "semantic_control_state"),
-    ),
-    BranchInventoryEntry(
-        name="direct_answer_gate_promotion_reason_mapper",
-        path="crates/clawd/src/ask_flow_gate_execution.rs",
-        category="contract_boundary",
-        input_fields=("reason_tag",),
-        output_fields=("rewrite_reason_code", "decision_source"),
-        tokens=("direct_answer_gate_planner_promotion_reason_code",),
-    ),
-    BranchInventoryEntry(
-        name="chat_fallback_agent_loop_activation",
-        path="crates/clawd/src/ask_flow.rs",
-        category="contract_boundary",
-        input_fields=("AskMode", "RouteResult", "IntentOutputContract"),
-        output_fields=("chat_fallback_agent_loop_activation",),
-        tokens=("chat_fallback_agent_loop_activation",),
-    ),
-    BranchInventoryEntry(
-        name="route_reason_machine_marker_projection",
-        path="crates/clawd/src/ask_flow_chat_helpers.rs",
-        category="compat_trace",
-        input_fields=("route_reason",),
-        output_fields=("machine_markers",),
-        tokens=("route_reason_machine_markers", "route_reason_has_exact_marker"),
-    ),
     BranchInventoryEntry(
         name="planner_structural_route_markers",
         path="crates/clawd/src/agent_engine/planning_route_markers.rs",
@@ -396,13 +364,13 @@ def print_summary() -> None:
 
 def run_self_test() -> int:
     assert matches_any(
-        "crates/clawd/src/ask_flow_gate_execution.rs", TARGET_PATTERNS
+        "crates/clawd/src/ask_flow.rs", TARGET_PATTERNS
     )
     assert is_test_path(ROOT / "crates/clawd/src/answer_verifier_tests.rs")
     planning_entries = covering_entries("crates/clawd/src/agent_engine/planning.rs")
     assert not any("semantic_rewrite" in entry.categories for entry in planning_entries)
     assert any(
-        entry.name == "pre_planner_exit_reason_table"
+        entry.name == "planner_structural_route_markers"
         for entry in BRANCH_INVENTORY
     )
     assert any(
