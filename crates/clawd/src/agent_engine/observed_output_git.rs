@@ -221,7 +221,6 @@ pub(super) fn git_current_branch_from_json_value(value: &serde_json::Value) -> O
         .or_else(|| {
             value
                 .get("output")
-                .or_else(|| value.get("text"))
                 .and_then(serde_json::Value::as_str)
                 .and_then(|text| {
                     normalized_scalar_candidate(text).or_else(|| git_current_branch_from_text(text))
@@ -294,13 +293,10 @@ pub(super) fn collect_git_basic_observation_text_candidates(
             if text.is_empty() {
                 return;
             }
-            if let Ok(inner) = serde_json::from_str::<serde_json::Value>(text) {
-                collect_git_basic_observation_text_candidates(&inner, candidates, depth + 1);
-            }
             candidates.push(text.to_string());
         }
         serde_json::Value::Object(obj) => {
-            for key in ["output", "command_output", "text"] {
+            for key in ["output", "command_output"] {
                 if let Some(value) = obj.get(key) {
                     collect_git_basic_observation_text_candidates(value, candidates, depth + 1);
                 }
