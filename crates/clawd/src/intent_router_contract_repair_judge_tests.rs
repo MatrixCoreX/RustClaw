@@ -66,7 +66,7 @@ fn contract_repair_judge_schema_accepts_canonical_payload() {
 }
 
 #[test]
-fn contract_repair_judge_scalar_semantic_token_normalizes_to_scalar_contract() {
+fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker() {
     let raw = r#"{
           "apply": true,
           "reason": "memory_only_answer_candidate_conflict_with_current_file_read_request",
@@ -124,25 +124,22 @@ fn contract_repair_judge_scalar_semantic_token_normalizes_to_scalar_contract() {
         attachment_processing_required: false,
     };
 
-    assert!(super::apply_contract_repair_judge_output(
+    assert!(!super::apply_contract_repair_judge_output(
         &mut out,
         validated.value
     ));
 
-    assert_eq!(out.decision, "planner_execute");
+    assert_eq!(out.decision, "direct_answer");
     let contract = super::parse_output_contract(out.output_contract, false);
-    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
-    assert_eq!(
-        contract.locator_hint,
-        "scripts/nl_tests/fixtures/device_local/package.json"
-    );
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
 }
 
 #[test]
-fn contract_repair_judge_output_applies_machine_contract_without_decision_authority() {
+fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marker() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "列出 document 目录下的所有文件名".to_string(),
         answer_candidate: String::new(),
@@ -198,18 +195,18 @@ fn contract_repair_judge_output_applies_machine_contract_without_decision_author
         state_patch: None,
     };
 
-    assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+    assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "planner_execute");
-    assert_eq!(out.confidence, 0.91);
-    assert!(out.reason.contains("contract_repair_applied"));
-    assert!(out.reason.contains("contract_repair_note_present"));
-    assert!(out.reason.contains("contract_repair_target=file_names"));
+    assert_eq!(out.decision, "direct_answer");
+    assert_eq!(out.confidence, 0.5);
+    assert!(!out.reason.contains("contract_repair_applied"));
+    assert!(!out.reason.contains("contract_repair_note_present"));
+    assert!(!out.reason.contains("contract_repair_target=file_names"));
     let contract = super::parse_output_contract(out.output_contract, false);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.locator_hint, "document");
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(!contract.requires_content_evidence);
+    assert!(contract.locator_hint.is_empty());
     assert!(out.state_patch.is_none());
 }
 
@@ -564,7 +561,7 @@ fn contract_repair_judge_preserves_structured_config_key_contract() {
         state_patch: None,
     };
 
-    assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+    assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
 
     let contract = super::parse_output_contract(out.output_contract, false);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::StructuredKeys);
@@ -572,7 +569,7 @@ fn contract_repair_judge_preserves_structured_config_key_contract() {
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(contract.locator_hint, "configs/config.toml");
-    assert!(out
+    assert!(!out
         .reason
         .contains("structured_config_key_contract_preserved"));
 }
@@ -646,7 +643,7 @@ fn contract_repair_judge_preserves_structured_scalar_field_contract() {
         state_patch: None,
     };
 
-    assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+    assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
 
     let contract = super::parse_output_contract(out.output_contract, false);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -657,7 +654,7 @@ fn contract_repair_judge_preserves_structured_scalar_field_contract() {
         contract.locator_hint,
         "scripts/nl_tests/fixtures/device_local/package.json"
     );
-    assert!(out
+    assert!(!out
         .reason
         .contains("structured_scalar_field_contract_preserved"));
 }
@@ -812,13 +809,13 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
         state_patch: None,
     };
 
-    assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+    assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert!(!out.wants_file_delivery);
+    assert!(out.wants_file_delivery);
     let contract = super::parse_output_contract(out.output_contract, out.wants_file_delivery);
-    assert_eq!(contract.response_shape, OutputResponseShape::Free);
-    assert!(!contract.delivery_required);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
 }
 
 #[test]
