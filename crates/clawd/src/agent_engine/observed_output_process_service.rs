@@ -19,11 +19,7 @@ fn service_control_status_payload_value(value: &serde_json::Value) -> Option<ser
     {
         return Some(extra.clone());
     }
-    value
-        .get("text")
-        .and_then(|value| value.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-        .filter(value_has_service_control_status_shape)
+    None
 }
 
 fn value_has_service_control_status_shape(value: &serde_json::Value) -> bool {
