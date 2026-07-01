@@ -611,7 +611,7 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
 }
 
 #[test]
-fn async_job_protocol_prefers_run_cmd_async_start_over_service_status_shortcut() {
+fn async_job_protocol_without_loop_command_does_not_parse_text_command() {
     let state = test_state_with_enabled_skills(&["process_basic", "run_cmd"]);
     let mut route = base_route_result();
     route.resolved_intent = "async_job_protocol: run `sleep 2 && echo RUSTCLAW_ASYNC_SMOKE`; adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
@@ -621,34 +621,14 @@ fn async_job_protocol_prefers_run_cmd_async_start_over_service_status_shortcut()
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
 
-    let plan = async_job_start_deterministic_plan_result(
+    assert!(async_job_start_deterministic_plan_result(
         &state,
         "start async job",
         Some(&route),
         &LoopState::new(1),
         &route.resolved_intent,
     )
-    .expect("async job machine contract should start runtime async command");
-
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let AgentAction::CallSkill { skill, args } = action else {
-        panic!("expected run_cmd action, got {action:?}");
-    };
-    assert_eq!(skill, "run_cmd");
-    assert_eq!(
-        args.get("command").and_then(Value::as_str),
-        Some("sleep 2 && echo RUSTCLAW_ASYNC_SMOKE")
-    );
-    assert_eq!(args.get("async_start").and_then(Value::as_bool), Some(true));
-    assert_eq!(
-        args.get("poll_after_seconds").and_then(Value::as_u64),
-        Some(2)
-    );
-    assert_eq!(
-        args.get(CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
-            .and_then(Value::as_str),
-        Some("async_job_protocol")
-    );
+    .is_none());
 }
 
 #[test]

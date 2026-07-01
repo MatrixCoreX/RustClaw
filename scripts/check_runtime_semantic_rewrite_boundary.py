@@ -309,6 +309,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_service_status_scalar_shape_health_selection())
     findings.extend(scan_task_control_task_id_user_text_selection())
     findings.extend(scan_task_control_legacy_token_fallback())
+    findings.extend(scan_async_job_start_user_text_command_selection())
     findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
@@ -1078,6 +1079,33 @@ def scan_task_control_legacy_token_text(rel_path: str, text: str) -> list[Findin
     return findings
 
 
+def scan_async_job_start_user_text_command_selection() -> list[Finding]:
+    return scan_async_job_start_user_text_command_text(
+        rel(VALUE_STRING_LIST_FILE),
+        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_async_job_start_user_text_command_text(rel_path: str, text: str) -> list[Finding]:
+    block = function_block(text, "async_job_start_deterministic_plan_result")
+    if block is None:
+        return []
+    findings: list[Finding] = []
+    block_start, block_text = block
+    for offset, line in enumerate(block_text.splitlines(), start=0):
+        if "explicit_command_segment(" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                block_start + offset,
+                "async_job_start_user_text_command_selection",
+                line.strip(),
+            )
+        )
+    return findings
+
+
 def rust_private_or_pub_function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(
         rf"^(?:pub\(super\)\s+)?fn\s+{re.escape(function_name)}\b", re.MULTILINE
@@ -1630,6 +1658,18 @@ def run_self_test() -> int:
         and blocked_task_control_legacy_token[0].kind == "task_control_legacy_token_fallback"
     )
     assert not scan_task_control_legacy_token_fallback()
+    blocked_async_job_start = scan_async_job_start_user_text_command_text(
+        rel(VALUE_STRING_LIST_FILE),
+        "pub(super) fn async_job_start_deterministic_plan_result(\n"
+        ") -> Option<PlanResult> {\n"
+        "    explicit_command_segment(&state.policy.command_intent, user_text)\n"
+        "}\n",
+    )
+    assert (
+        blocked_async_job_start
+        and blocked_async_job_start[0].kind == "async_job_start_user_text_command_selection"
+    )
+    assert not scan_async_job_start_user_text_command_selection()
     blocked_finalizer = scan_token_list_text(
         "crates/clawd/src/finalize/loop_reply_weather.rs",
         "route.output_contract_marker_is(crate::OutputSemanticKind::WeatherQuery)\n",
