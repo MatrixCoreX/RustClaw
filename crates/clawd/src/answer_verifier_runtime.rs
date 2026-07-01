@@ -299,8 +299,7 @@ pub(super) fn workspace_project_summary_requires_model_verifier(
     if !route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
         return false;
     }
-    let contract = route_result.effective_output_contract();
-    crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
+    crate::contract_matrix::final_answer_shape_for_route(route_result)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -308,9 +307,7 @@ pub(super) fn finalizer_summary_can_skip_answer_verifier(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_output_contract(
-        &route_result.output_contract,
-    ) else {
+    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route_result) else {
         return false;
     };
     if shape.allows_model_language() {
