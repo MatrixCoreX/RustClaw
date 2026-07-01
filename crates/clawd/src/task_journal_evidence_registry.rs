@@ -967,11 +967,6 @@ pub(super) fn value_looks_like_system_basic_info(value: &Value) -> bool {
     object
         .get("extra")
         .is_some_and(value_looks_like_system_basic_info)
-        || object
-            .get("text")
-            .and_then(Value::as_str)
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-            .is_some_and(|value| value_looks_like_system_basic_info(&value))
 }
 
 pub(super) fn push_source_action_ref(refs: &mut Vec<String>, skill: &str, value: Option<&Value>) {

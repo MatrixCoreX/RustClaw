@@ -13,6 +13,9 @@ mod observed_evidence_core;
 #[path = "task_journal_tests/skill_output_evidence_tests.rs"]
 mod skill_output_evidence;
 
+#[path = "task_journal_tests/system_basic_info_text_boundary.rs"]
+mod system_basic_info_text_boundary;
+
 #[path = "task_journal_tests/contract_coverage_tests.rs"]
 mod contract_coverage;
 
