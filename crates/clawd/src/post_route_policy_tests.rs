@@ -74,12 +74,12 @@ fn generated_file_delivery_without_locator_hint_can_execute() {
     let mut route = route_result();
     route.resolved_intent =
         "Create a shell script, save it as a file, and deliver the generated file".to_string();
+    route.route_reason = "generated_file_delivery".to_string();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint.clear();
 
@@ -100,12 +100,12 @@ fn generated_file_delivery_misclassified_as_path_without_hint_can_execute() {
     let mut route = route_result();
     route.resolved_intent =
         "Create a shell script, save it as a file, and deliver the generated file".to_string();
+    route.route_reason = "generated_file_delivery".to_string();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
 
@@ -213,12 +213,12 @@ fn generated_file_delivery_current_workspace_without_hint_can_execute() {
     let mut route = route_result();
     route.resolved_intent =
         "Create a small generated note in the workspace and deliver the generated file".to_string();
+    route.route_reason = "generated_file_delivery".to_string();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
 
@@ -253,6 +253,7 @@ fn current_workspace_scope_does_not_force_missing_locator_clarify() {
 #[test]
 fn sqlite_schema_version_current_workspace_directory_auto_locator_requires_clarify() {
     let mut route = route_result();
+    route.route_reason = "sqlite_schema_version".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteSchemaVersion;
 
@@ -285,7 +286,8 @@ fn sqlite_schema_version_current_workspace_directory_auto_locator_requires_clari
 #[test]
 fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.route_reason = "content_excerpt_summary".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
@@ -298,15 +300,21 @@ fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
         crate::AskMode::clarify()
     );
     assert!(result.missing_locator_for_path_scoped_content);
-    assert!(result
-        .clarify_reason
-        .contains("locator_required_for_path_scoped_content"));
+    assert_eq!(
+        result.clarify_reason_kind,
+        ClarifyReasonKind::MissingPathScopedLocator
+    );
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_missing_path_scoped_locator"
+    );
 }
 
 #[test]
 fn service_status_locator_hint_does_not_force_path_clarify() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.route_reason = "service_status".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -314,7 +322,7 @@ fn service_status_locator_hint_does_not_force_path_clarify() {
     let result = apply_post_route_policy(route, LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_chat_wrapped()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -433,7 +441,7 @@ fn background_locator_clarify_is_satisfied_by_direct_auto_locator() {
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_auto_locator_satisfied_background_clarify"
+        "post_route_auto_locator_satisfied_path_scoped_content"
     );
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
 }
@@ -444,7 +452,7 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_read_target; background_locator_requires_clarify".to_string();
+        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; filesystem_mutation_result".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     let temp_dir = std::env::temp_dir().join(format!(
         "clawd-post-route-policy-mutation-output-dir-{}-{}",
@@ -477,9 +485,9 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
 }
 
 #[test]
-fn ordinary_semantic_clarify_defers_to_agent_loop() {
+fn non_boundary_clarify_defers_to_agent_loop() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.route_reason = "background_locator_requires_clarify".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -489,14 +497,11 @@ fn ordinary_semantic_clarify_defers_to_agent_loop() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_chat_wrapped()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
-    assert_eq!(
-        result.gate_record.reason_code,
-        "post_route_semantic_clarify_deferred_to_agent_loop"
-    );
-    assert_eq!(result.gate_record.owner_layer, "agent_loop_semantic_defer");
+    assert_eq!(result.gate_record.reason_code, "post_route_no_change");
+    assert_eq!(result.gate_record.owner_layer, "post_route_policy");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::NoChange);
 }
 
@@ -506,7 +511,7 @@ fn filesystem_mutation_with_matching_locator_hint_executes_despite_deictic_marke
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; deictic_bare_locator_requires_clarify"
+        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; deictic_bare_locator_requires_clarify; filesystem_mutation_result"
             .to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -528,12 +533,12 @@ fn filesystem_mutation_with_matching_locator_hint_executes_despite_deictic_marke
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_chat_wrapped()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_auto_locator_satisfied_background_clarify"
+        "post_route_auto_locator_satisfied_path_scoped_content"
     );
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
 }
@@ -544,7 +549,7 @@ fn missing_read_target_content_excerpt_is_not_satisfied_by_default_auto_locator(
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_read_target; background_locator_requires_clarify".to_string();
+        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; content_excerpt_summary".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -573,7 +578,7 @@ fn document_heading_missing_read_target_with_matching_locator_hint_executes() {
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_read_target; background_locator_requires_clarify".to_string();
+        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; document_heading".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string();
@@ -596,7 +601,7 @@ fn document_heading_missing_read_target_with_matching_locator_hint_executes() {
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_auto_locator_satisfied_background_clarify"
+        "post_route_auto_locator_satisfied_path_scoped_content"
     );
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
 }
@@ -607,7 +612,7 @@ fn document_heading_missing_read_target_without_locator_hint_stays_clarify() {
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_read_target; background_locator_requires_clarify".to_string();
+        "clarify_reason_code:missing_read_target; background_locator_requires_clarify; document_heading".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -631,7 +636,7 @@ fn document_heading_missing_read_target_without_locator_hint_stays_clarify() {
 }
 
 #[test]
-fn deictic_bare_locator_clarify_is_not_satisfied_by_direct_auto_locator() {
+fn deictic_bare_locator_marker_no_longer_blocks_direct_auto_locator() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
@@ -647,15 +652,15 @@ fn deictic_bare_locator_clarify_is_not_satisfied_by_direct_auto_locator() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::clarify()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
-    assert!(result.execution_route_result.needs_clarify);
+    assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_boundary_clarify_required"
+        "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
+    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
 }
 
 #[test]
@@ -663,7 +668,7 @@ fn background_content_summary_with_direct_file_auto_locator_executes() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
-    route.route_reason = "background_locator_requires_clarify".to_string();
+    route.route_reason = "background_locator_requires_clarify; content_excerpt_summary".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -674,7 +679,7 @@ fn background_content_summary_with_direct_file_auto_locator_executes() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_chat_wrapped()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
@@ -685,7 +690,7 @@ fn background_content_summary_with_fuzzy_file_locator_still_clarifies() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::clarify();
     route.needs_clarify = true;
-    route.route_reason = "background_locator_requires_clarify".to_string();
+    route.route_reason = "background_locator_requires_clarify; content_excerpt_summary".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -718,7 +723,7 @@ fn current_workspace_auto_locator_rescues_clarify() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_chat_wrapped()
+        crate::AskMode::planner_execute_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
@@ -742,7 +747,7 @@ fn inherited_operation_without_boundary_contract_defers_to_agent_loop_even_with_
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_semantic_clarify_deferred_to_agent_loop"
+        "post_route_non_boundary_clarify_deferred_to_agent_loop"
     );
 }
 
@@ -792,7 +797,7 @@ fn inherited_operation_without_boundary_contract_defers_to_agent_loop_without_pr
     );
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_semantic_clarify_deferred_to_agent_loop"
+        "post_route_non_boundary_clarify_deferred_to_agent_loop"
     );
 }
 
@@ -926,6 +931,7 @@ fn act_directory_listing_does_not_default_to_directory_purpose_summary() {
 fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
     let mut route = route_result();
     route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
+    route.route_reason = "scalar_count".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
@@ -945,6 +951,7 @@ fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
 fn contract_matrix_snapshot_uses_post_route_policy_execution_contract() {
     let mut route = route_result();
     route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
+    route.route_reason = "scalar_count".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
@@ -1150,6 +1157,7 @@ fn scalar_path_only_output_without_input_locator_can_execute() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::planner_execute_plain();
     route.resolved_intent = "执行 which bash，只输出 bash 的路径".to_string();
+    route.route_reason = "scalar_path_only".to_string();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1173,6 +1181,7 @@ fn scalar_path_only_output_without_input_locator_can_execute() {
 fn scalar_path_only_contract_is_cleared_when_no_locator_binding_exists() {
     let mut route = route_result();
     route.resolved_intent = "只输出当前机器 hostname".to_string();
+    route.route_reason = "scalar_path_only".to_string();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -1203,7 +1212,7 @@ fn scalar_path_only_contract_stays_for_workspace_scope_without_locator() {
 #[test]
 fn one_sentence_command_summary_keeps_raw_command_output() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "执行 pwd 命令获取当前工作目录路径，然后用一句话简要解释这个路径大概是什么（只输出一句话）"
             .to_string();
@@ -1238,7 +1247,7 @@ fn direct_scalar_command_result_keeps_raw_command_output() {
 #[test]
 fn brief_command_explanation_no_longer_uses_surface_shape_to_clear_raw_output() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "run pwd, then briefly explain what this path is".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -1311,33 +1320,5 @@ fn fuzzy_locator_candidates_set_structured_clarify_reason_kind() {
     assert_eq!(
         result.clarify_reason_kind,
         ClarifyReasonKind::FuzzyLocatorCandidates
-    );
-}
-
-#[test]
-fn clarify_reason_kind_dispatch_tokens_keep_boundary_and_legacy_semantic_separate() {
-    assert_eq!(
-        ClarifyReasonKind::RouteReasonText.dispatch_event(),
-        "legacy_semantic_clarify_compat"
-    );
-    assert_eq!(
-        ClarifyReasonKind::RouteReasonText.dispatch_new_owner(),
-        "agent_loop_terminal_clarify_pending"
-    );
-    assert_eq!(
-        ClarifyReasonKind::RouteReasonText.dispatch_chosen_path(),
-        "ask_pipeline_legacy_semantic_clarify_compat"
-    );
-    assert_eq!(
-        ClarifyReasonKind::MissingPathScopedLocator.dispatch_event(),
-        "clarify_boundary_shortcut"
-    );
-    assert_eq!(
-        ClarifyReasonKind::MissingPathScopedLocator.dispatch_new_owner(),
-        "boundary_clarify_gate"
-    );
-    assert_eq!(
-        ClarifyReasonKind::FuzzyLocatorCandidates.dispatch_chosen_path(),
-        "ask_pipeline_boundary_clarify_shortcut"
     );
 }
