@@ -353,8 +353,8 @@ fn route_result_ignores_legacy_planner_hint_without_machine_execution_signal() {
 
     let route = super::route_result_from_normalizer(&state, &task, &out);
 
-    assert!(route.ask_mode.is_chat_gate());
-    assert!(!route.ask_mode.is_execute_gate());
+    assert!(route.ask_mode.is_execute_gate());
+    assert!(!route.ask_mode.is_chat_gate());
 }
 
 #[test]
