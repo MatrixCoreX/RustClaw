@@ -38,7 +38,7 @@ fn explicit_command_execution_repair_prevents_executionless_downgrade() {
         &mut contract,
         &mut finalize_style,
     );
-    let downgrade = super::cleanup_executionless_route_finalize_style(
+    let downgrade = super::cleanup_executionless_finalize_trace(
         &mut finalize_style,
         false,
         &contract,
@@ -1148,7 +1148,7 @@ fn raw_output_explicit_locator_repair_ignores_semantic_kind_without_machine_mark
 }
 
 #[test]
-fn plain_execute_is_not_downgraded_when_contract_is_sparse() {
+fn plain_execute_keeps_plain_finalizer_when_contract_is_sparse() {
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let contract = IntentOutputContract {
@@ -1157,7 +1157,7 @@ fn plain_execute_is_not_downgraded_when_contract_is_sparse() {
         ..IntentOutputContract::default()
     };
 
-    let reason = super::cleanup_executionless_route_finalize_style(
+    let reason = super::cleanup_executionless_finalize_trace(
         &mut finalize_style,
         false,
         &contract,
@@ -1183,7 +1183,7 @@ fn execution_signal_act_route_stays_executable() {
         ..IntentOutputContract::default()
     };
 
-    let reason = super::cleanup_executionless_route_finalize_style(
+    let reason = super::cleanup_executionless_finalize_trace(
         &mut finalize_style,
         false,
         &contract,

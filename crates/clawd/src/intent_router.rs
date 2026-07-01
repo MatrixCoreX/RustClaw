@@ -251,7 +251,7 @@ use directory_observation::directory_pair_fallback_decision;
 mod execution_contract;
 use execution_contract::{
     apply_command_payload_contract_repair, apply_explicit_command_execution_contract_repair,
-    apply_file_delivery_contract_repair, cleanup_executionless_route_finalize_style,
+    apply_file_delivery_contract_repair, cleanup_executionless_finalize_trace,
     output_semantic_kind_requires_fresh_evidence, parse_execution_recipe_hint,
     route_has_structured_execution_signal, structured_execution_signal_for_effective_route,
 };

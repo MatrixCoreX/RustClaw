@@ -1328,7 +1328,7 @@ fn structural_contract_repair_does_not_bind_case_mismatched_product_name() {
 }
 
 #[test]
-fn executionless_chat_wrapped_execute_uses_plain_finalizer_before_final_gate() {
+fn executionless_chat_wrapped_execute_cleans_finalize_trace_before_final_gate() {
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let contract = IntentOutputContract {
@@ -1337,7 +1337,7 @@ fn executionless_chat_wrapped_execute_uses_plain_finalizer_before_final_gate() {
         ..IntentOutputContract::default()
     };
 
-    let reason = super::cleanup_executionless_route_finalize_style(
+    let reason = super::cleanup_executionless_finalize_trace(
         &mut finalize_style,
         false,
         &contract,
@@ -1346,10 +1346,7 @@ fn executionless_chat_wrapped_execute_uses_plain_finalizer_before_final_gate() {
         None,
     );
 
-    assert_eq!(
-        reason,
-        Some("executionless_route_downgraded_to_direct_answer")
-    );
+    assert_eq!(reason, Some("executionless_finalize_trace_plain"));
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
 }

@@ -1275,7 +1275,7 @@ fn clarify_structured_payload_reply_promotes_direct_route_to_execute() {
         ask_mode: crate::AskMode::direct_answer(),
         resolved_intent: "Inline payload can be answered directly".to_string(),
         needs_clarify: false,
-        route_reason: "executionless_route_downgraded_to_direct_answer".to_string(),
+        route_reason: "executionless_finalize_trace_plain".to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
