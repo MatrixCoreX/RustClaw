@@ -1196,34 +1196,7 @@ fn observed_answer_fallback_can_use_compact_prompt(
             crate::OutputSemanticKind::ServiceStatus,
             crate::OutputSemanticKind::ExecutionFailedStep,
         ],
-    ) || route_has_docker_capability_marker(route)
-}
-
-fn route_has_docker_capability_marker(route: &crate::RouteResult) -> bool {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .any(|surface| machine_context_has_capability_namespace(surface, "docker"))
-}
-
-fn machine_context_has_capability_namespace(machine_context: &str, namespace: &str) -> bool {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .map(str::trim)
-        .any(|token| {
-            let Some(capability) = token.strip_prefix("capability_ref=") else {
-                return false;
-            };
-            let Some((candidate, action)) = capability.split_once('.') else {
-                return false;
-            };
-            candidate == namespace
-                && !action.is_empty()
-                && capability.bytes().all(|byte| {
-                    byte.is_ascii_lowercase()
-                        || byte.is_ascii_digit()
-                        || matches!(byte, b'_' | b'-' | b'.')
-                })
-        })
+    ) || crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {

@@ -55,6 +55,27 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
 }
 
 #[test]
+fn observed_fallback_prompt_uses_compact_template_for_docker_capability_ref() {
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route_result.resolved_intent = "capability_ref=docker.version".to_string();
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    let path = observed_answer_fallback_prompt_logical_path(
+        Some(&agent_run_context),
+        "field_value=24.0\nstatus=ok",
+    );
+
+    assert_eq!(path, "prompts/observed_answer_fallback_compact_prompt.md");
+}
+
+#[test]
 fn observed_answer_language_compatibility_rejects_clear_request_language_mismatch() {
     assert!(!observed_answer_language_compatible(
         "当前工作目录是 /home/guagua/rustclaw；进程 clawd 正在监听 8787。",
