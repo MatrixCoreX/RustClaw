@@ -480,29 +480,30 @@ fn validate_structured_file(path: &str, format: &str) -> Option<Result<(), Strin
 }
 
 pub(super) fn deterministic_structured_file_validation_from_read_range(
-    state: &AppState,
-    user_text: &str,
+    _state: &AppState,
+    _user_text: &str,
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigValidation {
+    if !route_requests_config_validation(route) {
         return None;
     }
     let (path, format) = latest_broad_structured_read_range(loop_state)?;
     let validation = validate_structured_file(&path, &format)?;
-    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let mut fields = Vec::new();
     let answer = match validation {
-        Ok(()) if prefer_english => format!("pass: {format} parsed successfully"),
-        Ok(()) => format!("通过：{format} 解析成功"),
-        Err(err) if prefer_english => format!(
-            "fail: {format} parse failed: {}",
-            crate::truncate_for_agent_trace(&err)
-        ),
-        Err(err) => format!(
-            "未通过：{format} 解析失败：{}",
-            crate::truncate_for_agent_trace(&err)
-        ),
+        Ok(()) => {
+            fields.push("validation_status=pass".to_string());
+            fields.push(format!("format={format}"));
+            fields.join("\n")
+        }
+        Err(err) => {
+            fields.push("validation_status=fail".to_string());
+            fields.push(format!("format={format}"));
+            fields.push(format!("error={}", crate::truncate_for_agent_trace(&err)));
+            fields.join("\n")
+        }
     };
     Some((
         answer,
@@ -519,6 +520,15 @@ pub(super) fn deterministic_structured_file_validation_from_read_range(
             ..Default::default()
         },
     ))
+}
+
+fn route_requests_config_validation(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &["validate", "validate_config", "validate_after_change"],
+        )
 }
 
 pub(super) fn attach_deterministic_structured_file_validation_from_read_range(
