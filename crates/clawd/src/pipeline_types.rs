@@ -268,6 +268,7 @@ impl OutputSemanticKind {
                 | Self::PhotoOrganization
                 | Self::PublishingPreview
                 | Self::PackageManagerDetection
+                | Self::ToolDiscovery
                 | Self::DockerPs
                 | Self::DockerImages
                 | Self::DockerLogs
