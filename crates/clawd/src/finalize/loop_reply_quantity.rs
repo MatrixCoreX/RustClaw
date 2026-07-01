@@ -818,9 +818,7 @@ pub(super) fn replace_delivery_with_deterministic_quantity_comparison_answer(
         *finalizer_summary = Some(summary);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,

@@ -596,7 +596,7 @@ fn generated_file_path_report_prefers_latest_path_synthesis_over_run_cmd_status(
 }
 
 #[test]
-fn loop_contract_scalar_observed_answer_replaces_status_but_keeps_progress() {
+fn loop_contract_scalar_observed_answer_replaces_status_and_drops_progress_summary() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result().output_contract;
     contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
@@ -623,9 +623,11 @@ fn loop_contract_scalar_observed_answer_replaces_status_but_keeps_progress() {
         &mut finalizer_summary,
     ));
 
-    assert_eq!(loop_state.delivery_messages.len(), 2);
-    assert!(loop_state.delivery_messages[0].contains("执行过程"));
-    assert_eq!(loop_state.delivery_messages[1], "/usr/bin/bash");
+    assert_eq!(loop_state.delivery_messages, vec!["/usr/bin/bash"]);
+    assert!(loop_state
+        .delivery_messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some("/usr/bin/bash")
@@ -633,7 +635,7 @@ fn loop_contract_scalar_observed_answer_replaces_status_but_keeps_progress() {
 }
 
 #[test]
-fn loop_contract_path_observed_answer_replaces_status_but_keeps_progress() {
+fn loop_contract_path_observed_answer_replaces_status_and_drops_progress_summary() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result().output_contract;
     contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
@@ -665,12 +667,14 @@ fn loop_contract_path_observed_answer_replaces_status_but_keeps_progress() {
         &mut finalizer_summary,
     ));
 
-    assert_eq!(loop_state.delivery_messages.len(), 2);
-    assert!(loop_state.delivery_messages[0].contains("执行过程"));
     assert_eq!(
-        loop_state.delivery_messages[1],
-        "plan/execution_intent_routing_repair_plan_20260509.md"
+        loop_state.delivery_messages,
+        vec!["plan/execution_intent_routing_repair_plan_20260509.md"]
     );
+    assert!(loop_state
+        .delivery_messages
+        .iter()
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
         Some("plan/execution_intent_routing_repair_plan_20260509.md")

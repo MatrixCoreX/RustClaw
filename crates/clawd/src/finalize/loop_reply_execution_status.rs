@@ -446,9 +446,7 @@ pub(super) fn replace_delivery_with_deterministic_observed_execution_status_answ
         .unwrap_or(false);
     *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
     loop_state.last_user_visible_respond = Some(answer.clone());
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     if !unchanged {
         append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
         log_deterministic_delivery_record(
@@ -485,9 +483,7 @@ pub(super) fn replace_delivery_with_deterministic_execution_failed_step_answer(
         .unwrap_or(false);
     *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
     loop_state.last_user_visible_respond = Some(answer.clone());
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     if !unchanged {
         append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
         log_deterministic_delivery_record(

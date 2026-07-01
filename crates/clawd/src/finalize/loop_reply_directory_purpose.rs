@@ -598,9 +598,7 @@ pub(super) fn replace_delivery_with_deterministic_recent_artifacts_judgment_answ
         loop_state.last_user_visible_respond = Some(current_delivery.trim().to_string());
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -1390,9 +1388,7 @@ pub(super) fn replace_delivery_with_deterministic_current_workspace_dirs_overvie
         *finalizer_summary = Some(summary);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -1486,9 +1482,7 @@ pub(super) fn replace_delivery_with_deterministic_directory_purpose_answer(
         *finalizer_summary = Some(summary);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,

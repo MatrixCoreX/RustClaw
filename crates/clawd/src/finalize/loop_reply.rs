@@ -390,7 +390,7 @@ async fn render_machine_payload_delivery_if_needed(
     if rendered.trim().is_empty() || visible_answer_is_machine_payload(&rendered) {
         return;
     }
-    delivery_messages.retain(|message| crate::finalize::is_execution_summary_message(message));
+    delivery_messages.clear();
     delivery_messages.push(rendered.clone());
     loop_state.delivery_messages = delivery_messages.clone();
     loop_state.last_user_visible_respond = Some(rendered);
