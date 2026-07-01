@@ -135,6 +135,37 @@ fn machine_summary_projects_multiline_weather_machine_fields() {
 }
 
 #[test]
+fn machine_text_fragments_do_not_parse_json_hidden_in_visible_text() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"text":"{\"command_output\":\"hidden\",\"status\":\"ok\"}"}"#,
+        &mut observed,
+    );
+
+    assert!(
+        !observed.iter().any(|value| matches!(
+            value.as_str(),
+            "command_output" | "command_output=hidden" | "status=ok"
+        )),
+        "{observed:?}"
+    );
+}
+
+#[test]
+fn machine_text_fragments_accept_extra_machine_fields() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"command_output":"visible","status":"ok"},"text":"display only"}"#,
+        &mut observed,
+    );
+
+    assert!(observed
+        .iter()
+        .any(|value| value == "command_output=visible"));
+    assert!(observed.iter().any(|value| value == "extra.status=ok"));
+}
+
+#[test]
 fn machine_summary_projects_bulleted_candidate_count_field() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(

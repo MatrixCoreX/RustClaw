@@ -546,9 +546,6 @@ fn collect_machine_text_fragments_from_json_path(
                     .filter(|text| !text.is_empty())
                 {
                     values.push(read_range_excerpt_without_line_prefixes(text));
-                    if let Ok(nested) = serde_json::from_str::<serde_json::Value>(text) {
-                        collect_machine_text_fragments_from_json(&nested, values);
-                    }
                 }
             }
             for key in ["extra", "result", "data"] {
@@ -557,6 +554,9 @@ fn collect_machine_text_fragments_from_json_path(
                 }
             }
             for (key, child) in obj {
+                if field_is_visible_text_boundary(key) {
+                    continue;
+                }
                 if valid_machine_key(key) {
                     values.push(key.to_string());
                     if let Some(parent) = parent_path {
@@ -600,6 +600,10 @@ fn collect_machine_text_fragments_from_json_path(
         serde_json::Value::Bool(value) => values.push(value.to_string()),
         serde_json::Value::Null => {}
     }
+}
+
+fn field_is_visible_text_boundary(key: &str) -> bool {
+    matches!(key, "text" | "error_text")
 }
 
 fn machine_json_value_as_surface_for_key(key: &str, value: &serde_json::Value) -> Option<String> {
