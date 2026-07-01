@@ -528,11 +528,10 @@ fn op_kind_from_route(
             crate::OutputLocatorKind::Path
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::Url
-        ) || matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-        ))
+        ) || route_result.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ContentExcerptWithSummary,
+        ]))
     {
         return FollowupOpKind::Read;
     }
@@ -543,15 +542,14 @@ fn op_kind_from_route(
 }
 
 fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -> bool {
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::SqliteTableListing
-            | crate::OutputSemanticKind::SqliteTableNamesOnly
-    ) || matches!(
+    route_result.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::DirectoryEntryGroups,
+        crate::OutputSemanticKind::FilePaths,
+        crate::OutputSemanticKind::SqliteTableListing,
+        crate::OutputSemanticKind::SqliteTableNamesOnly,
+    ]) || matches!(
         route_result.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::DirectoryLookup
             | crate::OutputDeliveryIntent::DirectoryBatchFiles
@@ -683,13 +681,7 @@ fn bound_target_from_journal_output_value(value: &Value) -> Option<String> {
             return Some(path);
         }
     }
-    let text_value = value
-        .get("text")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| text.starts_with('{') || text.starts_with('['))
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())?;
-    bound_target_from_journal_output_value(&text_value)
+    None
 }
 
 fn is_listing_json(value: &Value) -> bool {
@@ -831,16 +823,7 @@ fn ordered_entries_from_listing_json_value(value: &Value, depth: usize) -> Vec<S
             return entries;
         }
     }
-    let Some(text_value) = value
-        .get("text")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| text.starts_with('{') || text.starts_with('['))
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())
-    else {
-        return Vec::new();
-    };
-    ordered_entries_from_listing_json_value(&text_value, depth + 1)
+    Vec::new()
 }
 
 fn ordered_entries_from_listing_json(value: &Value) -> Vec<String> {
