@@ -10,10 +10,12 @@ use super::{
     observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
-    output_contract_prompt_block, route_contract_marker_is_scalar_path_only, should_verify_answer,
+    output_contract_prompt_block, recent_structured_scalar_values_from_journal,
+    route_contract_marker_is_scalar_path_only, should_verify_answer,
     strict_list_route_allows_observed_subset, structural_satisfaction_can_skip_verifier,
     structurally_satisfies_answer_contract, AnswerVerifierOut,
 };
+use super::{health_check_value_from_output, observed_find_ext_results};
 
 fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
     crate::RouteResult {
@@ -2043,3 +2045,6 @@ mod matrix_shape_contracts;
 
 #[path = "answer_verifier_tests/matrix_grounding.rs"]
 mod matrix_grounding;
+
+#[path = "answer_verifier_tests/text_protocol_boundary.rs"]
+mod text_protocol_boundary;

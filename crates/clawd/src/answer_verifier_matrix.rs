@@ -330,11 +330,7 @@ pub(super) fn health_check_value_from_output(output: &str) -> Option<serde_json:
             return Some(extra.clone());
         }
     }
-    value
-        .get("text")
-        .and_then(|text| text.as_str())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
-        .filter(health_check_json_has_primary_fields)
+    None
 }
 
 pub(super) fn health_check_json_has_primary_fields(value: &serde_json::Value) -> bool {
