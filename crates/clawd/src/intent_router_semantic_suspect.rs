@@ -220,7 +220,7 @@ pub(super) fn semantic_suspect_detail_for_normalizer_output_with_command_runtime
         })
         && current_request_mentions_workspace_identity(req, workspace_root)
     {
-        return Some("workspace_identity_chat_route_needs_semantic_review");
+        return Some("workspace_identity_plain_response_needs_boundary_review");
     }
     None
 }

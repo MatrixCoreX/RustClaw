@@ -116,11 +116,6 @@ fn contract_repair_detail_requires_llm_integrity_repair(detail: &str) -> bool {
         "executable_route_unknown_scalar_output_contract"
             | "active_task_invalid_turn_binding"
             | "active_ordered_scalar_path_missing_ordered_entry_ref"
-            | "chat_route_with_file_delivery_request"
-            | "chat_route_requires_content_evidence"
-            | "chat_route_requires_delivery"
-            | "chat_route_has_observable_semantic_kind"
-            | "chat_route_has_observable_locator"
             | "raw_command_output_locator_needs_semantic_review"
             | "locatorless_generic_evidence_contract_needs_semantic_shape_review"
     )
