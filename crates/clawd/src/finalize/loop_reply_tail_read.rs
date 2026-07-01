@@ -140,12 +140,6 @@ fn value_is_tail_read_range(value: &serde_json::Value) -> bool {
         return true;
     }
     value.get("extra").is_some_and(value_is_tail_read_range)
-        || value
-            .get("text")
-            .and_then(|text| text.as_str())
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-            .as_ref()
-            .is_some_and(value_is_tail_read_range)
 }
 
 fn flat_value_is_tail_read_range(value: &serde_json::Value) -> bool {
@@ -179,13 +173,6 @@ fn tail_read_range_answer_from_value(
     value
         .get("extra")
         .and_then(|extra| tail_read_range_answer_from_value(extra, prefer_english))
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(|text| text.as_str())
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-                .and_then(|inner| tail_read_range_answer_from_value(&inner, prefer_english))
-        })
 }
 
 fn flat_tail_read_range_answer_from_value(
@@ -223,15 +210,6 @@ fn normalized_tail_read_range_lines_from_value(
     value
         .get("extra")
         .and_then(|extra| normalized_tail_read_range_lines_from_value(extra, prefer_english))
-        .or_else(|| {
-            value
-                .get("text")
-                .and_then(|text| text.as_str())
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-                .and_then(|inner| {
-                    normalized_tail_read_range_lines_from_value(&inner, prefer_english)
-                })
-        })
 }
 
 fn flat_normalized_tail_read_range_lines_from_value(
