@@ -112,33 +112,11 @@ pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
     let Some(obj) = value.as_object() else {
         return trimmed.to_string();
     };
-    if let Some(text_value) = obj
-        .get("text")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .filter(json_object_is_transform_observation_body)
-    {
-        return text_value.to_string();
-    }
-    if let Some(extra) = obj
-        .get("extra")
-        .filter(|extra| json_object_is_direct_observation_body(extra))
-    {
+    if let Some(extra) = obj.get("extra").filter(|extra| {
+        json_object_is_direct_observation_body(extra)
+            || json_object_is_transform_observation_body(extra)
+    }) {
         return extra.to_string();
-    }
-    if let Some(text) = obj
-        .get("text")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        if let Ok(text_value) = serde_json::from_str::<serde_json::Value>(text) {
-            if json_object_is_direct_observation_body(&text_value) {
-                return text_value.to_string();
-            }
-        }
     }
     trimmed.to_string()
 }
