@@ -949,6 +949,25 @@ fn config_validate_capability_ref_without_semantic_kind_keeps_validate_action() 
 }
 
 #[test]
+fn config_guard_capability_ref_allows_direct_observed_finalize_without_semantic_kind() {
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=config.guard_after_change".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+
+    assert!(action_supports_structured_direct_observed_finalize(
+        Some(&route),
+        "config_edit",
+        &json!({
+            "action": "guard_config",
+            "path": "configs/config.toml",
+        }),
+    ));
+}
+
+#[test]
 fn rustclaw_config_guard_profile_without_locator_keeps_validate_action() {
     let mut route = base_route_result();
     route.output_contract.locator_hint.clear();
