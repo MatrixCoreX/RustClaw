@@ -248,13 +248,7 @@ fn markdown_text_from_read_value(value: &serde_json::Value) -> Option<String> {
     {
         return Some(text);
     }
-    let text = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())?;
-    let nested = serde_json::from_str::<serde_json::Value>(text).ok()?;
-    markdown_text_from_read_value(&nested)
+    None
 }
 
 fn normalize_markdown_body_for_compare(text: &str) -> String {
