@@ -167,6 +167,9 @@ pub(super) fn apply_contract_repair_judge_output(
     let Some(mut execution_recipe) = repair.execution_recipe else {
         return false;
     };
+    if !contract_repair_reason_has_boundary_machine_authority(&repair.reason) {
+        return false;
+    }
     let preserved_structured_config_keys = preserve_structured_config_key_contract_during_repair(
         out.output_contract.as_ref(),
         &mut output_contract,
@@ -392,6 +395,11 @@ fn contract_repair_reason_has_allowed_machine_override(reason: &str) -> bool {
     ]
     .iter()
     .any(|marker| repair_reason_has_machine_marker(reason, marker))
+}
+
+fn contract_repair_reason_has_boundary_machine_authority(reason: &str) -> bool {
+    contract_repair_reason_has_allowed_machine_override(reason)
+        || contract_repair_reason_requires_missing_locator_clarify(reason)
 }
 
 fn repaired_contract_has_execution_signal(output_contract: &IntentOutputContractOut) -> bool {
