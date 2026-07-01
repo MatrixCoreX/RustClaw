@@ -112,7 +112,7 @@ fn task_replace_clarify_reuses_active_task_without_keyword_detector() {
 }
 
 #[test]
-fn active_task_scope_update_is_routed_back_to_direct_answer() {
+fn active_task_scope_update_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("帮我做一个测试计划".to_string()),
@@ -129,16 +129,19 @@ fn active_task_scope_update_is_routed_back_to_direct_answer() {
         response_shape: OutputResponseShape::Free,
         ..IntentOutputContract::default()
     };
-    assert!(super::should_route_active_task_mutation_to_direct_answer(
-        "先只看登录模块",
-        "workspace_project_summary",
-        Some(&snapshot),
-        Some(TurnType::TaskScopeUpdate),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        &contract,
-        None,
-    ));
+    assert_eq!(
+        super::active_task_mutation_loop_context_hint(
+            "先只看登录模块",
+            "workspace_project_summary",
+            Some(&snapshot),
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            &contract,
+            None,
+        ),
+        Some("active_task_mutation_loop_context")
+    );
 }
 
 #[test]
@@ -1270,7 +1273,7 @@ fn scope_refinement_repair_preserves_standalone_observation_contract() {
 }
 
 #[test]
-fn active_task_scope_update_en_remains_direct_answer_from_chat_wrapped_execution() {
+fn active_task_scope_update_en_emits_loop_context_hint() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("Help me create a test plan".to_string()),
@@ -1280,14 +1283,17 @@ fn active_task_scope_update_en_remains_direct_answer_from_chat_wrapped_execution
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(super::should_route_active_task_mutation_to_direct_answer(
-        "Only focus on the login module first",
-        "",
-        Some(&snapshot),
-        Some(TurnType::TaskScopeUpdate),
-        Some(TargetTaskPolicy::ReuseActive),
-        false,
-        &IntentOutputContract::default(),
-        None,
-    ));
+    assert_eq!(
+        super::active_task_mutation_loop_context_hint(
+            "Only focus on the login module first",
+            "",
+            Some(&snapshot),
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            &IntentOutputContract::default(),
+            None,
+        ),
+        Some("active_task_mutation_loop_context")
+    );
 }
