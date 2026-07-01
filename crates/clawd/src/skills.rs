@@ -156,32 +156,28 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn child_text_object(value: &Value) -> Option<Value> {
-    string_field(value, "text").and_then(|text| serde_json::from_str::<Value>(&text).ok())
+fn child_extra_object(value: &Value) -> Option<&Value> {
+    value.get("extra").filter(|extra| extra.is_object())
 }
 
 fn structured_skill_error_string(skill: &str, value: &Value) -> String {
-    let text_object = child_text_object(value).unwrap_or(Value::Null);
+    let extra_object = child_extra_object(value);
     let error_kind = string_field(value, "error_kind")
-        .or_else(|| string_field(&text_object, "error_kind"))
-        .or_else(|| {
-            value
-                .get("extra")
-                .and_then(|extra| string_field(extra, "error_kind"))
-        })
+        .or_else(|| extra_object.and_then(|extra| string_field(extra, "error_kind")))
         .unwrap_or_else(|| "unknown".to_string());
     let error_text = string_field(value, "error_text")
-        .or_else(|| string_field(&text_object, "failure_reason"))
+        .or_else(|| extra_object.and_then(|extra| string_field(extra, "failure_reason")))
         .unwrap_or_else(|| "skill execution failed".to_string());
     let payload = json!({
         "skill": skill.trim(),
         "error_kind": error_kind,
         "error_text": error_text,
-        "platform": string_field(value, "platform").or_else(|| string_field(&text_object, "platform")),
-        "manager_type": string_field(&text_object, "manager_type"),
-        "service_name": string_field(&text_object, "service_name"),
+        "platform": string_field(value, "platform")
+            .or_else(|| extra_object.and_then(|extra| string_field(extra, "platform"))),
+        "manager_type": extra_object.and_then(|extra| string_field(extra, "manager_type")),
+        "service_name": extra_object.and_then(|extra| string_field(extra, "service_name")),
         "extra": value.get("extra").cloned().unwrap_or(Value::Null),
-        "text": text_object,
+        "text": Value::Null,
     });
     let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
     format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
