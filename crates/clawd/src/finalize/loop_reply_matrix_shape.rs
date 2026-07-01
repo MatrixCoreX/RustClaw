@@ -23,8 +23,10 @@ use super::{
 fn matrix_final_answer_shape_class(
     route: &crate::RouteResult,
 ) -> Option<crate::contract_matrix::FinalAnswerShapeClass> {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-        .map(|shape| shape.class())
+    if route_has_docker_text_list_capability_marker(route) {
+        return Some(crate::contract_matrix::FinalAnswerShapeClass::StrictList);
+    }
+    crate::contract_matrix::final_answer_shape_for_route(route).map(|shape| shape.class())
 }
 
 pub(super) fn route_requires_matrix_deterministic_final_answer(route: &crate::RouteResult) -> bool {
@@ -54,19 +56,14 @@ pub(super) fn should_try_observed_output_language_fallback(
         )
 }
 
+#[cfg(test)]
 pub(super) fn route_has_contract_matrix_final_shape(route: &crate::RouteResult) -> bool {
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    ) {
-        return false;
-    }
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract).is_some()
+    matrix_final_answer_shape_class(route).is_some()
 }
 
 pub(super) fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
     matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::DirectoryNames
             | crate::OutputSemanticKind::QuantityComparison
             | crate::OutputSemanticKind::ServiceStatus
@@ -85,6 +82,11 @@ pub(super) fn matrix_candidate_satisfies_final_shape(
     let candidate = candidate.trim();
     if candidate.is_empty() {
         return false;
+    }
+    if route_has_docker_text_list_capability_marker(route)
+        && docker_text_list_candidate_is_observed(route, loop_state, candidate)
+    {
+        return true;
     }
     let delivery_messages = vec![candidate.to_string()];
     let journal = build_loop_journal(
@@ -150,16 +152,26 @@ pub(super) fn current_synthesis_satisfies_matrix_shape(
 }
 
 pub(super) fn archive_member_list_prefers_observed_projection(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveList
-        && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    route_requests_archive_list(route)
+        && (crate::contract_matrix::final_answer_shape_for_route(route)
             == Some(crate::contract_matrix::FinalAnswerShape::ArchiveMemberList)
+            || route.output_contract.response_shape == crate::OutputResponseShape::Strict)
+}
+
+fn route_requests_archive_list(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["list"],
+        )
 }
 
 pub(super) fn file_name_list_prefers_observed_projection(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
         || route.output_contract.response_shape != crate::OutputResponseShape::Strict
         || route
             .output_contract
@@ -350,16 +362,7 @@ pub(super) fn matrix_strict_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::ArchiveList
-            | crate::OutputSemanticKind::HiddenEntriesCheck
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::StructuredKeys
-            | crate::OutputSemanticKind::SqliteTableNamesOnly
-    ) {
+    if !route_supports_matrix_strict_list_observed_answer(route) {
         return None;
     }
     if let Some(answer) = matrix_ranked_size_list_observed_answer(route, loop_state) {
@@ -391,7 +394,7 @@ pub(super) fn matrix_strict_list_observed_answer(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
             continue;
         };
-        if route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck {
+        if route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck) {
             collect_matrix_hidden_entries(&value, &mut items);
         } else {
             collect_matrix_strict_list_items(route, &value, &mut items);
@@ -408,6 +411,19 @@ pub(super) fn matrix_strict_list_observed_answer(
     Some((answer, matrix_observed_shape_summary(loop_state)))
 }
 
+fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
+    route_requests_archive_list(route)
+        || matches!(
+            route.effective_output_contract_semantic_kind(),
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::HiddenEntriesCheck
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::StructuredKeys
+                | crate::OutputSemanticKind::SqliteTableNamesOnly
+        )
+}
+
 fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
     route
         .output_contract
@@ -422,7 +438,7 @@ fn matrix_inventory_file_paths_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -515,7 +531,7 @@ fn matrix_ranked_size_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -611,9 +627,9 @@ pub(super) fn matrix_grouped_name_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    if crate::contract_matrix::final_answer_shape_for_route(route)
         != Some(crate::contract_matrix::FinalAnswerShape::GroupedNameList)
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
     {
         return None;
     }
@@ -731,10 +747,7 @@ fn matrix_docker_text_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DockerImages | crate::OutputSemanticKind::DockerPs
-    ) {
+    if !route_has_docker_text_list_capability_marker(route) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -761,6 +774,37 @@ fn matrix_docker_text_list_observed_answer(
         ));
     }
     None
+}
+
+fn docker_text_list_candidate_is_observed(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    candidate: &str,
+) -> bool {
+    if !route_has_docker_text_list_capability_marker(route) {
+        return false;
+    }
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        step.is_ok()
+            && matches!(step.skill.as_str(), "docker_basic" | "run_cmd")
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| output == candidate)
+    })
+}
+
+fn route_has_docker_text_list_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["docker"],
+        &["list", "containers", "images"],
+    )
 }
 
 fn collect_matrix_grouped_name_items(
@@ -843,11 +887,11 @@ fn collect_matrix_strict_list_items(
     {
         collect_matrix_strict_list_items(route, &text_value, items);
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveList {
+    if route_requests_archive_list(route) {
         collect_matrix_archive_member_items(route, value, items);
         return;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames) {
         collect_matrix_directory_name_items(route, value, items);
         return;
     }
@@ -1115,7 +1159,7 @@ fn matrix_list_display_item(route: &crate::RouteResult, raw: &str) -> Option<Str
         return None;
     }
     if matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
     ) {
         return std::path::Path::new(item)
@@ -1133,7 +1177,7 @@ fn matrix_table_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteTableListing {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
