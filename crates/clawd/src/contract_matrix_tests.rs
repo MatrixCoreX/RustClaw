@@ -1561,6 +1561,41 @@ fn action_trace_for_route_uses_route_trace_evidence() {
 }
 
 #[test]
+fn action_trace_for_archive_capability_ref_supplies_structured_extractor() {
+    let route = route_with_machine_capability_ref("capability_ref=archive.list");
+
+    let trace =
+        action_trace_for_route(&route, "archive_basic.list").expect("archive route action trace");
+
+    assert_eq!(
+        trace.get("contract_match").and_then(Value::as_str),
+        Some("capability_ref")
+    );
+    assert_eq!(
+        trace
+            .get("observation_extractor")
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str),
+        Some("archive_basic.list")
+    );
+    assert_eq!(
+        trace
+            .get("observation_extractor")
+            .and_then(|value| value.get("extractor_kind"))
+            .and_then(Value::as_str),
+        Some("structured_json")
+    );
+    let required = trace
+        .get("required_evidence")
+        .and_then(Value::as_array)
+        .expect("required evidence")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(required, vec!["candidates"]);
+}
+
+#[test]
 fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
     let route = RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
