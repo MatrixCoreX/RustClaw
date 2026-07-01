@@ -548,7 +548,7 @@ fn should_reinsert_execution_summaries_for_delivery(
 ) -> bool {
     let output_contract = route_result.effective_output_contract();
     if (output_contract.response_shape == crate::OutputResponseShape::Scalar
-        || route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation))
+        || route_requests_config_validation(route_result))
         && !answer_text.trim().is_empty()
         && !crate::finalize::is_execution_summary_message(answer_text)
     {
@@ -558,6 +558,15 @@ fn should_reinsert_execution_summaries_for_delivery(
         return false;
     }
     true
+}
+
+fn route_requests_config_validation(route_result: &crate::RouteResult) -> bool {
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route_result,
+            &["config"],
+            &["validate", "validate_config", "validate_after_change"],
+        )
 }
 
 fn drop_execution_summaries_when_delivery_is_scalar(
