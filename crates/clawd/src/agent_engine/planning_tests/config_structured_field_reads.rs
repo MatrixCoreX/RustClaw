@@ -968,6 +968,17 @@ fn config_guard_capability_ref_allows_direct_observed_finalize_without_semantic_
 }
 
 #[test]
+fn archive_capability_ref_uses_runtime_owned_observed_finalizer_without_semantic_kind() {
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.list".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+
+    assert!(route_uses_runtime_owned_observed_finalizer(&route));
+}
+
+#[test]
 fn rustclaw_config_guard_profile_without_locator_keeps_validate_action() {
     let mut route = base_route_result();
     route.output_contract.locator_hint.clear();
