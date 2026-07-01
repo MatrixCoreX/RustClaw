@@ -587,13 +587,7 @@ fn selected_file_paths_from_output(output: &str, limit: usize) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
         return Vec::new();
     };
-    let mut paths = selected_file_paths_from_value(&value, limit);
-    if paths.is_empty() {
-        if let Some(text) = value.get("text").and_then(Value::as_str) {
-            paths = selected_file_paths_from_output(text, limit);
-        }
-    }
-    paths
+    selected_file_paths_from_value(&value, limit)
 }
 
 fn selected_file_paths_from_value(value: &Value, limit: usize) -> Vec<String> {
@@ -629,10 +623,6 @@ fn selected_output_contains_non_file_entry(output: &str) -> bool {
         return false;
     };
     selected_value_contains_non_file_entry(&value)
-        || value
-            .get("text")
-            .and_then(Value::as_str)
-            .is_some_and(selected_output_contains_non_file_entry)
 }
 
 fn selected_value_contains_non_file_entry(value: &Value) -> bool {
