@@ -1,7 +1,13 @@
 use crate::{
-    ActFinalizeStyle, IntentOutputContract, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, RouteResult,
+    ActFinalizeStyle, IntentOutputContract, OutputLocatorKind, OutputResponseShape, RouteResult,
 };
+
+fn route_reason_has_marker(route_result: &RouteResult, marker: &str) -> bool {
+    route_result
+        .route_reason
+        .split(';')
+        .any(|part| part.trim() == marker)
+}
 
 pub(crate) fn content_evidence_execution_finalize_style(
     contract: &IntentOutputContract,
@@ -52,8 +58,7 @@ pub(super) fn should_force_content_evidence_for_path_bound_chat_wrapped_executio
     route_result: &RouteResult,
     direct_locator_path: Option<&str>,
 ) -> bool {
-    if route_result.output_contract.semantic_kind != OutputSemanticKind::None
-        || route_result.output_contract.delivery_required
+    if route_result.output_contract.delivery_required
         || !route_result.ask_mode.finalize_chat_wrapped()
         || !matches!(
             route_result.output_contract.response_shape,
@@ -74,7 +79,7 @@ pub(super) fn should_force_content_evidence_for_path_bound_chat_wrapped_executio
 pub(super) fn should_clear_scalar_count_for_non_scalar_contract(
     route_result: &RouteResult,
 ) -> bool {
-    route_result.output_contract.semantic_kind == OutputSemanticKind::ScalarCount
+    route_reason_has_marker(route_result, "scalar_count")
         && !scalar_count_contract_allows_count_shape(&route_result.output_contract)
 }
 
@@ -89,7 +94,7 @@ fn scalar_count_contract_allows_count_shape(contract: &IntentOutputContract) -> 
 pub(super) fn should_clear_scalar_path_only_without_locator_binding(
     route_result: &RouteResult,
 ) -> bool {
-    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+    if !route_reason_has_marker(route_result, "scalar_path_only")
         || route_result.output_contract.response_shape != OutputResponseShape::Scalar
         || route_result.output_contract.delivery_required
     {
