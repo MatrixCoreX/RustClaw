@@ -31,7 +31,7 @@ pub(super) fn bare_topic_model_supplied_locator_route_should_force_clarify(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
-    if route_reason_has_marker(route_result, "active_clarify_locator_reply_execute") {
+    if route_reason_has_marker(route_result, "active_clarify_locator_reply_bound_for_loop") {
         return false;
     }
     if turn_analysis.is_some_and(|analysis| {

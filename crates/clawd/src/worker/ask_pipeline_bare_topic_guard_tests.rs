@@ -111,7 +111,8 @@ fn bare_topic_model_supplied_locator_allows_active_clarify_locator_reply() {
     route.resolved_intent =
         "Continue previous clarified request using the supplied target directory".to_string();
     route.route_reason =
-        "preserve_active_clarify_output_contract; active_clarify_locator_reply_execute".to_string();
+        "preserve_active_clarify_output_contract; active_clarify_locator_reply_bound_for_loop"
+            .to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "scripts".to_string();
     route.output_contract.requires_content_evidence = true;
