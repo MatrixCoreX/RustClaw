@@ -338,50 +338,9 @@ fn primary_locator_for_route(route: &RouteResult) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CapabilityRef<'a> {
-    namespace: &'a str,
-    action: &'a str,
-}
-
-fn capability_ref_for_route(route: &RouteResult) -> Option<CapabilityRef<'_>> {
-    [&route.route_reason, &route.resolved_intent]
-        .iter()
-        .filter_map(|surface| first_capability_ref(surface))
-        .next()
-}
-
-fn first_capability_ref(machine_context: &str) -> Option<CapabilityRef<'_>> {
-    machine_context
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .filter_map(parse_capability_ref_token)
-        .next()
-}
-
-fn parse_capability_ref_token(raw: &str) -> Option<CapabilityRef<'_>> {
-    let capability = raw
-        .trim()
-        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
-        .strip_prefix("capability_ref=")?;
-    let (namespace, action) = capability.split_once('.')?;
-    if namespace.is_empty()
-        || action.is_empty()
-        || !capability_ref_chars_are_machine_safe(capability)
-    {
-        return None;
-    }
-    Some(CapabilityRef { namespace, action })
-}
-
-fn capability_ref_chars_are_machine_safe(value: &str) -> bool {
-    value.bytes().all(|byte| {
-        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-    })
-}
-
 fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObject> {
-    let capability = capability_ref_for_route(route)?;
-    Some(match capability.namespace {
+    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
+    Some(match capability.namespace() {
         "config" | "config_basic" | "config_edit" => TaskTargetObject::ConfigKey,
         "docker" | "process" | "service" => TaskTargetObject::Process,
         "db" | "database" | "sqlite" => TaskTargetObject::Db,
@@ -426,8 +385,8 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
 }
 
 fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
-    let capability = capability_ref_for_route(route)?;
-    let action = capability.action;
+    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
+    let action = capability.action();
     Some(if action_has_any_segment(action, &["count"]) {
         TaskOperation::Count
     } else if action_has_any_segment(action, &["list", "find", "search", "candidates"]) {
@@ -469,7 +428,7 @@ fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
         ],
     ) {
         TaskOperation::Summarize
-    } else if capability.namespace == "system"
+    } else if capability.namespace() == "system"
         && action_has_any_segment(action, &["run", "cmd", "command"])
     {
         TaskOperation::Run
@@ -547,8 +506,11 @@ fn operation_for_unclassified_route(route: &RouteResult) -> TaskOperation {
 }
 
 fn delivery_shape_for_capability_ref(route: &RouteResult) -> Option<TaskDeliveryShape> {
-    let capability = capability_ref_for_route(route)?;
-    if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
+    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
+    if action_has_any_segment(
+        capability.action(),
+        &["candidates", "find", "list", "search"],
+    ) {
         return Some(TaskDeliveryShape::List);
     }
     None
@@ -594,58 +556,56 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
 }
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
-    let capability = capability_ref_for_route(route)?;
-    let fields = if capability.namespace == "config"
-        || capability.namespace == "config_basic"
-        || capability.namespace == "config_edit"
-    {
-        if action_has_any_segment(capability.action, &["guard", "risk"]) {
-            &["candidates", "count"][..]
-        } else if action_has_any_segment(
-            capability.action,
-            &["apply", "change", "mutate", "set", "write"],
-        ) {
-            &["field_value", "path", "valid"][..]
-        } else if action_has_any_segment(capability.action, &["validate", "verify"]) {
-            &["valid"][..]
-        } else {
-            &["field_value"][..]
-        }
-    } else if capability.namespace == "archive" {
-        if action_has_any_segment(capability.action, &["list"]) {
+    let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
+    let namespace = capability.namespace();
+    let action = capability.action();
+    let fields =
+        if namespace == "config" || namespace == "config_basic" || namespace == "config_edit" {
+            if action_has_any_segment(action, &["guard", "risk"]) {
+                &["candidates", "count"][..]
+            } else if action_has_any_segment(action, &["apply", "change", "mutate", "set", "write"])
+            {
+                &["field_value", "path", "valid"][..]
+            } else if action_has_any_segment(action, &["validate", "verify"]) {
+                &["valid"][..]
+            } else {
+                &["field_value"][..]
+            }
+        } else if namespace == "archive" {
+            if action_has_any_segment(action, &["list"]) {
+                &["candidates"][..]
+            } else if action_has_any_segment(action, &["read"]) {
+                &["content_excerpt"][..]
+            } else if action_has_any_segment(action, &["pack", "unpack"]) {
+                &["path"][..]
+            } else {
+                &["field_value"][..]
+            }
+        } else if action_has_any_segment(action, &["candidates", "find", "list", "search"]) {
             &["candidates"][..]
-        } else if action_has_any_segment(capability.action, &["read"]) {
+        } else if action_has_any_segment(
+            action,
+            &[
+                "analyze",
+                "describe",
+                "extract",
+                "quote",
+                "read",
+                "summary",
+                "summarize",
+            ],
+        ) {
             &["content_excerpt"][..]
-        } else if action_has_any_segment(capability.action, &["pack", "unpack"]) {
-            &["path"][..]
+        } else if namespace == "web"
+            || namespace == "browser"
+            || namespace == "rss"
+            || namespace == "weather"
+            || namespace == "image_vision"
+        {
+            &["content_excerpt"][..]
         } else {
             &["field_value"][..]
-        }
-    } else if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
-        &["candidates"][..]
-    } else if action_has_any_segment(
-        capability.action,
-        &[
-            "analyze",
-            "describe",
-            "extract",
-            "quote",
-            "read",
-            "summary",
-            "summarize",
-        ],
-    ) {
-        &["content_excerpt"][..]
-    } else if capability.namespace == "web"
-        || capability.namespace == "browser"
-        || capability.namespace == "rss"
-        || capability.namespace == "weather"
-        || capability.namespace == "image_vision"
-    {
-        &["content_excerpt"][..]
-    } else {
-        &["field_value"][..]
-    };
+        };
     Some(fields.iter().map(|field| (*field).to_string()).collect())
 }
 
