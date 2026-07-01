@@ -105,6 +105,7 @@ include!("observed_output_tests/service_control_text_boundary.rs");
 include!("observed_output_tests/structured_scalar_text_boundary.rs");
 include!("observed_output_tests/system_basic_info_text_boundary.rs");
 include!("observed_output_tests/success_text_boundary.rs");
+include!("observed_output_tests/strict_raw_tail_text_boundary.rs");
 include!("observed_output_tests/structured_listing_path.rs");
 include!("observed_output_tests/structured_listing_path_tail.rs");
 include!("observed_output_tests/system_archive_path_package.rs");
