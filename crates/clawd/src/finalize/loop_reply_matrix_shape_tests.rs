@@ -95,6 +95,47 @@ fn matrix_shape_guard_replaces_unstructured_strict_list_with_observed_list() {
 }
 
 #[test]
+fn matrix_shape_guard_replaces_scalar_count_field_placeholder_with_observed_value() {
+    let state = test_state();
+    let task = claimed_task("task-matrix-shape-guard-scalar-count");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"count_inventory","counts":{"by_extension":{"log":2},"dirs":0,"files":2,"hidden":0,"total":2,"total_size_bytes":2698},"path":"logs","recursive":false,"resolved_path":"logs"},"text":"{\"action\":\"count_inventory\",\"counts\":{\"by_extension\":{\"log\":2},\"dirs\":0,\"files\":2,\"hidden\":0,\"total\":2,\"total_size_bytes\":2698},\"path\":\"logs\",\"recursive\":false,\"resolved_path\":\"logs\"}"}"#,
+    ));
+    let mut delivery = vec!["count".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "count direct entries",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(delivery, vec!["2"]);
+    assert_eq!(loop_state.last_user_visible_respond.as_deref(), Some("2"));
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn matrix_strict_list_shape_builds_list_from_observed_json() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -291,6 +332,30 @@ fn matrix_archive_member_list_defaults_untyped_selector_to_file_entries() {
         .expect("archive member list answer");
 
     assert_eq!(answer, "nested/config.ini\nnotes.txt");
+}
+
+#[test]
+fn matrix_archive_member_list_accepts_capability_ref_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=archive.list".to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "archive_basic",
+        r#"{"action":"list","archive":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"kind":"file","name":"notes.txt"},{"kind":"dir","name":"manual_dynamic_guard_unpack/"},{"kind":"file","name":"nested/config.ini"}],"candidates":["notes.txt","manual_dynamic_guard_unpack/","nested/config.ini"]}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("archive capability ref member list answer");
+
+    assert_eq!(answer, "nested/config.ini\nnotes.txt");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
 }
 
 #[test]
