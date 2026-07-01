@@ -268,7 +268,7 @@ fn normalizer_schema_normalization_drops_null_list_selector_sort_by() {
 }
 
 #[test]
-fn normalizer_schema_normalization_recovers_files_listing_contract_from_chat_drift() {
+fn normalizer_schema_normalization_does_not_recover_files_listing_from_string_contract() {
     let raw = r#"{
           "resolved_user_intent":"列出 /home/guagua/rustclaw/logs 目录下的前 10 个文件名，仅文件名，不读取文件内容",
           "answer_candidate":"",
