@@ -144,10 +144,7 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
             _ => false,
         },
         "config_edit" => match action {
-            Some("guard_config") => route_result.is_some_and(|route| {
-                route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::ConfigRiskAssessment
-            }),
+            Some("guard_config") => route_result.is_some_and(route_requests_config_guard),
             _ => false,
         },
         "system_basic" => match action {
@@ -209,6 +206,20 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
         },
         _ => false,
     }
+}
+
+fn route_requests_config_guard(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &[
+                "guard",
+                "guard_config",
+                "guard_after_change",
+                "guard_rustclaw_config",
+            ],
+        )
 }
 
 pub(super) fn observation_only_plan_can_finalize_from_direct_output(
