@@ -109,7 +109,6 @@ pub(super) fn apply_post_route_refinements(
     ) && !route_has_structured_list_selector(&post_route.execution_route_result)
     {
         post_route.execution_route_result.needs_clarify = true;
-        post_route.execution_route_result.set_clarify_gate();
         post_route
             .execution_route_result
             .output_contract

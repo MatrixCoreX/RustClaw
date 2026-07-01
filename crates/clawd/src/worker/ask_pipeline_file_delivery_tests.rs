@@ -369,7 +369,7 @@ fn direct_file_delivery_rejects_workspace_root_prebind_before_deictic_guard() {
     );
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(route.needs_clarify);
-    assert_eq!(route.ask_mode, crate::AskMode::clarify());
+    assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
     assert!(route
         .route_reason
         .contains("direct_file_delivery_workspace_root_locator_rejected"));
@@ -503,7 +503,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
     );
 
     assert!(applied.execution_route_result.needs_clarify);
-    assert!(applied.execution_route_result.is_clarify_gate());
+    assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -741,7 +741,7 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
     );
     assert_eq!(
         applied.execution_route_result.gate_kind(),
-        crate::RouteGateKind::Clarify
+        crate::RouteGateKind::Execute
     );
     assert!(!route_reason_has_marker(
         &applied.execution_route_result,

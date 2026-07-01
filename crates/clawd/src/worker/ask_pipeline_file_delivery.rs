@@ -33,7 +33,6 @@ pub(super) fn reject_direct_file_delivery_workspace_root_locator(
         return false;
     }
     route_result.needs_clarify = true;
-    route_result.set_clarify_gate();
     route_result.clarify_question.clear();
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
@@ -75,7 +74,6 @@ pub(super) fn refine_unresolved_file_delivery_boundary_contract(
         )
     }) else {
         post_route.execution_route_result.needs_clarify = true;
-        post_route.execution_route_result.set_clarify_gate();
         post_route.execution_route_result.wants_file_delivery = true;
         post_route
             .execution_route_result

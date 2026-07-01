@@ -472,6 +472,7 @@ impl RouteResult {
         self.set_ask_mode(AskMode::direct_answer());
     }
 
+    #[cfg(test)]
     pub(crate) fn set_clarify_gate(&mut self) {
         self.set_ask_mode(AskMode::clarify());
     }
@@ -601,7 +602,14 @@ impl RouteResult {
     }
 
     pub(crate) fn is_clarify_gate(&self) -> bool {
-        matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
+        #[cfg(test)]
+        {
+            matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
     }
 }
 

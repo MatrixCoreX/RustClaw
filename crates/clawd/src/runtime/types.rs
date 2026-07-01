@@ -120,6 +120,7 @@ pub(crate) enum FirstLayerDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RouteGateKind {
     Chat,
+    #[cfg(test)]
     Clarify,
     Execute,
 }
@@ -138,6 +139,7 @@ impl RouteGateKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Chat => "chat",
+            #[cfg(test)]
             Self::Clarify => "clarify",
             Self::Execute => "execute",
         }

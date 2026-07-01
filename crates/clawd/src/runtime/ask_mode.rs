@@ -23,6 +23,7 @@ pub(crate) enum ChatEntryStrategy {
     #[cfg(test)]
     DirectAnswerTrace,
     /// Clarification compatibility trace.
+    #[cfg(test)]
     ClarifyTrace,
     /// Resume context and continue discussion.
     ResumeFollowupDiscussion,
@@ -47,6 +48,7 @@ impl AskMode {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn clarify() -> Self {
         AskMode::ClarifyOrChat {
             entry: ChatEntryStrategy::ClarifyTrace,
@@ -92,6 +94,7 @@ impl AskMode {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::DirectAnswerTrace,
             } => "Chat",
+            #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
             } => "AskClarify",
@@ -112,6 +115,7 @@ impl AskMode {
 
     pub(crate) fn route_trace_decision_for_legacy_journal(&self) -> FirstLayerDecision {
         match self {
+            #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
             } => FirstLayerDecision::Clarify,
@@ -126,6 +130,7 @@ impl AskMode {
 
     pub(crate) fn gate_kind(&self) -> RouteGateKind {
         match self {
+            #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
             } => RouteGateKind::Clarify,
@@ -164,12 +169,19 @@ impl AskMode {
     }
 
     pub(crate) fn is_clarify_only(&self) -> bool {
-        matches!(
-            self,
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClarifyTrace,
-            }
-        )
+        #[cfg(test)]
+        {
+            matches!(
+                self,
+                AskMode::ClarifyOrChat {
+                    entry: ChatEntryStrategy::ClarifyTrace,
+                }
+            )
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
     }
 
     /// Direct-answer compatibility trace.
@@ -224,6 +236,7 @@ impl AskMode {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::DirectAnswerTrace,
             } => "clarify_or_chat:direct_answer_trace",
+            #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
             } => "clarify_or_chat:clarify_trace",

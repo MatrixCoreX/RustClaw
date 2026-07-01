@@ -66,10 +66,25 @@ fn file_delivery_locator_hint_points_to_existing_directory(
     !hint.is_empty() && Path::new(hint).is_dir()
 }
 
+fn route_has_structured_list_selector(route_result: &crate::RouteResult) -> bool {
+    let selector = &route_result.output_contract.self_extension.list_selector;
+    selector.target_kind_specified
+        || selector.limit.is_some()
+        || selector
+            .sort_by
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || selector.include_metadata.is_some()
+        || selector.include_hidden.is_some()
+        || route_reason_has_structural_marker(
+            route_result,
+            "normalizer_emitted_directory_file_selector",
+        )
+}
+
 fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) -> bool {
     if !route_requests_file_delivery(route_result)
-        || route_result.output_contract.semantic_kind
-            != crate::OutputSemanticKind::GeneratedFileDelivery
+        || !route_reason_has_structural_marker(route_result, "generated_file_delivery")
         || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
         || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
     {
@@ -96,9 +111,11 @@ fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) 
 fn preserve_filename_locator_as_existing_file_delivery(
     route_result: &mut crate::RouteResult,
 ) -> bool {
+    if !route_reason_has_structural_marker(route_result, "generated_file_delivery") {
+        return false;
+    }
     let contract = &mut route_result.output_contract;
-    if contract.semantic_kind != crate::OutputSemanticKind::GeneratedFileDelivery
-        || contract.locator_kind != crate::OutputLocatorKind::Filename
+    if contract.locator_kind != crate::OutputLocatorKind::Filename
         || contract.locator_hint.trim().is_empty()
         || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
         || contract.response_shape != crate::OutputResponseShape::FileToken
@@ -384,7 +401,6 @@ pub(super) fn append_active_delivery_content_target_token(
 
 fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = true;
-    route_result.set_clarify_gate();
     route_result.clarify_question.clear();
     route_result.wants_file_delivery = false;
     route_result.output_contract.delivery_required = false;
@@ -438,6 +454,13 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
         return false;
     }
     if file_delivery_locator_hint_points_to_existing_directory(route_result) {
+        if route_has_structured_list_selector(route_result) {
+            remove_route_reason_structural_marker(
+                route_result,
+                "directory_file_delivery_requires_structured_selection",
+            );
+            return false;
+        }
         route_result
             .route_reason
             .push_str("; directory_file_delivery_requires_structured_selection");
