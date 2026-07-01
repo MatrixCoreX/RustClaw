@@ -4,95 +4,72 @@ use super::*;
 #[path = "ask_pipeline_quantity_pair_binding_tests.rs"]
 mod tests;
 
-pub(super) fn prebind_quantity_compare_directory_pair_from_current_request(
+pub(super) fn current_request_quantity_pair_evidence(
     state: &AppState,
     prompt: &str,
-    route_result: &mut crate::RouteResult,
-) -> bool {
+    route_result: &crate::RouteResult,
+) -> Option<(String, String)> {
     if !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
     {
-        return false;
+        return None;
     }
-    let semantic_quantity_comparison =
-        route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison;
-    let semantic_recent_scalar_comparison = route_result.output_contract.semantic_kind
-        == crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    let quantity_comparison_marker = quantity_comparison_machine_signal(route_result);
+    let recent_scalar_comparison_marker = recent_scalar_comparison_machine_signal(route_result);
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    if ((semantic_quantity_comparison || semantic_recent_scalar_comparison)
+    if ((quantity_comparison_marker || recent_scalar_comparison_marker)
         && surface.has_structured_target_refinement())
-        || (semantic_quantity_comparison
+        || (quantity_comparison_marker
             && current_request_has_multiple_structured_config_locators(prompt))
     {
-        return false;
+        return None;
     }
-    if !semantic_quantity_comparison
-        && !semantic_recent_scalar_comparison
-        && route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+    if !quantity_comparison_marker
+        && !recent_scalar_comparison_marker
+        && (route_has_single_existing_locator_hint(state, route_result)
+            || route_has_existing_file_locator_hint(state, route_result)
+            || route_has_single_file_locator_hint_shape(route_result))
     {
-        return false;
+        return None;
     }
-    if !semantic_quantity_comparison && prompt_surface_contains_archive_locator_pair(prompt) {
-        return false;
+    if !quantity_comparison_marker && prompt_surface_contains_archive_locator_pair(prompt) {
+        return None;
     }
-    if !semantic_quantity_comparison
-        && !route_result.needs_clarify
-        && !route_result.is_execute_gate()
+    if !quantity_comparison_marker && !route_result.needs_clarify && !route_result.is_execute_gate()
     {
-        return false;
+        return None;
     }
-    let path_pair = if semantic_recent_scalar_comparison {
+    if recent_scalar_comparison_marker {
         workspace_path_pair_from_current_request(state, prompt)
             .filter(|(left, right)| {
                 std::path::Path::new(left).is_dir() && std::path::Path::new(right).is_dir()
             })
             .or_else(|| workspace_directory_pair_from_current_request(state, prompt, false))
-    } else if semantic_quantity_comparison {
+    } else if quantity_comparison_marker {
         workspace_path_pair_from_current_request(state, prompt).or_else(|| {
             if route_has_single_existing_locator_hint(state, route_result) {
                 None
             } else {
-                workspace_directory_pair_from_current_request(
-                    state,
-                    prompt,
-                    !semantic_quantity_comparison,
-                )
+                workspace_directory_pair_from_current_request(state, prompt, false)
             }
         })
     } else {
-        workspace_directory_pair_from_current_request(state, prompt, !semantic_quantity_comparison)
-    };
-    let Some((left, right)) = path_pair else {
-        return false;
-    };
-    if semantic_recent_scalar_comparison {
-        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-        route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        workspace_directory_pair_from_current_request(state, prompt, true)
     }
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route_result.output_contract.locator_hint = format!("{left} | {right}");
-    route_result.output_contract.requires_content_evidence = true;
-    route_result.needs_clarify = false;
-    route_result.clarify_question.clear();
-    route_result.set_planner_execute_finalize(
-        crate::post_route_policy::content_evidence_execution_finalize_style(
-            &route_result.output_contract,
-            false,
+}
+
+fn quantity_comparison_machine_signal(route_result: &crate::RouteResult) -> bool {
+    route_reason_has_marker(route_result, "quantity_comparison")
+        || route_reason_has_marker(route_result, "quantity_compare")
+}
+
+fn recent_scalar_comparison_machine_signal(route_result: &crate::RouteResult) -> bool {
+    route_reason_has_marker(route_result, "recent_scalar_equality_check")
+        || route_reason_has_marker(
+            route_result,
+            "structured_field_pair_requires_scalar_equality_check",
         )
-        .unwrap_or(crate::ActFinalizeStyle::ChatWrapped),
-    );
-    append_route_reason(
-        route_result,
-        if semantic_quantity_comparison {
-            "quantity_compare_path_pair_prebound_from_current_request"
-        } else if semantic_recent_scalar_comparison {
-            "recent_scalar_directory_pair_promoted_to_quantity_comparison"
-        } else {
-            "directory_pair_prebound_from_current_request"
-        },
-    );
-    true
 }
 
 fn current_request_has_multiple_structured_config_locators(prompt: &str) -> bool {
@@ -142,18 +119,32 @@ fn route_has_single_existing_locator_hint(
     !hint.is_empty() && resolve_existing_workspace_locator_hint(state, hint).is_some()
 }
 
-pub(super) fn route_has_single_existing_directory_locator_hint(
+fn route_has_existing_file_locator_hint(
     state: &AppState,
     route_result: &crate::RouteResult,
 ) -> bool {
-    let locators = crate::task_contract::target_locators_for_route(route_result);
-    if locators.len() > 1 {
+    let hint = route_result.output_contract.locator_hint.trim();
+    if hint.is_empty() {
+        return false;
+    }
+    resolve_existing_workspace_locator_hint(state, hint)
+        .map(std::path::PathBuf::from)
+        .is_some_and(|path| path.is_file())
+}
+
+fn route_has_single_file_locator_hint_shape(route_result: &crate::RouteResult) -> bool {
+    if !matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+    ) {
         return false;
     }
     let hint = route_result.output_contract.locator_hint.trim();
-    resolve_existing_workspace_locator_hint(state, hint)
-        .as_deref()
-        .is_some_and(|path| std::path::Path::new(path).is_dir())
+    !hint.is_empty()
+        && std::path::Path::new(hint)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| std::path::Path::new(name).extension().is_some())
 }
 
 fn workspace_path_pair_from_current_request(

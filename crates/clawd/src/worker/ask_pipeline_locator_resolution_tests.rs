@@ -59,7 +59,7 @@ fn auto_locator_attempts_for_current_workspace_locator() {
 #[test]
 fn auto_locator_attempts_for_filename_locators() {
     let mut route = route_with_locator(crate::OutputLocatorKind::Filename);
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "读取 README 前 20 行".to_string();
     route.output_contract.requires_content_evidence = true;
     assert!(should_attempt_auto_locator(&route));
@@ -119,6 +119,7 @@ fn auto_locator_skips_clarify_with_unbound_workspace_scope() {
 #[test]
 fn quantity_comparison_current_workspace_without_hint_does_not_auto_locator_to_root() {
     let mut route = route_with_locator(crate::OutputLocatorKind::CurrentWorkspace);
+    route.route_reason = "quantity_comparison".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     assert!(!should_attempt_auto_locator(&route));
 
@@ -131,7 +132,7 @@ fn current_workspace_locator_resolution_prefers_workspace_root() {
     let root = make_temp_root("current_workspace_locator_root");
     std::fs::create_dir_all(root.join("rustclaw")).expect("nested rustclaw dir");
     let mut route = route_with_locator(crate::OutputLocatorKind::CurrentWorkspace);
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Write a long introduction for RustClaw".to_string();
     route.route_reason = "workspace summary".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -149,7 +150,7 @@ fn current_workspace_locator_resolution_accepts_absolute_workspace_hint() {
     let root = make_temp_root("current_workspace_locator_abs_root");
     std::fs::write(root.join("rustclaw"), "#!/usr/bin/env bash\n").expect("launcher file");
     let mut route = route_with_locator(crate::OutputLocatorKind::CurrentWorkspace);
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Introduce RustClaw as the current project".to_string();
     route.route_reason = "workspace summary".to_string();
     route.output_contract.locator_hint = root.display().to_string();
@@ -170,7 +171,7 @@ fn current_workspace_locator_hint_naming_root_resolves_to_workspace_root() {
     std::fs::create_dir_all(&root).expect("workspace root");
     std::fs::write(root.join("rustclaw"), "#!/usr/bin/env bash\n").expect("same-name child");
     let mut route = route_with_locator(crate::OutputLocatorKind::CurrentWorkspace);
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Introduce the current RustClaw project".to_string();
     route.route_reason = "workspace summary".to_string();
     route.output_contract.locator_hint = "RustClaw".to_string();

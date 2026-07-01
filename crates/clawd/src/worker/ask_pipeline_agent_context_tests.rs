@@ -1,4 +1,7 @@
-use super::{build_agent_run_context_from_prepared_flow, PreparedAskFlow};
+use super::{
+    agent_loop_boundary_observations_block, agent_loop_default_context,
+    build_agent_run_context_from_prepared_flow, PreparedAskFlow,
+};
 
 fn base_route() -> crate::RouteResult {
     crate::RouteResult {
@@ -30,18 +33,11 @@ fn prepared_flow_with_context() -> PreparedAskFlow {
         turn_analysis: None,
         clarify_fallback_source: None,
         auto_locator_path: Some("/tmp/workspace/README.md".to_string()),
-        has_authoritative_deictic_anchor: true,
-        chat_prompt_context: "chat prompt".to_string(),
         resolved_prompt_for_execution: "resolved execution prompt".to_string(),
         prompt_with_memory_for_execution: "memory + resolved execution prompt".to_string(),
-        memory_context_for_execution: "memory facts".to_string(),
-        semantic_answer_candidate_draft: Some("candidate draft".to_string()),
         recent_execution_context: "recent execution facts".to_string(),
         session_alias_bindings: Vec::new(),
-        agent_mode: true,
         ask_mode: crate::AskMode::planner_execute_plain(),
-        clarify_reason: String::new(),
-        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
         fuzzy_locator_suggestions: vec!["README.md".to_string()],
         should_route_schedule_direct: false,
     }
@@ -69,19 +65,9 @@ fn prepared_ask_flow_builds_agent_run_context_for_replay_boundary() {
         Some("/tmp/workspace/README.md")
     );
     assert_eq!(
-        ctx.memory_context_for_execution.as_deref(),
-        Some("memory facts")
-    );
-    assert_eq!(
         ctx.cross_turn_recent_execution_context.as_deref(),
         Some("recent execution facts")
     );
-    assert_eq!(
-        ctx.semantic_answer_candidate_draft.as_deref(),
-        Some("candidate draft")
-    );
-    assert!(ctx.has_authoritative_deictic_anchor);
-    assert_eq!(ctx.fuzzy_locator_suggestions, vec!["README.md"]);
     assert_eq!(
         ctx.route_result
             .as_ref()
@@ -93,11 +79,99 @@ fn prepared_ask_flow_builds_agent_run_context_for_replay_boundary() {
 #[test]
 fn prepared_ask_flow_omits_empty_memory_and_recent_context() {
     let mut prepared_flow = prepared_flow_with_context();
-    prepared_flow.memory_context_for_execution = "<none>".to_string();
     prepared_flow.recent_execution_context = "   ".to_string();
 
     let ctx = build_agent_run_context_from_prepared_flow("raw user request", &prepared_flow);
 
-    assert_eq!(ctx.memory_context_for_execution, None);
     assert_eq!(ctx.cross_turn_recent_execution_context, None);
+}
+
+#[test]
+fn agent_loop_default_context_demotes_post_route_clarify_to_loop_context() {
+    let mut route = base_route();
+    route.needs_clarify = true;
+    route.clarify_question = "missing target".to_string();
+    route.set_clarify_gate();
+    route.route_reason = "post_route_locator_guard".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let loop_ctx = agent_loop_default_context(Some(ctx)).expect("loop context");
+    let route = loop_ctx.route_result.expect("route context");
+
+    assert!(!route.needs_clarify);
+    assert!(route.clarify_question.is_empty());
+    assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
+    assert!(route.route_reason.contains("agent_loop_default_entry"));
+}
+
+#[test]
+fn boundary_observation_block_filters_natural_language_route_reason() {
+    let mut route = base_route();
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.route_reason =
+        "用户自然语言原因; machine_boundary_code; MixedCaseCode; another.machine_code".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: Some("/tmp/workspace/README.md".to_string()),
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: true,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_locator_boundary",
+            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
+        ),
+    };
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
+                alias: "docs alias".to_string(),
+                target: "/tmp/workspace/docs".to_string(),
+                updated_at_ts: 1,
+            }],
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
+            bound_target: Some("/tmp/workspace/notes.md".to_string()),
+            ordered_entries: vec!["one.md".to_string(), "two.md".to_string()],
+            observed_entry_count: Some(2),
+            ..crate::observed_facts::ObservedFacts::default()
+        }),
+    };
+
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &session_snapshot,
+        "inspect /tmp/workspace/README.md",
+        "resolved capability_ref=kb.list_namespaces",
+        &[],
+    )
+    .expect("observation block");
+
+    assert!(block.contains("AGENT_LOOP_BOUNDARY_OBSERVATIONS"));
+    assert!(block.contains("machine_boundary_code"));
+    assert!(block.contains("another.machine_code"));
+    assert!(block.contains("/tmp/workspace/README.md"));
+    assert!(block.contains("current_request_locator"));
+    assert!(block.contains("explicit_locator_hints"));
+    assert!(block.contains("registry_capability_contract"));
+    assert!(block.contains("kb.list_namespaces"));
+    assert!(block.contains("docs alias"));
+    assert!(block.contains("/tmp/workspace/docs"));
+    assert!(block.contains("active_observed_facts"));
+    assert!(block.contains("/tmp/workspace/notes.md"));
+    assert!(!block.contains("用户自然语言原因"));
+    assert!(!block.contains("MixedCaseCode"));
 }

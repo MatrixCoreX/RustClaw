@@ -56,7 +56,7 @@ pub(super) fn test_state_with_root(root: PathBuf) -> AppState {
 
 pub(super) fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "读取 README 开头并总结".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -77,17 +77,5 @@ pub(super) fn executable_filename_route() -> crate::RouteResult {
             requires_content_evidence: true,
             ..Default::default()
         },
-    }
-}
-
-pub(super) fn unresolved_deictic_analysis() -> crate::intent_router::TurnAnalysis {
-    crate::intent_router::TurnAnalysis {
-        turn_type: None,
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(serde_json::json!({
-            "deictic_reference": {"target": "unresolved_prior_object"}
-        })),
-        attachment_processing_required: false,
     }
 }

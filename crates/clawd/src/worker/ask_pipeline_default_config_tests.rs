@@ -1,4 +1,4 @@
-use super::super::apply_ask_post_route;
+use super::super::{agent_loop_default_context, apply_ask_post_route};
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -69,15 +69,12 @@ fn test_task(task_id: &str) -> crate::ClaimedTask {
     }
 }
 
-fn config_route(
-    semantic_kind: crate::OutputSemanticKind,
-    resolved_intent: &str,
-) -> crate::RouteResult {
+fn config_route(route_marker: &str, resolved_intent: &str) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: resolved_intent.to_string(),
         needs_clarify: false,
-        route_reason: String::new(),
+        route_reason: route_marker.to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Unknown,
@@ -91,7 +88,6 @@ fn config_route(
         output_contract: crate::IntentOutputContract {
             locator_kind: crate::OutputLocatorKind::Path,
             requires_content_evidence: true,
-            semantic_kind,
             response_shape: crate::OutputResponseShape::Free,
             ..Default::default()
         },
@@ -111,7 +107,7 @@ fn config_contract_default_main_config_survives_product_name_auto_locator() {
     let state = test_state_with_root(root.clone());
     let task = test_task("config-contract-default-main-config");
     let route = config_route(
-        crate::OutputSemanticKind::ConfigValidation,
+        "config_validation",
         "Audit the product main config without exposing secret values.",
     );
     let resolved_intent = route.resolved_intent.clone();
@@ -132,28 +128,34 @@ fn config_contract_default_main_config_survives_product_name_auto_locator() {
     assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        "configs/config.toml"
+        crate::OutputLocatorKind::None
     );
     assert!(applied.auto_locator_path.is_none());
     assert!(!applied
         .prompt_with_memory_for_execution
         .contains(&root.join("rustclaw").display().to_string()));
     assert!(applied
+        .resolved_prompt_for_execution
+        .contains("default_main_config_contract"));
+    assert!(applied
+        .resolved_prompt_for_execution
+        .contains("configs/config.toml"));
+    assert!(applied
         .execution_route_result
         .route_reason
-        .contains("config_contract_default_main_config_to_planner"));
-    assert_eq!(
-        applied.gate_record.reason_code,
-        "post_route_config_contract_default_main_config_to_planner"
-    );
-    assert_eq!(
-        applied.gate_record.outcome,
-        crate::post_route_policy::PostRoutePolicyOutcome::Execute
-    );
+        .contains("config_contract_default_main_config_deferred_to_loop"));
+    assert!(!applied
+        .execution_route_result
+        .route_reason
+        .contains("_prebound"));
+    let loop_ctx = agent_loop_default_context(Some(crate::agent_engine::AgentRunContext {
+        route_result: Some(applied.execution_route_result.clone()),
+        ..Default::default()
+    }))
+    .expect("loop context");
+    let route = loop_ctx.route_result.expect("route");
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -169,13 +171,14 @@ fn config_risk_default_main_config_replaces_workspace_identity_locator_hint() {
     let state = test_state_with_root(root.clone());
     let task = test_task("config-risk-default-main-config-workspace-identity");
     let mut route = config_route(
-        crate::OutputSemanticKind::ConfigRiskAssessment,
+        "config_risk_assessment",
         "Assess the workspace main configuration and redact sensitive values.",
     );
     route.set_clarify_gate();
     route.needs_clarify = true;
-    route.route_reason =
-        "semantic_contract_requires_evidence; clarify_reason_code:missing_read_target".to_string();
+    route
+        .route_reason
+        .push_str("; semantic_contract_requires_evidence; clarify_reason_code:missing_read_target");
     let workspace_identity_hint = format!(
         "{}.toml",
         root.file_name()
@@ -197,15 +200,25 @@ fn config_risk_default_main_config_replaces_workspace_identity_locator_hint() {
         String::new(),
     );
 
-    assert!(!applied.execution_route_result.needs_clarify);
-    assert!(applied.execution_route_result.is_execute_gate());
+    assert!(applied.execution_route_result.needs_clarify);
     assert_eq!(
         applied.execution_route_result.output_contract.locator_hint,
-        "configs/config.toml"
+        ""
     );
+    assert!(applied.auto_locator_path.is_none());
+    assert!(applied
+        .resolved_prompt_for_execution
+        .contains("default_main_config_contract"));
+    assert!(applied
+        .resolved_prompt_for_execution
+        .contains("configs/config.toml"));
     assert!(applied
         .execution_route_result
         .route_reason
-        .contains("config_contract_default_main_config_prebound"));
+        .contains("config_contract_default_main_config_deferred_to_loop"));
+    assert!(!applied
+        .execution_route_result
+        .route_reason
+        .contains("_prebound"));
     let _ = std::fs::remove_dir_all(root);
 }

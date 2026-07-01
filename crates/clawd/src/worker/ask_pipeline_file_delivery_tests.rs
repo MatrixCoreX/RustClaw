@@ -1,9 +1,6 @@
 use super::super::{apply_ask_post_route, route_reason_has_marker};
 use super::{
-    direct_existing_file_delivery_token, prebind_direct_file_delivery_locator_before_deictic_guard,
-    prebind_file_delivery_locator_from_recent_ordered_resolved_prompt,
-    prebind_file_delivery_locator_from_resolved_prompt_path,
-    prebind_file_delivery_missing_locator_from_resolved_prompt_path,
+    reject_direct_file_delivery_workspace_root_locator,
     unbound_existing_file_delivery_route_should_force_clarify,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
@@ -64,7 +61,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "deliver file".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -79,15 +76,6 @@ fn executable_filename_route() -> crate::RouteResult {
         should_refresh_long_term_memory: false,
         agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
-    }
-}
-
-fn empty_session_snapshot() -> crate::conversation_state::ActiveSessionSnapshot {
-    crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
     }
 }
 
@@ -296,7 +284,8 @@ fn active_anchor_file_delivery_accepts_repaired_active_task_binding_marker() {
     let mut route = executable_filename_route();
     route.resolved_intent = "Send README.md as an attachment".to_string();
     route.route_reason =
-        "llm_semantic_contract_repair:active_task_invalid_turn_binding_fixed".to_string();
+        "llm_semantic_contract_repair; contract_repair_marker=active_task_invalid_turn_binding"
+            .to_string();
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -333,7 +322,7 @@ fn active_anchor_file_delivery_accepts_repaired_active_task_binding_marker() {
 }
 
 #[test]
-fn direct_file_delivery_locator_prebinds_directory_before_deictic_guard() {
+fn direct_file_delivery_directory_locator_defers_to_loop_before_deictic_guard() {
     let root = make_temp_root("delivery_dir_prebind");
     std::fs::create_dir_all(root.join("document")).expect("document dir");
     let state = test_state_with_root(root.clone());
@@ -348,26 +337,12 @@ fn direct_file_delivery_locator_prebinds_directory_before_deictic_guard() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "document directory".to_string();
 
-    assert!(prebind_direct_file_delivery_locator_before_deictic_guard(
+    assert!(!reject_direct_file_delivery_workspace_root_locator(
         &state, "", &mut route
     ));
 
-    assert!(!super::super::deictic_bare_locator_should_force_clarify(
-        &route,
-        None,
-        &empty_session_snapshot(),
-    ));
-    assert_eq!(
-        route.output_contract.locator_hint,
-        root.join("document")
-            .canonicalize()
-            .expect("canonical document")
-            .display()
-            .to_string()
-    );
-    assert!(route
-        .route_reason
-        .contains("direct_file_delivery_locator_prebound_before_deictic_guard"));
+    assert_eq!(route.output_contract.locator_hint, "document directory");
+    assert!(route.route_reason.is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -384,7 +359,7 @@ fn direct_file_delivery_rejects_workspace_root_prebind_before_deictic_guard() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
 
-    assert!(!prebind_direct_file_delivery_locator_before_deictic_guard(
+    assert!(reject_direct_file_delivery_workspace_root_locator(
         &state, "", &mut route
     ));
 
@@ -413,10 +388,9 @@ fn generated_file_delivery_runtime_target_skips_workspace_root_prebind_reject() 
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.locator_hint.clear();
 
-    assert!(!prebind_direct_file_delivery_locator_before_deictic_guard(
+    assert!(!reject_direct_file_delivery_workspace_root_locator(
         &state, "", &mut route
     ));
 
@@ -430,144 +404,6 @@ fn generated_file_delivery_runtime_target_skips_workspace_root_prebind_reject() 
     assert!(!route
         .route_reason
         .contains("direct_file_delivery_workspace_root_locator_rejected"));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn file_delivery_locator_prebinds_from_recent_ordered_resolved_prompt() {
-    let root = make_temp_root("delivery_recent_ordered_prebind");
-    let logs_dir = root.join("logs");
-    std::fs::create_dir_all(&logs_dir).expect("logs dir");
-    let target = logs_dir.join("clawd-dev.log");
-    std::fs::write(&target, "line\n").expect("target file");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::clarify();
-    route.needs_clarify = true;
-    route.wants_file_delivery = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    let recent_execution_context =
-        "- ts=1 kind=ask request=list logs result=act_plan.log, clawd-dev.log, clawd.log";
-
-    assert!(
-        prebind_file_delivery_locator_from_recent_ordered_resolved_prompt(
-            &state,
-            "Send the selected prior logs list entry clawd-dev.log",
-            recent_execution_context,
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        target
-            .canonicalize()
-            .expect("canonical target")
-            .display()
-            .to_string()
-    );
-    assert!(route
-        .route_reason
-        .contains("file_delivery_locator_prebound_from_recent_ordered_resolved_prompt"));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn file_delivery_locator_prebinds_from_resolved_prompt_path_before_unbound_guard() {
-    let root = make_temp_root("delivery_resolved_prompt_prebind");
-    let target_dir = root.join("scripts/nl_tests/fixtures/locator_smart/case_only");
-    std::fs::create_dir_all(&target_dir).expect("target dir");
-    let target = target_dir.join("Report.MD");
-    std::fs::write(&target, "report\n").expect("target file");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
-    route.resolved_intent = format!("Send the file {} to the user", target.display());
-    route.wants_file_delivery = true;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-
-    assert!(prebind_file_delivery_locator_from_resolved_prompt_path(
-        &state,
-        "Send the file from the repaired route intent to the user",
-        &mut route,
-    ));
-    assert!(!unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "把这个文件发给我",
-        &route,
-        false,
-    ));
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert_eq!(
-        route.output_contract.locator_hint,
-        target
-            .canonicalize()
-            .expect("canonical target")
-            .display()
-            .to_string()
-    );
-    assert!(route
-        .route_reason
-        .contains("file_delivery_locator_prebound_from_resolved_prompt_path"));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn file_delivery_missing_locator_prebinds_from_resolved_prompt_path() {
-    let root = make_temp_root("delivery_missing_resolved_prompt_prebind");
-    std::fs::create_dir_all(root.join("document")).expect("document dir");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
-    route.resolved_intent =
-        "User requests to deliver the file at document/missing.txt.".to_string();
-    route.wants_file_delivery = true;
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-
-    assert!(
-        prebind_file_delivery_missing_locator_from_resolved_prompt_path(
-            &state,
-            "User requests to deliver the file at document/missing.txt.",
-            &mut route,
-        )
-    );
-    assert!(!route.needs_clarify);
-    assert!(route.is_execute_gate());
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path
-    );
-    assert!(route
-        .output_contract
-        .locator_hint
-        .ends_with("document/missing.txt"));
-    assert!(route
-        .route_reason
-        .contains("file_delivery_missing_locator_prebound_from_resolved_prompt_path"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -632,7 +468,7 @@ fn explicit_missing_filename_delivery_contract_defers_not_found_to_execution() {
 }
 
 #[test]
-fn unresolved_file_delivery_current_request_filename_promotes_to_execute() {
+fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
     let root = make_temp_root("delivery_missing_current_request_filename");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -666,39 +502,28 @@ fn unresolved_file_delivery_current_request_filename_promotes_to_execute() {
         String::new(),
     );
 
-    assert!(!applied.execution_route_result.needs_clarify);
-    assert!(applied.execution_route_result.is_execute_gate());
-    assert!(applied.execution_route_result.wants_file_delivery);
-    assert_eq!(
-        applied
-            .execution_route_result
-            .output_contract
-            .response_shape,
-        crate::OutputResponseShape::FileToken
-    );
-    assert_eq!(
-        applied
-            .execution_route_result
-            .output_contract
-            .delivery_intent,
-        crate::OutputDeliveryIntent::FileSingle
-    );
+    assert!(applied.execution_route_result.needs_clarify);
+    assert!(applied.execution_route_result.is_clarify_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
-        crate::OutputLocatorKind::Filename
+        crate::OutputLocatorKind::None
     );
-    assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        "definitely_missing_named_file_rustclaw_001.txt"
-    );
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
     assert_eq!(
         applied.gate_record.reason_code,
-        "post_route_file_delivery_current_request_locator_deferred_to_execution"
+        "post_route_file_delivery_current_request_locator_deferred_to_loop"
     );
     assert!(route_reason_has_marker(
         &applied.execution_route_result,
-        "file_delivery_current_request_locator_deferred_to_execution"
+        "file_delivery_current_request_locator_deferred_to_loop"
     ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("definitely_missing_named_file_rustclaw_001.txt"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -745,7 +570,7 @@ fn unresolved_file_delivery_without_current_request_locator_stays_clarify() {
         .is_empty());
     assert!(!route_reason_has_marker(
         &applied.execution_route_result,
-        "file_delivery_current_request_locator_deferred_to_execution"
+        "file_delivery_current_request_locator_deferred_to_loop"
     ));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -832,7 +657,7 @@ fn unbound_existing_file_delivery_allows_generated_file_delivery() {
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+    route.route_reason = "generated_file_delivery".to_string();
 
     assert!(!unbound_existing_file_delivery_route_should_force_clarify(
         &state,
@@ -868,97 +693,6 @@ fn unbound_existing_file_delivery_allows_resolved_workspace_child() {
 }
 
 #[test]
-fn existing_file_delivery_contract_returns_file_token_without_planner() {
-    let root = make_temp_root("existing_file_delivery_token");
-    let file = root.join("config.toml");
-    std::fs::write(&file, "answer = true\n").expect("fixture file");
-    let canonical = file.canonicalize().expect("canonical file");
-    let mut route = executable_filename_route();
-    route.output_contract = crate::IntentOutputContract {
-        response_shape: crate::OutputResponseShape::FileToken,
-        delivery_required: true,
-        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: canonical.display().to_string(),
-        semantic_kind: crate::OutputSemanticKind::GeneratedFileDelivery,
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-
-    assert_eq!(
-        direct_existing_file_delivery_token(&route),
-        Some(format!("FILE:{}", canonical.display()))
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn content_summary_file_delivery_does_not_shortcut_planner() {
-    let root = make_temp_root("content_summary_file_delivery_no_shortcut");
-    let file = root.join("config.toml");
-    std::fs::write(&file, "answer = true\n").expect("fixture file");
-    let canonical = file.canonicalize().expect("canonical file");
-    let mut route = executable_filename_route();
-    route.output_contract = crate::IntentOutputContract {
-        response_shape: crate::OutputResponseShape::Strict,
-        delivery_required: true,
-        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: canonical.display().to_string(),
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptWithSummary,
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-
-    assert_eq!(direct_existing_file_delivery_token(&route), None);
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn generated_file_delivery_runtime_target_does_not_shortcut_existing_file() {
-    let root = make_temp_root("generated_file_delivery_no_existing_shortcut");
-    let file = root.join("document/skill_audio_smoke.mp3");
-    std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir document");
-    std::fs::write(&file, b"existing audio").expect("fixture file");
-    let canonical = file.canonicalize().expect("canonical file");
-    let mut route = executable_filename_route();
-    route.route_reason = "generated_file_delivery_allows_runtime_target".to_string();
-    route.output_contract = crate::IntentOutputContract {
-        response_shape: crate::OutputResponseShape::FileToken,
-        delivery_required: true,
-        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: canonical.display().to_string(),
-        semantic_kind: crate::OutputSemanticKind::GeneratedFileDelivery,
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-
-    assert_eq!(direct_existing_file_delivery_token(&route), None);
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn existing_file_delivery_contract_rejects_directory_or_missing_path() {
-    let root = make_temp_root("existing_file_delivery_no_token");
-    let mut route = executable_filename_route();
-    route.output_contract = crate::IntentOutputContract {
-        response_shape: crate::OutputResponseShape::FileToken,
-        delivery_required: true,
-        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: root.display().to_string(),
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-    assert_eq!(direct_existing_file_delivery_token(&route), None);
-
-    route.output_contract.locator_hint = root.join("missing.txt").display().to_string();
-    assert_eq!(direct_existing_file_delivery_token(&route), None);
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn directory_file_delivery_without_structured_selection_requires_clarify() {
     let root = make_temp_root("directory_delivery_requires_selection");
     let device_dir = root.join("device_local");
@@ -985,7 +719,6 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "device_local".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
     route.output_contract.requires_content_evidence = true;
     let resolved_intent = route.resolved_intent.clone();
 
@@ -1010,11 +743,15 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
         applied.execution_route_result.gate_kind(),
         crate::RouteGateKind::Clarify
     );
-    assert!(route_reason_has_marker(
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "directory_file_delivery_requires_structured_selection"
     ));
     assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "unresolved_file_delivery_requires_clarify"
+    ));
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "clarify_reason_code:missing_delivery_locator"
     ));

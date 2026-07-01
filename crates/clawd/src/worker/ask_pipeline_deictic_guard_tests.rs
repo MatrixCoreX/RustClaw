@@ -5,7 +5,7 @@ use super::{
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -128,9 +128,10 @@ fn deictic_synthesized_relative_path_forces_clarify() {
 #[test]
 fn deictic_forced_clarify_uses_machine_reason_code() {
     let mut route = executable_filename_route();
+    route.route_reason = "search_locator_required".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "reports/report.md".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     assert_eq!(
         deictic_missing_locator_reason_code(&route),

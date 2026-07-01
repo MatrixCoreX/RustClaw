@@ -14,8 +14,8 @@ mod auto_locator_binding;
 mod background_locator_guard;
 #[path = "ask_pipeline_bare_topic_guard.rs"]
 mod bare_topic_guard;
-#[path = "ask_pipeline_clarify_context.rs"]
-mod clarify_context;
+#[path = "ask_pipeline_boundary_preflight.rs"]
+mod boundary_preflight;
 #[path = "ask_pipeline_contract_repair.rs"]
 mod contract_repair;
 #[path = "ask_pipeline_default_config.rs"]
@@ -32,10 +32,10 @@ mod locator_hint_binding;
 mod locator_resolution;
 #[path = "ask_pipeline_locatorless_observation_guard.rs"]
 mod locatorless_observation_guard;
-#[path = "ask_pipeline_ordered_entry_binding.rs"]
-mod ordered_entry_binding;
 #[path = "ask_pipeline_post_route_binding.rs"]
 mod post_route_binding;
+#[path = "ask_pipeline_post_route_refinement.rs"]
+mod post_route_refinement;
 #[path = "ask_pipeline_quantity_pair_binding.rs"]
 mod quantity_pair_binding;
 #[path = "ask_pipeline_runtime_status.rs"]
@@ -47,20 +47,13 @@ mod unbound_context_guard;
 #[path = "ask_pipeline_workspace_locator_binding.rs"]
 mod workspace_locator_binding;
 use active_binding::{
-    active_observed_facts_have_bound_target,
-    prebind_active_bound_target_for_locatorless_content_evidence,
-    prebind_active_bound_target_from_matching_locator_hint,
-    prebind_active_listing_target_for_locatorless_scalar_count,
-    prebind_current_workspace_root_hint_for_scalar_count,
-    prebind_session_alias_locator_from_current_request,
-    repair_service_status_file_locator_to_content_excerpt, single_component_locator_hint,
-    SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
+    active_observed_facts_have_bound_target, active_session_has_bound_target,
+    single_component_locator_hint, SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
 };
 pub(super) use agent_context::build_agent_run_context_from_prepared_flow;
 use background_locator_guard::{
-    background_only_locator_route_should_force_clarify,
-    downgrade_background_locator_clarify_to_recent_observed_chat, locator_identity_candidates,
-    recent_execution_result_segments, text_mentions_locator_identity,
+    background_only_locator_route_should_force_clarify, recent_execution_result_segments,
+    text_mentions_locator_identity,
 };
 use bare_topic_guard::{
     bare_topic_clarify_question_should_drop_context_target,
@@ -69,27 +62,19 @@ use bare_topic_guard::{
     route_introduces_unmentioned_distinctive_context_target,
     route_introduces_unmentioned_distinctive_context_target_except_workspace_root,
 };
-use clarify_context::{
-    build_locator_fuzzy_clarify_context, route_clarify_reason_code,
-    should_reuse_route_clarify_question, should_suppress_recent_execution_in_clarify_context,
-    structured_missing_locator_clarify_context,
+use boundary_preflight::{
+    boundary_context_locator_preflight, boundary_post_binding_locator_preflight,
+    boundary_safety_preflight,
 };
 use contract_repair::{
-    repair_compound_file_names_plus_content_summary_contract,
-    repair_config_validation_findings_contract,
-    repair_generic_path_content_grounded_summary_contract,
-    repair_session_alias_listing_plus_content_summary_contract,
-    repair_sqlite_path_excerpt_judgment_contract, repair_sqlite_structured_table_listing_contract,
-    repair_sqlite_structured_version_contract,
-    repair_summary_only_content_excerpt_with_summary_contract,
+    contract_repair_candidate_observations, registry_capability_contract_observation,
 };
 use default_config::{
-    prebind_config_contract_default_main_config_locator,
-    promote_config_contract_default_main_config_to_execute,
+    default_main_config_contract_observation,
+    defer_config_contract_default_main_config_after_locator_policy,
 };
 use deictic_guard::{
-    deictic_bare_locator_should_force_clarify, deictic_missing_locator_reason_code,
-    mark_deictic_missing_locator_clarify, route_locator_hint_matches_active_ordered_entry,
+    deictic_bare_locator_should_force_clarify, route_locator_hint_matches_active_ordered_entry,
     state_patch_allows_deictic_locator_guard_bypass, state_patch_requires_deictic_locator_clarify,
 };
 pub(super) use execution_context::execution_user_request;
@@ -99,22 +84,12 @@ use execution_context::{
 };
 use file_delivery::{
     active_anchor_file_delivery_without_structured_reference_should_force_clarify,
-    direct_existing_file_delivery_token,
     directory_file_delivery_without_structured_selection_should_force_clarify,
-    generated_file_delivery_uses_runtime_target,
-    prebind_direct_file_delivery_locator_before_deictic_guard,
-    prebind_file_delivery_locator_from_recent_ordered_resolved_prompt,
-    prebind_file_delivery_locator_from_resolved_prompt_path,
-    prebind_file_delivery_missing_locator_from_resolved_prompt_path,
-    promote_unresolved_file_delivery_with_current_request_locator,
+    generated_file_delivery_uses_runtime_target, refine_unresolved_file_delivery_boundary_contract,
+    reject_direct_file_delivery_workspace_root_locator, route_has_structured_list_selector,
     unbound_existing_file_delivery_route_should_force_clarify,
 };
-use locator_hint_binding::{
-    locator_component_token, locator_hint_token_ambiguous_in_workspace,
-    locator_hint_token_present_in_prompt, prebind_workspace_root_locator_from_resolved_prompt,
-    resolve_direct_child_stem_workspace_locator_hint, resolve_existing_workspace_locator_hint,
-    resolved_prompt_existing_workspace_locator, text_contains_workspace_root_locator,
-};
+use locator_hint_binding::{locator_component_token, resolve_existing_workspace_locator_hint};
 use locator_resolution::{
     current_workspace_locator_resolution, effective_auto_locator_kind,
     locator_hint_names_workspace_root, locator_hint_points_to_workspace_root,
@@ -122,52 +97,30 @@ use locator_resolution::{
     should_attempt_auto_locator,
 };
 use locatorless_observation_guard::{
-    command_observation_route_has_runtime_evidence,
+    command_observation_marker_present, command_observation_route_has_runtime_evidence,
     current_request_has_self_contained_structured_payload,
-    locatorless_observation_route_should_force_clarify,
-    promote_locatorless_git_capability_to_repository_state,
-    promote_locatorless_scalar_child_metadata_to_quantity_comparison,
-    raw_command_output_has_explicit_command, raw_command_request_has_structural_input_locator,
-    semantic_kind_can_execute_without_locator,
-};
-use ordered_entry_binding::{
-    prebind_content_evidence_locator_from_active_ordered_resolved_prompt,
-    promote_clarify_observation_to_execute_with_locator,
-    resolve_recent_ordered_entry_target_from_resolved_prompt,
+    locatorless_observation_route_should_force_clarify, raw_command_output_has_explicit_command,
+    raw_command_request_has_structural_input_locator, route_can_execute_without_locator,
 };
 use post_route_binding::{
-    auto_locator_scalar_file_without_current_locator_should_force_clarify,
-    direct_auto_locator_path, post_route_promote_resolved_multifile_targets_to_execute,
+    auto_locator_scalar_file_without_current_locator_should_force_clarify, direct_auto_locator_path,
 };
+use post_route_refinement::apply_post_route_refinements;
 use quantity_pair_binding::{
-    prebind_quantity_compare_directory_pair_from_current_request,
-    route_has_single_existing_directory_locator_hint, structural_locator_token_candidates,
+    current_request_quantity_pair_evidence, structural_locator_token_candidates,
     workspace_directory_pair_from_current_request,
 };
 use runtime_status::{
-    prebind_runtime_status_scalar_path_to_current_workspace,
-    promote_locatorless_scalar_status_query_to_runtime_info,
-    promote_locatorless_status_query_to_service_status, turn_analysis_has_runtime_status_query,
+    append_runtime_status_capability_context, turn_analysis_has_runtime_status_query,
 };
 use structured_anchor_guard::{
-    active_session_has_structured_observation_anchor, answer_candidate_is_compact_scalar_shape,
-    direct_answer_from_structured_anchor_requires_evidence, embedded_normalizer_answer_candidate,
-    followup_frame_has_matching_target,
-    normalizer_answer_candidate_is_grounded_in_structured_observation,
-    normalizer_answer_candidate_matches_recent_execution_context,
-    observed_facts_have_matching_target,
-    preserve_scalar_shape_from_normalizer_candidate_for_clarify,
-    promote_structured_anchor_direct_answer_to_evidence, session_has_authoritative_deictic_anchor,
+    active_session_has_structured_observation_anchor, apply_structured_anchor_evidence_repair,
+    followup_frame_has_matching_target, observed_facts_have_matching_target,
+    session_has_authoritative_deictic_anchor, structured_anchor_route_requires_evidence_repair,
 };
 use unbound_context_guard::{
     deictic_memory_only_route_should_force_clarify,
     execute_route_without_input_locator_should_plan,
-    promote_broad_current_workspace_content_summary_to_directory_purpose,
-    promote_runtime_surface_contract_to_command_summary,
-    raw_command_output_without_locator_can_plan_via_contract,
-    repair_directory_purpose_command_summary_contract,
-    repair_directory_purpose_quantity_comparison_contract,
-    restore_explicit_extension_assess_gap_to_command_summary,
     runtime_status_query_route_can_plan_without_locator,
     task_control_route_can_plan_without_locator,
     unbound_model_context_target_route_should_force_clarify,
@@ -182,16 +135,8 @@ use workspace_locator_binding::{
     locator_hint_full_file_name_token_present_in_prompt,
     model_completed_workspace_file_locator_hint_should_force_clarify,
     path_scoped_locator_guard_can_defer_to_prompt_targets,
-    prebind_clarify_workspace_child_locator_from_current_request,
-    prebind_existing_workspace_locator_hint_from_current_request,
-    prebind_workspace_child_locator_from_current_request,
-    prebind_workspace_child_locator_from_resolved_prompt,
-    prebind_workspace_root_locator_from_current_request,
-    promote_clarify_path_scoped_filename_targets_to_execute,
-    promote_clarify_resolved_multifile_targets_to_execute,
     recent_artifacts_judgment_can_use_recent_execution_context,
-    structured_field_route_has_current_locator_surface,
-    WORKSPACE_LOCATOR_HINT_PREBOUND_FROM_CURRENT_REQUEST,
+    structured_field_route_has_current_locator_surface, workspace_root_name_token_present,
 };
 
 pub(super) struct PreparedAskFlow {
@@ -203,20 +148,13 @@ pub(super) struct PreparedAskFlow {
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) auto_locator_path: Option<String>,
-    pub(super) has_authoritative_deictic_anchor: bool,
-    pub(super) chat_prompt_context: String,
     pub(super) resolved_prompt_for_execution: String,
     pub(super) prompt_with_memory_for_execution: String,
-    pub(super) memory_context_for_execution: String,
-    pub(super) semantic_answer_candidate_draft: Option<String>,
     pub(super) recent_execution_context: String,
     pub(super) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
-    pub(super) agent_mode: bool,
     /// Final runtime ask mode after routing and post-route refinements.
     /// Dispatch decisions must use ask_mode predicates.
     pub(super) ask_mode: crate::AskMode,
-    pub(super) clarify_reason: String,
-    pub(super) clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     pub(super) fuzzy_locator_suggestions: Vec<String>,
     pub(super) should_route_schedule_direct: bool,
 }
@@ -226,19 +164,10 @@ struct AppliedAskPostRoute {
     auto_locator_path: Option<String>,
     #[cfg(test)]
     gate_record: crate::post_route_policy::PostRouteGateRecord,
-    has_authoritative_deictic_anchor: bool,
     resolved_prompt_for_execution: String,
     prompt_with_memory_for_execution: String,
     session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
-    clarify_reason: String,
-    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: Vec<String>,
-}
-
-fn clarify_fallback_source_or_default(
-    source: Option<crate::fallback::ClarifyFallbackSource>,
-) -> crate::fallback::ClarifyFallbackSource {
-    crate::finalize::clarify_fallback_source_or_default(source)
 }
 
 fn log_route_guard_record(
@@ -259,110 +188,367 @@ fn log_route_guard_record(
         route_result.gate_kind().as_str(),
         route_result.needs_clarify,
         route_result.output_contract.locator_kind.as_str(),
-        route_result.output_contract.semantic_kind.as_str(),
+        route_result.effective_output_contract_semantic_kind().as_str(),
         route_result.output_contract.response_shape.as_str(),
         route_result.output_contract.delivery_required,
         route_result.output_contract.requires_content_evidence,
     );
 }
 
-fn ask_reply_with_visible_process(
-    _state: &crate::AppState,
-    _task: &crate::ClaimedTask,
-    _prompt: &str,
-    text: String,
-) -> crate::AskReply {
-    let answer = text.trim().to_string();
-    if answer.is_empty() || crate::finalize::is_execution_summary_message(&answer) {
-        crate::AskReply::non_llm(text)
-    } else {
-        crate::AskReply::non_llm(answer)
+fn agent_loop_default_context(
+    mut agent_run_context: Option<crate::agent_engine::AgentRunContext>,
+) -> Option<crate::agent_engine::AgentRunContext> {
+    if let Some(route) = agent_run_context
+        .as_mut()
+        .and_then(|ctx| ctx.route_result.as_mut())
+    {
+        route.needs_clarify = false;
+        route.clarify_question.clear();
+        route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        append_route_reason(route, "agent_loop_default_entry");
+    }
+    agent_run_context
+}
+
+fn push_pre_loop_clarify_candidate(candidates: &mut Vec<&'static str>, candidate: &'static str) {
+    if !candidates.contains(&candidate) {
+        candidates.push(candidate);
     }
 }
 
-fn with_agent_decides_shadow_snapshot(
-    state: &crate::AppState,
-    task: &crate::ClaimedTask,
+fn append_agent_loop_boundary_observations(
+    state: &AppState,
+    post_route: &crate::post_route_policy::PostRoutePolicyResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     prompt: &str,
-    mut reply: crate::AskReply,
-    route_result: &crate::RouteResult,
-    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-) -> crate::AskReply {
-    let Some(attribution) = crate::agent_engine::agent_decides_shadow_snapshot_for_route(
+    resolved_prompt: &str,
+    pre_loop_clarify_candidates: &[&'static str],
+    resolved_prompt_for_execution: &mut String,
+    prompt_with_memory_for_execution: &mut String,
+) {
+    let Some(block) = agent_loop_boundary_observations_block(
         state,
-        task,
-        agent_run_context,
-        route_result,
+        post_route,
+        session_snapshot,
+        prompt,
+        resolved_prompt,
+        pre_loop_clarify_candidates,
     ) else {
-        return reply;
+        return;
     };
-    let journal = reply.task_journal.get_or_insert_with(|| {
-        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt)
-    });
-    journal.record_route_result(route_result);
-    journal.record_rollout_attribution(attribution);
-    reply
+    append_agent_loop_boundary_observation_block(resolved_prompt_for_execution, &block);
+    append_agent_loop_boundary_observation_block(prompt_with_memory_for_execution, &block);
 }
 
-fn with_dispatch_boundary_attribution(
-    task: &crate::ClaimedTask,
+fn append_agent_loop_boundary_observation_block(target: &mut String, block: &str) {
+    if target.contains("### AGENT_LOOP_BOUNDARY_OBSERVATIONS") {
+        return;
+    }
+    if !target.ends_with('\n') {
+        target.push('\n');
+    }
+    target.push('\n');
+    target.push_str(block);
+    target.push('\n');
+}
+
+fn agent_loop_boundary_observations_block(
+    state: &AppState,
+    post_route: &crate::post_route_policy::PostRoutePolicyResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     prompt: &str,
-    mut reply: crate::AskReply,
-    route_result: &crate::RouteResult,
-    event: &str,
-    old_owner: &str,
-    new_owner: &str,
-    chosen_path: &str,
-    rollback_token: &str,
-) -> crate::AskReply {
-    let journal = reply.task_journal.get_or_insert_with(|| {
-        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt)
+    resolved_prompt: &str,
+    pre_loop_clarify_candidates: &[&'static str],
+) -> Option<String> {
+    let route = &post_route.execution_route_result;
+    let route_reason_codes = route_reason_machine_codes(route);
+    let session_alias_bindings = session_alias_binding_observations(session_snapshot);
+    let active_bound_targets = active_bound_target_observations(session_snapshot);
+    let current_workspace_scope = current_workspace_scope_observation(state, route);
+    let current_request_locator = current_request_locator_observation(state, prompt, route);
+    let default_main_config_contract =
+        default_main_config_contract_observation(state, prompt, route);
+    let registry_capability_contract =
+        registry_capability_contract_observation(resolved_prompt, route);
+    let contract_repair_candidates =
+        contract_repair_candidate_observations(state, prompt, resolved_prompt, route);
+    let has_auto_locator = post_route
+        .auto_locator_path
+        .as_deref()
+        .is_some_and(|path| !path.trim().is_empty() || post_route.auto_locator_resolved_direct);
+    let has_fuzzy_locator = !post_route.fuzzy_locator_suggestions.is_empty();
+    let has_boundary_gate = post_route.gate_record.outcome
+        != crate::post_route_policy::PostRoutePolicyOutcome::NoChange
+        || route.needs_clarify
+        || post_route.missing_locator_for_path_scoped_content;
+
+    if !has_boundary_gate
+        && !has_auto_locator
+        && !has_fuzzy_locator
+        && route_reason_codes.is_empty()
+        && session_alias_bindings.is_empty()
+        && active_bound_targets.is_empty()
+        && current_workspace_scope.is_none()
+        && current_request_locator.is_none()
+        && default_main_config_contract.is_none()
+        && registry_capability_contract.is_none()
+        && contract_repair_candidates.is_empty()
+        && pre_loop_clarify_candidates.is_empty()
+    {
+        return None;
+    }
+
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "route_gate_kind": route.gate_kind().as_str(),
+        "needs_clarify": route.needs_clarify,
+        "locator_kind": route.output_contract.locator_kind.as_str(),
+        "delivery_required": route.output_contract.delivery_required,
+        "content_evidence_required": route.output_contract.requires_content_evidence,
+        "post_route_policy": {
+            "owner_layer": post_route.gate_record.owner_layer,
+            "reason_code": post_route.gate_record.reason_code,
+            "outcome": post_route.gate_record.outcome.as_str(),
+            "missing_locator_for_path_scoped_content": post_route.missing_locator_for_path_scoped_content,
+        },
+        "auto_locator": {
+            "resolved_direct": post_route.auto_locator_resolved_direct,
+            "path": post_route.auto_locator_path.as_deref().unwrap_or(""),
+            "fuzzy_candidates": post_route.fuzzy_locator_suggestions,
+        },
+        "session_alias_bindings": session_alias_bindings,
+        "active_bound_targets": active_bound_targets,
+        "current_workspace_scope": current_workspace_scope,
+        "current_request_locator": current_request_locator,
+        "default_main_config_contract": default_main_config_contract,
+        "registry_capability_contract": registry_capability_contract,
+        "contract_repair_candidates": contract_repair_candidates,
+        "pre_loop_clarify_candidates": pre_loop_clarify_candidates,
+        "route_reason_codes": route_reason_codes,
     });
-    journal.record_route_result(route_result);
-    journal.record_rollout_attribution(
-        crate::task_journal::TaskJournalRolloutAttribution::dispatch_boundary_attribution(
-            route_result,
-            event,
-            old_owner,
-            new_owner,
-            chosen_path,
-            rollback_token,
-        ),
-    );
-    reply
+    let encoded = serde_json::to_string(&observation).ok()?;
+    Some(format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{encoded}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS"
+    ))
 }
 
-fn resume_discussion_uses_direct_chat_renderer(route_result: &crate::RouteResult) -> bool {
-    crate::ask_flow::route_allows_agent_loop_pure_chat_submode(route_result)
+fn current_request_locator_observation(
+    state: &AppState,
+    prompt: &str,
+    route: &crate::RouteResult,
+) -> Option<serde_json::Value> {
+    if default_main_config_contract_observation(state, prompt, route).is_some() {
+        return None;
+    }
+    let explicit_locators =
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(prompt);
+    let mut explicit_locator_hints = explicit_locators
+        .iter()
+        .filter_map(|locator| {
+            let hint = locator.locator_hint.trim();
+            if hint.is_empty() {
+                return None;
+            }
+            Some(serde_json::json!({
+                "kind": locator.locator_kind.as_str(),
+                "hint": hint,
+            }))
+        })
+        .collect::<Vec<_>>();
+    if explicit_locator_hints.is_empty() {
+        if let Some(locator) =
+            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(prompt)
+        {
+            let hint = locator.locator_hint.trim();
+            if !hint.is_empty() {
+                explicit_locator_hints.push(serde_json::json!({
+                    "kind": locator.locator_kind.as_str(),
+                    "hint": hint,
+                }));
+            }
+        }
+    }
+    let has_concrete_surface = current_request_has_concrete_locator_surface(prompt);
+    let resolved_workspace_child = current_request_resolves_workspace_child_locator(state, prompt);
+    let resolved_workspace_path_pair = current_request_quantity_pair_evidence(state, prompt, route)
+        .map(|(left, right)| vec![left, right])
+        .unwrap_or_default();
+    let mentions_workspace_root =
+        workspace_root_name_token_present(&state.skill_rt.workspace_root, prompt);
+    let resolved_workspace_root = mentions_workspace_root.then(|| {
+        state
+            .skill_rt
+            .workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| state.skill_rt.workspace_root.clone())
+            .display()
+            .to_string()
+    });
+    let has_multiple_local_paths =
+        has_multiple_distinct_explicit_local_path_locators(state, prompt, None);
+    if !has_concrete_surface
+        && explicit_locator_hints.is_empty()
+        && resolved_workspace_child.is_none()
+        && resolved_workspace_path_pair.is_empty()
+        && resolved_workspace_root.is_none()
+        && !has_multiple_local_paths
+    {
+        return None;
+    }
+    Some(serde_json::json!({
+        "source": "current_request",
+        "has_concrete_surface": has_concrete_surface,
+        "explicit_locator_hints": explicit_locator_hints,
+        "resolved_workspace_child": resolved_workspace_child.as_deref().unwrap_or(""),
+        "resolved_workspace_path_pair": resolved_workspace_path_pair,
+        "mentions_workspace_root": mentions_workspace_root,
+        "resolved_workspace_root": resolved_workspace_root.as_deref().unwrap_or(""),
+        "has_multiple_local_paths": has_multiple_local_paths,
+    }))
 }
 
-fn route_targets_agent_execution_state(
-    state: &crate::AppState,
-    route_result: &crate::RouteResult,
-) -> bool {
-    route_result.is_execute_gate()
-        || (crate::agent_engine::agent_loop_semantic_authority_enabled(state)
-            && crate::ask_flow::route_allows_agent_loop_pure_chat_submode(route_result))
+fn current_workspace_scope_observation(
+    state: &AppState,
+    route: &crate::RouteResult,
+) -> Option<serde_json::Value> {
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || !current_workspace_scope_has_count_shape(route)
+        || route.effective_output_contract_semantic_kind() != crate::OutputSemanticKind::ScalarCount
+    {
+        return None;
+    }
+    let has_current_workspace_scope = route.output_contract.locator_kind
+        == crate::OutputLocatorKind::CurrentWorkspace
+        || route_reason_has_marker(route, "current_workspace_scope_from_current_request");
+    if !has_current_workspace_scope {
+        return None;
+    }
+    Some(serde_json::json!({
+        "source": "current_workspace_scope",
+        "target": state.skill_rt.workspace_root.display().to_string(),
+        "semantic_kind": route.effective_output_contract_semantic_kind().as_str(),
+        "response_shape": route.output_contract.response_shape.as_str(),
+    }))
 }
 
-fn execute_ask_routed_transition_reason(
-    route_result: &crate::RouteResult,
-    targets_agent_execution: bool,
-) -> &'static str {
-    if route_result.is_execute_gate() {
-        "execute_ask_routed_act"
-    } else if targets_agent_execution {
-        "execute_ask_routed_pure_chat_agent_loop"
-    } else {
-        "execute_ask_routed_chat"
+fn current_workspace_scope_has_count_shape(route: &crate::RouteResult) -> bool {
+    matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
+    ) || (route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && route.output_contract.exact_sentence_count == Some(1))
+}
+
+fn session_alias_binding_observations(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Vec<serde_json::Value> {
+    session_snapshot
+        .conversation_state
+        .as_ref()
+        .map(|state| {
+            state
+                .alias_bindings
+                .iter()
+                .filter_map(|binding| {
+                    let alias = binding.alias.trim();
+                    let target = binding.target.trim();
+                    if alias.is_empty() || target.is_empty() {
+                        return None;
+                    }
+                    Some(serde_json::json!({
+                        "alias": alias,
+                        "target": target,
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn active_bound_target_observations(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
+        let target = frame
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty());
+        let ordered_targets = active_followup_ordered_targets(frame);
+        if target.is_some() || !ordered_targets.is_empty() {
+            out.push(serde_json::json!({
+                "source": "active_followup_frame",
+                "op_kind": followup_op_kind_token(frame.op_kind),
+                "target": target.unwrap_or(""),
+                "ordered_targets": ordered_targets,
+                "ordered_entry_count": frame.ordered_entries.len(),
+            }));
+        }
+    }
+    if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            out.push(serde_json::json!({
+                "source": "active_observed_facts",
+                "target": target,
+                "ordered_entry_count": facts.ordered_entries.len(),
+                "observed_entry_count": facts.observed_entry_count,
+            }));
+        }
+    }
+    out
+}
+
+fn active_followup_ordered_targets(frame: &crate::followup_frame::FollowupFrame) -> Vec<String> {
+    frame
+        .ordered_entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, _)| crate::followup_frame::ordered_entry_target_at(frame, index))
+        .map(|target| target.trim().to_string())
+        .filter(|target| !target.is_empty())
+        .collect()
+}
+
+fn followup_op_kind_token(kind: crate::followup_frame::FollowupOpKind) -> &'static str {
+    match kind {
+        crate::followup_frame::FollowupOpKind::Generic => "generic",
+        crate::followup_frame::FollowupOpKind::Read => "read",
+        crate::followup_frame::FollowupOpKind::List => "list",
+        crate::followup_frame::FollowupOpKind::Delivery => "delivery",
+        crate::followup_frame::FollowupOpKind::ClarifyPending => "clarify_pending",
     }
 }
 
-fn ordinary_clarify_should_enter_agent_loop(
-    _state: &crate::AppState,
-    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
-) -> bool {
-    !clarify_reason_kind.is_boundary_clarify()
+fn route_reason_machine_codes(route_result: &crate::RouteResult) -> Vec<String> {
+    let mut codes = route_result
+        .route_reason
+        .split(';')
+        .filter_map(|part| {
+            let token = part.trim();
+            valid_route_reason_machine_code(token).then_some(token.to_string())
+        })
+        .collect::<Vec<_>>();
+    codes.sort();
+    codes.dedup();
+    codes
+}
+
+fn valid_route_reason_machine_code(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= 96
+        && token.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+        && token.bytes().any(|byte| byte == b'_')
 }
 
 fn subagent_boundary_clarify_should_enter_agent_loop(
@@ -443,404 +629,44 @@ fn apply_ask_post_route(
     let session_snapshot = crate::conversation_state::load_active_session_snapshot(state, task);
     let has_authoritative_deictic_anchor =
         session_has_authoritative_deictic_anchor(prompt, &route_result, &session_snapshot);
-    repair_compound_file_names_plus_content_summary_contract(&mut route_result);
-    repair_session_alias_listing_plus_content_summary_contract(
+    append_runtime_status_capability_context(&mut route_result, turn_analysis);
+    let mut pre_loop_clarify_candidates: Vec<&'static str> = Vec::new();
+    boundary_safety_preflight(
         state,
+        task,
         prompt,
-        &session_snapshot,
-        &mut route_result,
-    );
-    promote_locatorless_scalar_status_query_to_runtime_info(&mut route_result, turn_analysis);
-    promote_locatorless_status_query_to_service_status(
-        state,
-        prompt,
-        &mut route_result,
-        turn_analysis,
-    );
-    if deictic_memory_only_route_should_force_clarify(
-        prompt,
-        &route_result,
         turn_analysis,
         &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        append_route_reason(&mut route_result, "deictic_memory_only_requires_clarify");
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "deictic_memory_only_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if unbound_model_context_target_route_should_force_clarify(
+        &mut pre_loop_clarify_candidates,
+        &mut route_result,
+    );
+    boundary_post_binding_locator_preflight(
         state,
+        task,
         prompt,
-        &route_result,
         turn_analysis,
         &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        append_route_reason(
-            &mut route_result,
-            "unbound_model_context_target_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "unbound_model_context_target_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if bare_topic_model_supplied_locator_route_should_force_clarify(
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "bare_topic_model_supplied_locator_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "bare_topic_model_supplied_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if implicit_workspace_file_locator_route_should_force_clarify(
-        state,
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "implicit_workspace_file_locator_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "implicit_workspace_file_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    prebind_config_contract_default_main_config_locator(state, prompt, &mut route_result);
-    prebind_workspace_root_locator_from_current_request(state, prompt, &mut route_result);
-    prebind_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
-    prebind_clarify_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
-    prebind_workspace_child_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
-    repair_summary_only_content_excerpt_with_summary_contract(&mut route_result);
-    repair_generic_path_content_grounded_summary_contract(&mut route_result);
-    repair_sqlite_path_excerpt_judgment_contract(state, prompt, resolved_prompt, &mut route_result);
-    repair_sqlite_structured_version_contract(state, prompt, resolved_prompt, &mut route_result);
-    repair_sqlite_structured_table_listing_contract(
-        state,
-        prompt,
-        resolved_prompt,
+        &mut pre_loop_clarify_candidates,
         &mut route_result,
     );
-    repair_config_validation_findings_contract(state, prompt, resolved_prompt, &mut route_result);
-    prebind_file_delivery_locator_from_recent_ordered_resolved_prompt(
+    boundary_context_locator_preflight(
         state,
-        resolved_prompt,
-        recent_execution_context,
-        &mut route_result,
-    );
-    prebind_content_evidence_locator_from_active_ordered_resolved_prompt(
-        state,
-        resolved_prompt,
-        &mut route_result,
-        &session_snapshot,
-    );
-    prebind_file_delivery_locator_from_resolved_prompt_path(
-        state,
-        resolved_prompt,
-        &mut route_result,
-    );
-    prebind_file_delivery_missing_locator_from_resolved_prompt_path(
-        state,
-        resolved_prompt,
-        &mut route_result,
-    );
-    prebind_workspace_root_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
-    prebind_quantity_compare_directory_pair_from_current_request(
-        state,
-        resolved_prompt,
-        &mut route_result,
-    );
-    prebind_existing_workspace_locator_hint_from_current_request(state, prompt, &mut route_result);
-    prebind_session_alias_locator_from_current_request(
-        prompt,
-        &mut route_result,
-        &session_snapshot,
-    );
-    promote_clarify_resolved_multifile_targets_to_execute(state, prompt, &mut route_result);
-    promote_clarify_path_scoped_filename_targets_to_execute(prompt, &mut route_result);
-    prebind_active_bound_target_from_matching_locator_hint(&mut route_result, &session_snapshot);
-    prebind_active_bound_target_for_locatorless_content_evidence(
-        &mut route_result,
-        &session_snapshot,
-    );
-    repair_service_status_file_locator_to_content_excerpt(state, &mut route_result);
-    prebind_active_listing_target_for_locatorless_scalar_count(
-        &mut route_result,
-        &session_snapshot,
-    );
-    prebind_current_workspace_root_hint_for_scalar_count(state, prompt, &mut route_result);
-    if model_completed_workspace_file_locator_hint_should_force_clarify(
-        state,
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "model_completed_workspace_file_locator_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "model_completed_workspace_file_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if inferred_missing_workspace_locator_hint_should_force_clarify(
-        state,
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "inferred_missing_workspace_locator_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "inferred_missing_workspace_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if active_anchor_file_delivery_without_structured_reference_should_force_clarify(
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "active_anchor_file_delivery_requires_structured_reference",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "active_anchor_file_delivery_requires_structured_reference",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if bare_topic_model_supplied_locator_route_should_force_clarify(
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "bare_topic_model_supplied_locator_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "bare_topic_model_supplied_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    prebind_quantity_compare_directory_pair_from_current_request(state, prompt, &mut route_result);
-    if background_only_locator_route_should_force_clarify(
-        state,
+        task,
         prompt,
         resolved_prompt,
         recent_execution_context,
-        &route_result,
         turn_analysis,
         &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
-        append_route_reason(&mut route_result, "background_locator_requires_clarify");
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "background_locator_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    downgrade_background_locator_clarify_to_recent_observed_chat(
-        &mut route_result,
-        recent_execution_context,
-    );
-    promote_locatorless_scalar_status_query_to_runtime_info(&mut route_result, turn_analysis);
-    promote_locatorless_status_query_to_service_status(
-        state,
-        prompt,
-        &mut route_result,
-        turn_analysis,
-    );
-    prebind_runtime_status_scalar_path_to_current_workspace(
-        &mut route_result,
-        turn_analysis,
-        &session_snapshot,
-    );
-    promote_broad_current_workspace_content_summary_to_directory_purpose(prompt, &mut route_result);
-    repair_directory_purpose_command_summary_contract(state, prompt, &mut route_result);
-    repair_directory_purpose_quantity_comparison_contract(state, prompt, &mut route_result);
-    restore_explicit_extension_assess_gap_to_command_summary(&mut route_result);
-    promote_runtime_surface_contract_to_command_summary(prompt, &mut route_result);
-    promote_locatorless_git_capability_to_repository_state(&mut route_result);
-    promote_locatorless_scalar_child_metadata_to_quantity_comparison(
-        state,
-        prompt,
+        &mut pre_loop_clarify_candidates,
         &mut route_result,
     );
-    if locatorless_observation_route_should_force_clarify(
-        state,
-        prompt,
-        &route_result,
-        turn_analysis,
-        &session_snapshot,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        append_route_reason(
-            &mut route_result,
-            "locatorless_observation_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "locatorless_observation_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
-    if unbound_targeted_evidence_route_should_force_clarify(
-        prompt,
-        &route_result,
-        &session_snapshot,
-        recent_execution_context,
-    ) {
-        let before_gate_kind = route_result.gate_kind();
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "unbound_targeted_evidence_requires_clarify",
-        );
-        log_route_guard_record(
-            task,
-            "worker_locator_guard",
-            "unbound_targeted_evidence_requires_clarify",
-            "blocked",
-            before_gate_kind,
-            &route_result,
-        );
-    }
     if bare_topic_memory_expansion_route_should_force_clarify(
         prompt,
         &route_result,
         turn_analysis,
         &session_snapshot,
     ) {
-        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
-        append_route_reason(
-            &mut route_result,
-            "bare_topic_context_expansion_requires_clarify",
-        );
+        pre_loop_clarify_candidates.push("bare_topic_context_expansion");
     }
     if bare_topic_clarify_question_should_drop_context_target(prompt, &route_result) {
         route_result.clarify_question.clear();
@@ -853,29 +679,26 @@ fn apply_ask_post_route(
         has_authoritative_deictic_anchor,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        route_result.clarify_question.clear();
         route_result.wants_file_delivery = true;
         route_result.output_contract.delivery_required = true;
         route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "unbound_existing_file_delivery_requires_clarify",
+        push_pre_loop_clarify_candidate(
+            &mut pre_loop_clarify_candidates,
+            "unbound_existing_file_delivery",
         );
         log_route_guard_record(
             task,
             "worker_locator_guard",
-            "unbound_existing_file_delivery_requires_clarify",
-            "blocked",
+            "unbound_existing_file_delivery_deferred_to_agent_loop",
+            "deferred",
             before_gate_kind,
             &route_result,
         );
     }
-    prebind_direct_file_delivery_locator_before_deictic_guard(
+    reject_direct_file_delivery_workspace_root_locator(
         state,
         recent_execution_context,
         &mut route_result,
@@ -888,46 +711,40 @@ fn apply_ask_post_route(
         &session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut route_result);
         route_result.wants_file_delivery = true;
         route_result.output_contract.delivery_required = true;
         route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route_result.output_contract.locator_hint.clear();
-        append_route_reason(
-            &mut route_result,
-            "directory_file_delivery_requires_structured_selection",
+        push_pre_loop_clarify_candidate(
+            &mut pre_loop_clarify_candidates,
+            "directory_file_delivery_without_structured_selection",
         );
         log_route_guard_record(
             task,
             "worker_locator_guard",
-            "directory_file_delivery_requires_structured_selection",
-            "blocked",
+            "directory_file_delivery_deferred_to_agent_loop",
+            "deferred",
             before_gate_kind,
             &route_result,
         );
     }
     if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis, &session_snapshot) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.needs_clarify = true;
-        route_result.set_clarify_gate();
-        if route_result.clarify_question.trim().is_empty() {
-            mark_deictic_missing_locator_clarify(&mut route_result);
-        }
-        append_route_reason(&mut route_result, "deictic_bare_locator_requires_clarify");
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route_result.output_contract.locator_hint.clear();
+        push_pre_loop_clarify_candidate(&mut pre_loop_clarify_candidates, "deictic_bare_locator");
         log_route_guard_record(
             task,
             "worker_locator_guard",
-            "deictic_bare_locator_requires_clarify",
-            "blocked",
+            "deictic_bare_locator_deferred_to_agent_loop",
+            "deferred",
             before_gate_kind,
             &route_result,
         );
     }
-    if direct_answer_from_structured_anchor_requires_evidence(
+    if structured_anchor_route_requires_evidence_repair(
         prompt,
         &route_result,
         &session_snapshot,
@@ -936,12 +753,12 @@ fn apply_ask_post_route(
         turn_analysis,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        promote_structured_anchor_direct_answer_to_evidence(&mut route_result);
+        apply_structured_anchor_evidence_repair(&mut route_result);
         log_route_guard_record(
             task,
             "worker_active_task_guard",
-            "structured_anchor_direct_answer_requires_evidence",
-            "promoted",
+            "structured_anchor_requires_evidence",
+            "repaired",
             before_gate_kind,
             &route_result,
         );
@@ -990,147 +807,15 @@ fn apply_ask_post_route(
         };
     let mut post_route =
         crate::post_route_policy::apply_post_route_policy(route_result.clone(), locator_resolution);
-    if promote_unresolved_file_delivery_with_current_request_locator(prompt, &mut post_route) {
-        info!(
-            "{} worker_once: ask file_delivery_current_request_locator_to_planner task_id={}",
-            crate::highlight_tag("routing"),
-            task.task_id
-        );
-    }
-    if auto_locator_scalar_file_without_current_locator_should_force_clarify(
+    apply_post_route_refinements(
         state,
+        task,
         prompt,
-        &post_route.execution_route_result,
-        post_route.auto_locator_path.as_deref(),
-    ) {
-        post_route.execution_route_result.needs_clarify = true;
-        post_route.execution_route_result.set_clarify_gate();
-        mark_deictic_missing_locator_clarify(&mut post_route.execution_route_result);
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_kind = crate::OutputLocatorKind::None;
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_hint
-            .clear();
-        post_route.auto_locator_path = None;
-        post_route.auto_locator_hint = None;
-        post_route.auto_locator_resolved_direct = false;
-        post_route.missing_locator_for_path_scoped_content = true;
-        post_route.clarify_reason =
-            deictic_missing_locator_reason_code(&post_route.execution_route_result).to_string();
-        post_route.clarify_reason_kind =
-            crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator;
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_auto_locator_scalar_file_requires_current_locator",
-            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
-        );
-        append_route_reason(
-            &mut post_route.execution_route_result,
-            "auto_locator_scalar_file_requires_current_locator",
-        );
-    }
-    if post_route.missing_locator_for_path_scoped_content
-        && !route_reason_has_marker(
-            &post_route.execution_route_result,
-            "directory_file_delivery_requires_structured_selection",
-        )
-        && path_scoped_locator_guard_can_defer_to_prompt_targets(
-            prompt,
-            &post_route.execution_route_result,
-        )
-    {
-        post_route.missing_locator_for_path_scoped_content = false;
-        post_route.execution_route_result.needs_clarify = false;
-        post_route.execution_route_result.clarify_question.clear();
-        let finalize = crate::post_route_policy::content_evidence_execution_finalize_style(
-            &post_route.execution_route_result.output_contract,
-            false,
-        )
-        .unwrap_or(crate::ActFinalizeStyle::ChatWrapped);
-        post_route
-            .execution_route_result
-            .set_planner_execute_finalize(finalize);
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_locator_guard_deferred_to_prompt_targets",
-            crate::post_route_policy::PostRoutePolicyOutcome::Execute,
-        );
-        append_route_reason(
-            &mut post_route.execution_route_result,
-            "locator_guard_deferred_to_prompt_targets",
-        );
-    }
-    if post_route_promote_resolved_multifile_targets_to_execute(
-        state,
-        prompt,
-        resolved_prompt,
-        &mut post_route,
-    ) {
-        info!(
-            "{} worker_once: ask resolved_multifile_targets_to_planner task_id={}",
-            crate::highlight_tag("routing"),
-            task.task_id
-        );
-    }
-    if promote_config_contract_default_main_config_to_execute(state, prompt, &mut post_route) {
-        info!(
-            "{} worker_once: ask config_contract_default_main_config_to_planner task_id={}",
-            crate::highlight_tag("routing"),
-            task.task_id
-        );
-    }
-    if super::ask_prepare::repair_structural_file_delivery_resolution_for_turn(
-        &mut post_route.execution_route_result,
-        &session_snapshot,
         turn_analysis,
-    ) && !post_route.execution_route_result.needs_clarify
-    {
-        let target = post_route
-            .execution_route_result
-            .output_contract
-            .locator_hint
-            .trim()
-            .to_string();
-        if !target.is_empty() {
-            post_route.auto_locator_path = Some(target);
-            post_route.auto_locator_resolved_direct = true;
-            post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-                "post_route_structural_file_delivery_bound_target",
-                crate::post_route_policy::PostRoutePolicyOutcome::Execute,
-            );
-        }
-    }
-    auto_locator_binding::bind_structured_field_read_to_auto_locator(&mut post_route);
-    if route_reason_has_marker(
-        &post_route.execution_route_result,
-        "directory_file_delivery_requires_structured_selection",
-    ) {
-        post_route.execution_route_result.needs_clarify = true;
-        post_route.execution_route_result.set_clarify_gate();
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_kind = crate::OutputLocatorKind::None;
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_hint
-            .clear();
-        post_route.auto_locator_path = None;
-        post_route.auto_locator_hint = None;
-        post_route.auto_locator_resolved_direct = false;
-        post_route.missing_locator_for_path_scoped_content = true;
-        post_route.clarify_reason =
-            deictic_missing_locator_reason_code(&post_route.execution_route_result).to_string();
-        post_route.clarify_reason_kind =
-            crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator;
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_directory_file_delivery_requires_structured_selection",
-            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
-        );
-    }
+        &session_snapshot,
+        &mut pre_loop_clarify_candidates,
+        &mut post_route,
+    );
     if let Some(hint) = post_route.auto_locator_hint.as_deref() {
         resolved_prompt_for_execution.push_str(hint);
         prompt_with_memory_for_execution.push_str(hint);
@@ -1155,7 +840,7 @@ fn apply_ask_post_route(
     }
     if post_route.missing_locator_for_path_scoped_content {
         info!(
-            "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=locator_required_for_path_scoped_content raw_text={} resolved_text={}",
+            "{} worker_once: ask locator_boundary_requires_clarify task_id={} reason=locator_required_for_path_scoped_content raw_text={} resolved_text={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(prompt),
@@ -1172,7 +857,7 @@ fn apply_ask_post_route(
     );
     if post_route.execution_route_result.gate_kind() != route_result.gate_kind() {
         info!(
-            "{} worker_once: ask route_gate_override_by_auto_locator task_id={} gate={:?}->{:?}",
+            "{} worker_once: ask route_gate_refined_by_auto_locator task_id={} gate={:?}->{:?}",
             crate::highlight_tag("routing"),
             task.task_id,
             route_result.gate_kind(),
@@ -1231,12 +916,21 @@ fn apply_ask_post_route(
             &post_route.execution_route_result,
         );
     }
+    append_agent_loop_boundary_observations(
+        state,
+        &post_route,
+        &session_snapshot,
+        prompt,
+        resolved_prompt,
+        &pre_loop_clarify_candidates,
+        &mut resolved_prompt_for_execution,
+        &mut prompt_with_memory_for_execution,
+    );
     AppliedAskPostRoute {
         execution_route_result: post_route.execution_route_result,
         auto_locator_path: post_route.auto_locator_path,
         #[cfg(test)]
         gate_record: post_route.gate_record,
-        has_authoritative_deictic_anchor,
         resolved_prompt_for_execution,
         prompt_with_memory_for_execution,
         session_alias_bindings: session_snapshot
@@ -1244,18 +938,8 @@ fn apply_ask_post_route(
             .as_ref()
             .map(|conversation_state| conversation_state.alias_bindings.clone())
             .unwrap_or_default(),
-        clarify_reason: post_route.clarify_reason,
-        clarify_reason_kind: post_route.clarify_reason_kind,
         fuzzy_locator_suggestions: post_route.fuzzy_locator_suggestions,
     }
-}
-
-fn route_reason_has_marker_prefix(route_result: &crate::RouteResult, marker_prefix: &str) -> bool {
-    route_result
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .any(|part| part == marker_prefix || part.starts_with(&format!("{marker_prefix}:")))
 }
 
 fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> bool {
@@ -1266,6 +950,51 @@ fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> b
         .route_reason
         .split(';')
         .any(|part| route_reason_part_has_marker(part.trim(), marker))
+}
+
+pub(super) fn route_has_capability_ref_machine_signal(route_result: &crate::RouteResult) -> bool {
+    route_machine_tokens(route_result).any(|token| {
+        token
+            .strip_prefix("capability_ref=")
+            .is_some_and(valid_capability_ref_token)
+    })
+}
+
+pub(super) fn route_reason_has_capability_ref_prefix(
+    route_result: &crate::RouteResult,
+    prefix: &str,
+) -> bool {
+    let prefix = prefix.trim();
+    if prefix.is_empty() {
+        return false;
+    }
+    route_result
+        .route_reason
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
+        .map(str::trim)
+        .filter_map(|token| token.strip_prefix("capability_ref="))
+        .any(|capability_ref| {
+            valid_capability_ref_token(capability_ref) && capability_ref.starts_with(prefix)
+        })
+}
+
+fn route_machine_tokens(route_result: &crate::RouteResult) -> impl Iterator<Item = &str> {
+    [&route_result.route_reason, &route_result.resolved_intent]
+        .into_iter()
+        .flat_map(|surface| {
+            surface
+                .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
+                .map(str::trim)
+        })
+}
+
+fn valid_capability_ref_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty()
+        && token.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+        && token.bytes().any(|byte| byte == b'.')
 }
 
 fn route_reason_part_has_marker(part: &str, marker: &str) -> bool {
@@ -1297,9 +1026,6 @@ pub(super) async fn prepare_ask_flow(
     source: &str,
 ) -> Result<PreparedAskFlow> {
     let prepared_routing = super::prepare_ask_routing(state, task, payload, prompt, source).await?;
-    let semantic_answer_candidate_draft =
-        embedded_normalizer_answer_candidate(&prepared_routing.route_result.resolved_intent)
-            .map(ToOwned::to_owned);
     let prepared_execution = super::prepare_ask_execution_context(
         state,
         task,
@@ -1335,18 +1061,11 @@ pub(super) async fn prepare_ask_flow(
         turn_analysis: prepared_routing.turn_analysis,
         clarify_fallback_source: prepared_routing.clarify_fallback_source,
         auto_locator_path: applied_post_route.auto_locator_path,
-        has_authoritative_deictic_anchor: applied_post_route.has_authoritative_deictic_anchor,
-        chat_prompt_context: prepared_execution.chat_prompt_context,
         resolved_prompt_for_execution: applied_post_route.resolved_prompt_for_execution,
         prompt_with_memory_for_execution: applied_post_route.prompt_with_memory_for_execution,
-        memory_context_for_execution: prepared_execution.memory_context_for_execution,
-        semantic_answer_candidate_draft,
         recent_execution_context: prepared_execution.recent_execution_context,
         session_alias_bindings: applied_post_route.session_alias_bindings,
-        agent_mode: prepared_routing.agent_mode,
         ask_mode: final_ask_mode,
-        clarify_reason: applied_post_route.clarify_reason,
-        clarify_reason_kind: applied_post_route.clarify_reason_kind,
         fuzzy_locator_suggestions: applied_post_route.fuzzy_locator_suggestions,
         should_route_schedule_direct,
     })
@@ -1357,297 +1076,14 @@ pub(super) async fn execute_ask_dispatch(
     task: &crate::ClaimedTask,
     payload: &Value,
     prompt: &str,
-    recent_execution_context: &str,
     resolved_prompt_for_execution: &str,
     prompt_with_memory_for_execution: &str,
-    chat_prompt_context: &str,
     route_result: &crate::RouteResult,
-    agent_mode: bool,
-    clarify_reason: &str,
-    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
-    clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
-    fuzzy_locator_suggestions: &[String],
     ask_mode: &crate::AskMode,
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
-    if let Some(selected_class) =
-        crate::agent_engine::agent_loop_authority_selected_migration_class(state, route_result)
-    {
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            crate::AskState::Executing,
-            "agent_loop_authority_selected_migration_class",
-            None,
-        );
-        tracing::info!(
-            "agent_loop_authority_selected_migration_class task_id={} selected_migration_class={} previous_gate_kind={}",
-            task.task_id,
-            selected_class,
-            route_result.gate_kind().as_str(),
-        );
-        return Ok(Some(
-            crate::agent_engine::run_agent_with_tools(
-                state,
-                task,
-                prompt_with_memory_for_execution,
-                execution_user_request,
-                agent_run_context.clone(),
-            )
-            .await,
-        ));
-    }
-    if let Some(candidate) = crate::ask_flow::active_ordered_entries_count_direct_answer_candidate(
-        prompt,
-        agent_run_context.as_ref(),
-    ) {
-        return Ok(Some(Ok(with_agent_decides_shadow_snapshot(
-            state,
-            task,
-            prompt,
-            ask_reply_with_visible_process(state, task, prompt, candidate),
-            route_result,
-            agent_run_context.as_ref(),
-        ))));
-    }
-    if let Some(delivery_token) = direct_existing_file_delivery_token(route_result) {
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            crate::AskState::Executing,
-            "direct_existing_file_delivery",
-            None,
-        );
-        let path = delivery_token
-            .strip_prefix("FILE:")
-            .unwrap_or(delivery_token.as_str())
-            .to_string();
-        let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
-        journal.record_route_result(route_result);
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "direct_file_delivery".to_string(),
-                skill: "fs_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    serde_json::json!({
-                        "action": "direct_file_delivery",
-                        "execution_surface": "worker/ask_pipeline::direct_existing_file_delivery",
-                        "execution_surface_owner": "delivery_boundary",
-                        "path": path.clone(),
-                        "resolved_path": path,
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
-        return Ok(Some(Ok(with_agent_decides_shadow_snapshot(
-            state,
-            task,
-            prompt,
-            crate::AskReply::non_llm(delivery_token).with_task_journal(journal),
-            route_result,
-            agent_run_context.as_ref(),
-        ))));
-    }
-    if route_result.ask_mode.is_clarify_only() {
-        if ordinary_clarify_should_enter_agent_loop(state, clarify_reason_kind) {
-            crate::log_ask_transition(
-                state,
-                &task.task_id,
-                Some(crate::AskState::Routing),
-                crate::AskState::Executing,
-                "ordinary_clarify_deferred_to_agent_loop",
-                None,
-            );
-            let mut loop_ctx = agent_run_context.clone();
-            if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
-                route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-                append_route_reason(route, "ordinary_clarify_deferred_to_agent_loop");
-            }
-            return Ok(Some(
-                crate::agent_engine::run_agent_with_tools(
-                    state,
-                    task,
-                    prompt_with_memory_for_execution,
-                    execution_user_request,
-                    loop_ctx,
-                )
-                .await,
-            ));
-        }
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            crate::AskState::Clarifying,
-            "ask_mode_is_clarify_only",
-            None,
-        );
-        let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
-            route_result,
-            fuzzy_locator_suggestions,
-        );
-        let clarify_context = build_locator_fuzzy_clarify_context(
-            recent_execution_context,
-            fuzzy_locator_suggestions,
-            !suppress_recent_execution_context,
-        );
-        let structured_clarify_context =
-            structured_missing_locator_clarify_context(route_result, fuzzy_locator_suggestions);
-        let clarify_context = match structured_clarify_context.as_deref() {
-            Some(context)
-                if clarify_context.trim().is_empty() || clarify_context.trim() == "<none>" =>
-            {
-                format!("### STRUCTURED_CLARIFY_CONTEXT\n{context}")
-            }
-            Some(context) => {
-                format!("{clarify_context}\n\n### STRUCTURED_CLARIFY_CONTEXT\n{context}")
-            }
-            None => clarify_context,
-        };
-        let preferred_clarify_question = if should_reuse_route_clarify_question(
-            route_result,
-            clarify_reason_kind,
-            fuzzy_locator_suggestions,
-        ) {
-            let route_question = route_result.clarify_question.trim();
-            (!route_question.is_empty()).then_some(route_question)
-        } else {
-            None
-        };
-        let structured_context_requires_llm =
-            structured_clarify_context.is_some() && preferred_clarify_question.is_none();
-        let clarify_policy = if structured_context_requires_llm
-            || (preferred_clarify_question.is_none()
-                && route_result.clarify_question.trim().is_empty()
-                && !matches!(
-                    clarify_reason_kind,
-                    crate::post_route_policy::ClarifyReasonKind::FuzzyLocatorCandidates
-                )) {
-            crate::intent_router::ClarifyQuestionPolicy::SafeFallback
-        } else {
-            crate::intent_router::ClarifyQuestionPolicy::AllowModel
-        };
-        let fallback_source = clarify_fallback_source_or_default(clarify_fallback_source);
-        let clarify = crate::finalize::render_clarify_question(
-            state,
-            task,
-            crate::finalize::ClarifyRenderRequest {
-                user_request: prompt,
-                resolver_reason: clarify_reason,
-                candidate_context: Some(&clarify_context),
-                preferred_question: preferred_clarify_question,
-                policy: clarify_policy,
-                // §7.2: 路由阶段没拿到可用 clarify_question + 非 fuzzy_locator 触发的 SafeFallback。
-                // normalizer LLM 失败必须暴露为 LlmUnavailable，不能伪装成“我没看懂”。
-                fallback_source,
-            },
-        )
-        .await;
-        let reply = with_dispatch_boundary_attribution(
-            task,
-            prompt,
-            ask_reply_with_visible_process(state, task, prompt, clarify),
-            route_result,
-            clarify_reason_kind.dispatch_event(),
-            clarify_reason_kind.dispatch_old_owner(),
-            clarify_reason_kind.dispatch_new_owner(),
-            clarify_reason_kind.dispatch_chosen_path(),
-            "semantic_route_authority:legacy_pre_agent",
-        );
-        return Ok(Some(Ok(with_agent_decides_shadow_snapshot(
-            state,
-            task,
-            prompt,
-            reply,
-            route_result,
-            agent_run_context.as_ref(),
-        ))));
-    }
-    if ask_mode.is_resume_discussion() {
-        if !resume_discussion_uses_direct_chat_renderer(route_result) {
-            crate::log_ask_transition(
-                state,
-                &task.task_id,
-                Some(crate::AskState::Routing),
-                crate::AskState::Executing,
-                "resume_discussion_requires_agent_loop",
-                None,
-            );
-            let mut loop_ctx = agent_run_context.clone();
-            if let Some(route) = loop_ctx.as_mut().and_then(|ctx| ctx.route_result.as_mut()) {
-                route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-                append_route_reason(route, "resume_discussion_requires_agent_loop");
-            }
-            return Ok(Some(
-                crate::agent_engine::run_agent_with_tools(
-                    state,
-                    task,
-                    prompt_with_memory_for_execution,
-                    execution_user_request,
-                    loop_ctx,
-                )
-                .await,
-            ));
-        }
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            crate::AskState::ResumeDiscussing,
-            "ask_mode_resume_discussion",
-            None,
-        );
-        let resume_prompt_source = crate::resolve_prompt_rel_path_for_vendor(
-            &state.skill_rt.workspace_root,
-            &crate::active_prompt_vendor_name(state),
-            crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH,
-        );
-        crate::log_prompt_render(
-            state,
-            &task.task_id,
-            "resume_followup_discussion_prompt",
-            &resume_prompt_source,
-            None,
-        );
-        let reply = crate::llm_gateway::run_with_fallback_with_prompt_source(
-            state,
-            task,
-            resolved_prompt_for_execution,
-            &resume_prompt_source,
-        )
-        .await
-        .map(|s| crate::AskReply::llm(s.trim().to_string()));
-        return Ok(Some(reply));
-    }
-    if ask_mode.resume_execution() {
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            crate::AskState::ResumeExecuting,
-            "ask_mode_resume_execution",
-            None,
-        );
-        return Ok(Some(
-            crate::agent_engine::run_agent_with_tools(
-                state,
-                task,
-                prompt_with_memory_for_execution,
-                execution_user_request,
-                agent_run_context.clone(),
-            )
-            .await,
-        ));
-    }
     if should_route_schedule_direct {
         crate::log_ask_transition(
             state,
@@ -1669,62 +1105,42 @@ pub(super) async fn execute_ask_dispatch(
         {
             return Ok(None);
         }
-        let targets_agent_execution = route_targets_agent_execution_state(state, route_result);
-        let target_state = if targets_agent_execution {
-            crate::AskState::Executing
-        } else {
-            crate::AskState::Chatting
-        };
-        crate::log_ask_transition(
-            state,
-            &task.task_id,
-            Some(crate::AskState::Routing),
-            target_state,
-            execute_ask_routed_transition_reason(route_result, targets_agent_execution),
-            None,
-        );
-        return Ok(Some(
-            crate::execute_ask_routed(
-                state,
-                task,
-                chat_prompt_context,
-                prompt_with_memory_for_execution,
-                resolved_prompt_for_execution,
-                execution_user_request,
-                agent_mode,
-                ask_mode.is_resume_discussion(),
-                Some(route_result.ask_mode.clone()),
-                agent_run_context.clone(),
-            )
-            .await,
-        ));
     }
-    let targets_agent_execution = route_targets_agent_execution_state(state, route_result);
-    let target_state = if targets_agent_execution {
-        crate::AskState::Executing
-    } else {
-        crate::AskState::Chatting
-    };
+    if let Some(reply) = crate::self_extension::maybe_handle_ask_self_extension(
+        state,
+        task,
+        resolved_prompt_for_execution,
+        &execution_user_request,
+        agent_run_context.as_ref(),
+    )
+    .await
+    .map_err(anyhow::Error::msg)?
+    {
+        return Ok(Some(Ok(reply)));
+    }
+    let loop_ctx = agent_loop_default_context(agent_run_context);
     crate::log_ask_transition(
         state,
         &task.task_id,
         Some(crate::AskState::Routing),
-        target_state,
-        execute_ask_routed_transition_reason(route_result, targets_agent_execution),
+        crate::AskState::Executing,
+        "agent_loop_default_entry",
         None,
     );
+    tracing::info!(
+        "{} worker_once: ask agent_loop_default_entry task_id={} previous_gate_kind={} ask_mode={}",
+        crate::highlight_tag("routing"),
+        task.task_id,
+        route_result.gate_kind().as_str(),
+        ask_mode.as_str(),
+    );
     Ok(Some(
-        crate::execute_ask_routed(
+        crate::agent_engine::run_agent_with_tools(
             state,
             task,
-            chat_prompt_context,
             prompt_with_memory_for_execution,
-            resolved_prompt_for_execution,
             execution_user_request,
-            agent_mode,
-            false,
-            Some(route_result.ask_mode.clone()),
-            agent_run_context,
+            loop_ctx,
         )
         .await,
     ))
@@ -1734,17 +1150,8 @@ pub(super) async fn execute_ask_dispatch(
 #[path = "ask_pipeline_agent_context_tests.rs"]
 mod agent_context_tests;
 #[cfg(test)]
-#[path = "ask_pipeline_clarify_tests.rs"]
-mod clarify_tests;
-#[cfg(test)]
-#[path = "ask_pipeline_resume_tests.rs"]
-mod resume_tests;
-#[cfg(test)]
 #[path = "ask_pipeline_scalar_count_tests.rs"]
 mod scalar_count_tests;
 #[cfg(test)]
 #[path = "ask_pipeline_test_support.rs"]
 mod test_support;
-#[cfg(test)]
-#[path = "ask_pipeline_tests.rs"]
-mod tests;

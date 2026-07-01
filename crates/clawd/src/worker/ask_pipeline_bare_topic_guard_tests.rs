@@ -6,7 +6,7 @@ use super::{
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -40,11 +40,11 @@ fn empty_session_snapshot() -> crate::conversation_state::ActiveSessionSnapshot 
 }
 
 #[test]
-fn bare_topic_raw_command_with_unmentioned_context_target_forces_clarify() {
+fn bare_topic_command_marker_with_unmentioned_context_target_forces_clarify() {
     let mut route = executable_filename_route();
     route.resolved_intent = "View logs from the ops_http_repair test suite".to_string();
     route.route_reason =
-        "User typed a bare topic and route context mentioned scripts/nl_suite_logs/ops_http_repair"
+        "command_payload_requires_raw_output_execution; context mentioned scripts/nl_suite_logs/ops_http_repair"
             .to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -58,9 +58,12 @@ fn bare_topic_raw_command_with_unmentioned_context_target_forces_clarify() {
 }
 
 #[test]
-fn bare_topic_raw_command_without_unmentioned_context_target_stays_executable() {
+fn bare_topic_raw_command_without_command_marker_stays_executable() {
     let mut route = executable_filename_route();
-    route.resolved_intent = "execute pwd command".to_string();
+    route.resolved_intent = "View logs from the ops_http_repair test suite".to_string();
+    route.route_reason =
+        "model emitted raw command output semantic without a command observation marker"
+            .to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -68,7 +71,7 @@ fn bare_topic_raw_command_without_unmentioned_context_target_stays_executable() 
     let snapshot = empty_session_snapshot();
 
     assert!(!bare_topic_memory_expansion_route_should_force_clarify(
-        "pwd", &route, None, &snapshot,
+        "logs", &route, None, &snapshot,
     ));
 }
 

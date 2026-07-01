@@ -63,8 +63,5 @@ pub(super) fn route_reason_has_structured_field_selector_marker(
     ) || super::route_reason_has_marker(
         route_result,
         "single_path_config_field_extraction_contract_semantically_valid",
-    ) || super::route_reason_has_marker(
-        route_result,
-        "llm_semantic_contract_repair:single_path_config_field_extraction_contract_semantically_valid",
     )
 }

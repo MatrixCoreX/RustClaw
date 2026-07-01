@@ -101,7 +101,7 @@ pub(super) fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> 
     if route_result.needs_clarify && route_result.output_contract.locator_hint.trim().is_empty() {
         return false;
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    if super::route_reason_has_marker(route_result, "quantity_comparison")
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route_result.output_contract.locator_hint.trim().is_empty()
     {

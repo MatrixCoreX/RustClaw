@@ -57,7 +57,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -88,6 +88,10 @@ fn auto_locator_scalar_file_without_current_locator_requires_clarify() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("app.name".to_string());
 
     assert!(
         auto_locator_scalar_file_without_current_locator_should_force_clarify(
@@ -113,6 +117,10 @@ fn session_alias_prebound_scalar_file_allows_auto_locator_guard() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("heading".to_string());
     route.route_reason = "session_alias_locator_prebound_from_current_request".to_string();
 
     assert!(
@@ -139,11 +147,39 @@ fn explicit_file_scalar_route_allows_auto_locator_field_route() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("app.name".to_string());
 
     assert!(
         !auto_locator_scalar_file_without_current_locator_should_force_clarify(
             &state,
             "read configs/app_config.toml app.name and output only the value",
+            &route,
+            Some(config_path.to_str().expect("utf8 path")),
+        )
+    );
+}
+
+#[test]
+fn scalar_file_without_structured_field_contract_does_not_force_clarify() {
+    let root = make_temp_root("auto_locator_scalar_no_field_contract");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("config dir");
+    let config_path = config_dir.join("app_config.toml");
+    std::fs::write(&config_path, "[app]\nname = \"Demo\"\n").expect("config");
+    let state = test_state_with_root(root);
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+
+    assert!(
+        !auto_locator_scalar_file_without_current_locator_should_force_clarify(
+            &state,
+            "read the scalar value from that config",
             &route,
             Some(config_path.to_str().expect("utf8 path")),
         )

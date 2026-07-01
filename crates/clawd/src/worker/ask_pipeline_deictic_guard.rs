@@ -102,13 +102,13 @@ fn locator_hint_is_relative_path_like(locator_hint: &str) -> bool {
         && (hint.contains('/') || hint.contains('\\'))
 }
 
+#[cfg(test)]
 pub(super) fn deictic_missing_locator_reason_code(
     route_result: &crate::RouteResult,
 ) -> &'static str {
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ScalarCount
-    ) {
+    if route_reason_has_marker(route_result, "target_locator_required")
+        || route_reason_has_marker(route_result, "missing_count_target")
+    {
         return "missing_count_target";
     }
     if matches!(
@@ -119,41 +119,18 @@ pub(super) fn deictic_missing_locator_reason_code(
     ) {
         return "missing_delivery_locator";
     }
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ServiceStatus
-    ) {
+    if route_reason_has_marker(route_result, "service_status")
+        || route_reason_has_marker(route_result, "missing_service_target")
+    {
         return "missing_service_target";
     }
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ScalarPathOnly
-            | crate::OutputSemanticKind::ExistenceWithPath
-            | crate::OutputSemanticKind::ExistenceWithPathSummary
-    ) {
+    if route_reason_has_marker(route_result, "search_locator_required")
+        || route_reason_has_marker(route_result, "missing_search_locator")
+    {
         return "missing_search_locator";
     }
     if route_result.output_contract.requires_content_evidence {
         return "missing_read_target";
     }
     "missing_target"
-}
-
-fn deictic_missing_locator_reason_marker(route_result: &crate::RouteResult) -> &'static str {
-    match deictic_missing_locator_reason_code(route_result) {
-        "missing_count_target" => "clarify_reason_code:missing_count_target",
-        "missing_delivery_locator" => "clarify_reason_code:missing_delivery_locator",
-        "missing_service_target" => "clarify_reason_code:missing_service_target",
-        "missing_search_locator" => "clarify_reason_code:missing_search_locator",
-        "missing_read_target" => "clarify_reason_code:missing_read_target",
-        _ => "clarify_reason_code:missing_target",
-    }
-}
-
-pub(super) fn mark_deictic_missing_locator_clarify(route_result: &mut crate::RouteResult) {
-    route_result.clarify_question.clear();
-    append_route_reason(
-        route_result,
-        deictic_missing_locator_reason_marker(route_result),
-    );
 }

@@ -1,12 +1,10 @@
 use super::{
-    direct_answer_from_structured_anchor_requires_evidence,
-    preserve_scalar_shape_from_normalizer_candidate_for_clarify,
-    promote_structured_anchor_direct_answer_to_evidence,
+    apply_structured_anchor_evidence_repair, structured_anchor_route_requires_evidence_repair,
 };
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -53,23 +51,7 @@ fn listed_entry_snapshot() -> crate::conversation_state::ActiveSessionSnapshot {
 }
 
 #[test]
-fn scalar_shape_preserves_compact_normalizer_candidate() {
-    let mut route = executable_filename_route();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.resolved_intent =
-        "Count direct child items in that directory\nanswer_candidate: 6".to_string();
-
-    preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route);
-
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
-    );
-}
-
-#[test]
-fn structured_anchor_direct_answer_with_derived_candidate_requires_evidence() {
+fn structured_anchor_route_with_derived_candidate_requires_evidence() {
     let snapshot = listed_entry_snapshot();
     let mut route = executable_filename_route();
     route.ask_mode = crate::AskMode::direct_answer();
@@ -80,7 +62,7 @@ fn structured_anchor_direct_answer_with_derived_candidate_requires_evidence() {
     .to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
-    assert!(direct_answer_from_structured_anchor_requires_evidence(
+    assert!(structured_anchor_route_requires_evidence_repair(
         "What is the path and type for that entry?",
         &route,
         &snapshot,
@@ -89,7 +71,7 @@ fn structured_anchor_direct_answer_with_derived_candidate_requires_evidence() {
         None
     ));
 
-    promote_structured_anchor_direct_answer_to_evidence(&mut route);
+    apply_structured_anchor_evidence_repair(&mut route);
     assert!(route.is_execute_gate());
     assert!(route.output_contract.requires_content_evidence);
     assert_eq!(
@@ -99,7 +81,7 @@ fn structured_anchor_direct_answer_with_derived_candidate_requires_evidence() {
 }
 
 #[test]
-fn structured_anchor_direct_answer_with_exact_observed_candidate_stays_chat() {
+fn structured_anchor_route_with_exact_observed_candidate_requires_evidence() {
     let snapshot = listed_entry_snapshot();
     let mut route = executable_filename_route();
     route.ask_mode = crate::AskMode::direct_answer();
@@ -107,7 +89,7 @@ fn structured_anchor_direct_answer_with_exact_observed_candidate_stays_chat() {
         "User wants the observed entry name.\nanswer_candidate: hello.sh".to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(structured_anchor_route_requires_evidence_repair(
         "What is that entry name?",
         &route,
         &snapshot,
@@ -118,44 +100,7 @@ fn structured_anchor_direct_answer_with_exact_observed_candidate_stays_chat() {
 }
 
 #[test]
-fn deictic_forced_clarify_preserves_only_scalar_shape_from_answer_candidate() {
-    let mut route = executable_filename_route();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.resolved_intent =
-        "Count direct child items in that directory\nanswer_candidate: 6".to_string();
-
-    preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route);
-
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
-    );
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-    assert!(route.resolved_intent.contains("answer_candidate: 6"));
-}
-
-#[test]
-fn scalar_shape_preservation_ignores_list_like_answer_candidate() {
-    let mut route = executable_filename_route();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.resolved_intent =
-        "List candidate files\nanswer_candidate: a.log, b.log, c.log".to_string();
-
-    preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route);
-
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-}
-
-#[test]
-fn structured_anchor_direct_answer_with_state_patch_stays_chat() {
+fn structured_anchor_route_with_state_patch_stays_chat() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("list document entries".to_string()),
@@ -192,7 +137,7 @@ fn structured_anchor_direct_answer_with_state_patch_stays_chat() {
         attachment_processing_required: false,
     };
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(!structured_anchor_route_requires_evidence_repair(
         "Update the alias binding and acknowledge.",
         &route,
         &snapshot,
@@ -203,7 +148,7 @@ fn structured_anchor_direct_answer_with_state_patch_stays_chat() {
 }
 
 #[test]
-fn structured_anchor_direct_answer_with_resolved_target_basename_stays_chat() {
+fn structured_anchor_route_with_resolved_target_basename_stays_chat() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("send selected log file".to_string()),
@@ -235,7 +180,7 @@ fn structured_anchor_direct_answer_with_resolved_target_basename_stays_chat() {
     route.output_contract = crate::IntentOutputContract::default();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(!structured_anchor_route_requires_evidence_repair(
         "Only say this file name.",
         &route,
         &snapshot,
@@ -246,7 +191,7 @@ fn structured_anchor_direct_answer_with_resolved_target_basename_stays_chat() {
 }
 
 #[test]
-fn structured_anchor_direct_answer_with_recent_execution_token_stays_chat() {
+fn structured_anchor_route_with_recent_execution_token_candidate_requires_evidence() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
@@ -277,7 +222,7 @@ fn structured_anchor_direct_answer_with_recent_execution_token_stays_chat() {
 - ts=3 kind=ask request=read README.md result=# RustClaw
 - ts=2 kind=ask request=read scripts/nl_tests/fixtures/device_local/docs/service_notes.md result=# Service Notes";
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(structured_anchor_route_requires_evidence_repair(
         "Which previous excerpt is more like a project description? Answer only the filename.",
         &route,
         &snapshot,
@@ -288,7 +233,7 @@ fn structured_anchor_direct_answer_with_recent_execution_token_stays_chat() {
 }
 
 #[test]
-fn structured_anchor_direct_answer_with_existing_context_synthesis_candidate_stays_chat() {
+fn structured_anchor_route_with_existing_context_synthesis_candidate_requires_evidence() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("read README opening".to_string()),
@@ -318,7 +263,7 @@ fn structured_anchor_direct_answer_with_existing_context_synthesis_candidate_sta
     .to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(structured_anchor_route_requires_evidence_repair(
         "Summarize it in one sentence.",
         &route,
         &snapshot,
@@ -329,7 +274,7 @@ fn structured_anchor_direct_answer_with_existing_context_synthesis_candidate_sta
 }
 
 #[test]
-fn inline_json_followup_does_not_promote_to_workspace_evidence() {
+fn inline_json_followup_does_not_bind_to_workspace_evidence() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("transform records".to_string()),
@@ -358,7 +303,7 @@ fn inline_json_followup_does_not_promote_to_workspace_evidence() {
     .to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(!structured_anchor_route_requires_evidence_repair(
         r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]"#,
         &route,
         &snapshot,
@@ -400,7 +345,7 @@ fn active_text_mutation_with_structured_anchor_stays_chat() {
     route.resolved_intent = "Clarify the current request without reading files.".to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
-    assert!(!direct_answer_from_structured_anchor_requires_evidence(
+    assert!(!structured_anchor_route_requires_evidence_repair(
         "A concept label without a concrete target.",
         &route,
         &snapshot,

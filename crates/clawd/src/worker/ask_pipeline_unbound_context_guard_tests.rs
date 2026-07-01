@@ -1,11 +1,6 @@
-use super::super::deictic_missing_locator_reason_code;
-use super::super::route_reason_has_marker;
+use super::super::deictic_guard::deictic_missing_locator_reason_code;
 use super::{
-    promote_broad_current_workspace_content_summary_to_directory_purpose,
-    promote_runtime_surface_contract_to_command_summary,
-    repair_directory_purpose_command_summary_contract,
-    repair_directory_purpose_quantity_comparison_contract,
-    restore_explicit_extension_assess_gap_to_command_summary,
+    task_control_route_can_plan_without_locator,
     unbound_model_context_target_route_should_force_clarify,
     unbound_targeted_evidence_route_should_force_clarify,
 };
@@ -67,7 +62,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -94,6 +89,7 @@ fn executable_filename_route() -> crate::RouteResult {
 #[test]
 fn unbound_current_workspace_count_requires_clarify_without_anchor() {
     let mut route = executable_filename_route();
+    route.route_reason = "target_locator_required".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
@@ -116,6 +112,62 @@ fn unbound_current_workspace_count_requires_clarify_without_anchor() {
         deictic_missing_locator_reason_code(&route),
         "missing_count_target"
     );
+}
+
+#[test]
+fn current_workspace_count_semantic_enum_alone_does_not_force_preloop_clarify() {
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "count the current workspace entries and output only the number",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
+}
+
+#[test]
+fn locatorless_content_evidence_with_active_bound_target_reaches_agent_loop() {
+    let mut route = executable_filename_route();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some("/tmp/work/README.md".to_string()),
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "summarize current result",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None,
+        "active target should reach planner through loop observations, not route mutation"
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
 }
 
 #[test]
@@ -195,6 +247,55 @@ fn bound_current_workspace_content_summary_does_not_trigger_unbound_fallback_gua
 }
 
 #[test]
+fn current_workspace_locator_kind_does_not_force_unbound_clarify() {
+    let mut route = executable_filename_route();
+    route.resolved_intent = "capability_ref=git.status locator_hint=/tmp/rustclaw".to_string();
+    route.route_reason = "capability_ref=git.status".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "/tmp/rustclaw".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "report current workspace status fields",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
+}
+
+#[test]
+fn unmarked_resolved_only_workspace_hint_still_forces_unbound_clarify() {
+    let mut route = executable_filename_route();
+    route.resolved_intent = "read /tmp/other-project and summarize".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "/tmp/other-project".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(unbound_targeted_evidence_route_should_force_clarify(
+        "summarize current workspace evidence",
+        &route,
+        &snapshot,
+        "<none>",
+    ));
+}
+
+#[test]
 fn current_workspace_hidden_entries_check_does_not_trigger_unbound_fallback_guard() {
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -266,6 +367,7 @@ fn unbound_scalar_count_without_locator_requires_clarify() {
 #[test]
 fn unbound_current_workspace_file_summary_requires_clarify_without_anchor() {
     let mut route = executable_filename_route();
+    route.route_reason = "target_locator_required".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
@@ -287,173 +389,7 @@ fn unbound_current_workspace_file_summary_requires_clarify_without_anchor() {
 }
 
 #[test]
-fn broad_current_workspace_content_summary_repairs_to_directory_purpose_summary() {
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-
-    assert!(
-        promote_broad_current_workspace_content_summary_to_directory_purpose(
-            "summarize the current workspace structure in one sentence",
-            &mut route,
-        )
-    );
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryPurposeSummary
-    );
-    assert!(route
-        .route_reason
-        .contains("broad_current_workspace_content_summary_repaired_to_directory_purpose_summary"));
-}
-
-#[test]
-fn concrete_current_workspace_content_summary_does_not_repair_to_directory_purpose_summary() {
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-
-    assert!(
-        !promote_broad_current_workspace_content_summary_to_directory_purpose(
-            "read the beginning of README.md and summarize it in one sentence",
-            &mut route,
-        )
-    );
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    );
-}
-
-#[test]
-fn command_summary_with_directory_purpose_marker_repairs_to_directory_purpose() {
-    let state = test_state_with_root(make_temp_root("directory_purpose_command_repair"));
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.route_reason =
-        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection"
-            .to_string();
-
-    assert!(repair_directory_purpose_command_summary_contract(
-        &state,
-        "summarize prompts/schemas schema inventory and purpose",
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryPurposeSummary
-    );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route
-        .route_reason
-        .contains("command_summary_repaired_to_directory_purpose_summary"));
-}
-
-#[test]
-fn explicit_command_summary_does_not_repair_to_directory_purpose() {
-    let state = test_state_with_root(make_temp_root("explicit_command_summary_no_repair"));
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.route_reason = concat!(
-        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection",
-        "; explicit_command_requires_command_output_summary_execution"
-    )
-    .to_string();
-
-    assert!(!repair_directory_purpose_command_summary_contract(
-        &state,
-        "run command: ls -laS prompts/schemas/*.json | head -20 and summarize it",
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
-    );
-}
-
-#[test]
-fn extension_assess_gap_command_summary_does_not_repair_to_directory_purpose() {
-    let state = test_state_with_root(make_temp_root("extension_gap_no_directory_repair"));
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
-    route.route_reason = concat!(
-        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection",
-        "; capability=extension.assess_gap"
-    )
-    .to_string();
-
-    assert!(!repair_directory_purpose_command_summary_contract(
-        &state,
-        "extension_manager assess_gap",
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
-    );
-}
-
-#[test]
-fn extension_assess_gap_directory_contract_restores_to_command_summary() {
-    let mut route = executable_filename_route();
-    route.needs_clarify = true;
-    route.set_clarify_gate();
-    route.clarify_question = "clarify".to_string();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "*.csv".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
-    route.route_reason = "capability=extension.assess_gap".to_string();
-
-    assert!(restore_explicit_extension_assess_gap_to_command_summary(
-        &mut route
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
-    );
-    assert_eq!(
-        route.output_contract.locator_kind,
-        crate::OutputLocatorKind::None
-    );
-    assert!(route.output_contract.locator_hint.is_empty());
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route
-        .route_reason
-        .contains("extension_assess_gap_contract_restored_to_command_output_summary"));
-    assert!(!route.needs_clarify);
-    assert!(route.clarify_question.is_empty());
-    assert!(route.is_execute_gate());
-}
-
-#[test]
-fn runtime_surface_clawcli_resume_promotes_to_command_summary_without_locator() {
+fn runtime_surface_clawcli_resume_is_not_promoted_by_worker_post_route() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
     route.set_clarify_gate();
@@ -464,18 +400,14 @@ fn runtime_surface_clawcli_resume_promotes_to_command_summary_without_locator() 
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.resolved_intent =
-        "Inspect clawcli resume surface and report resume_task_id fields".to_string();
+        "capability_ref=clawcli.resume action=resume field=resume_task_id field=status".to_string();
 
-    assert!(promote_runtime_surface_contract_to_command_summary(
-        "clawcli resume resume_task_id",
-        &mut route,
-    ));
-    assert!(!route.needs_clarify);
-    assert!(route.clarify_question.is_empty());
-    assert!(route.is_execute_gate());
+    assert!(route.needs_clarify);
+    assert_eq!(route.clarify_question, "clarify");
+    assert!(!route.is_execute_gate());
     assert_eq!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::CommandOutputSummary
+        crate::OutputSemanticKind::ContentExcerptSummary
     );
     assert_eq!(
         route.output_contract.locator_kind,
@@ -483,11 +415,8 @@ fn runtime_surface_clawcli_resume_promotes_to_command_summary_without_locator() 
     );
     assert_eq!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
+        crate::OutputResponseShape::Strict
     );
-    assert!(route
-        .route_reason
-        .contains("runtime_surface_contract_promoted_to_command_output_summary"));
 
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
@@ -504,77 +433,23 @@ fn runtime_surface_clawcli_resume_promotes_to_command_summary_without_locator() 
 }
 
 #[test]
-fn quantity_comparison_single_directory_repair_promotes_to_directory_purpose() {
-    let root = make_temp_root("directory_purpose_quantity_repair");
-    std::fs::create_dir_all(root.join("prompts/schemas")).expect("schemas");
-    std::fs::write(
-        root.join("prompts/schemas/intent_normalizer.schema.json"),
-        r#"{"title":"IntentNormalizerOut"}"#,
-    )
-    .expect("schema");
-    let state = test_state_with_root(root.clone());
+fn runtime_surface_prompt_only_token_remains_worker_neutral() {
     let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.needs_clarify = true;
+    route.set_clarify_gate();
+    route.clarify_question = "clarify".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.route_reason =
-        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection"
-            .to_string();
+    route.resolved_intent = "Inspect runtime resume fields".to_string();
 
-    assert!(repair_directory_purpose_quantity_comparison_contract(
-        &state,
-        "inventory prompts/schemas/*.json and synthesize object purpose",
-        &mut route,
-    ));
+    assert!(route.needs_clarify);
     assert_eq!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryPurposeSummary
+        crate::OutputSemanticKind::ContentExcerptSummary
     );
-    assert_eq!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    );
-    assert!(route_reason_has_marker(
-        &route,
-        "quantity_comparison_repaired_to_directory_purpose_summary"
-    ));
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn quantity_comparison_path_pair_does_not_repair_to_directory_purpose() {
-    let root = make_temp_root("directory_purpose_quantity_pair_no_repair");
-    std::fs::create_dir_all(root.join("left")).expect("left");
-    std::fs::create_dir_all(root.join("right")).expect("right");
-    let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = format!(
-        "{} | {}",
-        root.join("left").display(),
-        root.join("right").display()
-    );
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.route_reason =
-        "llm_semantic_contract_repair:request_needs_directory_purpose_synthesis_plus_comparative_selection"
-            .to_string();
-
-    assert!(!repair_directory_purpose_quantity_comparison_contract(
-        &state,
-        "compare two directories",
-        &mut route,
-    ));
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::QuantityComparison
-    );
-
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -804,12 +679,123 @@ fn unbound_model_context_target_requires_clarify_before_planner_guess() {
 }
 
 #[test]
+fn unbound_model_context_allows_kb_namespace_capability_without_locator() {
+    let state = test_state_with_root(make_temp_root("unbound_model_kb_namespace_catalog"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.list_namespaces field=names field=count limit=10".to_string();
+    route.route_reason =
+        "structured non-filesystem metadata query; capability_ref=kb.list_namespaces".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_model_context_target_route_should_force_clarify(
+        &state,
+        "list current knowledge-base namespaces",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
+fn unbound_targeted_evidence_allows_kb_namespace_capability_without_locator() {
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.list_namespaces field=names field=count limit=10".to_string();
+    route.route_reason =
+        "structured non-filesystem metadata query; capability_ref=kb.list_namespaces".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "list current knowledge-base namespaces",
+        &route,
+        &snapshot,
+        "",
+    ));
+}
+
+#[test]
+fn unbound_targeted_evidence_allows_kb_search_capability_without_locator() {
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "capability_ref=kb.search namespace=docs query=service_status top_k=3".to_string();
+    route.route_reason = "structured skill-managed KB search; capability_ref=kb.search".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "search kb namespace",
+        &route,
+        &snapshot,
+        "",
+    ));
+}
+
+#[test]
+fn capability_ref_scalar_count_semantic_enum_does_not_force_unbound_clarify() {
+    let mut route = executable_filename_route();
+    route.resolved_intent = "capability_ref=kb.list_namespaces field=count".to_string();
+    route.route_reason = "capability_ref=kb.list_namespaces".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+        "count knowledge-base namespaces",
+        &route,
+        &snapshot,
+        "",
+    ));
+}
+
+#[test]
 fn task_control_machine_route_executes_without_locator() {
     let state = test_state_with_root(make_temp_root("task_control_without_locator"));
     let mut route = executable_filename_route();
     route.resolved_intent =
         "Use task_control.list and task_control.get to inspect task lifecycle fields.".to_string();
-    route.route_reason = "task_control.list task_control.get runtime task query".to_string();
+    route.route_reason =
+        "capability_ref=task_control.list capability_ref=task_control.get".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;
@@ -822,6 +808,7 @@ fn task_control_machine_route_executes_without_locator() {
         active_observed_facts: None,
     };
 
+    assert!(task_control_route_can_plan_without_locator(&route));
     assert!(!unbound_model_context_target_route_should_force_clarify(
         &state,
         "inspect task lifecycle fields",
@@ -829,6 +816,21 @@ fn task_control_machine_route_executes_without_locator() {
         None,
         &snapshot,
     ));
+}
+
+#[test]
+fn task_control_text_token_without_capability_ref_does_not_bypass_locator_guard() {
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Use task_control.list and task_control.get to inspect task lifecycle fields.".to_string();
+    route.route_reason = "task_control.list task_control.get runtime task query".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentPresenceCheck;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+
+    assert!(!task_control_route_can_plan_without_locator(&route));
 }
 
 #[test]
