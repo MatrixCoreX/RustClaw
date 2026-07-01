@@ -222,15 +222,6 @@ fn value_contains_observed_file_name_list(value: &serde_json::Value) -> bool {
             return true;
         }
     }
-    if let Some(text_value) = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        if value_contains_observed_file_name_list(&text_value) {
-            return true;
-        }
-    }
     value_string_array_has_items(value, &["names", "results", "files", "paths"])
         || value
             .pointer("/names_by_kind/files")
@@ -483,15 +474,6 @@ fn inventory_file_paths_from_value(value: &serde_json::Value) -> Option<Vec<Stri
             return Some(paths);
         }
     }
-    if let Some(text_value) = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        if let Some(paths) = inventory_file_paths_from_value(&text_value) {
-            return Some(paths);
-        }
-    }
     if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
         return None;
     }
@@ -680,15 +662,6 @@ fn ordered_matrix_grouped_name_list_from_value(
             return Some(answer);
         }
     }
-    if let Some(text_value) = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        if let Some(answer) = ordered_matrix_grouped_name_list_from_value(route, &text_value) {
-            return Some(answer);
-        }
-    }
     let sort_by = value
         .get("sort_by")
         .and_then(serde_json::Value::as_str)
@@ -817,13 +790,6 @@ fn collect_matrix_grouped_name_items(
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
         collect_matrix_grouped_name_items(route, extra, dirs, files, other);
     }
-    if let Some(text_value) = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        collect_matrix_grouped_name_items(route, &text_value, dirs, files, other);
-    }
     if let Some(names_by_kind) = value
         .get("names_by_kind")
         .and_then(serde_json::Value::as_object)
@@ -879,13 +845,6 @@ fn collect_matrix_strict_list_items(
 ) {
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
         collect_matrix_strict_list_items(route, extra, items);
-    }
-    if let Some(text_value) = value
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-    {
-        collect_matrix_strict_list_items(route, &text_value, items);
     }
     if route_requests_archive_list(route) {
         collect_matrix_archive_member_items(route, value, items);
