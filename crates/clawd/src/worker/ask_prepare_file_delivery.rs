@@ -93,7 +93,7 @@ fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) 
     if !route_result.output_contract.locator_hint.trim().is_empty() {
         return true;
     }
-    if route_result.needs_clarify || route_result.is_clarify_gate() {
+    if route_result.needs_clarify {
         return true;
     }
     matches!(
@@ -417,9 +417,6 @@ fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult)
 
 fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
-    if route_result.is_clarify_gate() {
-        route_result.set_execute_gate();
-    }
     route_result.clarify_question.clear();
     route_result.wants_file_delivery = true;
     route_result.output_contract.delivery_required = true;

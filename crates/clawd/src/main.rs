@@ -54,6 +54,7 @@ mod intent_router;
 mod language_policy;
 mod llm_gateway;
 mod log_utils;
+mod machine_capability_ref;
 mod machine_kv_projection;
 mod media_artifact_paths;
 mod memory;
@@ -98,13 +99,14 @@ pub(crate) use app_helpers::{
 };
 pub(crate) use ask_flow::{
     analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
-    build_resume_followup_discussion_prompt, execute_ask_routed, transcribe_attached_audio_for_ask,
+    build_resume_followup_discussion_prompt, transcribe_attached_audio_for_ask,
 };
+#[cfg(test)]
+pub(crate) use bootstrap::active_prompt_vendor_name;
 use bootstrap::{
-    active_prompt_vendor_name, load_command_intent_runtime, load_feishu_send_config,
-    load_lark_send_config, load_memory_runtime_config, load_persona_prompt,
-    load_prompt_template_for_state, load_schedule_runtime, load_wechat_send_config,
-    resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
+    load_command_intent_runtime, load_feishu_send_config, load_lark_send_config,
+    load_memory_runtime_config, load_persona_prompt, load_prompt_template_for_state,
+    load_schedule_runtime, load_wechat_send_config, resolve_ui_dist_dir,
 };
 use db_init::{
     ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, ensure_task_lease_schema,
@@ -158,22 +160,15 @@ pub(crate) use repo::{
     TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
-use task_admin_routes::{
-    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
-    list_active_tasks, list_automation_runs, pause_task_by_id, resume_task_by_id,
-};
-pub(crate) use task_contract::TaskContract;
-// Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
-// ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
-    AskStateRegistry, AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask,
-    CommandIntentRules, CommandIntentRuntime, CoreServices, FirstLayerDecision, LlmPromptBucket,
-    LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig,
-    RateLimiter, ReloadContext, RouteGateKind, RuntimeChannel, ScheduleIntentOutput,
-    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
-    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
+    AskStateRegistry, AskTransition, ChannelConfig, ClaimedTask, CommandIntentRules,
+    CommandIntentRuntime, CoreServices, FirstLayerDecision, LlmPromptBucket, LlmProviderRuntime,
+    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
+    RouteGateKind, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
+    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
+    WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -183,6 +178,11 @@ pub(crate) use system_health::{
     telegramd_process_stats, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
     whatsappd_process_stats,
 };
+use task_admin_routes::{
+    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
+    list_active_tasks, list_automation_runs, pause_task_by_id, resume_task_by_id,
+};
+pub(crate) use task_contract::TaskContract;
 pub(crate) use worker::task_payload_value;
 use worker::{
     recover_stale_running_tasks_on_startup, spawn_cleanup_worker, spawn_schedule_worker,
@@ -228,7 +228,6 @@ const LOG_CALL_WRAP: &str = "---- task-call ----";
 const ISOLATION_STARTUP_CLEANUP_MIN_SECONDS: u64 = 6 * 60 * 60;
 const DEFAULT_AGENT_ID: &str = "main";
 
-pub(crate) const CHAT_RESPONSE_PROMPT_LOGICAL_PATH: &str = "prompts/chat_response_prompt.md";
 pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH: &str =
     "prompts/resume_followup_discussion_prompt.md";
 

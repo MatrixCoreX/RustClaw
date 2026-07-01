@@ -174,7 +174,7 @@ impl TaskContract {
             || route.output_contract.delivery_required
             || !required_evidence_fields_for_route(route).is_empty();
         Self {
-            intent_kind: if route.needs_clarify || route.is_clarify_gate() {
+            intent_kind: if route.needs_clarify {
                 TaskIntentKind::Clarify
             } else if route.is_execute_gate() {
                 TaskIntentKind::PlannerExecute
@@ -338,13 +338,70 @@ fn primary_locator_for_route(route: &RouteResult) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CapabilityRef<'a> {
+    namespace: &'a str,
+    action: &'a str,
+}
+
+fn capability_ref_for_route(route: &RouteResult) -> Option<CapabilityRef<'_>> {
+    [&route.route_reason, &route.resolved_intent]
+        .iter()
+        .filter_map(|surface| first_capability_ref(surface))
+        .next()
+}
+
+fn first_capability_ref(machine_context: &str) -> Option<CapabilityRef<'_>> {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .filter_map(parse_capability_ref_token)
+        .next()
+}
+
+fn parse_capability_ref_token(raw: &str) -> Option<CapabilityRef<'_>> {
+    let capability = raw
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
+        .strip_prefix("capability_ref=")?;
+    let (namespace, action) = capability.split_once('.')?;
+    if namespace.is_empty()
+        || action.is_empty()
+        || !capability_ref_chars_are_machine_safe(capability)
+    {
+        return None;
+    }
+    Some(CapabilityRef { namespace, action })
+}
+
+fn capability_ref_chars_are_machine_safe(value: &str) -> bool {
+    value.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+    })
+}
+
+fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObject> {
+    let capability = capability_ref_for_route(route)?;
+    Some(match capability.namespace {
+        "config" | "config_basic" | "config_edit" => TaskTargetObject::ConfigKey,
+        "docker" | "process" | "service" => TaskTargetObject::Process,
+        "db" | "database" | "sqlite" => TaskTargetObject::Db,
+        "filesystem" | "fs_basic" | "file" | "archive" | "photo" => TaskTargetObject::Path,
+        "git" => TaskTargetObject::Directory,
+        "package" | "package_manager" | "module" | "system" | "system_basic" => {
+            TaskTargetObject::System
+        }
+        "browser" | "http" | "image_vision" | "rss" | "stock" | "crypto" | "weather" | "web"
+        | "x" => TaskTargetObject::Web,
+        _ => TaskTargetObject::Unknown,
+    })
+}
+
 fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
-    match route.output_contract.semantic_kind {
+    if let Some(target) = target_object_for_capability_ref(route) {
+        return target;
+    }
+    match route.effective_output_contract_semantic_kind() {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
-        OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerLogs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerContainerLifecycle => return TaskTargetObject::Process,
         OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::SqliteDatabaseKindJudgment
@@ -356,17 +413,8 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::ConfigRiskAssessment => {
             return TaskTargetObject::ConfigKey;
         }
-        OutputSemanticKind::RssNewsFetch
-        | OutputSemanticKind::WebPageSummary
-        | OutputSemanticKind::WebSearchSummary
-        | OutputSemanticKind::WeatherQuery
-        | OutputSemanticKind::MarketQuote
-        | OutputSemanticKind::ImageUnderstanding => return TaskTargetObject::Web,
-        OutputSemanticKind::PublishingPreview => return TaskTargetObject::Web,
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
-        OutputSemanticKind::PackageManagerDetection | OutputSemanticKind::ToolDiscovery => {
-            return TaskTargetObject::System;
-        }
+        OutputSemanticKind::ToolDiscovery => return TaskTargetObject::System,
         _ => {}
     }
     match route.output_contract.locator_kind {
@@ -377,8 +425,67 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
     }
 }
 
+fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
+    let capability = capability_ref_for_route(route)?;
+    let action = capability.action;
+    Some(if action_has_any_segment(action, &["count"]) {
+        TaskOperation::Count
+    } else if action_has_any_segment(action, &["list", "find", "search", "candidates"]) {
+        TaskOperation::List
+    } else if action_has_any_segment(
+        action,
+        &[
+            "apply",
+            "delete",
+            "install",
+            "kill",
+            "publish",
+            "remove",
+            "restart",
+            "start",
+            "stop",
+            "uninstall",
+        ],
+    ) {
+        TaskOperation::Modify
+    } else if action_has_any_segment(
+        action,
+        &["append", "create", "generate", "make", "pack", "write"],
+    ) {
+        TaskOperation::Write
+    } else if action_has_any_segment(action, &["check", "compare", "guard", "validate", "verify"]) {
+        TaskOperation::Validate
+    } else if action_has_any_segment(
+        action,
+        &[
+            "analyze",
+            "current",
+            "describe",
+            "positions",
+            "quote",
+            "summary",
+            "summarize",
+        ],
+    ) {
+        TaskOperation::Summarize
+    } else if capability.namespace == "system"
+        && action_has_any_segment(action, &["run", "cmd", "command"])
+    {
+        TaskOperation::Run
+    } else {
+        TaskOperation::Inspect
+    })
+}
+
 fn operation_for_route(route: &RouteResult) -> TaskOperation {
-    match route.output_contract.semantic_kind {
+    if let Some(operation) = operation_for_capability_ref(route) {
+        return operation;
+    }
+    let semantic_kind = route.effective_output_contract_semantic_kind();
+    if semantic_kind.is_registry_capability_bridge() {
+        return operation_for_unclassified_route(route);
+    }
+    match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
@@ -387,19 +494,11 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::ArchiveList
-        | OutputSemanticKind::ToolDiscovery
-        | OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerLogs => TaskOperation::List,
+        | OutputSemanticKind::ToolDiscovery => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary
-        | OutputSemanticKind::WebPageSummary
-        | OutputSemanticKind::WebSearchSummary
-        | OutputSemanticKind::WeatherQuery
-        | OutputSemanticKind::MarketQuote
-        | OutputSemanticKind::ImageUnderstanding
         | OutputSemanticKind::DirectoryPurposeSummary
         | OutputSemanticKind::WorkspaceProjectSummary
         | OutputSemanticKind::ExistenceWithPathSummary
@@ -409,12 +508,10 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::ArchivePack
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
-        OutputSemanticKind::ArchiveUnpack
-        | OutputSemanticKind::ConfigMutation
-        | OutputSemanticKind::DockerContainerLifecycle => TaskOperation::Modify,
+        OutputSemanticKind::ArchiveUnpack | OutputSemanticKind::ConfigMutation => {
+            TaskOperation::Modify
+        }
         OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::PackageManagerDetection
-        | OutputSemanticKind::PublishingPreview
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::DocumentHeading
@@ -428,27 +525,40 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ConfigRiskAssessment
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
-        | OutputSemanticKind::RssNewsFetch
         | OutputSemanticKind::ArchiveRead => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
-        OutputSemanticKind::None => {
-            if route.output_contract.delivery_required {
-                TaskOperation::Read
-            } else if route.is_execute_gate() {
-                TaskOperation::Inspect
-            } else {
-                TaskOperation::Unknown
-            }
-        }
+        OutputSemanticKind::None => operation_for_unclassified_route(route),
+        _ => operation_for_unclassified_route(route),
     }
 }
 
+fn operation_for_unclassified_route(route: &RouteResult) -> TaskOperation {
+    if route.output_contract.delivery_required {
+        TaskOperation::Read
+    } else if route.is_execute_gate() {
+        TaskOperation::Inspect
+    } else {
+        TaskOperation::Unknown
+    }
+}
+
+fn delivery_shape_for_capability_ref(route: &RouteResult) -> Option<TaskDeliveryShape> {
+    let capability = capability_ref_for_route(route)?;
+    if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
+        return Some(TaskDeliveryShape::List);
+    }
+    None
+}
+
 fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
+    if let Some(shape) = delivery_shape_for_capability_ref(route) {
+        return shape;
+    }
     if matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         OutputSemanticKind::FileNames
             | OutputSemanticKind::DirectoryNames
             | OutputSemanticKind::DirectoryEntryGroups
@@ -457,8 +567,6 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::ArchiveList
             | OutputSemanticKind::ToolDiscovery
-            | OutputSemanticKind::DockerPs
-            | OutputSemanticKind::DockerImages
     ) {
         return TaskDeliveryShape::List;
     }
@@ -470,8 +578,64 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
     }
 }
 
-fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
-    required_evidence_fields_for_output_contract(&route.output_contract)
+pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
+    if let Some(fields) = required_evidence_fields_for_capability_ref(route) {
+        return fields;
+    }
+    let output_contract = route.effective_output_contract();
+    if output_contract
+        .semantic_kind
+        .is_registry_capability_bridge()
+    {
+        return Vec::new();
+    }
+    required_evidence_fields_for_output_contract(&output_contract)
+}
+
+fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
+    let capability = capability_ref_for_route(route)?;
+    let fields =
+        if action_has_any_segment(capability.action, &["candidates", "find", "list", "search"]) {
+            &["candidates"][..]
+        } else if action_has_any_segment(
+            capability.action,
+            &[
+                "analyze",
+                "describe",
+                "extract",
+                "quote",
+                "read",
+                "summary",
+                "summarize",
+            ],
+        ) {
+            &["content_excerpt"][..]
+        } else if capability.namespace == "web"
+            || capability.namespace == "browser"
+            || capability.namespace == "rss"
+            || capability.namespace == "weather"
+            || capability.namespace == "image_vision"
+        {
+            &["content_excerpt"][..]
+        } else {
+            &["field_value"][..]
+        };
+    Some(fields.iter().map(|field| (*field).to_string()).collect())
+}
+
+fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    action
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')))
+        .any(|segment| {
+            let segment = segment.trim();
+            !segment.is_empty()
+                && needles.iter().any(|needle| {
+                    segment == *needle
+                        || segment.starts_with(&format!("{needle}_"))
+                        || segment.ends_with(&format!("_{needle}"))
+                        || segment.contains(&format!("_{needle}_"))
+                })
+        })
 }
 
 pub(crate) fn required_evidence_fields_for_output_contract(
@@ -517,10 +681,6 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::ContentExcerptWithSummary
         | OutputSemanticKind::ArchiveRead
         | OutputSemanticKind::DocumentHeading
-        | OutputSemanticKind::WebPageSummary
-        | OutputSemanticKind::WeatherQuery
-        | OutputSemanticKind::MarketQuote
-        | OutputSemanticKind::ImageUnderstanding
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");
         }
@@ -531,11 +691,9 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ContentPresenceCheck => {
             fields.insert("content_match");
             fields.insert("content_excerpt");
+            fields.insert("field_value");
         }
         OutputSemanticKind::DirectoryPurposeSummary => {
-            fields.insert("candidates");
-        }
-        OutputSemanticKind::WebSearchSummary => {
             fields.insert("candidates");
         }
         OutputSemanticKind::RecentArtifactsJudgment => {
@@ -549,21 +707,14 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
-        | OutputSemanticKind::ArchiveList
-        | OutputSemanticKind::DockerPs
-        | OutputSemanticKind::DockerImages
-        | OutputSemanticKind::DockerLogs => {
+        | OutputSemanticKind::ArchiveList => {
             fields.insert("candidates");
         }
         OutputSemanticKind::ServiceStatus
-        | OutputSemanticKind::RssNewsFetch
-        | OutputSemanticKind::PublishingPreview
-        | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
-        | OutputSemanticKind::RecentScalarEqualityCheck
-        | OutputSemanticKind::DockerContainerLifecycle => {
+        | OutputSemanticKind::RecentScalarEqualityCheck => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExecutionFailedStep => {
@@ -603,10 +754,10 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         _ => {}
     }
-    if output_contract.semantic_kind == OutputSemanticKind::ExistenceWithPathSummary {
+    if output_contract.semantic_kind_is(OutputSemanticKind::ExistenceWithPathSummary) {
         fields.insert("content_excerpt");
     }
-    if output_contract.semantic_kind == OutputSemanticKind::DocumentHeading {
+    if output_contract.semantic_kind_is(OutputSemanticKind::DocumentHeading) {
         fields.insert("path");
     }
     fields.into_iter().map(str::to_string).collect()

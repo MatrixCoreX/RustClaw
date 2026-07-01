@@ -122,7 +122,7 @@ fn unresolved_file_delivery_without_locator_requires_clarify() {
 #[test]
 fn generated_file_delivery_without_locator_can_choose_runtime_target() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "create a shell script, save it, and deliver the generated file"
             .to_string(),
         needs_clarify: true,

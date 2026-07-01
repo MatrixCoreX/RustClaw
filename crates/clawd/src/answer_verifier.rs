@@ -121,7 +121,7 @@ pub(crate) fn should_verify_answer(
     answer_text: &str,
 ) -> bool {
     let candidate = answer_text.trim();
-    if candidate.is_empty() || route_result.needs_clarify || route_result.is_clarify_gate() {
+    if candidate.is_empty() || route_result.needs_clarify {
         return false;
     }
     if matches!(

@@ -601,15 +601,9 @@ impl RouteResult {
             && !self.has_any_output_contract_marker()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_clarify_gate(&self) -> bool {
-        #[cfg(test)]
-        {
-            matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
-        }
-        #[cfg(not(test))]
-        {
-            false
-        }
+        matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
     }
 }
 

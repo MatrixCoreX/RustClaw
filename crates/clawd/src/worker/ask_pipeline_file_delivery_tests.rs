@@ -483,7 +483,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
     route.needs_clarify = true;
     route.route_reason =
         "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"

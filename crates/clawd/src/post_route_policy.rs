@@ -181,9 +181,7 @@ pub(crate) fn apply_post_route_policy(
             && !missing_locator_for_path_scoped_content;
     if existing_file_delivery_can_try_locator_hint {
         execution_route_result.needs_clarify = false;
-        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
-            execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
-        }
+        execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
     }
 
     let cleared_scalar_count_semantic =
@@ -220,17 +218,15 @@ pub(crate) fn apply_post_route_policy(
         && direct_auto_locator_can_satisfy_background_clarify;
     if direct_auto_locator_satisfies_background_clarify {
         execution_route_result.needs_clarify = false;
-        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
-            let finalize = if matches!(
-                execution_route_result.output_contract.response_shape,
-                OutputResponseShape::Scalar | OutputResponseShape::FileToken
-            ) {
-                ActFinalizeStyle::Plain
-            } else {
-                ActFinalizeStyle::ChatWrapped
-            };
-            execution_route_result.set_planner_execute_finalize(finalize);
-        }
+        let finalize = if matches!(
+            execution_route_result.output_contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        ) {
+            ActFinalizeStyle::Plain
+        } else {
+            ActFinalizeStyle::ChatWrapped
+        };
+        execution_route_result.set_planner_execute_finalize(finalize);
     }
 
     let fuzzy_locator_requires_clarify = !fuzzy_locator_suggestions.is_empty()
@@ -238,8 +234,7 @@ pub(crate) fn apply_post_route_policy(
             execution_route_result.output_contract.locator_kind,
             OutputLocatorKind::Path | OutputLocatorKind::Filename
         ) || current_workspace_content_summary_needs_concrete_locator);
-    let force_clarify = execution_route_result.is_clarify_gate()
-        || execution_route_result.needs_clarify
+    let force_clarify = execution_route_result.needs_clarify
         || missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify;
     let force_clarify = force_clarify && !existing_file_delivery_can_try_locator_hint;
@@ -259,7 +254,7 @@ pub(crate) fn apply_post_route_policy(
     let apply_force_clarify = force_clarify && !non_boundary_clarify_requested;
     if non_boundary_clarify_requested {
         execution_route_result.needs_clarify = false;
-        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
+        if execution_route_result.is_chat_gate() {
             execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         }
     }
