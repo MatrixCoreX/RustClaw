@@ -1599,7 +1599,7 @@ pub(super) fn config_risk_preview_deterministic_plan_result(
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
         || !route.is_execute_gate()
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigRiskAssessment
+        || !route_requests_config_risk_preview(route)
         || !skill_available_for_plan(state, "config_edit")
         || !skill_available_for_plan(state, "config_basic")
     {
@@ -1671,6 +1671,20 @@ fn web_search_extract_available_for_plan(state: &AppState) -> bool {
 fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains(skill)
+}
+
+fn route_requests_config_risk_preview(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &[
+                "guard_after_change",
+                "guard_config",
+                "plan_change",
+                "plan_config_change",
+            ],
+        )
 }
 
 fn web_search_query_from_route(route: &RouteResult, user_text: &str) -> Option<String> {
