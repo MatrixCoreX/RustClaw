@@ -118,7 +118,6 @@
             "git_commit_subject",
             "git_repository_state",
             "structured_keys",
-            "tool_discovery",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",

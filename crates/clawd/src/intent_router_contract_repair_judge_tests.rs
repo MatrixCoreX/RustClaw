@@ -1,6 +1,36 @@
 use super::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
 use crate::IntentOutputContract;
 use serde_json::json;
+use std::collections::BTreeSet;
+
+fn contract_repair_semantic_kind_enum() -> BTreeSet<String> {
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../prompts/schemas/contract_repair_judge.schema.json"
+    ))
+    .expect("contract repair judge schema parses");
+    schema
+        .pointer("/properties/output_contract/properties/semantic_kind/enum")
+        .and_then(|value| value.as_array())
+        .expect("semantic_kind enum")
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn contract_repair_judge_schema_hides_registry_capability_semantic_kinds() {
+    let schema_semantic_kinds = contract_repair_semantic_kind_enum();
+
+    for kind in OutputSemanticKind::ALL {
+        if kind.is_normalizer_schema_capability_bridge() {
+            assert!(
+                !schema_semantic_kinds.contains(kind.as_str()),
+                "contract repair judge schema must not expose registry-owned semantic_kind `{}`; preserve capability_ref machine tokens instead",
+                kind.as_str()
+            );
+        }
+    }
+}
 
 #[test]
 fn contract_repair_judge_schema_accepts_canonical_payload() {
