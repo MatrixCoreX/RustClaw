@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use super::{
-    route_has_structured_execution_signal, FirstLayerDecision, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-    RouteDecision, ScheduleKind, SelfExtensionMode, SelfExtensionTrigger,
+    route_has_structured_execution_signal, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
+    SelfExtensionMode, SelfExtensionTrigger,
 };
 
 pub(super) fn explicit_surface_path_facts_fallback_decision(
@@ -51,13 +51,12 @@ pub(super) fn explicit_surface_path_metadata_clarify_repair_decision(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
     needs_clarify: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !(needs_clarify || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)) {
+    if !needs_clarify {
         return None;
     }
     let targets = explicit_surface_path_fact_targets(req_surface);
@@ -65,7 +64,7 @@ pub(super) fn explicit_surface_path_metadata_clarify_repair_decision(
         || req_surface.has_delivery_token_reference()
         || req_surface.has_deictic_reference()
         || structured_target_refinement_blocks_explicit_path_facts(req_surface, &targets)
-        || output_contract.semantic_kind != OutputSemanticKind::QuantityComparison
+        || !output_contract.semantic_kind_is(OutputSemanticKind::QuantityComparison)
         || wants_file_delivery
         || !matches!(schedule_kind, ScheduleKind::None)
         || output_contract.delivery_required
@@ -96,7 +95,7 @@ pub(super) fn explicit_surface_path_metadata_clarify_repair_decision(
         resolved_user_intent: req.trim().to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
-        reason: "normalizer_clarify_explicit_multi_path_metadata".to_string(),
+        reason: "boundary_explicit_multi_path_metadata".to_string(),
         confidence: Some(0.55),
         schedule_kind: ScheduleKind::None,
         schedule_intent: None,
@@ -121,13 +120,12 @@ pub(super) fn explicit_surface_path_facts_clarify_repair_decision(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
     needs_clarify: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !(needs_clarify || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)) {
+    if !needs_clarify {
         return None;
     }
     if route_has_structured_execution_signal(
@@ -140,7 +138,7 @@ pub(super) fn explicit_surface_path_facts_clarify_repair_decision(
     }
     let mut decision =
         explicit_surface_path_facts_fallback_decision(req, req_surface, workspace_root)?;
-    decision.reason = "normalizer_clarify_explicit_multi_path_facts".to_string();
+    decision.reason = "boundary_explicit_multi_path_facts".to_string();
     decision.confidence = Some(0.55);
     Some(decision)
 }

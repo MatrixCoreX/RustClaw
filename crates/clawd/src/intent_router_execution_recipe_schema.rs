@@ -83,13 +83,11 @@ fn execution_recipe_value_declares_structured_scalar_field_request(value: Option
     }
 }
 
-pub(super) fn execution_recipe_value_declares_package_manager_detection(
+pub(super) fn execution_recipe_value_declares_package_detect_manager_capability(
     value: Option<&Value>,
 ) -> bool {
     match value {
         Some(Value::Object(map)) => {
-            let mut has_package_manager_target = false;
-            let mut has_detect_action = false;
             for (key, value) in map {
                 let key = normalize_schema_token(key);
                 if matches!(
@@ -101,29 +99,15 @@ pub(super) fn execution_recipe_value_declares_package_manager_detection(
                 ) {
                     return true;
                 }
-                if matches!(
-                    key.as_str(),
-                    "name" | "skill" | "skill_name" | "runner" | "runner_name" | "tool"
-                ) && value_has_schema_token(value, schema_token_is_package_manager_skill)
-                {
-                    has_package_manager_target = true;
-                }
-                if matches!(
-                    key.as_str(),
-                    "action" | "operation" | "op" | "method" | "intent"
-                ) && value_has_schema_token(value, schema_token_is_package_manager_detect_action)
-                {
-                    has_detect_action = true;
-                }
-                if execution_recipe_value_declares_package_manager_detection(Some(value)) {
+                if execution_recipe_value_declares_package_detect_manager_capability(Some(value)) {
                     return true;
                 }
             }
-            has_package_manager_target && has_detect_action
+            false
         }
-        Some(Value::Array(items)) => items
-            .iter()
-            .any(|value| execution_recipe_value_declares_package_manager_detection(Some(value))),
+        Some(Value::Array(items)) => items.iter().any(|value| {
+            execution_recipe_value_declares_package_detect_manager_capability(Some(value))
+        }),
         _ => false,
     }
 }
@@ -239,30 +223,10 @@ fn schema_token_is_service_status_capability(token: &str) -> bool {
     )
 }
 
-fn schema_token_is_package_manager_skill(token: &str) -> bool {
-    matches!(token, "package_manager" | "package_manager_skill")
-}
-
-fn schema_token_is_package_manager_detect_action(token: &str) -> bool {
-    matches!(
-        token,
-        "detect"
-            | "detection"
-            | "detect_manager"
-            | "manager_detection"
-            | "package_detect_manager"
-            | "package_manager_detect"
-            | "package_manager_detection"
-    )
-}
-
 fn schema_token_is_package_manager_detect_capability(token: &str) -> bool {
     matches!(
         token,
-        "package.detect_manager"
-            | "package_detect_manager"
-            | "package_manager_detect"
-            | "package_manager_detection"
+        "package.detect_manager" | "capability_ref=package.detect_manager"
     )
 }
 

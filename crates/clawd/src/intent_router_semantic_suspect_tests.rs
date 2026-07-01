@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 #[test]
-fn semantic_suspect_flags_chat_with_observable_contract() {
+fn semantic_suspect_ignores_legacy_chat_hint_with_observable_contract() {
     let out = super::IntentNormalizerOut {
         resolved_user_intent: "check README.md exists".to_string(),
         answer_candidate: String::new(),
@@ -46,7 +46,55 @@ fn semantic_suspect_flags_chat_with_observable_contract() {
             "",
             std::path::Path::new("/tmp/rustclaw")
         ),
-        Some("chat_route_requires_content_evidence")
+        None
+    );
+}
+
+#[test]
+fn semantic_suspect_treats_semantic_kind_alone_as_descriptive() {
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: "descriptive contract only".to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "direct_answer".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "free".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: "none".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "file_names".to_string(),
+            locator_hint: String::new(),
+            scalar_count_filter: None,
+            list_selector: None,
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        None
     );
 }
 

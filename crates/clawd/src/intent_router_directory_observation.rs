@@ -3,8 +3,8 @@ use std::path::Path;
 
 use super::{
     execution_finalize_style_for_contract, state_patch_deictic_reference_requires_clarify,
-    ActFinalizeStyle, AppState, FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
+    ActFinalizeStyle, AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
 };
 
 pub(super) fn resolved_existing_directory_from_current_request(
@@ -200,7 +200,6 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify
@@ -219,9 +218,7 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     }
     let recover_empty_listing_contract =
         empty_directory_listing_contract_can_bind_directory(output_contract, req);
-    if !crate::worker::semantic_kind_can_bind_workspace_child_locator(output_contract.semantic_kind)
-        && !recover_empty_listing_contract
-    {
+    if !output_contract.requires_content_evidence && !recover_empty_listing_contract {
         return None;
     }
     let directory = resolved_existing_directory_from_current_request(state, req)?;
@@ -240,7 +237,6 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style =
         crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
             .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
@@ -251,7 +247,7 @@ fn empty_directory_listing_contract_can_bind_directory(
     output_contract: &IntentOutputContract,
     req: &str,
 ) -> bool {
-    output_contract.semantic_kind == OutputSemanticKind::None
+    output_contract.semantic_kind_is_unclassified()
         && output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)

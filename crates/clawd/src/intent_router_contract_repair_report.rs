@@ -79,19 +79,19 @@ fn contract_repair_source_class(source: &str) -> &'static str {
         | "tool_payload" => "schema_normalization",
         "structural_cleanup" => "boundary_safety_repair",
         "conservative_none" => "boundary_safety_repair",
-        "semantic_suspect" => "legacy_semantic_reroute",
-        _ => "legacy_semantic_reroute",
+        "semantic_suspect" => "contract_integrity_repair",
+        _ => "machine_repair_unclassified",
     }
 }
 
 fn contract_repair_detail_class(detail: &str) -> &'static str {
     match detail {
         "execution_recipe_command_payload"
-        | "decision_promoted_by_output_contract"
+        | "execution_signal_promoted_by_output_contract"
         | "execution_recipe_enum"
         | "execution_recipe_fields_normalized"
         | "execution_recipe_health_check_observation"
-        | "execution_recipe_package_manager_detection"
+        | "execution_recipe_package_detect_manager_capability"
         | "execution_recipe_scalar_runtime_tool_observation"
         | "execution_recipe_service_status_observation"
         | "execution_recipe_structured_read_observation"
@@ -103,14 +103,10 @@ fn contract_repair_detail_class(detail: &str) -> &'static str {
         "output_contract_requires_evidence_repaired" => "schema_normalization",
         "output_contract_locator_kind_normalized" => "machine_locator_repair",
         "execution_recipe_untrusted_text_ignored"
-        | "internal_context_answer_candidate_cleared"
-        | "memory_only_answer_candidate_rebound_to_recent_user_memory"
-        | "memory_only_answer_candidate_recent_scalar_conflict_cleared"
-        | "memory_update_unbound_answer_candidate_cleared"
         | "non_object_output_safe_chat_schema"
         | "output_contract_unknown_semantic_ignored"
         | "raw_parse_failed_safe_chat_schema" => "boundary_safety_repair",
-        _ => "legacy_semantic_reroute",
+        _ => "machine_repair_unclassified",
     }
 }
 
@@ -118,8 +114,6 @@ fn contract_repair_detail_requires_llm_integrity_repair(detail: &str) -> bool {
     matches!(
         detail,
         "executable_route_unknown_scalar_output_contract"
-            | "answer_candidate_memory_only_binding"
-            | "active_task_answer_candidate_conflict"
             | "active_task_invalid_turn_binding"
             | "active_ordered_scalar_path_missing_ordered_entry_ref"
             | "chat_route_with_file_delivery_request"

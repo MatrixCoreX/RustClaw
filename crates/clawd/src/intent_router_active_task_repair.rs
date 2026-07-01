@@ -4,12 +4,81 @@ use std::collections::BTreeSet;
 use super::{
     active_primary_task_prompt, active_session_has_structured_execution_target,
     active_task_turn_can_reuse_semantic_patch, active_text_followup_surface_is_chat_only,
-    is_meaningful_state_patch, output_semantic_kind_requires_fresh_evidence,
-    semantic_kind_can_use_existing_observed_context, state_patch_deictic_reference_is_resolved,
-    state_patch_deictic_reference_requires_clarify, ActFinalizeStyle, AnswerCandidateBindingReport,
-    FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    is_meaningful_state_patch, state_patch_deictic_reference_is_resolved,
+    state_patch_deictic_reference_requires_clarify, ActFinalizeStyle, IntentOutputContract,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind,
+    TargetTaskPolicy, TurnType,
 };
+
+const FRESH_EVIDENCE_CONTRACT_MARKERS: &[&str] = &[
+    "raw_command_output",
+    "service_status",
+    "hidden_entries_check",
+    "file_names",
+    "directory_names",
+    "directory_entry_groups",
+    "file_paths",
+    "directory_purpose_summary",
+    "content_excerpt_summary",
+    "document_heading",
+    "content_presence_check",
+    "excerpt_kind_judgment",
+    "recent_artifacts_judgment",
+    "workspace_project_summary",
+    "scalar_count",
+    "recent_scalar_equality_check",
+    "execution_failed_step",
+    "generated_file_delivery",
+    "generated_file_path_report",
+    "filesystem_mutation_result",
+    "existence_with_path",
+    "existence_with_path_summary",
+    "git_commit_subject",
+    "git_repository_state",
+    "structured_keys",
+    "config_validation",
+    "config_mutation",
+    "config_risk_assessment",
+    "sqlite_table_listing",
+    "sqlite_table_names_only",
+    "sqlite_database_kind_judgment",
+    "sqlite_schema_version",
+    "archive_list",
+    "archive_read",
+    "archive_pack",
+    "archive_unpack",
+];
+
+const ACTIVE_SCOPE_TEXT_CONTRACT_MARKERS: &[&str] = &[
+    "workspace_project_summary",
+    "directory_purpose_summary",
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "excerpt_kind_judgment",
+];
+
+const EXISTING_OBSERVED_CONTEXT_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_presence_check",
+    "excerpt_kind_judgment",
+    "recent_artifacts_judgment",
+    "execution_failed_step",
+];
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
+}
+
+fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
+    markers
+        .iter()
+        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+}
 
 pub(super) fn unresolved_deictic_observable_target_should_clarify(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
@@ -37,12 +106,12 @@ pub(super) fn should_resolve_task_scope_update_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
+    needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+        || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
@@ -62,12 +131,12 @@ pub(super) fn should_resolve_task_append_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
+    needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+        || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(
             turn_type,
@@ -90,12 +159,12 @@ pub(super) fn should_resolve_task_replace_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
+    needs_clarify: bool,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
+        || !needs_clarify
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskReplace))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
@@ -111,26 +180,22 @@ pub(super) fn should_resolve_task_replace_clarify_with_active_task(
 
 pub(super) fn should_route_active_task_mutation_to_direct_answer(
     prompt: &str,
+    route_reason: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
         || active_primary_task_prompt(session_snapshot).is_none()
-        || !output_contract_allows_chat_only_task_mutation(output_contract)
+        || !output_contract_allows_chat_only_task_mutation(route_reason, output_contract)
     {
         return false;
     }
     if output_contract.requires_content_evidence
-        && !matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS)
         && active_primary_text_context(session_snapshot)
             .and_then(|(_, output)| output)
             .is_some()
@@ -166,14 +231,13 @@ pub(super) fn should_route_active_task_mutation_to_direct_answer(
 
 pub(super) fn apply_missing_active_task_reuse_clarify(
     prompt: &str,
+    route_reason: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    answer_candidate: Option<&str>,
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
@@ -183,37 +247,28 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
         return None;
     }
     if missing_active_reuse_has_standalone_execution_contract(
+        route_reason,
         turn_type,
-        *legacy_normalizer_decision,
         output_contract,
-    ) {
-        return None;
-    }
-    if missing_active_reuse_has_standalone_direct_answer_candidate(
-        *legacy_normalizer_decision,
-        output_contract,
-        answer_candidate,
     ) {
         return None;
     }
     if missing_active_text_followup_can_continue_as_chat(
         prompt,
+        route_reason,
         turn_type,
         target_task_policy,
-        *legacy_normalizer_decision,
         output_contract,
         state_patch,
     ) {
         *needs_clarify = false;
         clarify_question.clear();
-        *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
         *execution_finalize_style = ActFinalizeStyle::Plain;
         clear_output_contract_for_active_text_followup(output_contract);
         return Some("missing_active_task_reuse_continues_as_chat");
     }
     *needs_clarify = true;
     clarify_question.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::Clarify;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     clear_output_contract_for_active_text_followup(output_contract);
     Some("missing_active_task_reuse_requires_clarify")
@@ -221,19 +276,21 @@ pub(super) fn apply_missing_active_task_reuse_clarify(
 
 fn missing_active_text_followup_can_continue_as_chat(
     prompt: &str,
+    route_reason: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
-    if !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
-        || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
+    if prompt.trim().is_empty() {
+        return false;
+    }
+    if !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
         || !matches!(
             turn_type,
             Some(TurnType::TaskAppend | TurnType::TaskCorrect | TurnType::TaskScopeUpdate)
         )
-        || !output_contract_looks_like_contextual_text_followup(output_contract)
+        || !output_contract_looks_like_contextual_text_followup(route_reason, output_contract)
     {
         return false;
     }
@@ -245,21 +302,18 @@ fn missing_active_text_followup_can_continue_as_chat(
 }
 
 fn missing_active_reuse_has_standalone_execution_contract(
+    route_reason: &str,
     turn_type: Option<TurnType>,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
     if !matches!(
         turn_type,
         Some(TurnType::TaskRequest | TurnType::StatusQuery)
-    ) || !matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
     ) {
         return false;
     }
     let requires_observation = output_contract.requires_content_evidence
-        || output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind);
+        || route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS);
     if !requires_observation {
         return false;
     }
@@ -273,27 +327,6 @@ fn missing_active_reuse_has_standalone_execution_contract(
         return false;
     }
     true
-}
-
-fn missing_active_reuse_has_standalone_direct_answer_candidate(
-    legacy_normalizer_decision: FirstLayerDecision,
-    output_contract: &IntentOutputContract,
-    answer_candidate: Option<&str>,
-) -> bool {
-    if !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer) {
-        return false;
-    }
-    if answer_candidate
-        .map(str::trim)
-        .filter(|candidate| !candidate.is_empty())
-        .is_none()
-    {
-        return false;
-    }
-    !output_contract.requires_content_evidence
-        && !output_contract.delivery_required
-        && !output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
-        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
 }
 
 fn state_patch_has_semantic_update(state_patch: Option<&Value>) -> bool {
@@ -595,11 +628,11 @@ fn active_text_patch_locator_context_is_safe(
 
 pub(super) fn apply_active_task_structured_patch_repair(
     prompt: &str,
+    route_reason: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
@@ -614,7 +647,7 @@ pub(super) fn apply_active_task_structured_patch_repair(
         || crate::conversation_state::state_patch_is_alias_bindings_only(state_patch?)
         || state_patch_selects_ordered_entry_or_execution_scope(state_patch)
         || !state_patch_has_semantic_update(state_patch)
-        || !matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        || route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS)
         || output_contract.delivery_required
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(
@@ -655,7 +688,6 @@ pub(super) fn apply_active_task_structured_patch_repair(
     *turn_type = Some(TurnType::TaskCorrect);
     *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
     *needs_clarify = false;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.requires_content_evidence = false;
     output_contract.delivery_required = false;
@@ -668,11 +700,11 @@ pub(super) fn apply_active_task_structured_patch_repair(
 
 pub(super) fn apply_active_task_scope_refinement_repair(
     prompt: &str,
+    route_reason: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
@@ -705,7 +737,10 @@ pub(super) fn apply_active_task_scope_refinement_repair(
         *turn_type = Some(TurnType::TaskCorrect);
         return None;
     }
-    if active_task_scope_refinement_should_preserve_fresh_execution_contract(output_contract) {
+    if active_task_scope_refinement_should_preserve_fresh_execution_contract(
+        route_reason,
+        output_contract,
+    ) {
         return None;
     }
     if current_request_has_resolved_workspace_child_locator
@@ -734,16 +769,12 @@ pub(super) fn apply_active_task_scope_refinement_repair(
         return None;
     }
 
-    let model_lifted_prompt_into_execution_target = matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::Clarify | FirstLayerDecision::PlannerExecute
-    ) && (output_contract
-        .requires_content_evidence
+    let model_lifted_prompt_into_execution_target = output_contract.requires_content_evidence
         || !matches!(
             output_contract.locator_kind,
             OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
         )
-        || !matches!(output_contract.semantic_kind, OutputSemanticKind::None));
+        || route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS);
 
     if !*needs_clarify && !model_lifted_prompt_into_execution_target {
         return None;
@@ -759,7 +790,6 @@ pub(super) fn apply_active_task_scope_refinement_repair(
         "active_task_scope_refinement_repair"
     };
     *needs_clarify = false;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.requires_content_evidence = false;
     output_contract.delivery_required = false;
@@ -771,6 +801,7 @@ pub(super) fn apply_active_task_scope_refinement_repair(
 }
 
 fn active_task_scope_refinement_should_preserve_fresh_execution_contract(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
     if output_contract.delivery_required
@@ -784,7 +815,7 @@ fn active_task_scope_refinement_should_preserve_fresh_execution_contract(
     ) && !output_contract.locator_hint.trim().is_empty();
     has_concrete_observable_locator
         && (output_contract.requires_content_evidence
-            || output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind))
+            || route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS))
 }
 
 fn active_task_explicit_locator_clarify_should_preserve_binding(
@@ -802,12 +833,15 @@ fn active_task_explicit_locator_clarify_should_preserve_binding(
         && !output_contract.locator_hint.trim().is_empty()
 }
 
-fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutputContract) -> bool {
+fn output_contract_allows_chat_only_task_mutation(
+    route_reason: &str,
+    output_contract: &IntentOutputContract,
+) -> bool {
     let chat_only_contract = !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        && matches!(output_contract.semantic_kind, OutputSemanticKind::None);
+        && output_contract.semantic_kind_is_unclassified();
     let active_scope_text_contract = output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -821,15 +855,11 @@ fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutput
                 | OutputResponseShape::OneSentence
                 | OutputResponseShape::Strict
         )
-        && matches!(
-            output_contract.semantic_kind,
-            OutputSemanticKind::WorkspaceProjectSummary
-                | OutputSemanticKind::DirectoryPurposeSummary
-                | OutputSemanticKind::ContentExcerptSummary
-                | OutputSemanticKind::ContentExcerptWithSummary
-                | OutputSemanticKind::ExcerptKindJudgment
-                | OutputSemanticKind::None
-        );
+        && (output_contract.semantic_kind_is_unclassified()
+            || route_reason_has_any_machine_marker(
+                route_reason,
+                ACTIVE_SCOPE_TEXT_CONTRACT_MARKERS,
+            ));
     chat_only_contract || active_scope_text_contract
 }
 
@@ -840,15 +870,17 @@ pub(super) fn clear_output_contract_for_active_text_followup(
     output_contract.delivery_required = false;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.response_shape = OutputResponseShape::Free;
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.locator_hint.clear();
 }
 
 fn output_contract_looks_like_contextual_text_followup(
+    route_reason: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    let contextual_semantic = matches!(output_contract.semantic_kind, OutputSemanticKind::None)
-        || semantic_kind_can_use_existing_observed_context(output_contract.semantic_kind);
+    let contextual_semantic = output_contract.semantic_kind_is_unclassified()
+        || route_reason_has_any_machine_marker(route_reason, EXISTING_OBSERVED_CONTEXT_MARKERS);
     !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(
@@ -904,18 +936,4 @@ pub(super) fn active_context_has_structured_observation_anchor(
                 || facts.observed_entry_count.is_some()
                 || facts.slice_spec.is_some()
         })
-}
-
-pub(super) fn answer_candidate_can_conflict_with_active_text_followup(
-    binding: Option<&AnswerCandidateBindingReport>,
-) -> bool {
-    binding.is_some_and(|binding| {
-        binding.is_distinctive()
-            && !binding.in_current_request
-            && !binding.in_recent_execution_context
-            && (binding.in_recent_assistant_replies
-                || binding.in_recent_turns_full
-                || binding.in_last_turn_full
-                || binding.in_memory_context)
-    })
 }

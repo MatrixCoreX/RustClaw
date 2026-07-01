@@ -1,4 +1,4 @@
-use super::{first_layer_gate::FirstLayerDecisionGateRecord, turn_analysis::TurnAnalysis};
+use super::{route_trace::RouteTraceRecord, turn_analysis::TurnAnalysis};
 use crate::{
     ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
 };
@@ -28,13 +28,17 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) output_contract: IntentOutputContract,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(crate) execution_recipe_plan_hint: Option<ExecutionRecipePlanHint>,
-    /// Legacy first-layer decision from the normalizer compatibility schema.
-    pub(crate) legacy_first_layer_decision: FirstLayerDecision,
+    /// Trace-only route hint from the normalizer compatibility schema.
+    ///
+    /// Runtime dispatch must derive route authority from machine state such as
+    /// `needs_clarify`, output contract, delivery, schedule, and execution recipe.
+    #[allow(dead_code)]
+    pub(crate) route_trace_decision: FirstLayerDecision,
     /// Execution finalization style. This is not a semantic gate.
     pub(crate) execution_finalize_style: ActFinalizeStyle,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
     pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
-    pub(crate) first_layer_gate_record: FirstLayerDecisionGateRecord,
+    pub(crate) route_trace_record: RouteTraceRecord,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

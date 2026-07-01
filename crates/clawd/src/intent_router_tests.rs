@@ -1,17 +1,13 @@
-use super::test_support::make_temp_workspace_with_child;
 use super::{
-    apply_active_file_basename_answer_candidate_direct_repair,
-    apply_current_turn_structural_contract_repair,
-    apply_self_contained_payload_direct_answer_contract_repair,
-    direct_answer_decision_should_be_overridden_by_executable_contract,
-    parse_execution_recipe_hint, parse_runtime_async_job_start_plan_hint,
-    structural_alias_binding_fallback_decision, structured_execution_signal_for_effective_route,
-    IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    apply_current_turn_structural_contract_repair, parse_execution_recipe_hint,
+    parse_runtime_async_job_start_plan_hint, structural_alias_binding_fallback_decision,
+    structured_execution_signal_for_effective_route, IntentExecutionRecipeOut,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 use crate::{
     execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
-    ActFinalizeStyle, FirstLayerDecision,
+    FirstLayerDecision,
 };
 use serde_json::Value;
 
@@ -256,18 +252,6 @@ fn route_result_drops_backend_model_display_name_hint() {
         .route_reason
         .contains("agent_display_name_hint_backend_metadata_removed"));
 
-    let mut out = super::normalizer_output_from_fallback(
-        "who are you",
-        "test_fallback",
-        identity_decision("", false),
-        None,
-    );
-    out.resolved_user_intent = "User asks for assistant identity.\nanswer_candidate: 我是 MiMo-v2.5-pro，由小米 MiMo 团队开发。".to_string();
-    let route = super::route_result_from_normalizer(&state, &task, &out);
-    assert!(route
-        .route_reason
-        .contains("normalizer_answer_candidate_backend_metadata_removed"));
-
     let out = super::normalizer_output_from_fallback(
         "remember this display name",
         "test_fallback",
@@ -279,77 +263,98 @@ fn route_result_drops_backend_model_display_name_hint() {
 }
 
 #[test]
-fn inline_json_answer_candidate_can_repair_to_direct_answer_contract() {
-    let request =
-        r#"解释这个 JSON 代表什么：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
-    let mut contract = IntentOutputContract {
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::CurrentWorkspace,
-        locator_hint: "/tmp/rustclaw".to_string(),
-        semantic_kind: OutputSemanticKind::StructuredKeys,
-        ..IntentOutputContract::default()
+fn route_result_uses_machine_execution_signal_not_legacy_normalizer_hint() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-machine-route-execute".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"inspect workspace"}).to_string(),
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
-    let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
-
-    let repair = apply_self_contained_payload_direct_answer_contract_repair(
-        &mut contract,
-        request,
-        &surface,
-        false,
-        ScheduleKind::None,
+    let decision = super::RouteDecision {
+        resolved_user_intent: "inspect current workspace".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "structured evidence required".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out = super::normalizer_output_from_fallback(
+        "inspect workspace",
+        "test_fallback",
+        decision,
         None,
-        false,
-        "beta, alpha",
-        &mut decision,
-        &mut finalize,
     );
+    out.route_trace_decision = FirstLayerDecision::DirectAnswer;
 
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(route.ask_mode.is_execute_gate());
+    assert!(route.route_reason.contains("test_fallback"));
     assert_eq!(
-        repair,
-        Some("self_contained_payload_direct_answer_contract")
+        route.output_contract.semantic_kind,
+        OutputSemanticKind::None,
+        "raw normalizer semantic_kind should not remain route authority"
     );
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert_eq!(finalize, crate::ActFinalizeStyle::Plain);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert!(route
+        .route_reason
+        .contains("contract:workspace_project_summary"));
 }
 
 #[test]
-fn inline_json_transform_repair_keeps_planner_contract() {
-    let request = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"sort","by":"score","order":"desc"},{"op":"project","fields":["name"]}]}"#;
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
-    let mut contract = IntentOutputContract {
-        requires_content_evidence: true,
-        locator_kind: OutputLocatorKind::CurrentWorkspace,
-        locator_hint: "/tmp/rustclaw".to_string(),
-        semantic_kind: OutputSemanticKind::StructuredKeys,
-        ..IntentOutputContract::default()
+fn route_result_ignores_legacy_planner_hint_without_machine_execution_signal() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-machine-route-chat".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"plain discussion"}).to_string(),
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
-    let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
+    let decision = super::RouteDecision {
+        resolved_user_intent: "plain discussion".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "no execution signal".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract::default(),
+    };
+    let mut out =
+        super::normalizer_output_from_fallback("plain discussion", "test_fallback", decision, None);
+    out.route_trace_decision = FirstLayerDecision::PlannerExecute;
 
-    let repair = apply_self_contained_payload_direct_answer_contract_repair(
-        &mut contract,
-        request,
-        &surface,
-        false,
-        ScheduleKind::None,
-        None,
-        false,
-        "beta, alpha",
-        &mut decision,
-        &mut finalize,
-    );
+    let route = super::route_result_from_normalizer(&state, &task, &out);
 
-    assert_eq!(repair, None);
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
-    assert_eq!(finalize, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(route.ask_mode.is_chat_gate());
+    assert!(!route.ask_mode.is_execute_gate());
 }
 
 #[test]
@@ -371,11 +376,11 @@ Provided target or content: [{"name":"alpha","score":7},{"name":"beta","score":1
     };
 
     let repair = apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::Standalone),
@@ -406,11 +411,11 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
     };
 
     let repair = apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -450,11 +455,11 @@ fn current_workspace_extension_inventory_repair_uses_file_paths() {
     };
 
     let repair = apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -498,203 +503,27 @@ fn current_workspace_extension_inventory_repair_ignores_explicit_file_targets() 
 }
 
 #[test]
-fn inline_json_transform_direct_answer_candidate_promotes_to_planner_contract() {
-    let request = r#"把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
-    let mut contract = IntentOutputContract::default();
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize = crate::ActFinalizeStyle::Plain;
-
-    let repair = super::apply_inline_structured_transform_direct_answer_repair(
-        &mut contract,
-        &surface,
-        false,
-        ScheduleKind::None,
-        None,
-        false,
-        "| name | score |\n|------|-------|\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |",
-        &mut decision,
-        &mut finalize,
-    );
-
-    assert_eq!(repair, Some("inline_structured_transform_contract_repair"));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert_eq!(finalize, crate::ActFinalizeStyle::ChatWrapped);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-}
-
-#[test]
-fn inline_json_transform_fenced_table_candidate_promotes_to_planner_contract() {
-    let request = r#"把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
-    let mut contract = IntentOutputContract::default();
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize = crate::ActFinalizeStyle::Plain;
-
-    let repair = super::apply_inline_structured_transform_direct_answer_repair(
-        &mut contract,
-        &surface,
-        false,
-        ScheduleKind::None,
-        None,
-        false,
-        "```markdown\n| name | score |\n|------|-------|\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |\n```",
-        &mut decision,
-        &mut finalize,
-    );
-
-    assert_eq!(repair, Some("inline_structured_transform_contract_repair"));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert!(contract.requires_content_evidence);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
-}
-
-#[test]
-fn inline_json_direct_answer_repair_rejects_explicit_path() {
-    let request = r#"读取 data/input.json 并按 [{"field":"score"}] 排序"#;
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
-    let mut contract = IntentOutputContract {
-        requires_content_evidence: true,
-        semantic_kind: OutputSemanticKind::StructuredKeys,
-        ..IntentOutputContract::default()
-    };
-    let mut decision = FirstLayerDecision::PlannerExecute;
-    let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
-
-    let repair = apply_self_contained_payload_direct_answer_contract_repair(
-        &mut contract,
-        request,
-        &surface,
-        false,
-        ScheduleKind::None,
-        None,
-        false,
-        "beta, alpha",
-        &mut decision,
-        &mut finalize,
-    );
-
-    assert_eq!(repair, None);
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert!(contract.requires_content_evidence);
-}
-
-#[test]
-fn active_delivery_basename_candidate_keeps_direct_answer_contract() {
-    let workspace = make_temp_workspace_with_child("active_delivery_basename", "docs");
-    let target = workspace.join("docs").join("release_checklist.md");
-    std::fs::write(&target, "# release\n").expect("write target file");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = workspace.clone();
-    state.skill_rt.default_locator_search_dir = workspace.clone();
-    let session = crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
-            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
-            bound_target: Some(target.display().to_string()),
-            source_task_id: "task-1".to_string(),
-            updated_at_ts: 1,
-            expires_at_ts: crate::now_ts_u64() + 300,
-            ..Default::default()
-        }),
-        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
-            bound_target: Some(target.display().to_string()),
-            delivery_targets: vec![target.display().to_string()],
-            output_shape: Some(OutputResponseShape::FileToken.as_str().to_string()),
-            ..Default::default()
-        }),
-        active_clarify_state: None,
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize = ActFinalizeStyle::ChatWrapped;
-    let mut wants_file_delivery = false;
-    let mut contract = IntentOutputContract {
-        response_shape: OutputResponseShape::Scalar,
-        requires_content_evidence: true,
-        delivery_required: false,
-        locator_kind: OutputLocatorKind::CurrentWorkspace,
-        delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: OutputSemanticKind::None,
-        ..Default::default()
-    };
-
-    let repair = apply_active_file_basename_answer_candidate_direct_repair(
-        &state,
-        Some(&session),
-        "release_checklist.md",
-        false,
-        &mut decision,
-        &mut finalize,
-        &mut wants_file_delivery,
-        &mut contract,
-    );
-
-    assert_eq!(repair, Some("active_file_basename_answer_candidate_direct"));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert_eq!(finalize, ActFinalizeStyle::Plain);
-    assert!(!wants_file_delivery);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::FileBasename);
-    assert!(contract.locator_hint.is_empty());
-    let _ = std::fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn basename_answer_candidate_repair_blocks_executable_contract_override() {
+fn semantic_kind_alone_does_not_require_structured_execution_signal() {
     let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::Scalar,
         semantic_kind: OutputSemanticKind::FileBasename,
         ..Default::default()
     };
 
-    assert!(
-        direct_answer_decision_should_be_overridden_by_executable_contract(
-            false,
-            FirstLayerDecision::DirectAnswer,
-            &contract,
-            false,
-            ScheduleKind::None,
-            None,
-            None,
-        )
-    );
-    assert!(
-        !direct_answer_decision_should_be_overridden_by_executable_contract(
-            false,
-            FirstLayerDecision::DirectAnswer,
-            &contract,
-            false,
-            ScheduleKind::None,
-            None,
-            Some("active_file_basename_answer_candidate_direct"),
-        )
-    );
     assert!(!structured_execution_signal_for_effective_route(
         &contract,
         false,
         ScheduleKind::None,
         None,
-        Some("active_file_basename_answer_candidate_direct"),
     ));
-
     contract.semantic_kind = OutputSemanticKind::None;
     contract.requires_content_evidence = true;
-    assert!(
-        direct_answer_decision_should_be_overridden_by_executable_contract(
-            false,
-            FirstLayerDecision::DirectAnswer,
-            &contract,
-            false,
-            ScheduleKind::None,
-            None,
-            None,
-        )
-    );
+    assert!(structured_execution_signal_for_effective_route(
+        &contract,
+        false,
+        ScheduleKind::None,
+        None,
+    ));
 }
 
 /// §3.5c-小切口：intent_normalizer schema 与 Rust parser 漂移检查。
@@ -928,6 +757,14 @@ fn intent_normalizer_schema_drift() {
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();
     for kind in OutputSemanticKind::ALL {
+        if kind.is_registry_capability_bridge() {
+            assert!(
+                !schema_semantic_kinds.contains(kind.as_str()),
+                "intent_normalizer schema must not expose registry capability bridge semantic_kind `{}`; planner capability metadata owns this routing",
+                kind.as_str()
+            );
+            continue;
+        }
         assert!(
             schema_semantic_kinds.contains(kind.as_str()),
             "intent_normalizer schema missing canonical semantic_kind `{}`",
@@ -1046,7 +883,7 @@ fn active_ordered_scalar_path_missing_state_patch_context_reports_machine_anchor
         agent_display_name_hint: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
-        reason: "selected item from active ordered entries".to_string(),
+        reason: "selected item from active ordered entries; scalar_path_only".to_string(),
         confidence: 0.8,
         decision: "planner_execute".to_string(),
         schedule_intent: None,

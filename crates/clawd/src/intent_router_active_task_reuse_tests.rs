@@ -3,9 +3,8 @@
 use crate::FirstLayerDecision;
 
 use super::{
-    ActFinalizeStyle, ClarifyQuestionPolicy, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy,
-    TurnType,
+    ClarifyQuestionPolicy, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 
 #[test]
@@ -34,7 +33,7 @@ fn scope_update_clarify_is_resolved_when_active_task_exists() {
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            FirstLayerDecision::Clarify,
+            true,
             &IntentOutputContract::default(),
             None,
         )
@@ -59,7 +58,7 @@ fn scope_update_clarify_reuses_active_task_without_keyword_detector() {
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            FirstLayerDecision::Clarify,
+            true,
             &IntentOutputContract::default(),
             None,
         )
@@ -83,7 +82,7 @@ fn task_replace_clarify_is_resolved_when_active_task_exists() {
         Some(TurnType::TaskReplace),
         Some(TargetTaskPolicy::ReplaceActive),
         false,
-        FirstLayerDecision::Clarify,
+        true,
         &IntentOutputContract::default(),
         None,
     ));
@@ -106,7 +105,7 @@ fn task_replace_clarify_reuses_active_task_without_keyword_detector() {
         Some(TurnType::TaskReplace),
         Some(TargetTaskPolicy::ReplaceActive),
         false,
-        FirstLayerDecision::Clarify,
+        true,
         &IntentOutputContract::default(),
         None,
     ));
@@ -132,92 +131,20 @@ fn active_task_scope_update_is_routed_back_to_direct_answer() {
     };
     assert!(super::should_route_active_task_mutation_to_direct_answer(
         "先只看登录模块",
+        "workspace_project_summary",
         Some(&snapshot),
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::PlannerExecute,
         &contract,
         None,
     ));
 }
 
 #[test]
-fn active_bound_path_answer_candidate_stays_direct_answer() {
-    let workspace = super::test_support::make_temp_workspace_with_child(
-        "active_bound_path_answer_candidate",
-        "docs",
-    );
-    let target = workspace.join("docs").join("service_notes.md");
-    std::fs::write(&target, "# Service Notes\n").expect("write target");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = workspace.clone();
-    state.skill_rt.default_locator_search_dir = workspace.clone();
-    let target_text = target.display().to_string();
-    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: Some(crate::conversation_state::ConversationState {
-            last_primary_task_prompt: Some("send the selected file".to_string()),
-            last_primary_task_output: Some(format!("FILE:{target_text}")),
-            ..crate::conversation_state::ConversationState::default()
-        }),
-        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
-            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
-            bound_target: Some(target_text.clone()),
-            ordered_entries: vec![target_text.clone()],
-            ..crate::followup_frame::FollowupFrame::default()
-        }),
-        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
-            bound_target: Some(target_text.clone()),
-            delivery_targets: vec![target_text.clone()],
-            ordered_entries: vec![target_text.clone()],
-            ..crate::observed_facts::ObservedFacts::default()
-        }),
-        active_clarify_state: None,
-    };
-    let mut decision = FirstLayerDecision::DirectAnswer;
-    let mut finalize = ActFinalizeStyle::ChatWrapped;
-    let mut wants_file_delivery = false;
-    let mut contract = IntentOutputContract {
-        response_shape: OutputResponseShape::Free,
-        requires_content_evidence: false,
-        delivery_required: false,
-        locator_kind: OutputLocatorKind::Path,
-        delivery_intent: OutputDeliveryIntent::None,
-        semantic_kind: OutputSemanticKind::None,
-        locator_hint: target_text.clone(),
-        ..IntentOutputContract::default()
-    };
-
-    let repair = super::apply_active_bound_path_answer_candidate_direct_repair(
-        &state,
-        Some(&snapshot),
-        &target_text,
-        false,
-        ScheduleKind::None,
-        &mut decision,
-        &mut finalize,
-        &mut wants_file_delivery,
-        &mut contract,
-    );
-
-    assert_eq!(repair, Some("active_bound_path_answer_candidate_direct"));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert_eq!(finalize, ActFinalizeStyle::Plain);
-    assert!(!wants_file_delivery);
-    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert!(contract.locator_hint.is_empty());
-    let _ = std::fs::remove_dir_all(workspace);
-}
-
-#[test]
 fn missing_active_task_reuse_policy_is_repaired_to_clarify() {
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::DirectAnswer;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::Strict,
@@ -227,14 +154,13 @@ fn missing_active_task_reuse_policy_is_repaired_to_clarify() {
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "",
+        "",
         None,
         None,
         Some(TargetTaskPolicy::ReuseActive),
         None,
-        None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
@@ -242,7 +168,6 @@ fn missing_active_task_reuse_policy_is_repaired_to_clarify() {
     assert_eq!(reason, Some("missing_active_task_reuse_requires_clarify"));
     assert!(needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -250,10 +175,9 @@ fn missing_active_task_reuse_policy_is_repaired_to_clarify() {
 }
 
 #[test]
-fn missing_active_task_reuse_policy_preserves_standalone_answer_candidate() {
+fn missing_active_task_reuse_policy_ignores_standalone_answer_candidate() {
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::DirectAnswer;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::OneSentence,
@@ -265,31 +189,28 @@ fn missing_active_task_reuse_policy_preserves_standalone_answer_candidate() {
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "",
+        "",
         None,
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
-        Some("Use Python 3.10 for deployment."),
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
 
-    assert_eq!(reason, None);
-    assert!(!needs_clarify);
+    assert_eq!(reason, Some("missing_active_task_reuse_requires_clarify"));
+    assert!(needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
-    assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
 }
 
 #[test]
 fn missing_active_task_reuse_policy_preserves_current_task_execution_contract() {
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::Strict,
@@ -302,14 +223,13 @@ fn missing_active_task_reuse_policy_preserves_current_task_execution_contract() 
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "",
+        "",
         None,
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::ReuseActive),
         None,
-        None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
@@ -317,7 +237,6 @@ fn missing_active_task_reuse_policy_preserves_current_task_execution_contract() 
     assert_eq!(reason, None);
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
     assert_eq!(contract.locator_hint, "/tmp/work/document");
@@ -327,7 +246,6 @@ fn missing_active_task_reuse_policy_preserves_current_task_execution_contract() 
 fn missing_active_task_reuse_policy_preserves_status_query_execution_contract() {
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut contract = IntentOutputContract {
         response_shape: OutputResponseShape::OneSentence,
@@ -339,14 +257,13 @@ fn missing_active_task_reuse_policy_preserves_status_query_execution_contract() 
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "",
+        "",
         None,
         Some(TurnType::StatusQuery),
         Some(TargetTaskPolicy::ReuseActive),
         None,
-        None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
@@ -354,7 +271,6 @@ fn missing_active_task_reuse_policy_preserves_status_query_execution_contract() 
     assert_eq!(reason, None);
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::ServiceStatus);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
@@ -380,7 +296,7 @@ fn structured_replacement_patch_repairs_active_task_correction_metadata() {
     });
     let mut turn_type = None;
     let mut target_task_policy = None;
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -397,11 +313,11 @@ fn structured_replacement_patch_repairs_active_task_correction_metadata() {
 
     let reason = super::apply_active_task_structured_patch_repair(
         "Use Python 3.11 instead of Python 3.10.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -413,7 +329,7 @@ fn structured_replacement_patch_repairs_active_task_correction_metadata() {
     assert_eq!(reason, Some("active_task_structured_patch_repair"));
     assert_eq!(turn_type, Some(TurnType::TaskCorrect));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!needs_clarify);
     assert!(!contract.requires_content_evidence);
@@ -450,7 +366,7 @@ fn ordered_entry_execution_patch_preserves_planner_contract() {
     });
     let mut turn_type = Some(TurnType::TaskAppend);
     let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -467,11 +383,11 @@ fn ordered_entry_execution_patch_preserves_planner_contract() {
 
     let reason = super::apply_active_task_structured_patch_repair(
         "Use the selected ordered entry and read a bounded slice.",
+        "raw_command_output",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -518,7 +434,7 @@ fn structured_patch_repair_does_not_clear_execution_failed_step_contract() {
     });
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -535,11 +451,11 @@ fn structured_patch_repair_does_not_clear_execution_failed_step_contract() {
 
     let reason = super::apply_active_task_structured_patch_repair(
         "Run echo BEFORE_CHANGE, then definitely_missing_command, then echo AFTER_CHANGE_OLD; if I later continue, replace the last step.",
+        "execution_failed_step",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -580,7 +496,7 @@ fn structured_patch_repair_does_not_override_explicit_filename_target() {
     });
     let mut turn_type = None;
     let mut target_task_policy = None;
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -597,11 +513,11 @@ fn structured_patch_repair_does_not_override_explicit_filename_target() {
 
     let reason = super::apply_active_task_structured_patch_repair(
         "In README.md, replace Python 3.10 with Python 3.11.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -634,7 +550,7 @@ fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
     let patch = serde_json::json!({"release_notes_python_version": "Python 3.11"});
     let mut turn_type = None;
     let mut target_task_policy = None;
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -651,11 +567,11 @@ fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
 
     let reason = super::apply_active_task_structured_patch_repair(
         "Use Python 3.11 instead of Python 3.10.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -673,7 +589,7 @@ fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
 
     let mut turn_type = Some(TurnType::TaskCorrect);
     let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -689,11 +605,11 @@ fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
     };
     let reason = super::apply_active_task_structured_patch_repair(
         "Use Python 3.11 instead of Python 3.10.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -705,7 +621,7 @@ fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
     assert_eq!(reason, Some("active_task_structured_patch_repair"));
     assert_eq!(turn_type, Some(TurnType::TaskCorrect));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert!(!contract.requires_content_evidence);
     assert!(contract.locator_hint.is_empty());
 }
@@ -723,7 +639,6 @@ fn standalone_execution_target_misroute_is_repaired_to_active_scope_update() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
     let mut contract = IntentOutputContract {
@@ -740,11 +655,11 @@ fn standalone_execution_target_misroute_is_repaired_to_active_scope_update() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "先只看登录模块",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -757,7 +672,6 @@ fn standalone_execution_target_misroute_is_repaired_to_active_scope_update() {
     assert_eq!(reason, Some("active_task_scope_refinement_repair"));
     assert_eq!(turn_type, Some(TurnType::TaskScopeUpdate));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!needs_clarify);
     assert!(!contract.requires_content_evidence);
@@ -787,7 +701,6 @@ fn scope_refinement_repair_detaches_from_structured_active_target() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
     let mut contract = IntentOutputContract {
@@ -804,11 +717,11 @@ fn scope_refinement_repair_detaches_from_structured_active_target() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "A concept label without a concrete target.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -824,7 +737,6 @@ fn scope_refinement_repair_detaches_from_structured_active_target() {
     );
     assert_eq!(turn_type, None);
     assert_eq!(target_task_policy, None);
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!needs_clarify);
     assert!(!contract.requires_content_evidence);
@@ -853,7 +765,6 @@ fn active_ordered_scalar_path_without_ref_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut decision = FirstLayerDecision::DirectAnswer;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -870,9 +781,8 @@ fn active_ordered_scalar_path_without_ref_stays_chat() {
     let reason = super::apply_active_ordered_scalar_path_chat_repair(
         Some(&snapshot),
         None,
-        "",
+        "scalar_path_only",
         false,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
@@ -881,7 +791,6 @@ fn active_ordered_scalar_path_without_ref_stays_chat() {
         reason,
         Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
     );
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert!(!contract.requires_content_evidence);
@@ -910,7 +819,6 @@ fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -927,9 +835,8 @@ fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
     let reason = super::apply_active_ordered_scalar_path_chat_repair(
         Some(&snapshot),
         None,
-        "",
+        "scalar_path_only",
         false,
-        &mut decision,
         &mut finalize_style,
         &mut contract,
     );
@@ -938,7 +845,6 @@ fn active_ordered_scalar_path_without_ref_repairs_planner_to_chat() {
         reason,
         Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
     );
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert!(!contract.requires_content_evidence);
@@ -965,7 +871,6 @@ fn active_observed_output_summary_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -989,15 +894,13 @@ fn active_observed_output_summary_stays_chat() {
         ScheduleKind::None,
         None,
         false,
-        "",
         false,
-        &mut decision,
+        "excerpt_kind_judgment",
         &mut finalize_style,
         &mut contract,
     );
 
     assert_eq!(reason, Some("active_observed_output_chat_repair"));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
@@ -1028,7 +931,6 @@ fn active_observed_output_chinese_category_judgment_stays_chat() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut contract = IntentOutputContract {
         exact_sentence_count: Some(1),
@@ -1052,15 +954,13 @@ fn active_observed_output_chinese_category_judgment_stays_chat() {
         ScheduleKind::None,
         None,
         false,
-        "",
         false,
-        &mut decision,
+        "excerpt_kind_judgment",
         &mut finalize_style,
         &mut contract,
     );
 
     assert_eq!(reason, Some("active_observed_output_chat_repair"));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -1089,7 +989,6 @@ fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_cha
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut contract = IntentOutputContract {
         exact_sentence_count: Some(1),
@@ -1113,15 +1012,13 @@ fn active_observed_output_conversation_judgment_without_fresh_evidence_stays_cha
         ScheduleKind::None,
         None,
         false,
-        "",
         false,
-        &mut decision,
+        "",
         &mut finalize_style,
         &mut contract,
     );
 
     assert_eq!(reason, Some("active_observed_output_chat_repair"));
-    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
@@ -1144,7 +1041,6 @@ fn scope_refinement_repair_preserves_current_request_workspace_child_locator() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
     let mut contract = IntentOutputContract {
@@ -1161,11 +1057,11 @@ fn scope_refinement_repair_preserves_current_request_workspace_child_locator() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "Read README and summarize it.",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -1178,7 +1074,6 @@ fn scope_refinement_repair_preserves_current_request_workspace_child_locator() {
     assert_eq!(reason, None);
     assert_eq!(turn_type, Some(TurnType::TaskRequest));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(needs_clarify);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
 }
@@ -1196,7 +1091,6 @@ fn scope_refinement_repair_does_not_override_explicit_locator() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
     let mut contract = IntentOutputContract {
@@ -1213,11 +1107,11 @@ fn scope_refinement_repair_does_not_override_explicit_locator() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "先只看 UI/src",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -1230,7 +1124,6 @@ fn scope_refinement_repair_does_not_override_explicit_locator() {
     assert_eq!(reason, None);
     assert_eq!(turn_type, Some(TurnType::TaskCorrect));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(needs_clarify);
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -1271,7 +1164,6 @@ fn scope_refinement_repair_preserves_fresh_document_heading_contract() {
     });
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -1289,11 +1181,11 @@ fn scope_refinement_repair_preserves_fresh_document_heading_contract() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "Read only the selected document heading.",
+        "document_heading",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -1306,7 +1198,6 @@ fn scope_refinement_repair_preserves_fresh_document_heading_contract() {
     assert_eq!(reason, None);
     assert_eq!(turn_type, Some(TurnType::TaskRequest));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert!(!needs_clarify);
     assert!(contract.requires_content_evidence);
@@ -1332,7 +1223,6 @@ fn scope_refinement_repair_preserves_standalone_observation_contract() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut contract = IntentOutputContract {
@@ -1349,11 +1239,11 @@ fn scope_refinement_repair_preserves_standalone_observation_contract() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "检查当前运行环境并只返回关键值",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -1366,7 +1256,6 @@ fn scope_refinement_repair_preserves_standalone_observation_contract() {
     assert_eq!(reason, None);
     assert_eq!(turn_type, Some(TurnType::TaskRequest));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     assert!(!needs_clarify);
     assert!(contract.requires_content_evidence);
@@ -1386,11 +1275,11 @@ fn active_task_scope_update_en_remains_direct_answer_from_chat_wrapped_execution
     };
     assert!(super::should_route_active_task_mutation_to_direct_answer(
         "Only focus on the login module first",
+        "",
         Some(&snapshot),
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::PlannerExecute,
         &IntentOutputContract::default(),
         None,
     ));

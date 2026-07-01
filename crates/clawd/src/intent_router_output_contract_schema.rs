@@ -1,9 +1,7 @@
 use serde_json::Value;
 
-use crate::FirstLayerDecision;
-
 use super::{
-    canonical_first_layer_decision_token, contract_value_token,
+    contract_value_token, execution_recipe_value_declares_command_payload,
     looks_like_current_workspace_path_alias, normalize_bool_field_with_default,
     normalize_optional_string_field, normalize_output_delivery_intent_for_schema,
     normalize_output_locator_kind_for_schema, normalize_output_response_shape_for_schema,
@@ -15,12 +13,16 @@ use super::{
 
 pub(super) fn apply_raw_output_explicit_locator_repair(
     output_contract: &mut IntentOutputContract,
+    route_reason: &str,
     request: &str,
     command_runtime: &crate::CommandIntentRuntime,
 ) -> Option<&'static str> {
     if !output_contract.requires_content_evidence
         || output_contract.delivery_required
-        || output_contract.semantic_kind != OutputSemanticKind::RawCommandOutput
+        || !route_reason_has_machine_marker(
+            route_reason,
+            OutputSemanticKind::RawCommandOutput.as_str(),
+        )
         || output_contract.locator_kind != OutputLocatorKind::None
         || !output_contract.locator_hint.trim().is_empty()
         || crate::agent_engine::explicit_command_segment_for_policy(command_runtime, request)
@@ -38,6 +40,15 @@ pub(super) fn apply_raw_output_explicit_locator_repair(
     output_contract.locator_kind = locator.locator_kind;
     output_contract.locator_hint = locator.locator_hint;
     Some("raw_output_explicit_locator_contract_repair")
+}
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
 }
 
 pub(super) fn coerce_output_contract_value_for_schema(value: &mut Value) {
@@ -170,11 +181,8 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
 }
 
 pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>) {
-    let direct_answer_decision = obj
-        .get("decision")
-        .and_then(scalar_json_value_text)
-        .and_then(|text| canonical_first_layer_decision_token(&text))
-        .is_some_and(|decision| decision == FirstLayerDecision::DirectAnswer);
+    let command_payload_declared =
+        execution_recipe_value_declares_command_payload(obj.get("execution_recipe"));
     let Some(value) = obj.get_mut("output_contract") else {
         return;
     };
@@ -273,18 +281,24 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
         .and_then(|value| value.as_str())
         .map(normalize_output_semantic_kind_for_schema)
         .unwrap_or("none");
-    let mut semantic_kind =
-        if raw_scalar_output_contract_token.as_deref() == Some("raw") && direct_answer_decision {
-            "none".to_string()
-        } else {
-            semantic_kind.to_string()
-        };
+    let mut semantic_kind = if raw_scalar_output_contract_token.as_deref() == Some("raw")
+        && !command_payload_declared
+    {
+        "none".to_string()
+    } else {
+        semantic_kind.to_string()
+    };
     if semantic_kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
         && response_shape == "free"
     {
         semantic_kind = OutputSemanticKind::DirectoryPurposeSummary
             .as_str()
             .to_string();
+    }
+    let declared_semantic_kind_enum = parse_output_semantic_kind(&semantic_kind);
+    if declared_semantic_kind_enum.is_registry_capability_bridge() {
+        semantic_kind = OutputSemanticKind::None.as_str().to_string();
+        contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
     }
     contract.insert(
         "semantic_kind".to_string(),

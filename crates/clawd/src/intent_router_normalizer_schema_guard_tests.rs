@@ -17,7 +17,7 @@ fn normalizer_schema_normalization_recovers_minimax_file_list_search_payload() {
           "clarify_question":null,
           "reason":"directory listing",
           "confidence":0.7,
-          "decision":"planner_execute",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"list","semantic_kind":"file_list"},
           "execution_recipe":"list_md_files_excluding_readme",
           "turn_type":"file_query",
@@ -355,7 +355,7 @@ fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value
@@ -471,7 +471,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_text() {
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value
@@ -521,7 +521,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_array() 
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value
@@ -959,7 +959,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_find_recipe_text() {
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     assert_eq!(
         value
@@ -1581,7 +1581,7 @@ fn normalizer_schema_normalization_preserves_create_schedule_intent_task_text() 
 }
 
 #[test]
-fn normalizer_schema_normalization_recovers_scalar_output_contract_answer_candidate() {
+fn normalizer_schema_normalization_discards_scalar_output_contract_answer_candidate() {
     let raw = r#"{
           "resolved_user_intent":"查询之前记住的测试编号",
           "resume_behavior":"none",
@@ -1612,7 +1612,7 @@ fn normalizer_schema_normalization_recovers_scalar_output_contract_answer_candid
         value
             .get("answer_candidate")
             .and_then(|value| value.as_str()),
-        Some("client-like-continuous-20260430_094246")
+        Some("")
     );
     assert_eq!(
         value
@@ -1671,7 +1671,7 @@ fn normalizer_schema_normalization_treats_mime_output_contract_as_schema_token()
 }
 
 #[test]
-fn normalizer_schema_normalization_recovers_object_answer_candidate_and_ignores_json_contract() {
+fn normalizer_schema_normalization_discards_object_answer_candidate_and_ignores_json_contract() {
     let raw = r#"{
           "resolved_user_intent":"retrieve test ID",
           "answer_candidate":{"content":"client-like-continuous-20260430_095834"},
@@ -1703,7 +1703,7 @@ fn normalizer_schema_normalization_recovers_object_answer_candidate_and_ignores_
         value
             .get("answer_candidate")
             .and_then(|value| value.as_str()),
-        Some("client-like-continuous-20260430_095834")
+        Some("")
     );
     assert_eq!(
         value
@@ -1897,23 +1897,4 @@ fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() 
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
     )
     .expect("schema validation");
-}
-
-#[test]
-fn normalizer_resolved_intent_includes_answer_candidate_for_chat_stage() {
-    let resolved = super::merge_answer_candidate_into_resolved_intent(
-        "查询之前记住的测试编号".to_string(),
-        "client-like-continuous-20260430_094246",
-    );
-    assert_eq!(
-        resolved,
-        "查询之前记住的测试编号\nanswer_candidate: client-like-continuous-20260430_094246"
-    );
-    assert_eq!(
-        super::merge_answer_candidate_into_resolved_intent(
-            resolved.clone(),
-            "client-like-continuous-20260430_094246",
-        ),
-        resolved
-    );
 }

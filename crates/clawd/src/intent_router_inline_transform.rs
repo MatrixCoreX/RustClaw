@@ -1,166 +1,9 @@
 use serde_json::Value;
 
 use super::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
-    SelfExtensionMode, SelfExtensionTrigger,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, RouteDecision, ScheduleKind,
 };
-
-pub(super) fn apply_self_contained_payload_direct_answer_contract_repair(
-    output_contract: &mut IntentOutputContract,
-    req: &str,
-    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    wants_file_delivery: bool,
-    schedule_kind: ScheduleKind,
-    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    needs_clarify: bool,
-    answer_candidate: &str,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-) -> Option<&'static str> {
-    if needs_clarify
-        || answer_candidate.trim().is_empty()
-        || req_surface.inline_json_shape.is_none()
-        || crate::intent::surface_signals::inline_json_transform_request(req)
-        || wants_file_delivery
-        || !matches!(schedule_kind, ScheduleKind::None)
-        || execution_recipe_hint.is_some_and(|spec| {
-            !matches!(
-                spec.kind,
-                crate::execution_recipe::ExecutionRecipeKind::None
-            )
-        })
-        || req_surface.has_explicit_path_or_url()
-        || req_surface.has_filename_candidates()
-        || req_surface.has_delivery_token_reference()
-        || output_contract.delivery_required
-        || matches!(
-            output_contract.response_shape,
-            OutputResponseShape::FileToken
-        )
-        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(output_contract.self_extension.mode, SelfExtensionMode::None)
-        || !matches!(
-            output_contract.self_extension.trigger,
-            SelfExtensionTrigger::None
-        )
-        || output_contract.self_extension.execute_now
-    {
-        return None;
-    }
-
-    output_contract.requires_content_evidence = false;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.locator_hint.clear();
-    output_contract.semantic_kind = OutputSemanticKind::None;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    Some("self_contained_payload_direct_answer_contract")
-}
-
-pub(super) fn apply_inline_structured_transform_direct_answer_repair(
-    output_contract: &mut IntentOutputContract,
-    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    wants_file_delivery: bool,
-    schedule_kind: ScheduleKind,
-    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    needs_clarify: bool,
-    answer_candidate: &str,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-) -> Option<&'static str> {
-    if needs_clarify
-        || !matches!(
-            *legacy_normalizer_decision,
-            FirstLayerDecision::DirectAnswer
-        )
-        || req_surface.inline_json_shape.is_none()
-        || !answer_candidate_has_structured_transform_result(answer_candidate)
-        || wants_file_delivery
-        || !matches!(schedule_kind, ScheduleKind::None)
-        || execution_recipe_hint.is_some_and(|spec| {
-            !matches!(
-                spec.kind,
-                crate::execution_recipe::ExecutionRecipeKind::None
-            )
-        })
-        || req_surface.has_explicit_path_or_url()
-        || req_surface.has_filename_candidates()
-        || req_surface.has_delivery_token_reference()
-        || output_contract.delivery_required
-        || matches!(
-            output_contract.response_shape,
-            OutputResponseShape::FileToken
-        )
-        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-        || !matches!(output_contract.self_extension.mode, SelfExtensionMode::None)
-        || !matches!(
-            output_contract.self_extension.trigger,
-            SelfExtensionTrigger::None
-        )
-        || output_contract.self_extension.execute_now
-    {
-        return None;
-    }
-
-    output_contract.requires_content_evidence = true;
-    output_contract.delivery_required = false;
-    output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.locator_hint.clear();
-    output_contract.semantic_kind = OutputSemanticKind::None;
-    output_contract.response_shape = OutputResponseShape::Strict;
-    *legacy_normalizer_decision = FirstLayerDecision::PlannerExecute;
-    *execution_finalize_style = ActFinalizeStyle::ChatWrapped;
-    Some("inline_structured_transform_contract_repair")
-}
-
-fn answer_candidate_has_structured_transform_result(answer_candidate: &str) -> bool {
-    let normalized = strip_single_markdown_code_fence(answer_candidate);
-    let trimmed = normalized.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    serde_json::from_str::<serde_json::Value>(trimmed)
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value,
-                serde_json::Value::Array(_) | serde_json::Value::Object(_)
-            )
-        })
-        || answer_candidate_is_markdown_table(trimmed)
-}
-
-fn strip_single_markdown_code_fence(candidate: &str) -> String {
-    let trimmed = candidate.trim();
-    let lines = trimmed.lines().collect::<Vec<_>>();
-    if lines.len() < 3 {
-        return trimmed.to_string();
-    }
-    let first = lines.first().map(|line| line.trim()).unwrap_or_default();
-    let last = lines.last().map(|line| line.trim()).unwrap_or_default();
-    if first.starts_with("```") && last == "```" {
-        lines[1..lines.len() - 1].join("\n").trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn answer_candidate_is_markdown_table(candidate: &str) -> bool {
-    let lines = candidate
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    lines.len() >= 2
-        && lines
-            .first()
-            .is_some_and(|line| line.starts_with('|') && line.ends_with('|'))
-        && lines
-            .get(1)
-            .is_some_and(|line| line.chars().all(|ch| matches!(ch, '|' | '-' | ':' | ' ')))
-}
 
 pub(super) fn inline_json_transform_fallback_decision(req: &str) -> Option<RouteDecision> {
     if !inline_structural_transform_candidate(req) {
@@ -293,12 +136,11 @@ fn inline_transform_schema_tokens(text: &str) -> Vec<String> {
 pub(super) fn parsed_inline_json_transform_repair_decision(
     req: &str,
     needs_clarify: bool,
-    legacy_normalizer_decision: FirstLayerDecision,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<RouteDecision> {
-    if !needs_clarify && !matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify) {
+    if !needs_clarify {
         return None;
     }
     if wants_file_delivery || !matches!(schedule_kind, ScheduleKind::None) {

@@ -316,7 +316,7 @@ fn normalizer_schema_normalization_recovers_files_listing_contract_from_chat_dri
 }
 
 #[test]
-fn executable_unknown_scalar_output_contract_triggers_semantic_repair_not_answer_candidate() {
+fn legacy_planner_unknown_scalar_output_contract_does_not_trigger_repair_without_machine_signal() {
     let raw = r#"{
           "resolved_user_intent":"查找当前仓库里所有 sh 脚本所在的目录，去重后列出来",
           "answer_candidate":null,
@@ -351,10 +351,10 @@ fn executable_unknown_scalar_output_contract_triggers_semantic_repair_not_answer
             .and_then(|value| value.as_str()),
         Some("")
     );
-    assert!(report
+    assert!(!report
         .details
         .contains("executable_route_unknown_scalar_output_contract"));
-    assert!(report.needs_llm_contract_integrity_repair());
+    assert!(!report.needs_llm_contract_integrity_repair());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,

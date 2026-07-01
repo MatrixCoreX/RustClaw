@@ -2,10 +2,9 @@ use tracing::info;
 
 use super::{
     append_route_reason, bare_path_only_input_can_fill_active_observable_task,
-    execution_finalize_style_for_contract, first_layer_decision_gate_record,
-    is_bare_path_only_input_for_clarify, push_unique_repair_code,
-    structured_execution_signal_for_effective_route, ContractRepairReport, IntentNormalizerOutput,
-    TargetTaskPolicy, TurnAnalysis, TurnType,
+    execution_finalize_style_for_contract, is_bare_path_only_input_for_clarify,
+    push_unique_repair_code, route_trace_record, structured_execution_signal_for_effective_route,
+    ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
 };
 use crate::{
     ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
@@ -31,13 +30,10 @@ pub(super) fn build_normalizer_output_with_final_gate(
     output_contract: IntentOutputContract,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
-    legacy_normalizer_decision: FirstLayerDecision,
     execution_finalize_style: ActFinalizeStyle,
     turn_analysis: Option<TurnAnalysis>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    parsed_decision: Option<FirstLayerDecision>,
-    active_file_basename_answer_candidate_repair: Option<&'static str>,
     contract_repair_report: &ContractRepairReport,
     repair_reasons: &[Option<&'static str>],
 ) -> IntentNormalizerOutput {
@@ -47,7 +43,6 @@ pub(super) fn build_normalizer_output_with_final_gate(
             session_snapshot,
             turn_type,
             target_task_policy,
-            legacy_normalizer_decision,
             &output_contract,
         );
     let (needs_clarify_eff, clarify_question_eff) = if bare_path_only
@@ -73,26 +68,17 @@ pub(super) fn build_normalizer_output_with_final_gate(
     } else {
         (needs_clarify, clarify_question)
     };
-    let bare_path_promotes_to_execute = !needs_clarify_eff
-        && bare_path_only
-        && bare_path_fills_active_observable_task
-        && matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify);
+    let bare_path_promotes_to_execute =
+        !needs_clarify_eff && bare_path_only && bare_path_fills_active_observable_task;
     let structured_execution_signal = structured_execution_signal_for_effective_route(
         &output_contract,
         wants_file_delivery,
         schedule_kind,
         execution_recipe_hint,
-        active_file_basename_answer_candidate_repair,
     );
     let legacy_normalizer_decision_eff = if needs_clarify_eff {
         FirstLayerDecision::Clarify
-    } else if bare_path_promotes_to_execute
-        || structured_execution_signal
-        || matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
-    {
+    } else if bare_path_promotes_to_execute || structured_execution_signal {
         FirstLayerDecision::PlannerExecute
     } else {
         FirstLayerDecision::DirectAnswer
@@ -115,38 +101,33 @@ pub(super) fn build_normalizer_output_with_final_gate(
     } else {
         ActFinalizeStyle::Plain
     };
-    let mut first_layer_repair_codes = contract_repair_report
+    let mut route_trace_repair_codes = contract_repair_report
         .details
         .iter()
         .copied()
         .map(str::to_string)
         .collect::<Vec<_>>();
     for code in repair_reasons.iter().copied().flatten() {
-        push_unique_repair_code(&mut first_layer_repair_codes, code);
+        push_unique_repair_code(&mut route_trace_repair_codes, code);
     }
-    let first_layer_gate_record = first_layer_decision_gate_record(
-        parsed_decision,
+    let route_trace_record = route_trace_record(
         legacy_normalizer_decision_eff,
         needs_clarify_eff,
         &output_contract,
-        first_layer_repair_codes,
+        route_trace_repair_codes,
     );
     info!(
-        "{} intent_normalizer_first_layer_gate task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
+        "{} intent_normalizer_route_trace task_id={} owner_layer={} reason_code={} outcome={} route_trace_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         crate::highlight_tag("routing"),
         task.task_id,
-        first_layer_gate_record.owner_layer,
-        first_layer_gate_record.reason_code,
-        first_layer_gate_record.outcome,
-        first_layer_gate_record
-            .source_decision
-            .map(|decision| decision.as_str())
-            .unwrap_or("none"),
-        first_layer_gate_record.final_decision.as_str(),
-        first_layer_gate_record.needs_clarify,
-        first_layer_gate_record.output_contract_ref,
-        first_layer_gate_record.repair_codes.join(","),
-        first_layer_gate_record.repair_classes.join(","),
+        route_trace_record.owner_layer,
+        route_trace_record.reason_code,
+        route_trace_record.outcome,
+        route_trace_record.route_trace_decision.as_str(),
+        route_trace_record.needs_clarify,
+        route_trace_record.output_contract_ref,
+        route_trace_record.repair_codes.join(","),
+        route_trace_record.repair_classes.join(","),
     );
     IntentNormalizerOutput {
         resolved_user_intent,
@@ -163,10 +144,10 @@ pub(super) fn build_normalizer_output_with_final_gate(
         output_contract,
         execution_recipe_hint,
         execution_recipe_plan_hint,
-        legacy_first_layer_decision: legacy_normalizer_decision_eff,
+        route_trace_decision: legacy_normalizer_decision_eff,
         execution_finalize_style: execution_finalize_style_eff,
         turn_analysis,
         fallback_source: None,
-        first_layer_gate_record,
+        route_trace_record,
     }
 }

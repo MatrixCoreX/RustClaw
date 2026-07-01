@@ -1,7 +1,5 @@
 // Current-turn structural repair tests for intent_router.
 
-use crate::FirstLayerDecision;
-
 use super::{
     IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
     TargetTaskPolicy, TurnType,
@@ -19,11 +17,11 @@ fn observed_context_summary_followup_does_not_force_fresh_evidence() {
         "in one sentence tell me if anything looks abnormal",
     );
     let reason = super::apply_current_turn_structural_contract_repair(
+        "content_excerpt_summary",
         &mut contract,
         "in one sentence tell me if anything looks abnormal",
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::DirectAnswer,
         "",
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
@@ -44,11 +42,11 @@ fn explicit_locator_summary_still_requires_fresh_evidence() {
     let surface =
         crate::intent::surface_signals::analyze_prompt_surface("summarize app.log briefly");
     let reason = super::apply_current_turn_structural_contract_repair(
+        "content_excerpt_summary",
         &mut contract,
         "summarize app.log briefly",
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::DirectAnswer,
         "",
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
@@ -71,7 +69,7 @@ fn fs_basic_lifecycle_machine_tokens_repair_command_summary_contract() {
 
     let reason = super::apply_fs_basic_lifecycle_machine_contract_repair(
         &mut contract,
-        "fs_basic.make_dir -> write_text -> append_text -> read_text_range -> remove_path(recursive)",
+        "command_output_summary; fs_basic.make_dir -> write_text -> append_text -> read_text_range -> remove_path(recursive)",
     );
 
     assert_eq!(reason, Some("fs_basic_lifecycle_contract_repair"));
@@ -97,7 +95,7 @@ fn media_generation_machine_tokens_repair_command_summary_contract() {
 
     let reason = super::apply_media_generation_path_report_machine_contract_repair(
         &mut contract,
-        "capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs",
+        "command_output_summary; capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs",
     );
 
     assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
@@ -116,7 +114,129 @@ fn media_generation_machine_tokens_repair_command_summary_contract() {
 }
 
 #[test]
-fn media_generation_machine_tokens_override_publishing_preview_contract() {
+fn media_generation_capability_token_requires_exact_machine_token() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_media_generation_path_report_machine_contract_repair(
+        &mut contract,
+        "command_output_summary; capability=image.generate_extra dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs",
+    );
+
+    assert_eq!(reason, None);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+}
+
+#[test]
+fn locatorless_observation_capability_marker_uses_capability_ref_machine_token() {
+    assert!(
+        super::current_turn_structural_repair::contract_uses_locatorless_system_observation(
+            "service_status"
+        )
+    );
+    assert!(
+        super::current_turn_structural_repair::contract_uses_locatorless_system_observation(
+            "capability_ref=weather.current"
+        )
+    );
+    assert!(
+        super::current_turn_structural_repair::contract_uses_locatorless_system_observation(
+            "capability_ref=weather.current_extra"
+        )
+    );
+    assert!(
+        !super::current_turn_structural_repair::contract_uses_locatorless_system_observation(
+            "capability=weather.current"
+        )
+    );
+    assert!(
+        !super::current_turn_structural_repair::contract_uses_locatorless_system_observation(
+            "capability_ref=weathercurrent"
+        )
+    );
+}
+
+#[test]
+fn media_poll_machine_tokens_repair_command_summary_contract() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_media_generation_path_report_machine_contract_repair(
+        &mut contract,
+        "command_output_summary; capability=image.poll dry_run=true task_id=image-task-001 job_id=image-job-001 output_path=document/media_dry_run/image_status_card.png async_poll_adapter_result",
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "document/media_dry_run/image_status_card.png"
+    );
+}
+
+#[test]
+fn media_poll_machine_tokens_override_service_status_contract() {
+    let request = "capability=image.poll dry_run=true task_id=image-task-001 job_id=image-job-001 output_path=document/media_dry_run/image_status_card.png async_poll_adapter_result";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::ServiceStatus,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &format!("service_status; {request}"),
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "document/media_dry_run/image_status_card.png"
+    );
+}
+
+#[test]
+fn media_generation_machine_tokens_build_path_report_contract_without_legacy_preview_marker() {
     let request = "capability=image.generate dry_run=true output_path=document/media_dry_run/image_status_card.png planned_outputs";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
     let mut contract = IntentOutputContract {
@@ -124,16 +244,16 @@ fn media_generation_machine_tokens_override_publishing_preview_contract() {
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::None,
         locator_hint: String::new(),
-        semantic_kind: OutputSemanticKind::PublishingPreview,
+        semantic_kind: OutputSemanticKind::None,
         ..IntentOutputContract::default()
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        request,
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -164,11 +284,11 @@ fn media_generation_path_tokens_force_evidence_for_generic_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        request,
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -199,11 +319,11 @@ fn media_generation_machine_tokens_repair_generic_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        request,
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -238,11 +358,11 @@ fn media_generation_machine_tokens_override_filesystem_mutation_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        &format!("filesystem_mutation_result; {request}"),
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -272,11 +392,11 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -307,11 +427,11 @@ fn structural_config_field_value_repairs_direct_misroute_from_current_request() 
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::DirectAnswer,
         "",
         None,
         None,
@@ -339,11 +459,11 @@ fn structural_config_field_value_repairs_filesystem_mutation_to_config_mutation_
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -374,11 +494,11 @@ fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_cont
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -407,11 +527,11 @@ fn structural_config_field_value_overrides_failed_step_misroute_to_config_mutati
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -443,11 +563,11 @@ fn config_mutation_contract_repairs_missing_locator_from_current_request() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -478,11 +598,11 @@ fn structural_config_field_without_value_does_not_repair_to_mutation() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,

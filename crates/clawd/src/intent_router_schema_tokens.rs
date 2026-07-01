@@ -13,6 +13,24 @@ pub(super) fn normalize_schema_token(raw: &str) -> String {
         .to_string()
 }
 
+fn is_capability_ref_token(value: &str) -> bool {
+    let Some(capability) = value.strip_prefix("capability_ref=") else {
+        return false;
+    };
+    !capability.is_empty()
+        && capability.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+        && capability.bytes().any(|byte| byte == b'.')
+}
+
+pub(super) fn machine_context_has_capability_ref(machine_context: &str) -> bool {
+    machine_context
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
+        .map(|part| part.trim().to_ascii_lowercase())
+        .any(|part| is_capability_ref_token(&part))
+}
+
 pub(super) fn normalize_output_response_shape_for_schema(raw: &str) -> &'static str {
     let trimmed = raw.trim();
     if trimmed.contains('{') && trimmed.contains('}') {
@@ -190,6 +208,7 @@ pub(super) fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static s
     }
 }
 
+#[cfg(test)]
 pub(super) fn canonical_first_layer_decision_token(raw: &str) -> Option<FirstLayerDecision> {
     match normalize_schema_token(raw).as_str() {
         "clarify" => Some(FirstLayerDecision::Clarify),
@@ -199,6 +218,7 @@ pub(super) fn canonical_first_layer_decision_token(raw: &str) -> Option<FirstLay
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_first_layer_decision_text(raw: &str) -> Option<FirstLayerDecision> {
     canonical_first_layer_decision_token(raw)
 }
@@ -223,7 +243,7 @@ pub(super) fn execution_finalize_style_for_contract(
     if matches!(
         contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::FileToken
-    ) || matches!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput)
+    ) || contract.semantic_kind_is(OutputSemanticKind::RawCommandOutput)
     {
         ActFinalizeStyle::Plain
     } else {

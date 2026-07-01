@@ -1,12 +1,18 @@
 use serde_json::Value;
-use std::path::Path;
 
 use super::{
-    parse_output_contract, state_patch_deictic_reference_requires_clarify, ActFinalizeStyle,
-    AppState, FirstLayerDecision, IntentNormalizerOut, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy,
-    TurnType,
+    parse_output_contract, parse_output_semantic_kind,
+    state_patch_deictic_reference_requires_clarify, ActFinalizeStyle, IntentNormalizerOut,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
+
+const ACTIVE_OBSERVATION_CONTRACT_MARKERS: &[&str] = &[
+    "content_excerpt_summary",
+    "content_excerpt_with_summary",
+    "excerpt_kind_judgment",
+    "scalar_path_only",
+];
 
 pub(super) fn active_primary_task_prompt<'a>(
     session_snapshot: Option<&'a crate::conversation_state::ActiveSessionSnapshot>,
@@ -32,7 +38,7 @@ pub(super) fn active_clarify_locator_task_prompt<'a>(
         .filter(|state| {
             state.delivery_required
                 || state.output_shape.is_some()
-                || state.semantic_kind.is_some()
+                || clarify_state_has_known_semantic_marker(state)
                 || !state.candidate_targets.is_empty()
         })
         .map(|state| state.source_request.trim())
@@ -44,6 +50,35 @@ pub(super) fn active_observable_task_prompt<'a>(
 ) -> Option<&'a str> {
     active_primary_task_prompt(session_snapshot)
         .or_else(|| active_clarify_locator_task_prompt(session_snapshot))
+}
+
+fn clarify_state_has_known_semantic_marker(state: &crate::clarify_state::ClarifyState) -> bool {
+    state
+        .semantic_kind
+        .as_deref()
+        .is_some_and(|value| parse_output_semantic_kind(value) != OutputSemanticKind::None)
+}
+
+fn route_reason_has_contract_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').map(str::trim).any(|part| {
+        part == marker
+            || part
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.trim() == marker)
+    })
+}
+
+fn route_reason_has_any_active_observation_contract_marker(route_reason: &str) -> bool {
+    ACTIVE_OBSERVATION_CONTRACT_MARKERS
+        .iter()
+        .any(|marker| route_reason_has_contract_marker(route_reason, marker))
+}
+
+fn route_reason_has_repairable_active_observed_output_contract(route_reason: &str) -> bool {
+    !route_reason_has_any_active_observation_contract_marker(route_reason)
+        || route_reason_has_contract_marker(route_reason, "content_excerpt_summary")
+        || route_reason_has_contract_marker(route_reason, "content_excerpt_with_summary")
+        || route_reason_has_contract_marker(route_reason, "excerpt_kind_judgment")
 }
 
 pub(super) fn prompt_has_concrete_fileish_cue(
@@ -141,200 +176,6 @@ pub(super) fn active_session_has_structured_execution_target(
             .is_some_and(active_observed_facts_have_structured_target)
 }
 
-fn single_component_answer_candidate(candidate: &str) -> Option<&str> {
-    let candidate = candidate.trim();
-    if candidate.is_empty()
-        || candidate.contains('\n')
-        || candidate.contains('/')
-        || candidate.contains('\\')
-        || Path::new(candidate).components().count() != 1
-    {
-        return None;
-    }
-    Some(candidate)
-}
-
-fn existing_file_basename_for_session_target(state: &AppState, target: &str) -> Option<String> {
-    let target = target.trim();
-    if target.is_empty() {
-        return None;
-    }
-    let path = Path::new(target);
-    let is_existing_file = path.is_file()
-        || path
-            .canonicalize()
-            .ok()
-            .is_some_and(|canonical| canonical.is_file());
-    let is_workspace_file = !is_existing_file && state.skill_rt.workspace_root.join(path).is_file();
-    if !is_existing_file && !is_workspace_file {
-        return None;
-    }
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToString::to_string)
-}
-
-fn active_session_bound_file_basename_candidate(
-    state: &AppState,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    answer_candidate: &str,
-) -> Option<String> {
-    let candidate = single_component_answer_candidate(answer_candidate)?;
-    let snapshot = session_snapshot?;
-    let mut targets = Vec::new();
-    if let Some(frame) = snapshot.active_followup_frame.as_ref() {
-        if matches!(
-            frame.op_kind,
-            crate::followup_frame::FollowupOpKind::Delivery
-                | crate::followup_frame::FollowupOpKind::Read
-        ) {
-            if let Some(target) = frame.bound_target.as_deref() {
-                targets.push(target);
-            }
-        }
-    }
-    if let Some(facts) = snapshot.active_observed_facts.as_ref() {
-        if let Some(target) = facts.bound_target.as_deref() {
-            targets.push(target);
-        }
-        targets.extend(facts.delivery_targets.iter().map(String::as_str));
-    }
-    targets.into_iter().find_map(|target| {
-        let basename = existing_file_basename_for_session_target(state, target)?;
-        basename.eq_ignore_ascii_case(candidate).then_some(basename)
-    })
-}
-
-fn existing_path_for_answer_candidate(state: &AppState, answer_candidate: &str) -> Option<String> {
-    let candidate = answer_candidate.trim();
-    if candidate.is_empty()
-        || candidate.contains('\n')
-        || candidate.starts_with('{')
-        || candidate.starts_with('[')
-    {
-        return None;
-    }
-    let path = Path::new(candidate);
-    if path.is_absolute() && path.exists() {
-        return Some(path.display().to_string());
-    }
-    let workspace_path = state.skill_rt.workspace_root.join(path);
-    workspace_path
-        .exists()
-        .then(|| workspace_path.display().to_string())
-}
-
-fn paths_match_existing_location(left: &str, right: &str) -> bool {
-    let left = Path::new(left.trim());
-    let right = Path::new(right.trim());
-    if left == right {
-        return true;
-    }
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => false,
-    }
-}
-
-fn active_session_bound_targets(
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-) -> Vec<&str> {
-    let Some(snapshot) = session_snapshot else {
-        return Vec::new();
-    };
-    let mut targets = Vec::new();
-    if let Some(frame) = snapshot.active_followup_frame.as_ref() {
-        if let Some(target) = frame.bound_target.as_deref() {
-            targets.push(target);
-        }
-        targets.extend(frame.ordered_entries.iter().map(String::as_str));
-    }
-    if let Some(facts) = snapshot.active_observed_facts.as_ref() {
-        if let Some(target) = facts.bound_target.as_deref() {
-            targets.push(target);
-        }
-        targets.extend(facts.ordered_entries.iter().map(String::as_str));
-        targets.extend(facts.delivery_targets.iter().map(String::as_str));
-    }
-    targets
-}
-
-fn active_session_bound_path_answer_candidate(
-    state: &AppState,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    answer_candidate: &str,
-) -> Option<String> {
-    let candidate_path = existing_path_for_answer_candidate(state, answer_candidate)?;
-    active_session_bound_targets(session_snapshot)
-        .into_iter()
-        .filter(|target| !target.trim().is_empty())
-        .any(|target| paths_match_existing_location(&candidate_path, target))
-        .then_some(candidate_path)
-}
-
-pub(super) fn apply_active_file_basename_answer_candidate_direct_repair(
-    state: &AppState,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    answer_candidate: &str,
-    needs_clarify: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-    wants_file_delivery: &mut bool,
-    output_contract: &mut IntentOutputContract,
-) -> Option<&'static str> {
-    if needs_clarify || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer) {
-        return None;
-    }
-    active_session_bound_file_basename_candidate(state, session_snapshot, answer_candidate)?;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    *wants_file_delivery = false;
-    output_contract.response_shape = OutputResponseShape::Scalar;
-    output_contract.requires_content_evidence = false;
-    output_contract.delivery_required = false;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.semantic_kind = OutputSemanticKind::FileBasename;
-    output_contract.locator_hint.clear();
-    Some("active_file_basename_answer_candidate_direct")
-}
-
-pub(super) fn apply_active_bound_path_answer_candidate_direct_repair(
-    state: &AppState,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    answer_candidate: &str,
-    needs_clarify: bool,
-    schedule_kind: ScheduleKind,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
-    execution_finalize_style: &mut ActFinalizeStyle,
-    wants_file_delivery: &mut bool,
-    output_contract: &mut IntentOutputContract,
-) -> Option<&'static str> {
-    if needs_clarify
-        || !matches!(legacy_normalizer_decision, FirstLayerDecision::DirectAnswer)
-        || !matches!(schedule_kind, ScheduleKind::None)
-        || *wants_file_delivery
-        || output_contract.delivery_required
-        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
-    {
-        return None;
-    }
-    active_session_bound_path_answer_candidate(state, session_snapshot, answer_candidate)?;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
-    *execution_finalize_style = ActFinalizeStyle::Plain;
-    *wants_file_delivery = false;
-    output_contract.response_shape = OutputResponseShape::Scalar;
-    output_contract.requires_content_evidence = false;
-    output_contract.delivery_required = false;
-    output_contract.locator_kind = OutputLocatorKind::None;
-    output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.semantic_kind = OutputSemanticKind::None;
-    output_contract.locator_hint.clear();
-    Some("active_bound_path_answer_candidate_direct")
-}
-
 pub(super) fn active_session_has_ordered_entries(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> bool {
@@ -418,7 +259,7 @@ pub(super) fn active_ordered_scalar_path_missing_state_patch_context(
     let output_contract =
         parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
     if output_contract.response_shape != OutputResponseShape::Scalar
-        || output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || !route_reason_has_contract_marker(&out.reason, "scalar_path_only")
         || output_contract.locator_kind != OutputLocatorKind::None
         || !output_contract.locator_hint.trim().is_empty()
         || output_contract.delivery_required
@@ -457,22 +298,16 @@ pub(super) fn active_ordered_scalar_path_missing_state_patch_context(
 pub(super) fn apply_active_ordered_scalar_path_chat_repair(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     state_patch: Option<&Value>,
-    answer_candidate: &str,
+    route_reason: &str,
     needs_clarify: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
     if needs_clarify
-        || !matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::DirectAnswer | FirstLayerDecision::PlannerExecute
-        )
-        || !answer_candidate.trim().is_empty()
         || !active_session_has_ordered_entries(session_snapshot)
         || state_patch_has_ordered_entry_ref(state_patch)
         || output_contract.response_shape != OutputResponseShape::Scalar
-        || output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || !route_reason_has_contract_marker(route_reason, "scalar_path_only")
         || output_contract.locator_kind != OutputLocatorKind::None
         || !output_contract.locator_hint.trim().is_empty()
         || output_contract.delivery_required
@@ -485,7 +320,6 @@ pub(super) fn apply_active_ordered_scalar_path_chat_repair(
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("active_ordered_scalar_path_chat_repair_without_structured_ref")
 }
@@ -500,9 +334,8 @@ pub(super) fn apply_active_observed_output_chat_repair(
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     wants_file_delivery: bool,
-    answer_candidate: &str,
     needs_clarify: bool,
-    legacy_normalizer_decision: &mut FirstLayerDecision,
+    route_reason: &str,
     execution_finalize_style: &mut ActFinalizeStyle,
     output_contract: &mut IntentOutputContract,
 ) -> Option<&'static str> {
@@ -521,17 +354,13 @@ pub(super) fn apply_active_observed_output_chat_repair(
                 | OutputResponseShape::Scalar
                 | OutputResponseShape::Strict
         )
-        && output_contract.semantic_kind == OutputSemanticKind::None;
+        && !route_reason_has_any_active_observation_contract_marker(route_reason);
     if attachment_processing_required
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
         || execution_recipe_hint.is_some()
         || wants_file_delivery
         || needs_clarify
-        || !matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::DirectAnswer | FirstLayerDecision::PlannerExecute
-        )
         || !matches!(
             turn_type,
             None | Some(TurnType::TaskRequest | TurnType::TaskScopeUpdate)
@@ -540,7 +369,6 @@ pub(super) fn apply_active_observed_output_chat_repair(
             target_task_policy,
             None | Some(TargetTaskPolicy::ReuseActive)
         )
-        || !answer_candidate.trim().is_empty()
         || !active_session_has_structured_execution_target(session_snapshot)
         || !active_session_has_recent_primary_output(session_snapshot)
         || current_turn_has_concrete_target
@@ -555,13 +383,7 @@ pub(super) fn apply_active_observed_output_chat_repair(
         )
         || !contract_locator_matches_active_observation(session_snapshot, output_contract)
         || output_contract.delivery_intent != OutputDeliveryIntent::None
-        || !matches!(
-            output_contract.semantic_kind,
-            OutputSemanticKind::None
-                | OutputSemanticKind::ContentExcerptSummary
-                | OutputSemanticKind::ContentExcerptWithSummary
-                | OutputSemanticKind::ExcerptKindJudgment
-        )
+        || !route_reason_has_repairable_active_observed_output_contract(route_reason)
     {
         return None;
     }
@@ -572,7 +394,6 @@ pub(super) fn apply_active_observed_output_chat_repair(
     output_contract.locator_hint.clear();
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.semantic_kind = OutputSemanticKind::None;
-    *legacy_normalizer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("active_observed_output_chat_repair")
 }

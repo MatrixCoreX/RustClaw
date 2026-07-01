@@ -1,21 +1,60 @@
 use std::path::Path;
 
-use crate::{AppState, FirstLayerDecision};
+use crate::AppState;
 
 use super::{
     active_clarify_locator_task_prompt, active_observable_task_prompt,
     compare_path_targets_current_anchor, first_compare_path_from_text, locator_hint_compare_path,
-    locator_hint_points_to_workspace_root, output_semantic_kind_requires_fresh_evidence,
-    route_has_structured_execution_signal, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ScheduleKind, TargetTaskPolicy,
-    TurnType,
+    locator_hint_points_to_workspace_root, route_has_structured_execution_signal,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
 };
+
+const CURRENT_ANCHOR_CONTEXT_ONLY_MARKERS: &[&str] = &["tool_discovery"];
+const CURRENT_ANCHOR_COMMAND_OBSERVATION_MARKERS: &[&str] =
+    &["raw_command_output", "execution_failed_step"];
+const CURRENT_ANCHOR_CONFIG_MARKERS: &[&str] = &[
+    "config_risk_assessment",
+    "config_validation",
+    "config_mutation",
+];
+
+fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
+    route_reason.split(';').any(|entry| {
+        let entry = entry.trim();
+        entry == marker
+            || entry
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix == marker)
+    })
+}
+
+fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
+    markers
+        .iter()
+        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+}
+
+fn output_contract_has_file_delivery_signal(
+    route_reason: &str,
+    output_contract: &IntentOutputContract,
+) -> bool {
+    route_reason_has_machine_marker(route_reason, "generated_file_delivery")
+        || output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+        || matches!(
+            output_contract.delivery_intent,
+            OutputDeliveryIntent::FileSingle
+        )
+}
 
 pub(super) fn bare_path_only_input_can_fill_active_observable_task(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
     let active_delivery_frame = session_snapshot
@@ -35,13 +74,7 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
             output_contract.delivery_intent,
             OutputDeliveryIntent::FileSingle
         );
-    if active_delivery_frame
-        && file_delivery_contract
-        && matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        )
-    {
+    if active_delivery_frame && file_delivery_contract {
         return true;
     }
 
@@ -53,21 +86,18 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
         Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
     );
     let executable_observation_contract = output_contract.requires_content_evidence
-        && (output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
-            || matches!(
-                output_contract.response_shape,
-                OutputResponseShape::Scalar
-                    | OutputResponseShape::Strict
-                    | OutputResponseShape::FileToken
-            )
-            || matches!(
-                output_contract.locator_kind,
-                OutputLocatorKind::Path
-                    | OutputLocatorKind::Filename
-                    | OutputLocatorKind::Url
-                    | OutputLocatorKind::CurrentWorkspace
-            )
-            || !output_contract.locator_hint.trim().is_empty());
+        && (matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Scalar
+                | OutputResponseShape::Strict
+                | OutputResponseShape::FileToken
+        ) || matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::Url
+                | OutputLocatorKind::CurrentWorkspace
+        ) || !output_contract.locator_hint.trim().is_empty());
     let active_replacement_locator_policy = matches!(turn_type, Some(TurnType::TaskRequest))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
         && executable_observation_contract;
@@ -77,15 +107,8 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
     let active_implicit_locator_policy =
         turn_type.is_none() && target_task_policy.is_none() && executable_observation_contract;
 
-    let decision_can_fill_active_task =
-        matches!(
-            legacy_normalizer_decision,
-            FirstLayerDecision::PlannerExecute
-        ) || (matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
-            && executable_observation_contract);
-
     if active_observable_task_prompt(session_snapshot).is_none()
-        || !decision_can_fill_active_task
+        || !executable_observation_contract
         || !(active_followup_policy
             || active_replacement_locator_policy
             || active_clarify_locator_policy
@@ -101,7 +124,6 @@ pub(super) fn bare_path_only_input_can_fill_active_observable_task(
                 | OutputResponseShape::Strict
                 | OutputResponseShape::FileToken
         )
-        || output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
 }
 
 pub(super) fn sanitize_resolved_intent_for_current_turn_locator(
@@ -165,14 +187,15 @@ fn normalizer_target_drifted_from_current_anchor(
 
 pub(super) fn apply_current_turn_anchor_drift_repair(
     output_contract: &mut IntentOutputContract,
+    route_reason: &str,
     resolved_user_intent: &str,
     current_anchor_path: &str,
     workspace_root: &Path,
 ) -> Option<&'static str> {
-    if current_turn_anchor_repair_preserves_context_only_contract(output_contract.semantic_kind) {
+    if route_reason_has_any_machine_marker(route_reason, CURRENT_ANCHOR_CONTEXT_ONLY_MARKERS) {
         return None;
     }
-    if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery {
+    if route_reason_has_machine_marker(route_reason, "generated_file_delivery") {
         return None;
     }
     if matches!(
@@ -191,21 +214,14 @@ pub(super) fn apply_current_turn_anchor_drift_repair(
         return None;
     }
 
-    let preserve_file_delivery = output_contract.delivery_required
-        || matches!(
-            output_contract.response_shape,
-            OutputResponseShape::FileToken
-        )
-        || matches!(
-            output_contract.delivery_intent,
-            OutputDeliveryIntent::FileSingle
-        );
-    let preserve_command_observation = matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::RawCommandOutput | OutputSemanticKind::ExecutionFailedStep
+    let preserve_file_delivery =
+        output_contract_has_file_delivery_signal(route_reason, output_contract);
+    let preserve_command_observation = route_reason_has_any_machine_marker(
+        route_reason,
+        CURRENT_ANCHOR_COMMAND_OBSERVATION_MARKERS,
     );
     let preserve_quantity_comparison =
-        output_contract.semantic_kind == OutputSemanticKind::QuantityComparison;
+        route_reason_has_machine_marker(route_reason, "quantity_comparison");
 
     output_contract.response_shape = if preserve_file_delivery {
         OutputResponseShape::FileToken
@@ -232,7 +248,11 @@ pub(super) fn apply_current_turn_anchor_drift_repair(
         OutputDeliveryIntent::None
     };
     output_contract.semantic_kind = if preserve_command_observation {
-        output_contract.semantic_kind
+        if route_reason_has_machine_marker(route_reason, "execution_failed_step") {
+            OutputSemanticKind::ExecutionFailedStep
+        } else {
+            OutputSemanticKind::RawCommandOutput
+        }
     } else if preserve_quantity_comparison {
         OutputSemanticKind::QuantityComparison
     } else {
@@ -278,8 +298,8 @@ pub(super) fn current_request_mentions_session_alias(
 }
 
 pub(super) fn current_turn_anchor_drift_repair_allowed(
-    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
+    route_reason: &str,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
@@ -289,18 +309,16 @@ pub(super) fn current_turn_anchor_drift_repair_allowed(
     if needs_clarify {
         return false;
     }
-    if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery {
+    if wants_file_delivery
+        || output_contract_has_file_delivery_signal(route_reason, output_contract)
+    {
         return false;
     }
-    if current_turn_anchor_repair_preserves_context_only_contract(output_contract.semantic_kind) {
+    if route_reason_has_any_machine_marker(route_reason, CURRENT_ANCHOR_CONTEXT_ONLY_MARKERS) {
         return false;
     }
-    if matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::ConfigRiskAssessment
-            | OutputSemanticKind::ConfigValidation
-            | OutputSemanticKind::ConfigMutation
-    ) && !output_contract.locator_hint.trim().is_empty()
+    if route_reason_has_any_machine_marker(route_reason, CURRENT_ANCHOR_CONFIG_MARKERS)
+        && !output_contract.locator_hint.trim().is_empty()
     {
         return false;
     }
@@ -310,19 +328,10 @@ pub(super) fn current_turn_anchor_drift_repair_allowed(
             return false;
         }
     }
-    matches!(
-        legacy_normalizer_decision,
-        FirstLayerDecision::PlannerExecute
-    ) || route_has_structured_execution_signal(
+    route_has_structured_execution_signal(
         output_contract,
         wants_file_delivery,
         schedule_kind,
         execution_recipe_hint,
     )
-}
-
-fn current_turn_anchor_repair_preserves_context_only_contract(
-    semantic_kind: OutputSemanticKind,
-) -> bool {
-    matches!(semantic_kind, OutputSemanticKind::ToolDiscovery)
 }

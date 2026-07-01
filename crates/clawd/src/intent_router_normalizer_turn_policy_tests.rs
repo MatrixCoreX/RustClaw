@@ -1,7 +1,6 @@
 // Normalizer schedule and turn-policy tests for intent_router.
 
 use crate::runtime::types::{ScheduleIntentSchedule, ScheduleIntentTask};
-use crate::FirstLayerDecision;
 
 use super::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
@@ -61,7 +60,7 @@ fn normalizer_schema_normalization_coerces_invalid_schedule_kind_to_none() {
 }
 
 #[test]
-fn normalizer_schema_normalization_promotes_schedule_type_token_to_create_for_execution() {
+fn normalizer_schema_normalization_promotes_schedule_type_token_without_decision_authority() {
     let raw = r#"{
           "resolved_user_intent":"Create a daily 08:00 reminder in the current conversation",
           "resume_behavior":"none",
@@ -74,7 +73,7 @@ fn normalizer_schema_normalization_promotes_schedule_type_token_to_create_for_ex
           "clarify_question":"",
           "reason":"schedule type token was emitted in the operation field",
           "confidence":0.91,
-          "decision":"planner_execute",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","semantic_kind":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
           "turn_type":"task_request",
@@ -157,15 +156,13 @@ fn schedule_route_contract_repair_clears_filesystem_evidence_contract() {
     contract.delivery_intent = super::OutputDeliveryIntent::None;
     contract.semantic_kind = super::OutputSemanticKind::FilesystemMutationResult;
     let mut wants_file_delivery = false;
-    let mut decision = super::FirstLayerDecision::PlannerExecute;
+    let decision = super::FirstLayerDecision::DirectAnswer;
     let mut finalize_style = super::ActFinalizeStyle::ChatWrapped;
 
     let repair = super::apply_schedule_route_contract_repair(
         super::ScheduleKind::Create,
-        false,
         &mut contract,
         &mut wants_file_delivery,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -176,7 +173,7 @@ fn schedule_route_contract_repair_clears_filesystem_evidence_contract() {
     assert_eq!(contract.locator_kind, super::OutputLocatorKind::None);
     assert_eq!(contract.delivery_intent, super::OutputDeliveryIntent::None);
     assert_eq!(contract.semantic_kind, super::OutputSemanticKind::None);
-    assert_eq!(decision, super::FirstLayerDecision::PlannerExecute);
+    assert_eq!(decision, super::FirstLayerDecision::DirectAnswer);
     assert_eq!(finalize_style, super::ActFinalizeStyle::Plain);
 }
 
@@ -564,7 +561,6 @@ fn structured_preference_ack_is_detached_from_active_task() {
     assert!(super::should_detach_bare_acknowledgement_from_active_task(
         Some(TurnType::PreferenceOrMemory),
         Some(TargetTaskPolicy::ReuseActive),
-        FirstLayerDecision::DirectAnswer,
         &contract,
         None,
         false,
@@ -572,7 +568,6 @@ fn structured_preference_ack_is_detached_from_active_task() {
     assert!(!super::should_detach_bare_acknowledgement_from_active_task(
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
-        FirstLayerDecision::DirectAnswer,
         &contract,
         None,
         false,
@@ -580,7 +575,6 @@ fn structured_preference_ack_is_detached_from_active_task() {
     assert!(!super::should_detach_bare_acknowledgement_from_active_task(
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
-        FirstLayerDecision::DirectAnswer,
         &contract,
         Some(&serde_json::json!({"output_refinement":"one_sentence_only"})),
         false,
@@ -611,7 +605,7 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
             Some(&snapshot_without_primary),
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::Clarify,
+            true,
             &contract,
             None,
             false,
@@ -633,7 +627,7 @@ fn orphan_output_shape_clarify_downgrades_to_standalone_chat() {
             Some(&snapshot_with_primary),
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::Clarify,
+            true,
             &contract,
             None,
             false,
@@ -648,7 +642,6 @@ fn missing_turn_type_with_standalone_policy_infers_primary_task_request() {
         super::infer_missing_turn_type_from_policy(
             None,
             Some(TargetTaskPolicy::Standalone),
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,
@@ -659,7 +652,6 @@ fn missing_turn_type_with_standalone_policy_infers_primary_task_request() {
         super::infer_missing_turn_type_from_policy(
             Some(TurnType::PreferenceOrMemory),
             Some(TargetTaskPolicy::Standalone),
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             true,
@@ -670,7 +662,6 @@ fn missing_turn_type_with_standalone_policy_infers_primary_task_request() {
         super::infer_missing_turn_type_from_policy(
             None,
             Some(TargetTaskPolicy::Standalone),
-            FirstLayerDecision::Clarify,
             true,
             crate::ScheduleKind::None,
             false,
@@ -685,7 +676,6 @@ fn missing_turn_type_with_active_task_policy_infers_mutation_type() {
         super::infer_missing_turn_type_from_policy(
             None,
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,
@@ -696,7 +686,6 @@ fn missing_turn_type_with_active_task_policy_infers_mutation_type() {
         super::infer_missing_turn_type_from_policy(
             None,
             Some(TargetTaskPolicy::ReplaceActive),
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,
@@ -707,7 +696,6 @@ fn missing_turn_type_with_active_task_policy_infers_mutation_type() {
         super::infer_missing_turn_type_from_policy(
             None,
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             true,
@@ -735,7 +723,7 @@ fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
             None,
             Some(TurnType::TaskRequest),
             None,
-            FirstLayerDecision::Clarify,
+            true,
             &contract,
             None,
             false,
@@ -749,7 +737,7 @@ fn standalone_freeform_clarify_can_downgrade_to_direct_answer() {
             None,
             Some(TurnType::TaskRequest),
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::Clarify,
+            true,
             &contract,
             None,
             false,
@@ -778,7 +766,7 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
             None,
             Some(TurnType::TaskRequest),
             None,
-            FirstLayerDecision::Clarify,
+            true,
             &observable_contract,
             None,
             false,
@@ -813,7 +801,7 @@ fn standalone_freeform_clarify_downgrade_preserves_observable_and_active_tasks()
             Some(&snapshot_with_primary),
             Some(TurnType::TaskRequest),
             None,
-            FirstLayerDecision::Clarify,
+            true,
             &freeform_contract,
             None,
             false,
@@ -840,7 +828,6 @@ fn missing_policy_with_strict_chat_deliverable_infers_standalone_task() {
     let policy = super::infer_missing_target_policy_from_contract(
         None,
         None,
-        FirstLayerDecision::DirectAnswer,
         false,
         crate::ScheduleKind::None,
         false,
@@ -851,7 +838,6 @@ fn missing_policy_with_strict_chat_deliverable_infers_standalone_task() {
         super::infer_missing_turn_type_from_policy(
             None,
             policy,
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,
@@ -877,7 +863,6 @@ fn missing_policy_with_non_strict_chat_does_not_promote_generic_chat() {
         super::infer_missing_target_policy_from_contract(
             None,
             None,
-            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,

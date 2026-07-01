@@ -30,10 +30,8 @@ use ordered_entry::{
 
 pub(super) struct PreparedAskExecutionContext {
     pub(super) context_bundle: crate::task_context_builder::TaskContextBundle,
-    pub(super) chat_prompt_context: String,
     pub(super) resolved_prompt_for_execution: String,
     pub(super) prompt_with_memory_for_execution: String,
-    pub(super) memory_context_for_execution: String,
     pub(super) recent_execution_context: String,
 }
 
@@ -44,7 +42,6 @@ pub(super) struct PreparedAskRouting {
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) resolved_prompt: String,
-    pub(super) agent_mode: bool,
 }
 
 pub(super) struct PreparedAskInput {
@@ -451,10 +448,8 @@ pub(super) async fn prepare_ask_execution_context(
     );
     Ok(PreparedAskExecutionContext {
         context_bundle,
-        chat_prompt_context,
         resolved_prompt_for_execution,
         prompt_with_memory_for_execution,
-        memory_context_for_execution: prompt_with_memory,
         recent_execution_context,
     })
 }
@@ -543,31 +538,27 @@ fn parse_clarify_state_response_shape(value: Option<&str>) -> Option<crate::Outp
     }
 }
 
-fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::OutputSemanticKind> {
+fn normalize_clarify_state_semantic_marker(value: Option<&str>) -> Option<&'static str> {
     match value?.trim() {
-        "content_excerpt_summary" => Some(crate::OutputSemanticKind::ContentExcerptSummary),
-        "content_excerpt_with_summary" => {
-            Some(crate::OutputSemanticKind::ContentExcerptWithSummary)
-        }
-        "scalar_path_only" => Some(crate::OutputSemanticKind::ScalarPathOnly),
-        "file_basename" => Some(crate::OutputSemanticKind::FileBasename),
-        "raw_command_output" => Some(crate::OutputSemanticKind::RawCommandOutput),
-        "command_output_summary" => Some(crate::OutputSemanticKind::CommandOutputSummary),
-        "file_names" => Some(crate::OutputSemanticKind::FileNames),
-        "directory_names" => Some(crate::OutputSemanticKind::DirectoryNames),
-        "directory_entry_groups" => Some(crate::OutputSemanticKind::DirectoryEntryGroups),
-        "file_paths" => Some(crate::OutputSemanticKind::FilePaths),
-        "existence_with_path" => Some(crate::OutputSemanticKind::ExistenceWithPath),
-        "existence_with_path_summary" => Some(crate::OutputSemanticKind::ExistenceWithPathSummary),
-        "hidden_entries_check" => Some(crate::OutputSemanticKind::HiddenEntriesCheck),
-        "execution_failed_step" => Some(crate::OutputSemanticKind::ExecutionFailedStep),
-        "generated_file_delivery" => Some(crate::OutputSemanticKind::GeneratedFileDelivery),
-        "generated_file_path_report" => Some(crate::OutputSemanticKind::GeneratedFilePathReport),
-        "filesystem_mutation_result" => Some(crate::OutputSemanticKind::FilesystemMutationResult),
-        "recent_scalar_equality_check" => {
-            Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        }
-        "git_commit_subject" => Some(crate::OutputSemanticKind::GitCommitSubject),
+        "content_excerpt_summary" => Some("content_excerpt_summary"),
+        "content_excerpt_with_summary" => Some("content_excerpt_with_summary"),
+        "scalar_path_only" => Some("scalar_path_only"),
+        "file_basename" => Some("file_basename"),
+        "raw_command_output" => Some("raw_command_output"),
+        "command_output_summary" => Some("command_output_summary"),
+        "file_names" => Some("file_names"),
+        "directory_names" => Some("directory_names"),
+        "directory_entry_groups" => Some("directory_entry_groups"),
+        "file_paths" => Some("file_paths"),
+        "existence_with_path" => Some("existence_with_path"),
+        "existence_with_path_summary" => Some("existence_with_path_summary"),
+        "hidden_entries_check" => Some("hidden_entries_check"),
+        "execution_failed_step" => Some("execution_failed_step"),
+        "generated_file_delivery" => Some("generated_file_delivery"),
+        "generated_file_path_report" => Some("generated_file_path_report"),
+        "filesystem_mutation_result" => Some("filesystem_mutation_result"),
+        "recent_scalar_equality_check" => Some("recent_scalar_equality_check"),
+        "git_commit_subject" => Some("git_commit_subject"),
         "git_repository_state"
         | "git_workspace_state"
         | "git_state"
@@ -575,42 +566,94 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         | "git_branch"
         | "git_current_branch"
         | "git_remote"
-        | "git_changed_files" => Some(crate::OutputSemanticKind::GitRepositoryState),
-        "structured_keys" => Some(crate::OutputSemanticKind::StructuredKeys),
-        "config_validation" | "structured_config_validation" => {
-            Some(crate::OutputSemanticKind::ConfigValidation)
-        }
+        | "git_changed_files" => Some("git_repository_state"),
+        "structured_keys" => Some("structured_keys"),
+        "config_validation" | "structured_config_validation" => Some("config_validation"),
         "config_mutation" | "config_write" | "config_set" | "structured_config_mutation" => {
-            Some(crate::OutputSemanticKind::ConfigMutation)
+            Some("config_mutation")
         }
         "config_risk_assessment" | "config_risk" | "structured_config_risk" | "config_guard" => {
-            Some(crate::OutputSemanticKind::ConfigRiskAssessment)
+            Some("config_risk_assessment")
         }
-        "sqlite_table_listing" => Some(crate::OutputSemanticKind::SqliteTableListing),
-        "sqlite_table_names_only" => Some(crate::OutputSemanticKind::SqliteTableNamesOnly),
-        "sqlite_database_kind_judgment" => {
-            Some(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
-        }
-        "sqlite_schema_version" => Some(crate::OutputSemanticKind::SqliteSchemaVersion),
-        "web_page_summary" => Some(crate::OutputSemanticKind::WebPageSummary),
-        "web_search_summary" => Some(crate::OutputSemanticKind::WebSearchSummary),
-        "weather_query" => Some(crate::OutputSemanticKind::WeatherQuery),
-        "market_quote" => Some(crate::OutputSemanticKind::MarketQuote),
-        "image_understanding" => Some(crate::OutputSemanticKind::ImageUnderstanding),
-        "publishing_preview" => Some(crate::OutputSemanticKind::PublishingPreview),
-        "archive_list" => Some(crate::OutputSemanticKind::ArchiveList),
-        "archive_read" => Some(crate::OutputSemanticKind::ArchiveRead),
-        "archive_pack" => Some(crate::OutputSemanticKind::ArchivePack),
-        "archive_unpack" => Some(crate::OutputSemanticKind::ArchiveUnpack),
-        "docker_ps" => Some(crate::OutputSemanticKind::DockerPs),
-        "docker_images" => Some(crate::OutputSemanticKind::DockerImages),
-        "docker_logs" => Some(crate::OutputSemanticKind::DockerLogs),
-        "docker_container_lifecycle" => Some(crate::OutputSemanticKind::DockerContainerLifecycle),
-        "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
-        "package_manager_detection" => Some(crate::OutputSemanticKind::PackageManagerDetection),
-        "tool_discovery" => Some(crate::OutputSemanticKind::ToolDiscovery),
+        "sqlite_table_listing" => Some("sqlite_table_listing"),
+        "sqlite_table_names_only" => Some("sqlite_table_names_only"),
+        "sqlite_database_kind_judgment" => Some("sqlite_database_kind_judgment"),
+        "sqlite_schema_version" => Some("sqlite_schema_version"),
+        "archive_list" => Some("archive_list"),
+        "archive_read" => Some("archive_read"),
+        "archive_pack" => Some("archive_pack"),
+        "archive_unpack" => Some("archive_unpack"),
+        "service_status" => Some("service_status"),
+        "tool_discovery" => Some("tool_discovery"),
         _ => None,
     }
+}
+
+fn append_route_reason_marker(route_result: &mut crate::RouteResult, marker: &str) {
+    if marker.trim().is_empty() {
+        return;
+    }
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = marker.to_string();
+    } else if !route_result
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == marker)
+    {
+        route_result.route_reason.push_str("; ");
+        route_result.route_reason.push_str(marker);
+    }
+}
+
+fn append_effective_contract_marker(route_result: &mut crate::RouteResult, marker: &str) {
+    let marker = marker.trim();
+    if marker.is_empty() {
+        return;
+    }
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    append_route_reason_marker(route_result, &format!("contract:{marker}"));
+}
+
+fn route_has_output_contract_marker(route_result: &crate::RouteResult) -> bool {
+    [
+        "content_excerpt_summary",
+        "content_excerpt_with_summary",
+        "scalar_path_only",
+        "file_basename",
+        "raw_command_output",
+        "command_output_summary",
+        "file_names",
+        "directory_names",
+        "directory_entry_groups",
+        "file_paths",
+        "existence_with_path",
+        "existence_with_path_summary",
+        "hidden_entries_check",
+        "execution_failed_step",
+        "generated_file_delivery",
+        "generated_file_path_report",
+        "filesystem_mutation_result",
+        "recent_scalar_equality_check",
+        "git_commit_subject",
+        "git_repository_state",
+        "structured_keys",
+        "config_validation",
+        "config_mutation",
+        "config_risk_assessment",
+        "sqlite_table_listing",
+        "sqlite_table_names_only",
+        "sqlite_database_kind_judgment",
+        "sqlite_schema_version",
+        "archive_list",
+        "archive_read",
+        "archive_pack",
+        "archive_unpack",
+        "service_status",
+        "tool_discovery",
+    ]
+    .iter()
+    .any(|marker| route_reason_has_structural_marker(route_result, marker))
 }
 
 fn preserve_active_clarify_output_contract_for_locator_reply(
@@ -630,7 +673,8 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
         return;
     }
     let prior_shape = parse_clarify_state_response_shape(clarify_state.output_shape.as_deref());
-    let prior_semantic = parse_clarify_state_semantic_kind(clarify_state.semantic_kind.as_deref());
+    let prior_marker =
+        normalize_clarify_state_semantic_marker(clarify_state.semantic_kind.as_deref());
     let prior_selector = crate::clarify_state::structured_field_selector_token_from_text(
         &clarify_state.source_request,
     );
@@ -639,16 +683,13 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     if prior_requested_file_delivery {
         return;
     }
-    if prior_shape.is_none() && prior_semantic.is_none() && prior_selector.is_none() {
+    if prior_shape.is_none() && prior_marker.is_none() && prior_selector.is_none() {
         return;
     }
 
     let current_requested_file_delivery = route_requests_file_delivery(route_result);
     if current_requested_file_delivery
-        && !prior_non_file_contract_should_override_current_file_delivery(
-            prior_shape,
-            prior_semantic,
-        )
+        && !prior_non_file_contract_should_override_current_file_delivery(prior_shape, prior_marker)
     {
         route_result
             .route_reason
@@ -669,12 +710,9 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     } else if current_requested_file_delivery {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
     }
-    if let Some(semantic) = prior_semantic {
-        route_result.output_contract.semantic_kind = semantic;
-    } else if prior_shape.is_some()
-        && !current_requested_file_delivery
-        && route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
-    {
+    if let Some(marker) = prior_marker {
+        append_effective_contract_marker(route_result, marker);
+    } else if prior_shape.is_some() && !current_requested_file_delivery {
         route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
         route_result
             .route_reason
@@ -738,7 +776,12 @@ fn normalize_active_clarify_structured_field_selector_for_locator_reply(
     trimmed_selector.to_string()
 }
 
-fn promote_active_clarify_structured_payload_reply_to_execute(
+const ACTIVE_CLARIFY_STRUCTURED_PAYLOAD_BOUND_FOR_LOOP: &str =
+    "active_clarify_structured_payload_bound_for_loop";
+const ACTIVE_CLARIFY_LOCATOR_REPLY_BOUND_FOR_LOOP: &str =
+    "active_clarify_locator_reply_bound_for_loop";
+
+fn bind_active_clarify_structured_payload_reply_for_loop(
     route_result: &mut crate::RouteResult,
     clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
@@ -758,10 +801,11 @@ fn promote_active_clarify_structured_payload_reply_to_execute(
         return;
     }
     let prior_shape = parse_clarify_state_response_shape(clarify_state.output_shape.as_deref());
-    let prior_semantic = parse_clarify_state_semantic_kind(clarify_state.semantic_kind.as_deref());
+    let prior_marker =
+        normalize_clarify_state_semantic_marker(clarify_state.semantic_kind.as_deref());
     if clarify_state.delivery_required
         || matches!(prior_shape, Some(crate::OutputResponseShape::FileToken))
-        || (prior_shape.is_none() && prior_semantic.is_none())
+        || (prior_shape.is_none() && prior_marker.is_none())
     {
         return;
     }
@@ -778,9 +822,10 @@ fn promote_active_clarify_structured_payload_reply_to_execute(
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.route_reason.push_str("; ");
     route_result
         .route_reason
-        .push_str("; active_clarify_structured_payload_execute");
+        .push_str(ACTIVE_CLARIFY_STRUCTURED_PAYLOAD_BOUND_FOR_LOOP);
 }
 
 fn active_clarify_locator_reply_is_structured_payload(text: &str) -> bool {
@@ -810,9 +855,9 @@ fn preserve_locator_reply_runtime_intent(
 
 fn prior_non_file_contract_should_override_current_file_delivery(
     prior_shape: Option<crate::OutputResponseShape>,
-    prior_semantic: Option<crate::OutputSemanticKind>,
+    prior_marker: Option<&str>,
 ) -> bool {
-    if prior_semantic.is_some() {
+    if prior_marker.is_some() {
         return true;
     }
     matches!(
@@ -832,7 +877,7 @@ fn structural_locator_kind_from_reply(locator: &str) -> crate::OutputLocatorKind
     crate::OutputLocatorKind::Filename
 }
 
-fn promote_active_clarify_locator_reply_to_execute(
+fn bind_active_clarify_locator_reply_for_loop(
     route_result: &mut crate::RouteResult,
     clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
@@ -882,7 +927,13 @@ fn promote_active_clarify_locator_reply_to_execute(
     ) {
         route_result.output_contract.locator_kind = structural_locator_kind_from_reply(locator);
     }
-    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None {
+    if route_has_output_contract_marker(route_result)
+        || route_result
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .is_some()
+    {
         route_result.output_contract.requires_content_evidence = true;
     }
     if let Some(pair) =
@@ -895,14 +946,15 @@ fn promote_active_clarify_locator_reply_to_execute(
         route_result.output_contract.requires_content_evidence = true;
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
         route_result.output_contract.locator_hint = pair;
-        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveUnpack;
+        append_effective_contract_marker(route_result, "archive_unpack");
         route_result
             .route_reason
             .push_str("; active_clarify_archive_unpack_pair_repaired");
     }
+    route_result.route_reason.push_str("; ");
     route_result
         .route_reason
-        .push_str("; active_clarify_locator_reply_execute");
+        .push_str(ACTIVE_CLARIFY_LOCATOR_REPLY_BOUND_FOR_LOOP);
 }
 
 fn archive_unpack_pair_from_active_clarify_locator_reply(
@@ -1002,7 +1054,7 @@ fn active_clarify_state_has_structural_binding_contract(
 ) -> bool {
     clarify_state.delivery_required
         || clarify_state.output_shape.is_some()
-        || clarify_state.semantic_kind.is_some()
+        || normalize_clarify_state_semantic_marker(clarify_state.semantic_kind.as_deref()).is_some()
         || crate::clarify_state::structured_field_selector_token_from_text(
             &clarify_state.source_request,
         )
@@ -1121,10 +1173,7 @@ fn repair_scalar_field_value_contract_for_active_clarify_fast_path(
                 | crate::OutputResponseShape::Scalar
                 | crate::OutputResponseShape::Strict
         )
-        || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::StructuredKeys
-        )
+        || !route_reason_has_structural_marker(route_result, "structured_keys")
     {
         return;
     }
@@ -1146,6 +1195,7 @@ fn active_clarify_locator_reply_fast_path_route(
     else {
         return None;
     };
+    let _ = task;
     let clarify_state = session_snapshot.active_clarify_state.as_ref()?;
     if hit.prior_user_text.trim() != clarify_state.source_request.trim() {
         return None;
@@ -1171,6 +1221,7 @@ fn active_clarify_locator_reply_fast_path_route(
         clarify_question: String::new(),
         route_reason: "active_clarify_locator_reply_fast_path".to_string(),
         route_confidence: Some(1.0),
+        #[cfg(test)]
         visible_skill_candidates: state.planner_available_skills_for_task(task),
         risk_ceiling: crate::RiskCeiling::Unknown,
         resume_behavior: crate::ResumeBehavior::None,
@@ -1187,12 +1238,12 @@ fn active_clarify_locator_reply_fast_path_route(
         clarify_followup_resolution,
         session_snapshot,
     );
-    promote_active_clarify_structured_payload_reply_to_execute(
+    bind_active_clarify_structured_payload_reply_for_loop(
         &mut route_result,
         clarify_followup_resolution,
         session_snapshot,
     );
-    promote_active_clarify_locator_reply_to_execute(
+    bind_active_clarify_locator_reply_for_loop(
         &mut route_result,
         clarify_followup_resolution,
         session_snapshot,
@@ -1202,10 +1253,12 @@ fn active_clarify_locator_reply_fast_path_route(
         && (!matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::Free
-        ) || !matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-        ))
+        ) || route_has_output_contract_marker(&route_result)
+            || route_result
+                .output_contract
+                .self_extension
+                .structured_field_selector
+                .is_some())
     {
         route_result.output_contract.requires_content_evidence = true;
     }
@@ -1221,10 +1274,6 @@ pub(super) async fn prepare_ask_routing(
     prompt: &str,
     source: &str,
 ) -> anyhow::Result<PreparedAskRouting> {
-    let agent_mode = payload
-        .get("agent_mode")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
     let is_resume_continue = super::is_resume_continue_source(source);
     let (now_iso, timezone_str, schedule_rules) =
         schedule_service::schedule_context_for_normalizer(state);
@@ -1302,7 +1351,6 @@ pub(super) async fn prepare_ask_routing(
             turn_analysis: None,
             clarify_fallback_source: None,
             resolved_prompt,
-            agent_mode,
         });
     }
     let normalizer_prompt = match &clarify_followup_resolution {
@@ -1361,21 +1409,16 @@ pub(super) async fn prepare_ask_routing(
     )
     .await;
     info!(
-        "first_layer_gate_record task_id={} owner_layer={} reason_code={} outcome={} source_decision={} final_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
+        "route_trace_record task_id={} owner_layer={} reason_code={} outcome={} route_trace_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         task.task_id,
-        normalizer_out.first_layer_gate_record.owner_layer,
-        normalizer_out.first_layer_gate_record.reason_code,
-        normalizer_out.first_layer_gate_record.outcome,
-        normalizer_out
-            .first_layer_gate_record
-            .source_decision
-            .map(|decision| decision.as_str())
-            .unwrap_or("none"),
-        normalizer_out.first_layer_gate_record.final_decision.as_str(),
-        normalizer_out.first_layer_gate_record.needs_clarify,
-        normalizer_out.first_layer_gate_record.output_contract_ref,
-        normalizer_out.first_layer_gate_record.repair_codes.join(","),
-        normalizer_out.first_layer_gate_record.repair_classes.join(","),
+        normalizer_out.route_trace_record.owner_layer,
+        normalizer_out.route_trace_record.reason_code,
+        normalizer_out.route_trace_record.outcome,
+        normalizer_out.route_trace_record.route_trace_decision.as_str(),
+        normalizer_out.route_trace_record.needs_clarify,
+        normalizer_out.route_trace_record.output_contract_ref,
+        normalizer_out.route_trace_record.repair_codes.join(","),
+        normalizer_out.route_trace_record.repair_classes.join(","),
     );
     // Phase 0.4: 若 normalizer 已给出 schedule_intent，缓存起来，后续
     // `schedule.compile` 技能可以直接复用，避免对同一段文本再跑一次
@@ -1395,12 +1438,12 @@ pub(super) async fn prepare_ask_routing(
         &clarify_followup_resolution,
         &session_snapshot,
     );
-    promote_active_clarify_structured_payload_reply_to_execute(
+    bind_active_clarify_structured_payload_reply_for_loop(
         &mut route_result,
         &clarify_followup_resolution,
         &session_snapshot,
     );
-    promote_active_clarify_locator_reply_to_execute(
+    bind_active_clarify_locator_reply_for_loop(
         &mut route_result,
         &clarify_followup_resolution,
         &session_snapshot,
@@ -1551,7 +1594,6 @@ pub(super) async fn prepare_ask_routing(
         turn_analysis,
         clarify_fallback_source,
         resolved_prompt,
-        agent_mode,
     })
 }
 

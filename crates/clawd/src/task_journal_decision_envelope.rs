@@ -226,7 +226,7 @@ pub(super) fn agent_loop_decision_envelope_json(
     json!({
         "schema_version": 1,
         "source": source,
-        "initial_hint_ref": route.legacy_first_layer_decision_for_trace().as_str(),
+        "initial_hint_ref": route.route_trace_decision_for_legacy_journal().as_str(),
         "initial_gate_ref": route.gate_kind().as_str(),
         "semantic_authority": semantic_authority,
         "fallback_gate_policy": "fallback_safety_check_only",
@@ -256,7 +256,7 @@ pub(super) fn agent_loop_decision_envelope_json(
 }
 
 pub(super) fn output_contract_ref_for_route(route: &crate::RouteResult) -> String {
-    let contract = &route.output_contract;
+    let contract = route.effective_output_contract();
     format!(
         "semantic:{}|shape:{}|locator:{}|delivery:{}|content_evidence:{}",
         contract.semantic_kind.as_str(),
@@ -292,44 +292,6 @@ pub(super) fn first_non_think_action_capability_ref(
         crate::AgentAction::SynthesizeAnswer { .. } => Some("synthesize_answer"),
         crate::AgentAction::Respond { .. } => Some("respond"),
     })
-}
-
-pub(super) fn route_gate_agent_decision_delta(
-    route_gate: crate::RouteGateKind,
-    agent_decision: &str,
-) -> &'static str {
-    use crate::RouteGateKind;
-    let same_gate = match route_gate {
-        RouteGateKind::Clarify => matches!(agent_decision, "respond"),
-        RouteGateKind::Chat => matches!(agent_decision, "respond" | "synthesize_answer"),
-        RouteGateKind::Execute => matches!(
-            agent_decision,
-            "call_tool" | "call_skill" | "call_capability"
-        ),
-    };
-    if same_gate {
-        "same_gate"
-    } else if matches!(agent_decision, "think" | "no_action") {
-        "not_comparable"
-    } else {
-        "different_gate"
-    }
-}
-
-pub(super) fn agent_action_capability_delta(actions: &[crate::AgentAction]) -> &'static str {
-    match actions
-        .iter()
-        .find(|action| !matches!(action, crate::AgentAction::Think { .. }))
-    {
-        Some(crate::AgentAction::CallCapability { .. }) => "agent_capability_ref",
-        Some(crate::AgentAction::CallSkill { .. } | crate::AgentAction::CallTool { .. }) => {
-            "agent_runtime_ref"
-        }
-        Some(crate::AgentAction::Respond { .. } | crate::AgentAction::SynthesizeAnswer { .. }) => {
-            "no_capability_ref"
-        }
-        Some(crate::AgentAction::Think { .. }) | None => "not_comparable",
-    }
 }
 
 fn agent_loop_decision_from_first_action(
@@ -431,7 +393,7 @@ fn agent_loop_clarify_reason_code(
 }
 
 fn agent_loop_answer_shape(route: &crate::RouteResult) -> String {
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::contract_matrix::final_answer_shape_for_route(route)
         .map(|shape| shape.as_str().to_string())
         .unwrap_or_else(|| route.output_contract.response_shape.as_str().to_string())
 }

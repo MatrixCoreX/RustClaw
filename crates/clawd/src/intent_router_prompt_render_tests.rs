@@ -6,7 +6,7 @@ fn normalizer_compact_prompt_is_default_for_agent_loop_convergence() {
 }
 
 #[test]
-fn compact_normalizer_prompt_pins_output_contract_schema() {
+fn compact_normalizer_prompt_pins_boundary_schema() {
     let route_view = crate::task_context_builder::RouteContextView {
         request_surface_hints: "locator_target_pair: Cargo.toml | Cargo.lock".to_string(),
         ..Default::default()
@@ -25,72 +25,38 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
         "list current toml files and briefly explain them",
     );
 
+    assert!(prompt.contains("Compact boundary normalizer"));
+    assert!(prompt.contains("This stage extracts boundaries only"));
+    assert!(prompt.contains("agent loop owns ordinary respond / clarify / act"));
+    assert!(prompt.contains("Always include all top-level compatibility schema keys"));
+    assert!(prompt.contains("decision is a derived compatibility trace only"));
+    assert!(prompt.contains("answer_candidate is legacy compatibility"));
+    assert!(prompt.contains("Boundary extraction scope"));
+    assert!(prompt.contains("Do not classify ordinary capability families"));
+    assert!(prompt.contains("let the planner/resolver choose from CAPABILITIES"));
+    assert!(prompt.contains("Prefer semantic_kind=\"none\""));
+    assert!(prompt.contains("never create a new feature enum"));
     assert!(prompt.contains("Allowed output_contract keys only"));
-    assert!(prompt.contains("output_contract as a JSON object, never as a string token"));
-    assert!(prompt.contains("Use ALIASES only for temporary references"));
-    assert!(prompt.contains("ALIASES: <none>"));
-    assert!(prompt.contains("CAPABILITIES:"));
     assert!(
         prompt.contains("Allowed response_shape: free, one_sentence, strict, scalar, file_token")
     );
-    assert!(prompt.contains("Allowed semantic_kind: none, raw_command_output"));
-    assert!(prompt.contains("document_heading"));
-    assert!(prompt.contains("semantic_kind=\"document_heading\""));
-    assert!(prompt.contains("semantic_kind=\"hidden_entries_check\""));
-    assert!(prompt.contains("semantic_kind=\"existence_with_path\""));
-    assert!(prompt.contains("file/path metadata comparisons"));
-    assert!(prompt.contains("semantic_kind=\"quantity_comparison\""));
-    assert!(prompt.contains("state_patch.quantity_comparison"));
-    assert!(prompt.contains("\"source\":\"recent_count_inventory\""));
-    assert!(prompt.contains("\"selection\":\"max\"|\"min\""));
-    assert!(prompt.contains("semantic_kind=\"execution_failed_step\""));
-    assert!(prompt.contains("Preserve the whole ordered action sequence"));
-    assert!(prompt.contains("Only use execution_failed_step when the requested final answer"));
-    assert!(prompt.contains("Ordinary ordered observations whose final answer combines"));
-    assert!(prompt
-        .contains("ordinary ordered observations that combine successful command/tool results"));
-    assert!(prompt.contains("explicit command result plus status/process/port observation"));
-    assert!(prompt.contains("service_status is for status-only tasks"));
-    assert!(prompt.contains("RECENT_OBSERVED_JUDGMENT"));
-    assert!(prompt.contains("do not turn them into fresh file_names/path lookup"));
-    assert!(prompt.contains("Text drafting/composition is not file delivery by default"));
-    assert!(prompt.contains("Write a long article about RustClaw"));
-    assert!(prompt.contains("presence judgment is not numeric counting"));
-    assert!(prompt.contains("Do not emit exact_format, required_evidence, fields"));
-    assert!(prompt.contains("instead of inventing enum values"));
-    assert!(prompt.contains("Every enum field must be exactly one listed schema token"));
-    assert!(prompt.contains("clarify is a decision, never a turn_type or resume_behavior"));
-    assert!(prompt.contains("state_patch must be a JSON object or null"));
-    assert!(prompt.contains("Use decision=\"planner_execute\" when the request inspects"));
-    assert!(prompt.contains("generic baseline diagnostics"));
-    assert!(prompt.contains("semantic_kind=\"service_status\""));
-    assert!(
-        prompt.contains("task_control queue/running/cancel status=>planner_execute service_status")
-    );
-    assert!(
-        prompt.contains("Do not use runtime_status_query.kind=\"approval_wait\" for task queue")
-    );
-    assert!(prompt.contains("current_user, host_name, or kernel_release"));
-    assert!(prompt.contains("kb.ingest=>planner_execute filesystem_mutation_result"));
-    assert!(prompt.contains("do not classify these as service_status"));
-    assert!(
-        prompt.contains("Filesystem lifecycle mutation contracts outrank command_output_summary")
-    );
-    assert!(prompt.contains("inherit only the slice/count constraint"));
-    assert!(prompt.contains("Never ask the user to paste local file contents"));
-    assert!(prompt.contains("Output exactly one raw JSON object and then stop"));
-    assert!(prompt.contains("Normalizer protocol is internal only"));
-    assert!(prompt.contains("Inline-data transform invariant"));
-    assert!(prompt.contains("Always include all top-level schema keys"));
-    assert!(prompt.contains("If ACTIVE_TASK is <none>, do not use task_append"));
-    assert!(prompt.contains("turn_type=\"task_append\", target_task_policy=\"reuse_active\""));
-    assert!(prompt.contains("never force planner_execute for a presentation-only constraint"));
-    assert!(prompt.contains("Current REQUEST overrides RECENT/MEMORY"));
-    assert!(prompt.contains("Do not import a prior directory/path scope"));
-    assert!(prompt.contains("Fresh unresolved deictic executable targets are missing locators"));
-    assert!(prompt.contains("Do not resolve a fresh deictic target from MEMORY alone"));
-    assert!(prompt.contains("current_workspace_scope_from_current_request"));
-    assert!(prompt.contains("resolved current workspace scope, not a missing locator"));
+    assert!(prompt.contains("Every enum field must contain one exact schema token"));
+    assert!(prompt.contains("state_patch may carry only machine fields"));
+    assert!(prompt.contains("ALIASES: <none>"));
+    assert!(prompt.contains("CAPABILITIES:"));
+    assert!(prompt.contains("BOUNDARY_ONLY no ordinary capability-family routing"));
+    assert!(prompt.contains("REQUEST: list current toml files and briefly explain them"));
+
+    assert!(!prompt.contains("capability_ref=weather.current"));
+    assert!(!prompt.contains("capability_ref=web.search_results"));
+    assert!(!prompt.contains("capability_ref=image_vision"));
+    assert!(!prompt.contains("capability_ref=package.detect_manager"));
+    assert!(!prompt.contains("directory_purpose_summary"));
+    assert!(!prompt.contains("semantic_kind=\"file_names\""));
+    assert!(!prompt.contains("semantic_kind=\"directory_names\""));
+    assert!(!prompt.contains("semantic_kind=\"service_status\""));
+    assert!(!prompt.contains("CONTRACT: output_contract"));
+    assert!(!prompt.contains("SCALAR_COUNT_GUARD"));
 }
 
 #[test]
@@ -163,8 +129,9 @@ fn compact_normalizer_prompt_keeps_summary_recall_guard_in_head_and_tail() {
     let compact_head = crate::providers::utf8_safe_prefix(&prompt, 1485);
     let compact_tail = crate::providers::utf8_safe_suffix(&prompt, 1485);
 
-    assert!(compact_head.contains("High-priority"));
-    assert!(compact_head.contains("mainly verifies or means"));
+    assert!(compact_head.contains("answer_candidate is legacy compatibility"));
+    assert!(prompt.contains("answer_candidate is legacy compatibility"));
+    assert!(prompt.contains("including recall"));
     assert!(compact_tail.contains("SUMMARY_RECALL"));
     assert!(compact_tail.contains(request));
 }
@@ -332,9 +299,9 @@ fn compact_normalizer_prompt_tail_preserves_runtime_context_near_request() {
     );
     let compact_tail = crate::providers::utf8_safe_suffix(&prompt, 1700);
 
-    assert!(prompt.contains("CONTRACT: output_contract must be a JSON object"));
+    assert!(prompt.contains("output_contract is a compatibility evidence/delivery envelope"));
     assert!(compact_tail.contains("LOCAL_EXEC"));
-    assert!(compact_tail.contains("no cannot-access-FS reply"));
+    assert!(compact_tail.contains("let the loop act"));
     assert!(compact_tail.contains("RUNTIME:"));
     assert!(compact_tail.contains("current_process_cwd: /tmp/rustclaw-workspace"));
     assert!(compact_tail.contains("workspace_root: /tmp/rustclaw-workspace"));

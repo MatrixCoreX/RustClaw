@@ -1,7 +1,5 @@
 // Current-turn anchor repair tests for intent_router.
 
-use crate::FirstLayerDecision;
-
 use super::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
     OutputSemanticKind,
@@ -21,6 +19,7 @@ fn current_turn_anchor_drift_repair_discards_contextual_path_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "",
         "查询 /tmp/rustclaw-anchor-test/data/db-basic-contract.sqlite 的 schema version",
         "/tmp/rustclaw-anchor-test/logs",
         workspace,
@@ -55,6 +54,7 @@ fn current_turn_anchor_drift_repair_preserves_file_delivery_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "",
         "Send me /tmp/rustclaw-anchor-test/old.md",
         "/tmp/rustclaw-anchor-test/LICENSE.zh-CN.md",
         workspace,
@@ -90,6 +90,7 @@ fn current_turn_anchor_drift_repair_skips_generated_file_delivery_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "generated_file_delivery",
         "Write a shell script and deliver the file.",
         "/tmp/rustclaw-anchor-test/hello.sh",
         workspace,
@@ -121,6 +122,7 @@ fn current_turn_anchor_drift_repair_skips_tool_discovery_context_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "tool_discovery",
         "List projection tokens including /tmp/rustclaw-anchor-test/old-context.md",
         "/tmp/rustclaw-anchor-test/current.md",
         workspace,
@@ -148,6 +150,7 @@ fn current_turn_anchor_drift_repair_preserves_raw_command_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "raw_command_output",
         "执行 ls scripts，把结果按字母倒序排，只输出前 5 个",
         "/tmp/rustclaw-anchor-test/scripts",
         workspace,
@@ -180,6 +183,7 @@ fn current_turn_anchor_drift_repair_preserves_execution_failed_step_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "execution_failed_step",
         "Execute a structured command sequence and report the failed step.",
         "/tmp/rustclaw-anchor-test/scripts",
         workspace,
@@ -215,6 +219,7 @@ fn current_turn_anchor_drift_repair_preserves_quantity_comparison_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "quantity_comparison",
         "比较 Cargo.lock 和 Cargo.toml 的大小比例",
         "/tmp/rustclaw-anchor-test/Cargo.lock",
         workspace,
@@ -250,6 +255,7 @@ fn current_turn_anchor_drift_repair_keeps_compatible_child_path() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "",
         "列出 /tmp/rustclaw-anchor-test/logs/clawd.log 的基本信息",
         "/tmp/rustclaw-anchor-test/logs",
         workspace,
@@ -277,6 +283,7 @@ fn current_turn_anchor_drift_repair_keeps_multi_target_locator_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "",
         "Check README.md, README.zh-CN.md, and Cargo.toml in the current workspace",
         "/tmp/rustclaw-anchor-test/README.md",
         workspace,
@@ -310,6 +317,7 @@ fn current_turn_anchor_drift_repair_preserves_archive_pair_contract() {
 
     let repair = super::apply_current_turn_anchor_drift_repair(
         &mut contract,
+        "",
         "archive unpack path pair",
         "/tmp/rustclaw-anchor-test/tmp/test_bundle.zip",
         workspace,
@@ -329,8 +337,8 @@ fn current_turn_anchor_repair_stays_off_for_executionless_chat() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::DirectAnswer,
         false,
+        "",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -348,8 +356,8 @@ fn current_turn_anchor_repair_allowed_for_structured_evidence_contract() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
     assert!(super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::DirectAnswer,
         false,
+        "",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -371,8 +379,8 @@ fn current_turn_anchor_repair_stays_off_for_generated_file_delivery() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
         false,
+        "generated_file_delivery",
         &contract,
         true,
         crate::ScheduleKind::None,
@@ -393,8 +401,8 @@ fn current_turn_anchor_repair_stays_off_for_tool_discovery_context_contract() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
         false,
+        "tool_discovery",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -404,13 +412,13 @@ fn current_turn_anchor_repair_stays_off_for_tool_discovery_context_contract() {
 }
 
 #[test]
-fn current_turn_anchor_repair_allowed_for_explicit_act_route() {
+fn current_turn_anchor_repair_stays_off_without_structured_signal() {
     let contract = IntentOutputContract::default();
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
-    assert!(super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
+    assert!(!super::current_turn_anchor_drift_repair_allowed(
         false,
+        "",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -457,8 +465,8 @@ fn current_turn_anchor_repair_stays_off_for_structured_config_contract_with_loca
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test/rustclaw");
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
         false,
+        "config_risk_assessment",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -479,8 +487,8 @@ fn current_turn_anchor_repair_stays_off_for_current_workspace_root_identity() {
     };
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
         false,
+        "",
         &contract,
         false,
         crate::ScheduleKind::None,
@@ -501,8 +509,8 @@ fn current_turn_anchor_repair_stays_off_for_current_workspace_absolute_hint() {
     };
 
     assert!(!super::current_turn_anchor_drift_repair_allowed(
-        FirstLayerDecision::PlannerExecute,
         false,
+        "",
         &contract,
         false,
         crate::ScheduleKind::None,

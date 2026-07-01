@@ -392,9 +392,7 @@ fn finalizer_summary_json(
     journal: &TaskJournal,
 ) -> Value {
     let evidence_coverage = route.map(|route| evidence_coverage_for_route(route, journal));
-    let final_answer_shape = route.and_then(|route| {
-        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-    });
+    let final_answer_shape = route.and_then(crate::contract_matrix::final_answer_shape_for_route);
     json!({
         "stage": summary.stage.map(TaskJournalFinalizerStage::as_str),
         "disposition": summary.disposition.map(crate::finalize::FinalizerDisposition::as_str),
@@ -583,8 +581,8 @@ fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "route_gate_kind": route.gate_kind().as_str(),
         "initial_gate_ref": route.gate_kind().as_str(),
-        "initial_hint_ref": route.legacy_first_layer_decision_for_trace().as_str(),
-        "legacy_first_layer_decision": route.legacy_first_layer_decision_for_trace().as_str(),
+        "initial_hint_ref": route.route_trace_decision_for_legacy_journal().as_str(),
+        "legacy_first_layer_decision": route.route_trace_decision_for_legacy_journal().as_str(),
         "legacy_route_label": route.legacy_route_label_for_trace(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,

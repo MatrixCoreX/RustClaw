@@ -1,7 +1,7 @@
 //! Intent routing and unified normalizer for ask tasks.
 //!
 //! **Ask main path:** Only `run_intent_normalizer` is used (resolved intent, resume_behavior,
-//! schedule_kind, first-layer decision, needs_clarify, and output contract in one LLM call).
+//! schedule_kind, route trace, needs_clarify, and output contract in one LLM call).
 //!
 //! **Fallback when normalizer LLM fails / parse fails:** stay on AskClarify unless the current
 //! request contains an explicit structured tool/capability domain with no competing locator.
@@ -39,9 +39,9 @@ use contract_repair_judge::clear_spurious_generated_file_delivery_attachment_pro
 #[cfg(test)]
 use contract_repair_judge::ContractRepairJudgeOut;
 
-#[path = "intent_router_first_layer_gate.rs"]
-mod first_layer_gate;
-use first_layer_gate::{first_layer_decision_gate_record, push_unique_repair_code};
+#[path = "intent_router_route_trace.rs"]
+mod route_trace;
+use route_trace::{push_unique_repair_code, route_trace_record};
 
 #[path = "intent_router_turn_analysis.rs"]
 mod turn_analysis;
@@ -90,40 +90,37 @@ use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};
 
 #[path = "intent_router_schema_tokens.rs"]
 mod schema_tokens;
+#[cfg(test)]
+use schema_tokens::parse_first_layer_decision_text;
 use schema_tokens::{
-    canonical_first_layer_decision_token, contract_value_token,
-    execution_finalize_style_for_contract, looks_like_current_workspace_path_alias,
+    contract_value_token, execution_finalize_style_for_contract,
+    looks_like_current_workspace_path_alias, machine_context_has_capability_ref,
     normalize_output_delivery_intent_for_schema, normalize_output_locator_kind_for_schema,
     normalize_output_response_shape_for_schema, normalize_output_semantic_kind_for_schema,
-    normalize_schema_token, parse_first_layer_decision_text, route_label_from_first_layer_decision,
+    normalize_schema_token, route_label_from_first_layer_decision,
 };
 
 #[path = "intent_router_schema_report.rs"]
 mod schema_report;
 use schema_report::{
-    answer_candidate_value_text, answer_like_normalizer_payload_text,
-    contract_repair_report_from_before_after,
+    answer_like_normalizer_payload_text, contract_repair_report_from_before_after,
     parse_top_level_json_object_preserving_meaningful_duplicates, scalar_json_value_text,
-    scalar_output_contract_answer_candidate,
 };
 
 #[path = "intent_router_normalizer_schema_core.rs"]
 mod normalizer_schema_core;
 use normalizer_schema_core::{
-    normalize_bool_field_with_default, normalize_decision_from_executable_output_contract,
-    normalize_execution_recipe_for_schema, normalize_intent_normalizer_scalar_types_for_schema,
+    normalize_bool_field_with_default, normalize_execution_recipe_for_schema,
+    normalize_intent_normalizer_scalar_types_for_schema,
     normalize_intent_normalizer_top_level_for_schema, normalize_optional_string_field,
-    normalize_plain_intent_normalizer_text_for_schema,
+    normalize_plain_intent_normalizer_text_for_schema, sync_compat_decision_trace_for_schema,
 };
 
 #[path = "intent_router_normalizer_raw_schema.rs"]
 mod normalizer_raw_schema;
 #[cfg(test)]
 use normalizer_raw_schema::normalize_intent_normalizer_raw_for_schema;
-use normalizer_raw_schema::{
-    merge_answer_candidate_into_resolved_intent,
-    normalize_intent_normalizer_raw_for_schema_with_report,
-};
+use normalizer_raw_schema::normalize_intent_normalizer_raw_for_schema_with_report;
 
 #[path = "intent_router_output_contract_schema.rs"]
 mod output_contract_schema;
@@ -135,7 +132,6 @@ use output_contract_schema::{
 #[path = "intent_router_runtime_status_recipe.rs"]
 mod runtime_status_recipe;
 use runtime_status_recipe::{
-    apply_unobserved_runtime_status_answer_candidate_repair,
     execution_recipe_value_declares_command_payload,
     execution_recipe_value_declares_scalar_runtime_tool_observation,
     scalar_runtime_status_kind_from_execution_recipe,
@@ -146,7 +142,7 @@ use runtime_status_recipe::{
 mod execution_recipe_schema;
 use execution_recipe_schema::{
     execution_recipe_value_declares_health_check_observation,
-    execution_recipe_value_declares_package_manager_detection,
+    execution_recipe_value_declares_package_detect_manager_capability,
     execution_recipe_value_declares_service_status_observation,
     execution_recipe_value_declares_structured_read_observation,
     execution_recipe_value_declares_structured_scalar_extraction,
@@ -158,9 +154,9 @@ use execution_recipe_schema::{
 #[path = "intent_router_execution_recipe_contract.rs"]
 mod execution_recipe_contract;
 use execution_recipe_contract::{
-    force_output_contract_semantic_kind, mark_decision_planner_execute_from_execution_recipe,
-    mark_output_contract_requires_content_evidence, normalize_output_contract_for_command_payload,
-    normalize_output_contract_for_package_manager_detection,
+    force_output_contract_semantic_kind, mark_output_contract_requires_content_evidence,
+    normalize_output_contract_for_command_payload,
+    normalize_output_contract_for_package_detect_manager_capability,
     normalize_output_contract_for_service_status_recipe,
     normalize_output_contract_for_structured_read_recipe,
     promote_misnested_turn_analysis_from_execution_recipe,
@@ -170,7 +166,7 @@ use execution_recipe_contract::{
 mod state_patch_tokens;
 use state_patch_tokens::{
     request_uses_filename_only_schema_token, state_patch_deictic_reference_is_resolved,
-    state_patch_deictic_reference_requires_clarify, state_patch_requests_filename_only_output,
+    state_patch_deictic_reference_requires_clarify,
 };
 
 #[path = "intent_router_state_patch_fields.rs"]
@@ -179,7 +175,7 @@ use state_patch_fields::{
     append_state_patch_slice_tokens_to_resolved_intent,
     append_state_patch_structured_field_selector_to_resolved_intent,
     apply_state_patch_structured_field_selector, normalize_structured_field_selector,
-    schema_key_is_structured_scalar_field_selector,
+    schema_key_is_structured_scalar_field_selector, state_patch_targets_task_lifecycle_fields,
 };
 
 #[path = "intent_router_unbound_scope_tokens.rs"]
@@ -213,10 +209,9 @@ use structural_contracts::{
     file_paths_missing_file_locator_parent_dir,
     generated_file_delivery_existing_content_summary_repair,
     generated_file_delivery_filename_only_existing_target_repair,
-    output_contract_structured_config_path, planner_execute_inline_structured_payload_context,
-    planner_execute_inline_structured_transform_contract_context,
-    quoted_literal_content_presence_contract_repair, structural_config_value_after_field,
-    structured_config_keys_contract_from_surface,
+    inline_structured_payload_contract_context, inline_structured_transform_contract_context,
+    output_contract_structured_config_path, quoted_literal_content_presence_contract_repair,
+    structural_config_value_after_field, structured_config_keys_contract_from_surface,
     structured_field_pair_contract_from_quantity_comparison,
     structured_field_value_contract_from_quantity_comparison,
     structured_identifier_presence_contract_from_surface,
@@ -234,21 +229,15 @@ pub(crate) use contract_hint::{
 mod inline_transform;
 #[cfg(test)]
 use inline_transform::inline_json_transform_fallback_decision;
-use inline_transform::{
-    apply_inline_structured_transform_direct_answer_repair,
-    apply_self_contained_payload_direct_answer_contract_repair,
-    parsed_inline_json_transform_repair_decision,
-};
+use inline_transform::parsed_inline_json_transform_repair_decision;
 
 #[path = "intent_router_observation_repair.rs"]
 mod observation_repair;
 use observation_repair::{
-    apply_answer_candidate_path_evidence_repair,
     apply_deictic_missing_locator_state_patch_clarify_repair,
     apply_locatorless_observation_clarify_repair,
     apply_spurious_structured_observation_clarify_repair,
     apply_workspace_default_observation_clarify_repair,
-    semantic_kind_can_use_existing_observed_context,
     should_preserve_existing_observed_context_synthesis_contract,
 };
 
@@ -262,10 +251,8 @@ use directory_observation::directory_pair_fallback_decision;
 mod execution_contract;
 use execution_contract::{
     apply_command_payload_contract_repair, apply_explicit_command_execution_contract_repair,
-    apply_file_delivery_contract_repair,
-    direct_answer_decision_should_be_overridden_by_executable_contract,
-    downgrade_executionless_route_to_direct_answer, output_semantic_kind_requires_fresh_evidence,
-    parse_execution_recipe_hint, restore_declared_publishing_preview_contract,
+    apply_file_delivery_contract_repair, cleanup_executionless_route_finalize_style,
+    output_semantic_kind_requires_fresh_evidence, parse_execution_recipe_hint,
     route_has_structured_execution_signal, structured_execution_signal_for_effective_route,
 };
 
@@ -300,10 +287,8 @@ use active_observation::prompt_has_concrete_fileish_cue;
 use active_observation::{
     active_clarify_locator_task_prompt, active_observable_task_prompt, active_primary_task_prompt,
     active_session_has_structured_execution_target, active_task_turn_can_reuse_semantic_patch,
-    active_text_followup_surface_is_chat_only,
-    apply_active_bound_path_answer_candidate_direct_repair,
-    apply_active_file_basename_answer_candidate_direct_repair,
-    apply_active_observed_output_chat_repair, apply_active_ordered_scalar_path_chat_repair,
+    active_text_followup_surface_is_chat_only, apply_active_observed_output_chat_repair,
+    apply_active_ordered_scalar_path_chat_repair,
 };
 
 #[path = "intent_router_active_task_repair.rs"]
@@ -312,7 +297,6 @@ mod active_task_repair;
 use active_task_repair::unresolved_deictic_observable_target_should_clarify;
 use active_task_repair::{
     active_context_has_structured_observation_anchor, active_primary_text_context,
-    answer_candidate_can_conflict_with_active_text_followup,
     apply_active_task_scope_refinement_repair, apply_active_task_structured_patch_repair,
     apply_missing_active_task_reuse_clarify, clear_output_contract_for_active_text_followup,
     repair_state_patch_replacement_literal_conflicts,
@@ -347,18 +331,8 @@ use structural_schedule::{
 
 #[path = "intent_router_answer_candidate_binding.rs"]
 mod answer_candidate_binding;
-use answer_candidate_binding::AnswerCandidateBindingReport;
 #[cfg(test)]
-use answer_candidate_binding::{
-    active_task_invalid_turn_binding_context, analyze_answer_candidate_binding,
-    answer_candidate_binding_repair_context, clear_internal_context_answer_candidate,
-    clear_memory_only_answer_candidate_if_recent_context_conflicts,
-    rebind_memory_only_answer_candidate_to_recent_user_memory,
-};
-#[cfg(test)]
-use answer_candidate_binding::{
-    latest_user_memory_distinctive_scalar_candidate, recent_distinctive_scalar_conflict_tokens,
-};
+use answer_candidate_binding::active_task_invalid_turn_binding_context;
 
 #[path = "intent_router_route_output.rs"]
 mod route_output;
@@ -417,6 +391,7 @@ struct IntentNormalizerOut {
     #[serde(default)]
     resolved_user_intent: String,
     #[serde(default)]
+    #[allow(dead_code)]
     answer_candidate: String,
     #[serde(default)]
     resume_behavior: String,
@@ -484,10 +459,6 @@ mod contract_repair_judge_tests;
 #[cfg(test)]
 #[path = "intent_router_prompt_render_tests.rs"]
 mod prompt_render_tests;
-
-#[cfg(test)]
-#[path = "intent_router_answer_candidate_binding_tests.rs"]
-mod answer_candidate_binding_tests;
 
 #[cfg(test)]
 #[path = "intent_router_semantic_suspect_tests.rs"]

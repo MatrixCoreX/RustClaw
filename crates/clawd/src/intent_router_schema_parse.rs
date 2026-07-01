@@ -5,9 +5,9 @@ use super::{
     ExecutionRecipePlanHint,
 };
 use crate::{
-    FirstLayerDecision, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ResumeBehavior, ScheduleKind,
-    SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
+    IntentOutputContract, OutputDeliveryIntent, OutputListSelector, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, ResumeBehavior, ScheduleKind, SelfExtensionContract,
+    SelfExtensionMode, SelfExtensionTrigger,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -175,7 +175,6 @@ pub(super) fn parse_target_task_policy(s: &str) -> Option<TargetTaskPolicy> {
 pub(super) fn infer_missing_turn_type_from_policy(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    legacy_normalizer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -184,7 +183,6 @@ pub(super) fn infer_missing_turn_type_from_policy(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || matches!(legacy_normalizer_decision, FirstLayerDecision::Clarify)
     {
         return turn_type;
     }
@@ -455,6 +453,12 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "image_extract"
         | "image_compare"
         | "screenshot_summary" => OutputSemanticKind::ImageUnderstanding,
+        "photo_organization"
+        | "photo_organize"
+        | "photo_organizing"
+        | "photo_source_candidates"
+        | "photo_discovery"
+        | "photo_organization_preview" => OutputSemanticKind::PhotoOrganization,
         "publishing_preview" | "social_post_preview" | "channel_draft_preview" => {
             OutputSemanticKind::PublishingPreview
         }
@@ -609,7 +613,7 @@ pub(super) fn parse_output_contract(
     {
         if matches!(contract.delivery_intent, OutputDeliveryIntent::None)
             || (matches!(contract.delivery_intent, OutputDeliveryIntent::FileSingle)
-                && !matches!(contract.semantic_kind, OutputSemanticKind::None))
+                && !contract.semantic_kind_is_unclassified())
         {
             contract.delivery_required = false;
             contract.delivery_intent = OutputDeliveryIntent::None;

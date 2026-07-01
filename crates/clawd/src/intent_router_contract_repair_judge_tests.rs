@@ -112,7 +112,7 @@ fn contract_repair_judge_scalar_semantic_token_normalizes_to_scalar_contract() {
 }
 
 #[test]
-fn contract_repair_judge_output_applies_semantic_contract() {
+fn contract_repair_judge_output_applies_machine_contract_without_decision_authority() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "列出 document 目录下的所有文件名".to_string(),
         answer_candidate: String::new(),
@@ -138,8 +138,9 @@ fn contract_repair_judge_output_applies_semantic_contract() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "malformed_contract_semantically_requires_directory_listing".to_string(),
+        repair_target: String::new(),
         confidence: 0.91,
-        decision: "planner_execute".to_string(),
+        decision: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
         resolved_user_intent: "列出 document 目录下所有文件名，只输出文件名列表".to_string(),
@@ -171,7 +172,9 @@ fn contract_repair_judge_output_applies_semantic_contract() {
 
     assert_eq!(out.decision, "planner_execute");
     assert_eq!(out.confidence, 0.91);
-    assert!(out.reason.contains("llm_semantic_contract_repair"));
+    assert!(out.reason.contains("contract_repair_applied"));
+    assert!(out.reason.contains("contract_repair_note_present"));
+    assert!(out.reason.contains("contract_repair_target=file_names"));
     let contract = super::parse_output_contract(out.output_contract, false);
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
@@ -209,6 +212,7 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
         reason:
             "semantic repair `execution_failed_step_contract_preserves_ordered_command_sequence`"
                 .to_string(),
+        repair_target: String::new(),
         confidence: 0.91,
         decision: "clarify".to_string(),
         needs_clarify: true,
@@ -285,6 +289,7 @@ fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarif
         reason:
             "generated_file_delivery_allows_runtime_target; direct_file_delivery_workspace_root_locator_rejected"
                 .to_string(),
+        repair_target: String::new(),
         confidence: 0.91,
         decision: "clarify".to_string(),
         needs_clarify: true,
@@ -359,6 +364,32 @@ fn generated_file_delivery_contract_clears_spurious_attachment_processing() {
 }
 
 #[test]
+fn delivery_contract_clears_spurious_attachment_processing_without_semantic_kind() {
+    let mut attachment_processing_required = true;
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::clear_spurious_generated_file_delivery_attachment_processing(
+        &mut attachment_processing_required,
+        &contract,
+        true,
+    );
+
+    assert_eq!(
+        repair,
+        Some("generated_file_delivery_cleared_spurious_attachment_processing")
+    );
+    assert!(!attachment_processing_required);
+}
+
+#[test]
 fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "Continue from the prior task.".to_string(),
@@ -385,6 +416,7 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "active_task_invalid_turn_binding_repaired_continuation_request".to_string(),
+        repair_target: String::new(),
         confidence: 0.91,
         decision: "clarify".to_string(),
         needs_clarify: true,
@@ -421,6 +453,9 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
     assert!(out.clarify_question.is_empty());
     assert_eq!(out.turn_type, "status_query");
     assert_eq!(out.target_task_policy, "reuse_active");
+    assert!(out
+        .reason
+        .contains("contract_repair_marker=active_task_invalid_turn_binding"));
     assert!(out.state_patch.is_none());
     let contract = super::parse_output_contract(out.output_contract, false);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -469,6 +504,7 @@ fn contract_repair_judge_preserves_structured_config_key_contract() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "fresh_file_observation_required".to_string(),
+        repair_target: String::new(),
         confidence: 0.95,
         decision: "planner_execute".to_string(),
         needs_clarify: false,
@@ -550,6 +586,7 @@ fn contract_repair_judge_preserves_structured_scalar_field_contract() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "single_path_generic_contract_needs_semantic_shape_review".to_string(),
+        repair_target: String::new(),
         confidence: 0.95,
         decision: "planner_execute".to_string(),
         needs_clarify: false,
@@ -625,6 +662,7 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
         apply: true,
         reason: "execution_recipe_untrusted_text_ignored_and_turn_binding_missing_for_content_read"
             .to_string(),
+        repair_target: String::new(),
         confidence: 0.95,
         decision: "planner_execute".to_string(),
         needs_clarify: false,
@@ -713,6 +751,7 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "inline_text_contract".to_string(),
+        repair_target: String::new(),
         confidence: 0.85,
         decision: "direct_answer".to_string(),
         needs_clarify: false,
@@ -779,6 +818,7 @@ fn contract_repair_judge_output_rejects_low_confidence() {
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "uncertain".to_string(),
+        repair_target: String::new(),
         confidence: 0.59,
         decision: "planner_execute".to_string(),
         needs_clarify: false,
@@ -835,6 +875,7 @@ fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal
     let repair = super::ContractRepairJudgeOut {
         apply: true,
         reason: "ordinary_semantic_route_change".to_string(),
+        repair_target: String::new(),
         confidence: 0.91,
         decision: "planner_execute".to_string(),
         needs_clarify: false,

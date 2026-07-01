@@ -2,7 +2,6 @@ use super::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
     OutputSemanticKind, TargetTaskPolicy, TurnType,
 };
-use crate::FirstLayerDecision;
 
 #[test]
 fn active_task_output_table_refinement_is_routed_back_to_direct_answer() {
@@ -20,11 +19,11 @@ fn active_task_output_table_refinement_is_routed_back_to_direct_answer() {
     };
     assert!(super::should_route_active_task_mutation_to_direct_answer(
         "把结果改成 markdown table 输出",
+        "",
         Some(&snapshot),
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::PlannerExecute,
         &IntentOutputContract::default(),
         None,
     ));
@@ -45,11 +44,11 @@ fn active_task_correct_is_routed_back_to_direct_answer() {
     };
     assert!(super::should_route_active_task_mutation_to_direct_answer(
         "Correction: not Python 3.10, use Python 3.11",
+        "",
         Some(&snapshot),
         Some(TurnType::TaskCorrect),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::PlannerExecute,
         &IntentOutputContract::default(),
         None,
     ));
@@ -90,6 +89,7 @@ fn active_task_invalid_turn_binding_context_uses_schema_tokens_not_user_phrases(
 #[test]
 fn active_task_invalid_turn_binding_skips_recent_observed_judgment_contract() {
     let raw = serde_json::json!({
+        "reason": "excerpt_kind_judgment",
         "turn_type": "response",
         "target_task_policy": "recent_result_selection",
         "output_contract": {
@@ -230,11 +230,11 @@ fn active_task_mutation_with_content_evidence_stays_executable() {
     };
     assert!(!super::should_route_active_task_mutation_to_direct_answer(
         "Focus only on the UI part",
+        "workspace_project_summary",
         Some(&snapshot),
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::PlannerExecute,
         &contract,
         None,
     ));
@@ -269,7 +269,7 @@ fn unresolved_deictic_observation_clarify_is_not_downgraded_to_direct_answer() {
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            FirstLayerDecision::Clarify,
+            true,
             &contract,
             Some(&state_patch),
         )
@@ -329,7 +329,6 @@ fn scope_refinement_repair_keeps_unresolved_deictic_observation_clarify() {
     };
     let mut turn_type = Some(TurnType::TaskRequest);
     let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-    let mut decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
     let mut contract = IntentOutputContract {
@@ -346,11 +345,11 @@ fn scope_refinement_repair_keeps_unresolved_deictic_observation_clarify() {
 
     let reason = super::apply_active_task_scope_refinement_repair(
         "看看那个文件最后 5 行",
+        "",
         Some(&snapshot),
         &mut turn_type,
         &mut target_task_policy,
         false,
-        &mut decision,
         &mut finalize_style,
         &mut needs_clarify,
         super::ScheduleKind::None,
@@ -363,7 +362,6 @@ fn scope_refinement_repair_keeps_unresolved_deictic_observation_clarify() {
     assert_eq!(reason, None);
     assert_eq!(turn_type, Some(TurnType::TaskRequest));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-    assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(needs_clarify);
     assert!(contract.requires_content_evidence);
 }
@@ -388,7 +386,7 @@ fn active_task_output_refinement_clarify_is_resolved() {
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::Clarify,
+        true,
         &IntentOutputContract::default(),
         None,
     ));
@@ -412,7 +410,7 @@ fn active_task_append_clarify_without_output_is_resolved() {
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::Clarify,
+        true,
         &IntentOutputContract::default(),
         None,
     ));
@@ -422,20 +420,18 @@ fn active_task_append_clarify_without_output_is_resolved() {
 fn missing_active_text_append_clarify_continues_as_chat() {
     let mut needs_clarify = true;
     let mut clarify_question = "who is the beginner?".to_string();
-    let mut decision = crate::FirstLayerDecision::Clarify;
     let mut finalize = crate::ActFinalizeStyle::Plain;
     let mut contract = super::IntentOutputContract::default();
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "make it beginner friendly",
+        "",
         None,
         Some(super::TurnType::TaskAppend),
         Some(super::TargetTaskPolicy::ReuseActive),
         None,
-        None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize,
         &mut contract,
     );
@@ -443,34 +439,30 @@ fn missing_active_text_append_clarify_continues_as_chat() {
     assert_eq!(reason, Some("missing_active_task_reuse_continues_as_chat"));
     assert!(!needs_clarify);
     assert!(clarify_question.is_empty());
-    assert_eq!(decision, crate::FirstLayerDecision::DirectAnswer);
 }
 
 #[test]
 fn missing_active_text_append_keeps_file_locator_clarify() {
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = crate::FirstLayerDecision::Clarify;
     let mut finalize = crate::ActFinalizeStyle::Plain;
     let mut contract = super::IntentOutputContract::default();
 
     let reason = super::apply_missing_active_task_reuse_clarify(
         "README.md",
+        "",
         None,
         Some(super::TurnType::TaskAppend),
         Some(super::TargetTaskPolicy::ReuseActive),
         None,
-        None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize,
         &mut contract,
     );
 
     assert_eq!(reason, Some("missing_active_task_reuse_requires_clarify"));
     assert!(needs_clarify);
-    assert_eq!(decision, crate::FirstLayerDecision::Clarify);
 }
 
 #[test]
@@ -491,7 +483,7 @@ fn active_task_append_clarify_keeps_file_locator_guard() {
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
         false,
-        FirstLayerDecision::Clarify,
+        true,
         &IntentOutputContract::default(),
         None,
     ));
@@ -521,7 +513,6 @@ fn bare_path_correction_can_fill_active_observable_task() {
         Some(&snapshot),
         Some(TurnType::TaskCorrect),
         Some(TargetTaskPolicy::ReuseActive),
-        FirstLayerDecision::PlannerExecute,
         &contract,
     ));
 }
@@ -553,7 +544,6 @@ fn bare_path_clarify_with_observable_scalar_contract_can_fill_active_task() {
         Some(&snapshot),
         None,
         None,
-        FirstLayerDecision::Clarify,
         &contract,
     ));
 }
@@ -591,7 +581,6 @@ fn bare_path_active_clarify_state_can_fill_standalone_task_request() {
         Some(&snapshot),
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::Standalone),
-        FirstLayerDecision::Clarify,
         &contract,
     ));
 }
@@ -621,7 +610,6 @@ fn bare_filename_task_request_can_replace_active_existence_check() {
         Some(&snapshot),
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::ReplaceActive),
-        FirstLayerDecision::PlannerExecute,
         &contract,
     ));
 }
@@ -651,7 +639,6 @@ fn bare_path_with_executable_contract_can_fill_active_log_tail() {
         Some(&snapshot),
         None,
         None,
-        FirstLayerDecision::PlannerExecute,
         &contract,
     ));
 }
@@ -691,7 +678,6 @@ fn bare_filename_can_replace_active_delivery_target() {
         Some(&snapshot),
         Some(TurnType::TaskRequest),
         None,
-        FirstLayerDecision::PlannerExecute,
         &contract,
     ));
 }
@@ -713,8 +699,37 @@ fn bare_path_without_observable_contract_still_needs_action_clarify() {
             Some(&snapshot),
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
-            FirstLayerDecision::PlannerExecute,
             &IntentOutputContract::default(),
+        )
+    );
+}
+
+#[test]
+fn bare_path_semantic_kind_alone_does_not_fill_active_observable_task() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("检查上一个目标".to_string()),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    assert!(
+        !super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            &contract,
         )
     );
 }

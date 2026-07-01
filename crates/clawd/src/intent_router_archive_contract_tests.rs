@@ -21,7 +21,7 @@ fn archive_unpack_missing_archive_locator_forces_clarify_even_with_destination_p
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_archive_unpack_missing_archive_locator_clarify(
@@ -30,7 +30,6 @@ fn archive_unpack_missing_archive_locator_forces_clarify_even_with_destination_p
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -39,7 +38,7 @@ fn archive_unpack_missing_archive_locator_forces_clarify_even_with_destination_p
         Some("archive_unpack_missing_archive_locator_clarify")
     );
     assert!(needs_clarify);
-    assert_eq!(decision, FirstLayerDecision::Clarify);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
@@ -60,7 +59,7 @@ fn archive_unpack_missing_archive_locator_allows_structural_archive_pair() {
     };
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
-    let mut decision = FirstLayerDecision::PlannerExecute;
+    let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
 
     let reason = super::apply_archive_unpack_missing_archive_locator_clarify(
@@ -69,7 +68,6 @@ fn archive_unpack_missing_archive_locator_allows_structural_archive_pair() {
         None,
         &mut needs_clarify,
         &mut clarify_question,
-        &mut decision,
         &mut finalize_style,
     );
 
@@ -103,11 +101,11 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -127,6 +125,44 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
 }
 
 #[test]
+fn archive_pair_does_not_treat_generated_delivery_semantic_kind_as_delivery_contract() {
+    let req =
+        "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new("/workspace"),
+        "",
+        None,
+        None,
+    );
+
+    assert_ne!(reason, Some("archive_pack_pair_contract_repair"));
+    assert_ne!(reason, Some("archive_unpack_pair_contract_repair"));
+    assert!(
+        !matches!(
+            contract.semantic_kind,
+            OutputSemanticKind::ArchivePack | OutputSemanticKind::ArchiveUnpack
+        ),
+        "semantic enum alone must not promote an archive pair operation"
+    );
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+}
+
+#[test]
 fn archive_pack_pair_repairs_scalar_path_only_contract() {
     let req = "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -140,11 +176,11 @@ fn archive_pack_pair_repairs_scalar_path_only_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -180,11 +216,11 @@ fn archive_unpack_pair_repairs_generated_file_delivery_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -222,11 +258,11 @@ fn archive_unpack_pair_repairs_generic_path_content_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -259,11 +295,11 @@ fn archive_unpack_pair_repairs_filesystem_mutation_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -294,11 +330,11 @@ fn archive_unpack_pair_repairs_content_excerpt_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -341,11 +377,11 @@ fn archive_unpack_pair_repairs_policy_suffix_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -395,11 +431,11 @@ fn archive_read_member_repairs_content_excerpt_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -444,11 +480,11 @@ fn archive_read_member_repair_preserves_archive_sqlite_compound_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -475,11 +511,11 @@ fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -507,11 +543,11 @@ fn archive_read_member_repairs_archive_unpack_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -540,11 +576,11 @@ fn archive_list_single_archive_repairs_archive_unpack_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -577,11 +613,11 @@ fn archive_list_single_archive_repairs_file_names_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -618,11 +654,11 @@ fn archive_list_single_archive_repairs_directory_entry_groups_without_locator_hi
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -656,11 +692,11 @@ fn archive_read_nested_member_path_is_not_unpack_destination() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -689,11 +725,11 @@ fn archive_read_member_repair_requires_member_candidate() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,
@@ -724,11 +760,11 @@ fn archive_pair_does_not_repair_plain_observation_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
+        "",
         &mut contract,
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        FirstLayerDecision::PlannerExecute,
         "",
         None,
         None,

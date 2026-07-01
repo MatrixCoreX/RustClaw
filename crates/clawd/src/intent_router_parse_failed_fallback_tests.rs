@@ -51,7 +51,7 @@ fn normalizer_schema_normalization_does_not_invent_contract_from_surface() {
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(
         value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        Some("direct_answer")
     );
     let contract = value
         .get("output_contract")
@@ -352,10 +352,7 @@ fn fallback_normalizer_output_still_enforces_content_evidence_planner_execute() 
         },
         None,
     );
-    assert_eq!(
-        out.legacy_first_layer_decision,
-        FirstLayerDecision::PlannerExecute
-    );
+    assert_eq!(out.route_trace_decision, FirstLayerDecision::PlannerExecute);
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.locator_kind,
@@ -534,10 +531,7 @@ fn inline_json_transform_fallback_builds_planner_execute_contract() {
         None,
     );
 
-    assert_eq!(
-        out.legacy_first_layer_decision,
-        FirstLayerDecision::PlannerExecute
-    );
+    assert_eq!(out.route_trace_decision, FirstLayerDecision::PlannerExecute);
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.response_shape,
@@ -562,7 +556,6 @@ fn parsed_inline_json_transform_repair_builds_planner_execute_contract() {
     let fallback = super::parsed_inline_json_transform_repair_decision(
         req,
         true,
-        FirstLayerDecision::Clarify,
         false,
         ScheduleKind::None,
         None,
@@ -592,7 +585,6 @@ fn parsed_inline_json_transform_repair_preserves_file_delivery_route() {
     assert!(super::parsed_inline_json_transform_repair_decision(
         req,
         true,
-        FirstLayerDecision::Clarify,
         true,
         ScheduleKind::None,
         None
@@ -607,7 +599,6 @@ fn parsed_inline_json_transform_repair_preserves_clean_planner_route() {
     assert!(super::parsed_inline_json_transform_repair_decision(
         req,
         false,
-        FirstLayerDecision::PlannerExecute,
         false,
         ScheduleKind::None,
         None
@@ -622,7 +613,6 @@ fn parsed_inline_json_transform_repair_preserves_direct_non_clarify_route() {
     assert!(super::parsed_inline_json_transform_repair_decision(
         req,
         false,
-        FirstLayerDecision::DirectAnswer,
         false,
         ScheduleKind::None,
         None
@@ -644,10 +634,7 @@ fn directory_pair_fallback_builds_planner_execute_locator_contract() {
     let out =
         normalizer_output_from_fallback(req, "llm_failed_directory_pair_fallback", fallback, None);
 
-    assert_eq!(
-        out.legacy_first_layer_decision,
-        FirstLayerDecision::PlannerExecute
-    );
+    assert_eq!(out.route_trace_decision, FirstLayerDecision::PlannerExecute);
     assert!(!out.needs_clarify);
     assert_eq!(
         out.output_contract.response_shape,
@@ -708,7 +695,6 @@ fn explicit_surface_path_facts_clarify_repair_overrides_missing_path_clarify() {
         &surface,
         std::path::Path::new("/workspace"),
         true,
-        FirstLayerDecision::Clarify,
         &IntentOutputContract::default(),
         false,
         ScheduleKind::None,
@@ -721,10 +707,7 @@ fn explicit_surface_path_facts_clarify_repair_overrides_missing_path_clarify() {
         fallback.output_contract.semantic_kind,
         OutputSemanticKind::ExistenceWithPath
     );
-    assert_eq!(
-        fallback.reason,
-        "normalizer_clarify_explicit_multi_path_facts"
-    );
+    assert_eq!(fallback.reason, "boundary_explicit_multi_path_facts");
 }
 
 #[test]
@@ -742,7 +725,6 @@ fn explicit_surface_path_metadata_clarify_repair_preserves_quantity_comparison()
         &surface,
         std::path::Path::new("/workspace"),
         true,
-        FirstLayerDecision::Clarify,
         &contract,
         false,
         ScheduleKind::None,
@@ -759,10 +741,7 @@ fn explicit_surface_path_metadata_clarify_repair_preserves_quantity_comparison()
         fallback.output_contract.locator_kind,
         OutputLocatorKind::CurrentWorkspace
     );
-    assert_eq!(
-        fallback.reason,
-        "normalizer_clarify_explicit_multi_path_metadata"
-    );
+    assert_eq!(fallback.reason, "boundary_explicit_multi_path_metadata");
 }
 
 #[test]
@@ -780,7 +759,6 @@ fn explicit_surface_path_facts_clarify_repair_preserves_structured_contract() {
         &surface,
         std::path::Path::new("/workspace"),
         true,
-        FirstLayerDecision::Clarify,
         &contract,
         false,
         ScheduleKind::None,
@@ -816,6 +794,7 @@ fn workspace_scope_patch_sets_locator_hint_from_structured_scope() {
         self_extension: crate::SelfExtensionContract::default(),
     };
     let applied = super::apply_workspace_scope_patch_to_contract(
+        "workspace_project_summary",
         &mut contract,
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
@@ -841,6 +820,7 @@ fn workspace_scope_patch_keeps_specific_locator_hint() {
         self_extension: crate::SelfExtensionContract::default(),
     };
     let applied = super::apply_workspace_scope_patch_to_contract(
+        "workspace_project_summary",
         &mut contract,
         Some(TurnType::TaskScopeUpdate),
         Some(TargetTaskPolicy::ReuseActive),
@@ -871,7 +851,7 @@ fn fallback_normalizer_keeps_llm_failure_on_safe_clarify() {
         },
         Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
     );
-    assert_eq!(out.legacy_first_layer_decision, FirstLayerDecision::Clarify);
+    assert_eq!(out.route_trace_decision, FirstLayerDecision::Clarify);
     assert!(out.needs_clarify);
     assert!(matches!(
         out.output_contract.response_shape,
