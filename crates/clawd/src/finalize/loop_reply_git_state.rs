@@ -68,9 +68,7 @@ pub(super) async fn replace_git_repository_state_machine_delivery_with_observed_
                     &answer,
                 ) =>
         {
-            loop_state
-                .delivery_messages
-                .retain(|message| crate::finalize::is_execution_summary_message(message));
+            loop_state.delivery_messages.clear();
             append_delivery_message(
                 &task.task_id,
                 &mut loop_state.delivery_messages,
@@ -137,9 +135,7 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
         loop_state.last_user_visible_respond = Some(answer);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,

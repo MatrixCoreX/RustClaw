@@ -1357,8 +1357,7 @@ pub(crate) async fn finalize_ask_result(
                     failure_reply = false;
                     semantic_clarify = false;
                     answer_text = recovered_answer;
-                    answer_messages
-                        .retain(|message| crate::finalize::is_execution_summary_message(message));
+                    answer_messages.clear();
                     answer_messages.push(answer_text.clone());
                     journal.answer_verifier_summary = None;
                     journal.record_final_answer(&answer_text);
@@ -1374,8 +1373,7 @@ pub(crate) async fn finalize_ask_result(
             {
                 if answer_text.trim() != token {
                     answer_text = token;
-                    answer_messages
-                        .retain(|message| crate::finalize::is_execution_summary_message(message));
+                    answer_messages.clear();
                     answer_messages.push(answer_text.clone());
                     journal.record_final_answer(&answer_text);
                 }
@@ -1440,8 +1438,7 @@ pub(crate) async fn finalize_ask_result(
             if let Some(recovered_answer) = deterministic_filtered_log_entry_recovery(&journal) {
                 failure_reply = false;
                 answer_text = recovered_answer;
-                answer_messages
-                    .retain(|message| crate::finalize::is_execution_summary_message(message));
+                answer_messages.clear();
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
@@ -1452,8 +1449,7 @@ pub(crate) async fn finalize_ask_result(
                 failure_reply = false;
                 semantic_clarify = false;
                 answer_text = recovered_answer;
-                answer_messages
-                    .retain(|message| crate::finalize::is_execution_summary_message(message));
+                answer_messages.clear();
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
@@ -1473,8 +1469,7 @@ pub(crate) async fn finalize_ask_result(
                 failure_reply = false;
                 semantic_clarify = false;
                 answer_text = recovered_answer;
-                answer_messages
-                    .retain(|message| crate::finalize::is_execution_summary_message(message));
+                answer_messages.clear();
                 answer_messages.push(answer_text.clone());
                 journal.record_final_answer(&answer_text);
                 mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);

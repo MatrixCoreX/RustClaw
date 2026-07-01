@@ -55,14 +55,11 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
         loop_state.last_user_visible_respond.as_deref(),
         Some("last alpha\nlast beta")
     );
+    assert_eq!(loop_state.delivery_messages, vec!["last alpha\nlast beta"]);
     assert!(loop_state
         .delivery_messages
         .iter()
-        .any(|message| crate::finalize::is_execution_summary_message(message)));
-    assert_eq!(
-        loop_state.delivery_messages.last().map(String::as_str),
-        Some("last alpha\nlast beta")
-    );
+        .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert_eq!(
         finalizer_summary.and_then(|summary| summary.disposition),
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)

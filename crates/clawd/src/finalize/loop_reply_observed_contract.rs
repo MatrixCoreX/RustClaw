@@ -401,9 +401,7 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
     ) {
         return false;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -504,9 +502,7 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
         *finalizer_summary = Some(summary);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -587,9 +583,7 @@ pub(super) fn replace_delivery_with_loop_contract_observed_answer(
         *finalizer_summary = Some(summary);
         return true;
     }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -743,9 +737,7 @@ pub(super) fn replace_structured_delivery_with_grounded_terminal_respond(
     else {
         return false;
     };
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
@@ -853,9 +845,7 @@ pub(super) fn replace_structured_delivery_with_grounded_synthesis(
     else {
         return false;
     };
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    loop_state.delivery_messages.clear();
     append_delivery_message(
         &task.task_id,
         &mut loop_state.delivery_messages,
