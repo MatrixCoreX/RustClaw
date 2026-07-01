@@ -51,20 +51,7 @@ const FRESH_EVIDENCE_CONTRACT_MARKERS: &[&str] = &[
     "filesystem_mutation_result",
     "existence_with_path",
     "existence_with_path_summary",
-    "git_commit_subject",
-    "git_repository_state",
     "structured_keys",
-    "config_validation",
-    "config_mutation",
-    "config_risk_assessment",
-    "sqlite_table_listing",
-    "sqlite_table_names_only",
-    "sqlite_database_kind_judgment",
-    "sqlite_schema_version",
-    "archive_list",
-    "archive_read",
-    "archive_pack",
-    "archive_unpack",
 ];
 
 fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {

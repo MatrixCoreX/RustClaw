@@ -18,11 +18,9 @@ const WORKSPACE_DEFAULT_OBSERVATION_MARKERS: &[&str] = &[
     "workspace_project_summary",
     "existence_with_path",
     "existence_with_path_summary",
-    "git_commit_subject",
-    "git_repository_state",
 ];
 
-const LOCATORLESS_DEFAULT_OBSERVATION_MARKERS: &[&str] = &["service_status", "tool_discovery"];
+const LOCATORLESS_DEFAULT_OBSERVATION_MARKERS: &[&str] = &["service_status"];
 
 const EXISTING_OBSERVED_CONTEXT_MARKERS: &[&str] = &[
     "content_excerpt_summary",

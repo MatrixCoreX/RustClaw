@@ -404,7 +404,7 @@ fn deictic_missing_locator_state_patch_forces_boundary_clarify_contract() {
 }
 
 #[test]
-fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
+fn structured_contract_hint_repair_ignores_legacy_git_semantic_hint() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -444,11 +444,8 @@ fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
         &mut finalize_style,
     );
 
-    assert_eq!(reason, Some("structured_contract_hint_repair"));
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::GitRepositoryState
-    );
+    assert_eq!(reason, None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
     assert!(contract.requires_content_evidence);
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert!(!needs_clarify);
@@ -677,7 +674,7 @@ fn recent_scalar_equality_requires_fresh_evidence() {
 }
 
 #[test]
-fn contract_hint_fallback_recovers_git_route_without_nl_tokens() {
+fn contract_hint_fallback_ignores_legacy_git_semantic_hint() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -694,22 +691,9 @@ fn contract_hint_fallback_recovers_git_route_without_nl_tokens() {
         &surface,
         workspace_root,
         "normalizer_parse_failed_contract_hint",
-    )
-    .expect("contract hint fallback");
+    );
 
-    assert!(!decision.needs_clarify);
-    assert_eq!(
-        decision.output_contract.semantic_kind,
-        OutputSemanticKind::GitRepositoryState
-    );
-    assert_eq!(
-        decision.output_contract.locator_kind,
-        OutputLocatorKind::CurrentWorkspace
-    );
-    assert_eq!(
-        decision.output_contract.locator_hint,
-        workspace_root.display().to_string()
-    );
+    assert!(decision.is_none());
 }
 
 #[test]
