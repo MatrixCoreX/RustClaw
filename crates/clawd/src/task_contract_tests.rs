@@ -187,6 +187,40 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
 }
 
 #[test]
+fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_ref() {
+    for semantic_kind in [
+        OutputSemanticKind::WeatherQuery,
+        OutputSemanticKind::PackageManagerDetection,
+        OutputSemanticKind::DockerImages,
+        OutputSemanticKind::ConfigValidation,
+        OutputSemanticKind::ConfigMutation,
+        OutputSemanticKind::ConfigRiskAssessment,
+        OutputSemanticKind::ArchiveList,
+        OutputSemanticKind::ArchiveRead,
+        OutputSemanticKind::ArchivePack,
+        OutputSemanticKind::ArchiveUnpack,
+    ] {
+        let route = route_with_contract(
+            AskMode::planner_execute_plain(),
+            IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::None,
+                semantic_kind,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.target_object, TaskTargetObject::Unknown);
+        assert_eq!(contract.operation, TaskOperation::Inspect);
+        assert_eq!(contract.delivery_shape, TaskDeliveryShape::Raw);
+        assert!(contract.required_evidence_fields.is_empty());
+    }
+}
+
+#[test]
 fn task_contract_splits_structured_multi_target_locator() {
     let route = route_with_contract(
         AskMode::planner_execute_plain(),

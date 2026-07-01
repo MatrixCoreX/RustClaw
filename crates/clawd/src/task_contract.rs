@@ -359,7 +359,11 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
     if let Some(target) = target_object_for_capability_ref(route) {
         return target;
     }
-    match route.effective_output_contract_semantic_kind() {
+    let semantic_kind = route.effective_output_contract_semantic_kind();
+    if semantic_kind.is_normalizer_schema_capability_bridge() {
+        return target_object_for_locator_kind(route.output_contract.locator_kind);
+    }
+    match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
         OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
@@ -376,7 +380,11 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         OutputSemanticKind::ToolDiscovery => return TaskTargetObject::System,
         _ => {}
     }
-    match route.output_contract.locator_kind {
+    target_object_for_locator_kind(route.output_contract.locator_kind)
+}
+
+fn target_object_for_locator_kind(locator_kind: OutputLocatorKind) -> TaskTargetObject {
+    match locator_kind {
         OutputLocatorKind::Path | OutputLocatorKind::Filename => TaskTargetObject::Path,
         OutputLocatorKind::CurrentWorkspace => TaskTargetObject::Directory,
         OutputLocatorKind::Url => TaskTargetObject::Web,
@@ -442,7 +450,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         return operation;
     }
     let semantic_kind = route.effective_output_contract_semantic_kind();
-    if semantic_kind.is_registry_capability_bridge() {
+    if semantic_kind.is_normalizer_schema_capability_bridge() {
         return operation_for_unclassified_route(route);
     }
     match semantic_kind {
@@ -520,6 +528,12 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
     if let Some(shape) = delivery_shape_for_capability_ref(route) {
         return shape;
     }
+    if route
+        .effective_output_contract_semantic_kind()
+        .is_normalizer_schema_capability_bridge()
+    {
+        return delivery_shape_for_response_shape(route.output_contract.response_shape);
+    }
     if matches!(
         route.effective_output_contract_semantic_kind(),
         OutputSemanticKind::FileNames
@@ -533,7 +547,11 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
     ) {
         return TaskDeliveryShape::List;
     }
-    match route.output_contract.response_shape {
+    delivery_shape_for_response_shape(route.output_contract.response_shape)
+}
+
+fn delivery_shape_for_response_shape(response_shape: OutputResponseShape) -> TaskDeliveryShape {
+    match response_shape {
         OutputResponseShape::OneSentence => TaskDeliveryShape::OneSentence,
         OutputResponseShape::Strict | OutputResponseShape::Scalar => TaskDeliveryShape::Raw,
         OutputResponseShape::FileToken => TaskDeliveryShape::File,
@@ -548,7 +566,7 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
     let output_contract = route.effective_output_contract();
     if output_contract
         .semantic_kind
-        .is_registry_capability_bridge()
+        .is_normalizer_schema_capability_bridge()
     {
         return Vec::new();
     }
