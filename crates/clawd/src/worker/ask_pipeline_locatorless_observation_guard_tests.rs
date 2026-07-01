@@ -194,6 +194,35 @@ fn locatorless_registry_capability_ref_can_plan_without_guard_whitelist_growth()
 }
 
 #[test]
+fn locatorless_registry_capability_ref_must_come_from_route_reason() {
+    let state = test_state_with_root(make_temp_root("locatorless_capability_ref_resolved_only"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Generate a short media preview. capability_ref=media_video.generate".to_string();
+    route.route_reason = "registry capability route without machine ref".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(locatorless_observation_route_should_force_clarify(
+        &state,
+        "generate a short media preview",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
 fn locatorless_git_capability_plans_without_enum_promotion() {
     let state = test_state_with_root(make_temp_root("locatorless_git_capability"));
     let mut route = executable_filename_route();
