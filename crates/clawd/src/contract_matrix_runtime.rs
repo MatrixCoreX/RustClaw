@@ -577,10 +577,17 @@ pub(crate) fn action_policy_for_route(
     let output_contract = route.effective_output_contract();
     let mut policy =
         action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)?;
-    if matches!(
-        policy.decision,
-        ActionPolicyDecision::RejectedNotAllowed | ActionPolicyDecision::RejectedNoActionsAllowed
-    ) && route_capability_ref_allows_action(route, normalized_skill, args)
+    let capability_ref_allows_action =
+        route_capability_ref_allows_action(route, normalized_skill, args);
+    if capability_ref_allows_action
+        && (output_contract
+            .semantic_kind
+            .is_normalizer_schema_capability_bridge()
+            || matches!(
+                policy.decision,
+                ActionPolicyDecision::RejectedNotAllowed
+                    | ActionPolicyDecision::RejectedNoActionsAllowed
+            ))
     {
         policy.decision = ActionPolicyDecision::Allowed;
         policy.contract_match = "capability_ref".to_string();

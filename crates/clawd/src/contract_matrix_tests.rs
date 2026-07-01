@@ -80,6 +80,34 @@ fn route_capability_ref_allows_config_archive_policy_without_semantic_kind() {
 }
 
 #[test]
+fn route_capability_ref_overrides_bridge_semantic_policy_match() {
+    for (semantic_kind, capability_ref, skill, args) in [
+        (
+            OutputSemanticKind::ConfigValidation,
+            "capability_ref=config.validate",
+            "config_basic",
+            serde_json::json!({"action":"validate","path":"configs/config.toml"}),
+        ),
+        (
+            OutputSemanticKind::ArchivePack,
+            "capability_ref=archive.pack",
+            "archive_basic",
+            serde_json::json!({"action":"pack","source":"tmp/report","archive":"tmp/report.zip"}),
+        ),
+    ] {
+        let mut route = route_with_machine_capability_ref(capability_ref);
+        route.output_contract.semantic_kind = semantic_kind;
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {capability_ref}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.contract_repair_source, "capability_ref_route_policy");
+    }
+}
+
+#[test]
 fn route_policy_does_not_allow_config_action_without_capability_ref() {
     let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
     route.route_reason.clear();
