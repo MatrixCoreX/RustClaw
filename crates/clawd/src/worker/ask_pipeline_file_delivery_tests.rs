@@ -502,7 +502,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
         String::new(),
     );
 
-    assert!(applied.execution_route_result.needs_clarify);
+    assert!(!applied.execution_route_result.needs_clarify);
     assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
@@ -515,7 +515,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
         .is_empty());
     assert_eq!(
         applied.gate_record.reason_code,
-        "post_route_file_delivery_current_request_locator_deferred_to_loop"
+        "post_route_file_delivery_current_request_locator_deferred_to_agent_loop"
     );
     assert!(route_reason_has_marker(
         &applied.execution_route_result,
@@ -524,11 +524,14 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
     assert!(applied
         .prompt_with_memory_for_execution
         .contains("definitely_missing_named_file_rustclaw_001.txt"));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("post_route_file_delivery_current_request_locator"));
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn unresolved_file_delivery_without_current_request_locator_stays_clarify() {
+fn unresolved_file_delivery_without_current_request_locator_defers_to_loop_evidence() {
     let root = make_temp_root("delivery_missing_current_request_no_locator");
     let state = test_state_with_root(root.clone());
     let task = crate::ClaimedTask {
@@ -562,7 +565,8 @@ fn unresolved_file_delivery_without_current_request_locator_stays_clarify() {
         String::new(),
     );
 
-    assert!(applied.execution_route_result.needs_clarify);
+    assert!(!applied.execution_route_result.needs_clarify);
+    assert!(applied.execution_route_result.is_execute_gate());
     assert!(applied
         .execution_route_result
         .output_contract
@@ -572,6 +576,17 @@ fn unresolved_file_delivery_without_current_request_locator_stays_clarify() {
         &applied.execution_route_result,
         "file_delivery_current_request_locator_deferred_to_loop"
     ));
+    assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "unresolved_file_delivery_deferred_to_agent_loop"
+    ));
+    assert_eq!(
+        applied.gate_record.reason_code,
+        "post_route_unresolved_file_delivery_deferred_to_agent_loop"
+    );
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("post_route_unresolved_file_delivery_requires_locator"));
     let _ = std::fs::remove_dir_all(root);
 }
 
