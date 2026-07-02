@@ -610,10 +610,7 @@ pub(super) fn git_repository_state_deterministic_plan_result(
     _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
-    if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
-        || !route.output_contract.requires_content_evidence
-    {
+    if loop_state.has_tool_or_skill_output || !route.output_contract.requires_content_evidence {
         return None;
     }
     let action = git_repository_state_action_from_route(route)?;
@@ -647,7 +644,6 @@ pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind
@@ -705,7 +701,6 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind
@@ -850,7 +845,6 @@ pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary

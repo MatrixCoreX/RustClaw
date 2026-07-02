@@ -999,7 +999,7 @@ reqwest = { version = "0.12" }
     let cargo_path = root.path.join("Cargo.toml").display().to_string();
     let readme_path = root.path.join("README.md").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1094,7 +1094,7 @@ version = "0.1.7"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1161,7 +1161,7 @@ version = "0.1.0"
         .display()
         .to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Scalar,
     );
