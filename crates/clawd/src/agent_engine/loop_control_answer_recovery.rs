@@ -1094,7 +1094,7 @@ fn latest_terminal_candidate_can_recover_answer_gap(
 }
 
 fn route_requires_structural_terminal_recovery(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
@@ -1102,7 +1102,7 @@ fn route_allows_latest_synthesis_retry_recovery(
     route: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if !crate::contract_matrix::final_answer_shape_for_route(route)
+    if !crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
     {
         return false;

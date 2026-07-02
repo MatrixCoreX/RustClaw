@@ -20,7 +20,7 @@ pub(super) fn route_should_synthesize_non_bilingual_existence_with_path(
         return false;
     };
     route_contract_marker_is(route, crate::OutputSemanticKind::ExistenceWithPath)
-        && crate::contract_matrix::final_answer_shape_for_route(route)
+        && crate::evidence_policy::final_answer_shape_for_route(route)
             .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -227,7 +227,7 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
     if route_contract_marker_is(route, crate::OutputSemanticKind::RawCommandOutput)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && route.output_contract.locator_kind == crate::OutputLocatorKind::None
-        && crate::contract_matrix::final_answer_shape_for_route(route)
+        && crate::evidence_policy::final_answer_shape_for_route(route)
             .is_some_and(|shape| shape.allows_model_language())
     {
         return true;

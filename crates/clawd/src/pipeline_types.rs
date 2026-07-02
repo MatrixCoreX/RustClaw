@@ -651,7 +651,8 @@ impl RouteResult {
             OutputSemanticKind::ScalarPathOnly => {
                 !self.output_contract.delivery_required
                     && self.output_contract.response_shape == OutputResponseShape::Scalar
-                    && (!matches!(self.output_contract.locator_kind, OutputLocatorKind::None)
+                    && (self.explicit_output_contract_marker_kind() == Some(semantic_kind)
+                        || !matches!(self.output_contract.locator_kind, OutputLocatorKind::None)
                         || !self.output_contract.locator_hint.trim().is_empty())
             }
             _ => true,
