@@ -57,7 +57,7 @@ pub(super) fn planned_action_allowed_by_current_contract(
     let Some((skill, args)) = planned_execution_action_ref(action) else {
         return true;
     };
-    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
+    crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
 }
 
@@ -754,8 +754,8 @@ pub(super) fn plain_rustclaw_main_config_validation_action_target(
 
 fn route_requests_config_validation(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::contract_matrix::final_answer_shape_for_route(route)
-            == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
 }
 
 fn route_requests_config_risk_guard(route: &RouteResult) -> bool {

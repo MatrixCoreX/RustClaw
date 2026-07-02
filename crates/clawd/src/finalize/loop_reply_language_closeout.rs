@@ -419,7 +419,7 @@ pub(super) fn auto_requested_success_marker<'a>(
 }
 
 pub(super) fn route_allows_model_language_final_answer(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 

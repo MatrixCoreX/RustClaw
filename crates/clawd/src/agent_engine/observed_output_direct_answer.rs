@@ -797,14 +797,14 @@ pub(super) fn route_requires_http_body_synthesis(route: Option<&crate::RouteResu
     if route_requests_browser_page_body(route) {
         return true;
     }
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
         return false;
     };
     if super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::ServiceStatus,
     ) {
-        return shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Verdict;
+        return shape.class() == crate::evidence_policy::FinalAnswerShapeClass::Verdict;
     }
     false
 }

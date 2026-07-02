@@ -466,7 +466,7 @@ pub(super) fn contract_allows_log_analyze_for_path(route: &RouteResult, path: &s
         "path": path,
         "max_matches": 50,
     });
-    crate::contract_matrix::capability_ref_action_policy_for_route(
+    crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
         "log_analyze",
         &args,
@@ -1323,7 +1323,7 @@ pub(super) fn archive_pack_deterministic_plan_result(
     let AgentAction::CallSkill { skill, args } = &action else {
         return None;
     };
-    if crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
+    if crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| !policy.is_allowed())
         && !crate::machine_capability_ref::route_has_capability_action_name(
             route,
