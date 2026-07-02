@@ -523,7 +523,7 @@ fn non_boundary_clarify_defers_to_agent_loop() {
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.gate_record.reason_code, "post_route_no_change");
-    assert_eq!(result.gate_record.owner_layer, "post_route_policy");
+    assert_eq!(result.gate_record.owner_layer, "post_route_boundary");
     assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::NoChange);
 }
 

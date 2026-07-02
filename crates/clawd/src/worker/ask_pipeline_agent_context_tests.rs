@@ -169,6 +169,8 @@ fn boundary_observation_block_filters_natural_language_route_reason() {
     assert!(block.contains("explicit_locator_hints"));
     assert!(block.contains("registry_capability_contract"));
     assert!(block.contains("kb.list_namespaces"));
+    assert!(block.contains("post_route_boundary_record"));
+    assert!(!block.contains("\"post_route_policy\""));
     assert!(block.contains("docs alias"));
     assert!(block.contains("/tmp/workspace/docs"));
     assert!(block.contains("active_observed_facts"));
