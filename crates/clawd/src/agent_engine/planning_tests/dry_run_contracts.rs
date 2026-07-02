@@ -31,7 +31,8 @@ fn answer_verifier_contract_dry_run_returns_machine_contract_fields() {
 #[test]
 fn async_job_contract_dry_run_exposes_lifecycle_checkpoint_fields() {
     let mut route = base_route_result();
-    route.route_reason = "dry_run pending_async_job poll_async_job".to_string();
+    route.route_reason =
+        "dry_run pending_async_job_contract poll_entrypoint=poll_async_job".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = structured_dry_run_response_deterministic_plan_result(
@@ -69,9 +70,9 @@ fn async_job_contract_dry_run_exposes_lifecycle_checkpoint_fields() {
 #[test]
 fn structured_dry_run_response_emits_async_job_poll_contract() {
     let mut route = base_route_result();
-    route.route_reason = "semantic=async_job_protocol mode=dry_run would_mutate=false".to_string();
+    route.route_reason = "async_job_protocol=version:1 mode=dry_run would_mutate=false".to_string();
     route.resolved_intent =
-        "adapter_result.type=pending_async_job next_step=poll_async_job".to_string();
+        "adapter_result_key=async_poll_adapter_result next_step=poll_async_job".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = structured_dry_run_response_deterministic_plan_result(
@@ -123,9 +124,8 @@ fn structured_dry_run_response_emits_async_job_poll_contract() {
 #[test]
 fn async_timeout_policy_field_tokens_trigger_deterministic_contract() {
     let mut route = base_route_result();
-    route.route_reason =
-        "mode=dry_run fields=effective_deadline_ts,expires_at,remaining_seconds,expired"
-            .to_string();
+    route.route_reason = "mode=dry_run async_timeout_policy policy_source=async_job_contract fields=effective_deadline_ts,expires_at,remaining_seconds,expired"
+        .to_string();
     route.resolved_intent =
         "effective_deadline_ts expires_at remaining_seconds expired dry_run".to_string();
     let loop_state = LoopState::new(1);
@@ -153,6 +153,47 @@ fn async_timeout_policy_field_tokens_trigger_deterministic_contract() {
             .pointer("/async_timeout_policy/remaining_seconds")
             .and_then(Value::as_str),
         Some("max(effective_deadline_ts-now_ts,0)")
+    );
+}
+
+#[test]
+fn async_job_contract_dry_run_ignores_bare_legacy_async_tokens() {
+    let mut route = base_route_result();
+    route.route_reason = "dry_run pending_async_job poll_async_job".to_string();
+    route.resolved_intent = "pending_async_job poll_async_job dry_run".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry_run pending_async_job poll_async_job",
+        Some(&route),
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "bare async job words should not preempt planner authority"
+    );
+}
+
+#[test]
+fn async_timeout_policy_dry_run_requires_policy_envelope() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "mode=dry_run fields=effective_deadline_ts,expires_at,remaining_seconds,expired"
+            .to_string();
+    route.resolved_intent =
+        "effective_deadline_ts expires_at remaining_seconds expired dry_run".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry_run effective_deadline_ts expires_at remaining_seconds expired",
+        Some(&route),
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "timeout field names need async_timeout_policy + policy_source envelope"
     );
 }
 
