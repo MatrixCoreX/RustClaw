@@ -172,7 +172,6 @@ pub(super) fn path_scoped_locator_guard_can_defer_to_prompt_targets(
     route_result: &crate::RouteResult,
 ) -> bool {
     if route_result.needs_clarify
-        || !route_result.is_execute_gate()
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || !matches!(
