@@ -5,6 +5,9 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
 ) -> Option<PlanResult> {
+    let route_only_tokens = route_result
+        .map(|route| format!("{}\n{}", route.route_reason, route.resolved_intent))
+        .unwrap_or_default();
     let route_tokens = if let Some(route) = route_result {
         format!(
             "{}\n{}\n{}",
@@ -13,7 +16,9 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     } else {
         goal.to_string()
     };
-    if loop_state.round_no <= 1 && finalizer_language_policy_dry_run_tokens_present(&route_tokens) {
+    if loop_state.round_no <= 1
+        && finalizer_language_policy_dry_run_tokens_present(&route_only_tokens)
+    {
         return Some(finalizer_language_policy_dry_run_plan(goal));
     }
     if loop_state.has_tool_or_skill_output || loop_state.round_no > 1 {
@@ -296,14 +301,22 @@ fn observed_output_projection_dry_run_tokens_present(text: &str) -> bool {
 
 fn finalizer_language_policy_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    let has_evidence_token = normalized.contains("structured_evidence")
-        || normalized.contains("structured evidence")
-        || normalized.contains("evidence");
-    normalized.contains("message_key")
-        && normalized.contains("finalizer")
-        && normalized.contains("i18n")
-        && has_evidence_token
-        && has_dry_run_machine_token(&normalized)
+    if !has_dry_run_machine_token(&normalized) {
+        return false;
+    }
+    let has_policy_message_key = contains_machine_kv_or_json_pair(
+        &normalized,
+        "message_key",
+        "clawd.finalizer.language_policy",
+    );
+    let has_finalizer_renderer =
+        contains_machine_kv_or_json_pair(&normalized, "renderer", "finalizer_llm_i18n");
+    let has_output_contract = contains_machine_kv_or_json_pair(
+        &normalized,
+        "output_contract",
+        "message_key_or_structured_evidence",
+    );
+    has_policy_message_key && has_finalizer_renderer && has_output_contract
 }
 
 fn local_process_cancel_dry_run_tokens_present(text: &str) -> bool {
@@ -337,9 +350,12 @@ fn async_job_dry_run_tokens_present(text: &str) -> bool {
 
 fn contains_machine_kv_or_json_pair(text: &str, key: &str, value: &str) -> bool {
     let kv_pair = format!("{key}={value}");
+    let compact_text = text
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
     let compact_json_pair = format!("\"{}\":\"{}\"", key, value);
-    let spaced_json_pair = format!("\"{}\": \"{}\"", key, value);
-    text.contains(&kv_pair) || text.contains(&compact_json_pair) || text.contains(&spaced_json_pair)
+    text.contains(&kv_pair) || compact_text.contains(&compact_json_pair)
 }
 
 fn has_dry_run_machine_token(normalized: &str) -> bool {
