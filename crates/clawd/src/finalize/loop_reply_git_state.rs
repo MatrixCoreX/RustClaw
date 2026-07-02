@@ -166,11 +166,8 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
 
 fn route_requests_git_repository_state(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["git", "git_basic"],
-            &["status"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::GitStateSummary)
 }
 
 fn requested_git_machine_fields(

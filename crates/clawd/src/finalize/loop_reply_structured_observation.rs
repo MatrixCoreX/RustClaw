@@ -198,7 +198,7 @@ pub(super) fn deterministic_structured_container_summary_answer(
         return None;
     }
     if !matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
     ) {
         return None;
@@ -278,8 +278,8 @@ fn db_basic_rows_answer_from_output_for_route(
 ) -> Option<String> {
     db_basic_rows_answer_from_output_with_scalar_count(
         output,
-        route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-            && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount,
+        route.effective_output_contract().response_shape == crate::OutputResponseShape::Scalar
+            && route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount),
     )
 }
 
@@ -524,11 +524,8 @@ pub(super) fn deterministic_structured_file_validation_from_read_range(
 
 fn route_requests_config_validation(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &["validate", "validate_config", "validate_after_change"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
 }
 
 pub(super) fn attach_deterministic_structured_file_validation_from_read_range(
