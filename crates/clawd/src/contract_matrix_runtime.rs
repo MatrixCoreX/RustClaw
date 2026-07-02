@@ -600,7 +600,7 @@ fn action_trace_for_output_contract_with_route_reason(
 fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value {
     let action_key = action.as_key();
     let final_answer_shape_kind =
-        final_answer_shape_for_route(route).unwrap_or(FinalAnswerShape::Free);
+        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
     let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
     let evidence_expression = EvidenceExpression::default().to_trace_json(&required_evidence);
     let observation_extractor = ObservationExtractor::from_source(&action_key);
@@ -860,29 +860,11 @@ pub(crate) fn action_policy_for_route(
     args: &Value,
 ) -> Option<ContractActionPolicy> {
     let route = route?;
-    let output_contract = route.effective_output_contract();
-    let mut policy =
-        match action_policy_for_output_contract(Some(&output_contract), normalized_skill, args) {
-            Some(policy) => policy,
-            None => return route_capability_ref_action_policy(route, normalized_skill, args),
-        };
-    let capability_ref_allows_action =
-        route_capability_ref_allows_action(route, normalized_skill, args);
-    if capability_ref_allows_action {
-        if let Some(action) = route_capability_policy_action_ref(normalized_skill, args) {
-            policy.action_key = action.effective.as_key();
-            policy.original_action_ref = action.original.as_key();
-            policy.replacement_action_ref = action.replacement_action_ref();
-            policy.preferred_replacement_reason_code =
-                action.replacement_reason_code.map(str::to_string);
-        }
-        policy.decision = ActionPolicyDecision::Allowed;
-        policy.contract_match = "capability_ref".to_string();
-        policy.contract_repair_source = "capability_ref_route_policy".to_string();
-        policy.required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
-        policy.preferred_actions = vec![policy.action_key.clone()];
+    if let Some(policy) = route_capability_ref_action_policy(route, normalized_skill, args) {
+        return Some(policy);
     }
-    Some(policy)
+    let output_contract = route.effective_output_contract();
+    action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)
 }
 
 fn route_capability_ref_action_policy(
@@ -895,7 +877,7 @@ fn route_capability_ref_action_policy(
     }
     let action = route_capability_policy_action_ref(normalized_skill, args)?;
     let final_answer_shape_kind =
-        final_answer_shape_for_route(route).unwrap_or(FinalAnswerShape::Free);
+        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
     Some(ContractActionPolicy {
         decision: ActionPolicyDecision::Allowed,
         action_key: action.effective.as_key(),
@@ -1048,26 +1030,11 @@ pub(crate) fn arg_policy_decision_for_route(
     resolved_args: &Value,
 ) -> Option<ContractArgPolicy> {
     let route = route?;
-    let output_contract = route.effective_output_contract();
-    let mut policy =
-        match arg_policy_decision(Some(&output_contract), normalized_skill, resolved_args) {
-            Some(policy) => policy,
-            None => return route_capability_ref_arg_policy(route, normalized_skill, resolved_args),
-        };
-    if route_capability_ref_allows_action(route, normalized_skill, resolved_args) {
-        if let Some(action) = route_capability_policy_action_ref(normalized_skill, resolved_args) {
-            let (expected, missing, deferred, decision) =
-                arg_target_policy_decision(&output_contract, &action.effective, resolved_args);
-            policy.action_key = action.effective.as_key();
-            policy.expected_target_args = expected;
-            policy.missing_target_args = missing;
-            policy.deferred_target_args = deferred;
-            policy.decision = decision;
-        }
-        policy.contract_match = "capability_ref".to_string();
-        policy.required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    if let Some(policy) = route_capability_ref_arg_policy(route, normalized_skill, resolved_args) {
+        return Some(policy);
     }
-    Some(policy)
+    let output_contract = route.effective_output_contract();
+    arg_policy_decision(Some(&output_contract), normalized_skill, resolved_args)
 }
 
 fn route_capability_ref_arg_policy(
@@ -1081,7 +1048,7 @@ fn route_capability_ref_arg_policy(
     let output_contract = route.effective_output_contract();
     let action = route_capability_policy_action_ref(normalized_skill, resolved_args)?;
     let final_answer_shape_kind =
-        final_answer_shape_for_route(route).unwrap_or(FinalAnswerShape::Free);
+        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
     let (expected, missing, deferred, decision) =
         arg_target_policy_decision(&output_contract, &action.effective, resolved_args);
     Some(ContractArgPolicy {

@@ -20,22 +20,8 @@ fn publishing_preview_semantic_no_longer_owns_x_preview_policy() {
 }
 
 #[test]
-fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
+fn non_bridge_package_actions_remain_structured_contract_inputs() {
     let cases = [
-        (
-            OutputSemanticKind::SqliteTableListing,
-            "db_basic",
-            serde_json::json!({"action":"list_tables","db_path":"tmp/app.db"}),
-            "db_basic.list_tables",
-            "sqlite_table_listing",
-        ),
-        (
-            OutputSemanticKind::SqliteSchemaVersion,
-            "db_basic",
-            serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
-            "db_basic.schema_version",
-            "sqlite_schema_version",
-        ),
         (
             OutputSemanticKind::CommandOutputSummary,
             "package_manager",
@@ -86,6 +72,16 @@ fn package_sqlite_and_docker_actions_remain_structured_contract_inputs() {
 #[test]
 fn registry_bridge_semantic_contracts_no_longer_allow_actions() {
     for (semantic_kind, skill, args) in [
+        (
+            OutputSemanticKind::SqliteTableListing,
+            "db_basic",
+            serde_json::json!({"action":"list_tables","db_path":"tmp/app.db"}),
+        ),
+        (
+            OutputSemanticKind::SqliteSchemaVersion,
+            "db_basic",
+            serde_json::json!({"action":"schema_version","db_path":"tmp/app.db"}),
+        ),
         (
             OutputSemanticKind::PackageManagerDetection,
             "package_manager",

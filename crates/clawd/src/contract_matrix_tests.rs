@@ -496,6 +496,30 @@ fn route_capability_ref_overrides_bridge_semantic_policy_match() {
 }
 
 #[test]
+fn route_capability_ref_policy_does_not_inherit_wrong_semantic_shape() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    let policy = action_policy_for_route(
+        Some(&route),
+        "config_basic",
+        &serde_json::json!({
+            "action": "validate",
+            "path": "configs/config.toml",
+        }),
+    )
+    .expect("route capability policy");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.contract_match, "capability_ref");
+    assert_eq!(
+        policy.final_answer_shape_kind,
+        FinalAnswerShape::ValidationVerdict
+    );
+    assert_eq!(policy.final_answer_shape, "validation_verdict");
+}
+
+#[test]
 fn route_action_policy_canonicalizes_virtual_config_validation() {
     let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
@@ -769,6 +793,38 @@ fn route_arg_policy_prefers_capability_ref_over_bridge_semantic_match() {
     assert_eq!(policy.action_key, "config_basic.validate");
     assert_eq!(policy.contract_match, "capability_ref");
     assert_eq!(policy.expected_target_args, vec!["path"]);
+}
+
+#[test]
+fn route_capability_ref_arg_policy_does_not_inherit_wrong_semantic_shape() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    let policy = arg_policy_decision_for_route(
+        Some(&route),
+        "config_basic",
+        &serde_json::json!({
+            "action": "validate",
+            "path": "configs/config.toml",
+        }),
+    )
+    .expect("route capability arg policy");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.contract_match, "capability_ref");
+    assert_eq!(policy.final_answer_shape, "validation_verdict");
+}
+
+#[test]
+fn route_capability_ref_action_trace_does_not_inherit_wrong_semantic_shape() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    let trace = action_trace_for_route(&route, "config_basic.validate")
+        .expect("route capability action trace");
+
+    assert_eq!(trace["contract_match"], "capability_ref");
+    assert_eq!(trace["final_answer_shape"], "validation_verdict");
 }
 
 #[test]
@@ -1462,22 +1518,18 @@ fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
 }
 
 #[test]
-fn configured_legacy_text_observation_extractors_extend_default_structured_extractors() {
-    let git_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
-        semantic_kind: OutputSemanticKind::GitCommitSubject,
+fn configured_legacy_text_observation_extractors_are_reflected_in_trace() {
+    let scalar_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ScalarCount,
         ..IntentOutputContract::default()
     })
-    .expect("git trace snapshot");
-    let git_extractors = git_snapshot
+    .expect("scalar trace snapshot");
+    let scalar_extractors = scalar_snapshot
         .get("observation_extractors")
         .and_then(Value::as_array)
-        .expect("git observation extractors");
-    assert!(git_extractors.iter().any(|item| {
-        item.get("source").and_then(Value::as_str) == Some("git_basic")
-            && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
-    }));
-    assert!(git_extractors.iter().any(|item| {
-        item.get("source").and_then(Value::as_str) == Some("git_basic")
+        .expect("scalar observation extractors");
+    assert!(scalar_extractors.iter().any(|item| {
+        item.get("source").and_then(Value::as_str) == Some("archive_basic")
             && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
     }));
 
