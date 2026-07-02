@@ -409,7 +409,7 @@ fn trace_snapshot_for_output_contract_with_route_reason(
         "contract_matrix_hash": matrix.matrix_version_hash(),
         "schema_version": matrix.schema_version,
         "trace_policy": matrix.trace_policy.to_trace_json(),
-        "semantic_kind": output_contract.semantic_kind.as_str(),
+        "contract_marker": output_contract.semantic_kind.as_str(),
         "response_shape": output_contract.response_shape.as_str(),
         "locator_kind": output_contract.locator_kind.as_str(),
         "delivery_intent": output_contract.delivery_intent.as_str(),

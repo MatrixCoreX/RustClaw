@@ -23,6 +23,7 @@ MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
+TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
 INTENT_ROUTER_CONTRACT_HINT_FILE = SRC_ROOT / "intent_router_contract_hint.rs"
 INTENT_ROUTER_EXECUTION_CONTRACT_FILE = SRC_ROOT / "intent_router_execution_contract.rs"
@@ -49,6 +50,7 @@ EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_contract_repair_report.rs",
 )
 CONTRACT_MATRIX_FILE = SRC_ROOT / "contract_matrix.rs"
+CONTRACT_MATRIX_RUNTIME_FILE = SRC_ROOT / "contract_matrix_runtime.rs"
 TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
@@ -317,6 +319,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
     findings.extend(scan_execution_recipe_registry_bridge_tokens())
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
+    findings.extend(scan_contract_matrix_trace_contract_marker())
+    findings.extend(scan_task_journal_step_contract_marker())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
@@ -1099,6 +1103,80 @@ def scan_contract_matrix_registry_bridge_bypass() -> list[Finding]:
             "match_output_contract must not match normalizer schema capability bridge semantic kinds as semantic contracts",
         )
     ]
+
+
+def scan_contract_matrix_trace_contract_marker() -> list[Finding]:
+    rel_path = rel(CONTRACT_MATRIX_RUNTIME_FILE)
+    text = CONTRACT_MATRIX_RUNTIME_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn trace_snapshot_for_output_contract_with_route_reason(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "contract_matrix_trace_snapshot_missing",
+                "missing trace_snapshot_for_output_contract_with_route_reason",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker": output_contract.semantic_kind.as_str()' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_matrix_trace_contract_marker_missing",
+                "contract matrix trace snapshot should expose contract_marker",
+            )
+        )
+    if '"semantic_kind": output_contract.semantic_kind.as_str()' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_matrix_trace_semantic_kind_field",
+                "contract matrix trace snapshot must not expose legacy semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_task_journal_step_contract_marker() -> list[Finding]:
+    rel_path = rel(TASK_JOURNAL_FILE)
+    text = TASK_JOURNAL_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn step_contract_trace_json(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "task_journal_step_contract_trace_missing",
+                "missing step_contract_trace_json",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker": contract.get("contract_marker").and_then(Value::as_str)' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "task_journal_step_contract_marker_missing",
+                "task journal step contract trace should expose contract_marker",
+            )
+        )
+    if '"semantic_kind": contract.get("semantic_kind").and_then(Value::as_str)' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "task_journal_step_semantic_kind_field",
+                "task journal step contract trace must not expose legacy semantic_kind",
+            )
+        )
+    return findings
 
 
 def scan_task_context_builder_registry_bridge_budget() -> list[Finding]:

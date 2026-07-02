@@ -1524,6 +1524,11 @@ fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
         Some("enforce")
     );
     assert_eq!(
+        snapshot.get("contract_marker").and_then(Value::as_str),
+        Some("file_names")
+    );
+    assert!(snapshot.get("semantic_kind").is_none());
+    assert_eq!(
         snapshot.get("evidence_scope").and_then(Value::as_str),
         Some("current_task")
     );
