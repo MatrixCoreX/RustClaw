@@ -828,6 +828,24 @@ fn route_capability_ref_action_trace_does_not_inherit_wrong_semantic_shape() {
 }
 
 #[test]
+fn route_capability_ref_action_refs_do_not_inherit_wrong_semantic_matrix_scope() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    let allowed = allowed_action_refs_for_route(&route)
+        .into_iter()
+        .map(|action| action.as_key())
+        .collect::<Vec<_>>();
+    let preferred = preferred_action_refs_for_route(&route)
+        .into_iter()
+        .map(|action| action.as_key())
+        .collect::<Vec<_>>();
+
+    assert_eq!(allowed, vec!["config_basic.validate"]);
+    assert_eq!(preferred, vec!["config_basic.validate"]);
+}
+
+#[test]
 fn route_policy_does_not_allow_config_action_without_capability_ref() {
     let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
     route.route_reason.clear();

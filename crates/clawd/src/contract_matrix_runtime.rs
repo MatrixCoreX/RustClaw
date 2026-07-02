@@ -669,6 +669,14 @@ fn preferred_action_refs_for_output_contract(
 }
 
 pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
+    let preferred_capability_refs = route_capability_ref_action_refs(route, true);
+    if !preferred_capability_refs.is_empty() {
+        return preferred_capability_refs;
+    }
+    let capability_refs = route_capability_ref_action_refs(route, false);
+    if !capability_refs.is_empty() {
+        return capability_refs;
+    }
     let output_contract = route.effective_output_contract();
     preferred_action_refs_for_output_contract(&output_contract)
 }
@@ -689,8 +697,39 @@ fn allowed_action_refs_for_output_contract(
 }
 
 pub(crate) fn allowed_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
+    let capability_refs = route_capability_ref_action_refs(route, false);
+    if !capability_refs.is_empty() {
+        return capability_refs;
+    }
     let output_contract = route.effective_output_contract();
     allowed_action_refs_for_output_contract(&output_contract)
+}
+
+fn route_capability_ref_action_refs(route: &RouteResult, preferred_only: bool) -> Vec<ActionRef> {
+    let route_refs = crate::machine_capability_ref::route_capability_ref_tokens(route)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if route_refs.is_empty() {
+        return Vec::new();
+    }
+    let Some(registry) = bundled_skills_registry() else {
+        return Vec::new();
+    };
+    let mut action_refs = BTreeSet::new();
+    for skill in registry.all_names() {
+        for mapping in registry.planner_capabilities(&skill) {
+            if !route_refs.contains(&mapping.name) || (preferred_only && !mapping.preferred) {
+                continue;
+            }
+            let Some(action) = mapping.action.as_deref() else {
+                continue;
+            };
+            if let Some(action_ref) = ActionRef::parse(&format!("{skill}.{action}")) {
+                action_refs.insert(action_ref);
+            }
+        }
+    }
+    action_refs.into_iter().collect()
 }
 
 fn policy_action_ref_for_match(
