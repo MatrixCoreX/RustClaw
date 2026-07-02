@@ -187,7 +187,7 @@ flowchart TD
 
 ### Permission Plane And Command Policy
 
-The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, contract matrix evidence/action policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by legacy `semantic_kind` values.
+The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by legacy `semantic_kind` values.
 
 - `risk_level`, `requires_confirmation`, `once_per_task`, `idempotent`, and `dedup_scope` come from registry and planner capability metadata where available.
 - `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
@@ -205,7 +205,7 @@ Runtime code should consume stable contracts such as:
 - capability refs emitted by the planner or boundary context, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
 - action names, for example `read_field`, `validate_config`, or `transform_data`
 - registry metadata and `planner_capabilities`
-- `TaskContract` / `OutputContract` fields, target locators, and explicit `field_path` values
+- `EvidencePolicyContext` / `OutputContract` fields, target locators, and explicit `field_path` values
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
 - `permission_decision` and `command_policy` machine fields
 
