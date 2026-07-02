@@ -233,16 +233,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_runtime_status_scalar"
     );
     return_deterministic_plan!(
-        runtime_status_scalar_info_fallback_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            turn_analysis_for_prompt,
-        ),
-        "plan_deterministic_runtime_status_scalar_info_fallback"
-    );
-    return_deterministic_plan!(
         hook_permission_surface_deterministic_plan_result(
             state,
             goal,

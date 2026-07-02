@@ -64,17 +64,6 @@ pub(super) fn route_reason_has_marker(route: &RouteResult, marker: &str) -> bool
         .any(|part| part.trim() == marker)
 }
 
-pub(super) fn runtime_status_scalar_info_fallback_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> Option<PlanResult> {
-    let _ = (state, goal, route_result, loop_state, turn_analysis);
-    None
-}
-
 #[cfg(test)]
 pub(super) fn first_port_filter_token(text: &str) -> Option<String> {
     text.split_whitespace()
