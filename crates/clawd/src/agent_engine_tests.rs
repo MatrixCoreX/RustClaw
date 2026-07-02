@@ -303,7 +303,7 @@ fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
 }
 
 #[test]
-fn loop_state_still_reads_legacy_current_workspace_scope_semantic_marker() {
+fn loop_state_ignores_legacy_current_workspace_scope_semantic_marker() {
     let mut loop_state = LoopState::new(2);
     let observation = json!({
         "kind": "agent_loop_boundary_observations",
@@ -325,13 +325,9 @@ fn loop_state_still_reads_legacy_current_workspace_scope_semantic_marker() {
 
     seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
 
-    let raw = loop_state
+    assert!(!loop_state
         .output_vars
-        .get("current_workspace_scalar_count_targets")
-        .expect("legacy scope marker should remain readable for historical journals");
-    let targets: Vec<String> =
-        serde_json::from_str(raw).expect("workspace scalar targets must be JSON encoded");
-    assert_eq!(targets, vec!["/tmp/work".to_string()]);
+        .contains_key("current_workspace_scalar_count_targets"));
 }
 
 #[test]

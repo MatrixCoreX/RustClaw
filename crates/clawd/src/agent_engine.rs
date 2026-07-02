@@ -1196,7 +1196,6 @@ fn current_workspace_scope_marks_scalar_count(scope: &Value) -> bool {
     const SCALAR_COUNT_MARKER: &str = "scalar_count";
     ["task_shape", "contract_marker", "output_contract_marker"]
         .into_iter()
-        .chain(["semantic_kind"])
         .filter_map(|key| scope.get(key).and_then(Value::as_str))
         .map(str::trim)
         .any(|value| value == SCALAR_COUNT_MARKER)

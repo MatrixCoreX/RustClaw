@@ -178,9 +178,12 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
             .expect("preview reply");
     let value: serde_json::Value = serde_json::from_str(&reply).expect("preview json");
     assert_eq!(
-        value.get("semantic_kind").and_then(|value| value.as_str()),
+        value
+            .get("contract_marker")
+            .and_then(|value| value.as_str()),
         Some("schedule_intent_preview")
     );
+    assert!(value.get("semantic_kind").is_none());
     assert_eq!(
         value.get("would_mutate").and_then(|value| value.as_bool()),
         Some(false)
