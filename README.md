@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default when `semantic_route_authority = "agent_loop_default"`. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. Legacy pre-agent routing is now an explicit `semantic_route_authority = "legacy"` / rollback compatibility path, not the default route for ordinary chat fallback.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
 
 ### Request And Agent Loop Flow
 
@@ -37,11 +37,11 @@ flowchart TD
     E -->|ask| F[Resolve identity + session + active task]
     F --> G[Intent normalizer<br/>structured hint only]
     G --> H[Ask context bundle<br/>memory + attachments + recent execution]
-    H --> I[Boundary guards<br/>locator + contract + safety + budget + compat]
+    H --> I[Boundary guards<br/>locator + contract + safety + budget + boundary hints]
     I -->|agent-loop authority| J[Agent-loop semantic authority]
-    I -->|schedule / clarify / machine fast path / rollback| K[Boundary-owned finalize path]
+    I -->|schedule / clarify / machine fast path / boundary completion| K[Boundary-owned finalize path]
     J --> L{Loop round}
-    L -->|deterministic observation contract| M[Runtime-built observation plan]
+    L -->|explicit observation / boundary contract| M[Runtime-built boundary plan]
     L -->|general work| N[Planner LLM<br/>call_capability preferred]
     M --> O[CapabilityResolver]
     N --> O
@@ -125,10 +125,10 @@ flowchart TD
     D --> E[Ask context bundle]
     E --> F[Boundary guards<br/>machine fields only]
     F -->|agent-loop authority| G[Agent-loop context]
-    F -->|compat / schedule / machine fast path| H[Compatibility finalization path]
+    F -->|schedule / clarify / machine fast path| H[Boundary finalization path]
     G --> I{Round source}
-    I -->|runtime can prove plan| J[Deterministic plan]
-    I -->|runtime async command contract| JA[Deterministic async job plan<br/>start / poll / cancel]
+    I -->|explicit protocol / boundary contract| J[Runtime boundary plan]
+    I -->|runtime async command contract| JA[Async job boundary plan<br/>start / poll / cancel]
     I -->|needs reasoning| K[LLM: planner round]
     K --> L[Plan JSON steps]
     J --> M[CapabilityResolver]
@@ -171,7 +171,7 @@ flowchart TD
 ```
 
 - `Normalizer prompt`: lets an LLM read the user turn and emit schema-backed fields. Runtime consumes those fields as hints and contracts rather than matching user phrases.
-- `Planner prompt`: is built only for loop rounds that need model reasoning. Narrow observation contracts can use runtime-built plans without an extra planner call.
+- `Planner prompt`: is built for loop rounds that need model reasoning. Only explicit protocol or boundary contracts, such as dry-run projections, runtime status surfaces, async job polling, and safety/status completion, may use runtime-built plans without an extra planner call; ordinary semantic capability choice remains planner-owned.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
@@ -183,11 +183,11 @@ flowchart TD
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
 - `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
-- `Compatibility finalization`: remains for schedule, clarify, machine fact fast paths, and explicit legacy/rollback compatibility, but it is not the ordinary semantic decision path.
+- `Boundary finalization`: remains for schedule, clarify, machine fact fast paths, and explicit safety/status completion. It is not an ordinary semantic router, and it should not reintroduce route-authority rollback switches.
 
 ### Permission Plane And Command Policy
 
-The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, contract matrix policy, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose.
+The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, contract matrix evidence/action policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by legacy `semantic_kind` values.
 
 - `risk_level`, `requires_confirmation`, `once_per_task`, `idempotent`, and `dedup_scope` come from registry and planner capability metadata where available.
 - `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
@@ -201,14 +201,15 @@ RustClaw keeps natural-language understanding on the LLM side and deterministic 
 
 Runtime code should consume stable contracts such as:
 
-- schema enums, for example `semantic_kind = "package_manager_detection"`
+- schema enums for non-capability output shapes, for example `semantic_kind = "content_excerpt_summary"`
+- capability refs emitted by the planner or boundary context, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
 - action names, for example `read_field`, `validate_config`, or `transform_data`
 - registry metadata and `planner_capabilities`
 - `TaskContract` / `OutputContract` fields, target locators, and explicit `field_path` values
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
 - `permission_decision` and `command_policy` machine fields
 
-Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
+Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata; stale registry-bridge `semantic_kind` values fall through to generic contract policy and cannot select those capability families. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
 
 ## Memory System
 
@@ -673,11 +674,11 @@ Use the smallest affected NL set while code is still moving, then widen coverage
 2. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
 3. Typical aggregate: compressed representative coverage after a phase batch.
 4. Canary: 500 client-like cases before changing default authority or deleting old gates.
-5. Safe aggregate: full 2100+ coverage, or an explicitly equivalent covered set, before removing rollback/deletion gates.
+5. Safe aggregate: compact equivalent coverage first, then full 2100+ coverage only for high-risk deletion gates or release hardening.
 
-Current `configs/agent_guard.toml` defaults use `semantic_route_authority = "agent_loop_default"`, `answer_verifier_enforce_required_scope = "all"`, and `registry_idempotency_guard_scope = "all"`. The older `agent_decides_semantic_route` and `agent_decides_migration_class` names are ignored historical config keys; use `semantic_route_authority` and `agent_loop_canary_bucket` for route-authority rollback/debug.
+Current `configs/agent_guard.toml` defaults keep verifier and registry guards enabled, including `answer_verifier_enforce_required_scope = "all"` and `registry_idempotency_guard_scope = "all"`. The old route-authority rollback/debug keys are no longer runtime configuration. If route boundary behavior changes, run the route-authority guard script and update replay/README flow descriptions instead of reintroducing semantic route switches.
 
-Before physically deleting remaining compatibility or rollback code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 353 rows covering 495/495 categories), route-delta review with no unexplained mismatch, and the route/repair/static guards. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.
+Before physically deleting remaining compatibility code paths, use the current deletion gate rather than a fixed seven-day wait: compact live NL for the affected class, release-gate equivalent live coverage (`scripts/nl_tests/build_release_gate_subset.py --check` currently selects 353 rows covering 495/495 categories), loop-boundary/replay review with no unexplained mismatch, and the route/repair/static guards. A longer observation window is still reasonable for high-risk production rollout, but it is not required for normal development cleanup.
 
 Focused long-tail closed-loop entries:
 
