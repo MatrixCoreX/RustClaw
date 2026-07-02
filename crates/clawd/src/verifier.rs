@@ -1239,8 +1239,7 @@ fn route_clarify_can_defer_to_runtime_status_plan(
     route: &crate::RouteResult,
     plan_result: &PlanResult,
 ) -> bool {
-    if !route.is_execute_gate()
-        || !route.output_contract.requires_content_evidence
+    if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.wants_file_delivery
         || route.output_contract.locator_kind != crate::OutputLocatorKind::None
