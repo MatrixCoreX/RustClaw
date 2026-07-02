@@ -798,6 +798,9 @@ fn evidence_policy_checked_direct_candidate(
     if hidden_entries_direct_candidate_satisfies_contract(route, loop_state, &answer) {
         return Some(answer);
     }
+    if system_basic_scalar_path_candidate_satisfies_contract(route, loop_state, &answer) {
+        return Some(answer);
+    }
     let requires_evidence_policy_grounding =
         route_requires_evidence_policy_grounding_for_direct_candidate(route);
     if requires_evidence_policy_grounding
@@ -867,6 +870,37 @@ fn hidden_entries_direct_candidate_satisfies_contract(
     actual == expected
 }
 
+fn system_basic_scalar_path_candidate_satisfies_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    answer: &str,
+) -> bool {
+    if !output_route_policy::route_contract_marker_is(
+        route,
+        crate::OutputSemanticKind::ScalarPathOnly,
+    ) || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    {
+        return false;
+    }
+    let answer = answer.trim();
+    if answer.is_empty()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+    {
+        return false;
+    }
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        step.is_ok()
+            && step.skill == "system_basic"
+            && step
+                .output
+                .as_deref()
+                .and_then(|body| system_basic_info_value("system_basic", body))
+                .and_then(|value| system_basic_info_scalar_path_candidate(&value))
+                .is_some_and(|candidate| candidate.trim() == answer)
+    })
+}
+
 fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
     route
         .output_contract
@@ -880,7 +914,7 @@ fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
 }
 
 fn route_requires_evidence_policy_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
@@ -891,7 +925,7 @@ fn route_requires_evidence_policy_grounding_for_direct_candidate(
 }
 
 fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -958,9 +992,9 @@ fn latest_observation_lacks_required_content_evidence(
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), &step.skill, &args)
+    crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), &step.skill, &args)
         .is_some_and(|policy| {
-            policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+            policy.decision == crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
         })
 }
 
