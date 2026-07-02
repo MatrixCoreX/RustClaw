@@ -208,6 +208,22 @@ fn async_job_contract_dry_run_ignores_bare_legacy_async_tokens() {
 }
 
 #[test]
+fn async_job_contract_dry_run_ignores_prompt_only_protocol_envelope() {
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "async_job_protocol=version:1 dry_run adapter_result_key=async_poll_adapter_result",
+        None,
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "current user text must not trigger async-job dry-run policy"
+    );
+}
+
+#[test]
 fn async_timeout_policy_dry_run_requires_policy_envelope() {
     let mut route = base_route_result();
     route.route_reason =
