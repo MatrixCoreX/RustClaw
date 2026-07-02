@@ -64,7 +64,7 @@ fn file_delivery_with_structured_locator_is_preserved() {
 }
 
 #[test]
-fn unresolved_file_delivery_without_locator_requires_clarify() {
+fn unresolved_file_delivery_without_locator_defers_to_loop() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "send the file".to_string(),
@@ -101,13 +101,13 @@ fn unresolved_file_delivery_without_locator_requires_clarify() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
+    assert!(!route.needs_clarify);
     assert!(route.is_execute_gate());
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.delivery_intent,
-        crate::OutputDeliveryIntent::None
+        crate::OutputDeliveryIntent::FileSingle
     );
     assert_eq!(
         route.output_contract.locator_kind,
@@ -116,7 +116,7 @@ fn unresolved_file_delivery_without_locator_requires_clarify() {
     assert!(route.clarify_question.is_empty());
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
 }
 
 #[test]
@@ -295,7 +295,7 @@ fn generated_file_delivery_current_workspace_without_locator_can_choose_runtime_
 }
 
 #[test]
-fn generated_file_delivery_path_kind_without_locator_requires_clarify() {
+fn generated_file_delivery_path_kind_without_locator_defers_to_loop() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "deliver unresolved existing file target".to_string(),
@@ -332,24 +332,24 @@ fn generated_file_delivery_path_kind_without_locator_requires_clarify() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
+    assert!(!route.needs_clarify);
     assert!(route.is_execute_gate());
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.delivery_intent,
-        crate::OutputDeliveryIntent::None
+        crate::OutputDeliveryIntent::FileSingle
     );
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("generated_file_delivery_allows_runtime_target"));
 }
 
 #[test]
-fn generated_file_delivery_existing_directory_locator_requires_clarify() {
+fn generated_file_delivery_existing_directory_locator_defers_to_loop() {
     let root = make_temp_root("generated_delivery_dir_locator");
     std::fs::write(root.join("service_notes.md"), "service notes").expect("fixture");
     std::fs::write(root.join("release_checklist.md"), "release").expect("fixture");
@@ -389,13 +389,13 @@ fn generated_file_delivery_existing_directory_locator_requires_clarify() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
+    assert!(!route.needs_clarify);
     assert!(route.is_execute_gate());
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.delivery_intent,
-        crate::OutputDeliveryIntent::None
+        crate::OutputDeliveryIntent::FileSingle
     );
     assert_eq!(route.output_contract.locator_hint, "");
     assert!(route
@@ -403,7 +403,7 @@ fn generated_file_delivery_existing_directory_locator_requires_clarify() {
         .contains("directory_file_delivery_requires_structured_selection"));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("generated_file_delivery_allows_runtime_target"));
@@ -456,18 +456,18 @@ fn structurally_resolved_file_delivery_defers_recent_read_target_to_loop() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(!route.needs_clarify);
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
+        crate::OutputResponseShape::FileToken
     );
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(!route.resolved_intent.contains("/tmp/README.md"));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));
@@ -521,14 +521,15 @@ fn clarified_structural_file_delivery_defers_recent_read_target_to_loop() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(!route.resolved_intent.contains(target));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));
@@ -594,10 +595,10 @@ fn ambiguous_deictic_file_delivery_does_not_bind_stale_read_target() {
         Some(&turn_analysis),
     );
 
-    assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(route.output_contract.locator_hint, "");
     assert!(!route.resolved_intent.contains(stale_target));
     assert!(!route
@@ -605,7 +606,7 @@ fn ambiguous_deictic_file_delivery_does_not_bind_stale_read_target() {
         .contains("structural_file_delivery_bound_to_recent_read_target"));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
 }
 
 #[test]
@@ -658,8 +659,8 @@ fn directory_selection_clarify_marker_blocks_stale_read_target_rebind() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
-    assert!(route.is_clarify_gate());
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
     assert_eq!(route.output_contract.locator_hint, "");
     assert!(!route.resolved_intent.contains("/tmp/README.md"));
     assert!(!route
@@ -716,9 +717,10 @@ fn structurally_resolved_file_delivery_defers_active_delivery_target_to_loop() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -727,7 +729,7 @@ fn structurally_resolved_file_delivery_defers_active_delivery_target_to_loop() {
     assert!(!route.resolved_intent.contains("release_checklist.md"));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));
@@ -777,18 +779,19 @@ fn structurally_resolved_file_delivery_defers_active_observed_target_to_loop() {
 
     repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
-    assert!(route.needs_clarify);
-    assert!(!route.wants_file_delivery);
-    assert!(!route.output_contract.delivery_required);
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
     assert_eq!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
+        crate::OutputResponseShape::FileToken
     );
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(!route.resolved_intent.contains(target));
     assert!(route
         .route_reason
-        .contains("unresolved_file_delivery_requires_clarify"));
+        .contains("unresolved_file_delivery_requires_locator"));
     assert!(!route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));

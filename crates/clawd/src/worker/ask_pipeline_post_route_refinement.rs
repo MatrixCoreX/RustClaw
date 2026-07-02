@@ -141,6 +141,9 @@ fn defer_boundary_clarify_to_agent_loop(
 ) {
     let route_has_unresolved_file_delivery_marker = route_reason_has_marker(
         &post_route.execution_route_result,
+        "unresolved_file_delivery_requires_locator",
+    ) || route_reason_has_marker(
+        &post_route.execution_route_result,
         "unresolved_file_delivery_requires_clarify",
     );
     let route_has_workspace_root_delivery_reject = route_reason_has_marker(

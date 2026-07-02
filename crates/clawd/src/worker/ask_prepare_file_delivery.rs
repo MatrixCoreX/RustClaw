@@ -1,6 +1,9 @@
 use serde_json::Value;
 use std::path::Path;
 
+const UNRESOLVED_FILE_DELIVERY_REQUIRES_LOCATOR_MARKER: &str =
+    "unresolved_file_delivery_requires_locator";
+
 pub(super) fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
@@ -312,20 +315,22 @@ pub(super) fn append_active_delivery_content_target_token(
     runtime_prompt.push_str(target);
 }
 
-fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
-    route_result.needs_clarify = true;
+fn record_unresolved_file_delivery_loop_candidate(route_result: &mut crate::RouteResult) {
+    route_result.needs_clarify = false;
     route_result.clarify_question.clear();
-    route_result.wants_file_delivery = false;
-    route_result.output_contract.delivery_required = false;
-    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route_result.output_contract.requires_content_evidence = false;
+    route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    route_result.wants_file_delivery = true;
+    route_result.output_contract.delivery_required = true;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route_result.output_contract.locator_hint.clear();
+    route_result.route_reason.push_str("; ");
     route_result
         .route_reason
-        .push_str("; unresolved_file_delivery_requires_clarify");
+        .push_str(UNRESOLVED_FILE_DELIVERY_REQUIRES_LOCATOR_MARKER);
 }
 
 fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
@@ -374,7 +379,7 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
         route_result
             .route_reason
             .push_str("; directory_file_delivery_requires_structured_selection");
-        force_unresolved_file_delivery_clarify(route_result);
+        record_unresolved_file_delivery_loop_candidate(route_result);
         return true;
     }
     if preserve_filename_locator_as_existing_file_delivery(route_result) {
@@ -387,6 +392,6 @@ pub(in crate::worker) fn repair_structural_file_delivery_resolution_for_turn(
     if file_delivery_has_concrete_locator(route_result) {
         return false;
     }
-    force_unresolved_file_delivery_clarify(route_result);
+    record_unresolved_file_delivery_loop_candidate(route_result);
     true
 }
