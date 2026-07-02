@@ -104,6 +104,25 @@ fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projecti
 }
 
 #[test]
+fn task_control_lifecycle_dry_run_requires_explicit_capability_refs() {
+    let mut route = base_route_result();
+    route.route_reason = "task_control.resume task_control.pause dry_run=true".to_string();
+    route.resolved_intent = concat!(
+        "action=resume action=pause ",
+        "task_id=00000000-0000-4000-8000-000000000010 ",
+        "checkpoint_id=ckpt-1 pause_seconds=120 would_mutate=false"
+    )
+    .to_string();
+
+    assert!(structured_dry_run_response_deterministic_plan_result(
+        "task-control lifecycle dry-run contract",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .is_none());
+}
+
+#[test]
 fn config_risk_preview_uses_git_plan_change_and_guard_observations() {
     let state = test_state_with_enabled_skills(&["git_basic", "config_edit", "config_basic"]);
     let mut route = base_route_result();
