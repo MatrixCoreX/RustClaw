@@ -317,15 +317,29 @@ fn local_process_cancel_dry_run_tokens_present(text: &str) -> bool {
 
 fn async_job_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
+    if !has_dry_run_machine_token(&normalized) {
+        return false;
+    }
+    let has_async_job_protocol_envelope = normalized.contains("async_job_protocol=version:");
+    let has_pending_job_contract = normalized.contains("pending_async_job_contract");
+    let has_poll_adapter_result = normalized.contains("async_poll_adapter_result");
+    let has_async_timeout_policy_envelope = normalized.contains("async_timeout_policy")
+        && contains_machine_kv_or_json_pair(&normalized, "policy_source", "async_job_contract");
     let has_async_timeout_policy_tokens = normalized.contains("effective_deadline_ts")
         && normalized.contains("expires_at")
         && normalized.contains("remaining_seconds")
         && normalized.contains("expired");
-    (normalized.contains("pending_async_job")
-        || normalized.contains("async_job_protocol")
-        || normalized.contains("poll_async_job")
-        || has_async_timeout_policy_tokens)
-        && has_dry_run_machine_token(&normalized)
+    has_async_job_protocol_envelope
+        || has_pending_job_contract
+        || has_poll_adapter_result
+        || (has_async_timeout_policy_envelope && has_async_timeout_policy_tokens)
+}
+
+fn contains_machine_kv_or_json_pair(text: &str, key: &str, value: &str) -> bool {
+    let kv_pair = format!("{key}={value}");
+    let compact_json_pair = format!("\"{}\":\"{}\"", key, value);
+    let spaced_json_pair = format!("\"{}\": \"{}\"", key, value);
+    text.contains(&kv_pair) || text.contains(&compact_json_pair) || text.contains(&spaced_json_pair)
 }
 
 fn has_dry_run_machine_token(normalized: &str) -> bool {
