@@ -1109,6 +1109,7 @@ fn archive_basic_short_list_archive_uses_active_bound_target() {
 fn package_manager_detect_uses_deterministic_skill_plan() {
     let state = test_state_with_enabled_skills(&["package_manager"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
@@ -1138,6 +1139,7 @@ fn package_manager_detect_uses_deterministic_skill_plan() {
 fn package_docker_probe_uses_structured_readonly_skills_for_service_status_route() {
     let state = test_state_with_enabled_skills(&["package_manager", "docker_basic"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
