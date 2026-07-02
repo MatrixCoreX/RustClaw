@@ -282,10 +282,6 @@ pub(super) fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteRe
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys
-            | crate::OutputSemanticKind::ArchiveList
-            | crate::OutputSemanticKind::ArchiveRead
-            | crate::OutputSemanticKind::ArchivePack
-            | crate::OutputSemanticKind::ArchiveUnpack
     ) || crate::machine_capability_ref::route_has_capability_namespace(
         route_result,
         &["archive", "docker"],

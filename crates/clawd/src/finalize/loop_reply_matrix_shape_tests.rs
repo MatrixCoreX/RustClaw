@@ -320,6 +320,7 @@ fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.route_reason = "capability_ref=archive.list".to_string();
     route
         .output_contract
         .self_extension
@@ -398,6 +399,7 @@ fn matrix_archive_member_list_replaces_synthesis_with_observed_projection() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+    route.route_reason = "capability_ref=archive.list".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -716,6 +718,7 @@ fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "data/app.sqlite".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+    route.route_reason = "capability_ref=database.list_tables".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
