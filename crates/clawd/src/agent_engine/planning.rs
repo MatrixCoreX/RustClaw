@@ -81,6 +81,7 @@ mod explicit_observed_paths;
 mod filesystem_mutation_plan;
 #[path = "inline_transform_contract.rs"]
 mod inline_transform_contract;
+#[cfg(test)]
 #[path = "kb_chain_plan.rs"]
 mod kb_chain_plan;
 #[path = "legacy_file_config_capabilities.rs"]
@@ -131,6 +132,7 @@ use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
 use filesystem_mutation_plan::*;
 use inline_transform_contract::*;
+#[cfg(test)]
 use kb_chain_plan::*;
 use legacy_file_config_capabilities::*;
 use media_artifact_plan::*;
@@ -365,17 +367,6 @@ pub(super) async fn plan_round_actions(
             auto_locator_path,
         ),
         "plan_deterministic_archive_database_aggregate"
-    );
-    return_deterministic_plan!(
-        kb_chain_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            auto_locator_path,
-        ),
-        "plan_deterministic_kb_chain"
     );
     if allow_structural_deterministic_plans {
         return_deterministic_plan!(
