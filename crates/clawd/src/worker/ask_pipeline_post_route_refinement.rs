@@ -132,10 +132,10 @@ pub(super) fn apply_post_route_refinements(
             crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
         );
     }
-    defer_locator_boundary_clarify_to_agent_loop(pre_loop_clarify_candidates, post_route);
+    defer_boundary_clarify_to_agent_loop(pre_loop_clarify_candidates, post_route);
 }
 
-fn defer_locator_boundary_clarify_to_agent_loop(
+fn defer_boundary_clarify_to_agent_loop(
     pre_loop_clarify_candidates: &mut Vec<&'static str>,
     post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
 ) {
@@ -149,6 +149,14 @@ fn defer_locator_boundary_clarify_to_agent_loop(
         ("boundary_locator_gate", "post_route_fuzzy_locator_candidates") => {
             "post_route_fuzzy_locator_candidates"
         }
+        (
+            "boundary_delivery_gate",
+            "post_route_file_delivery_current_request_locator_deferred_to_loop",
+        ) => "post_route_file_delivery_current_request_locator",
+        (
+            "agent_loop_boundary_defer",
+            "post_route_unresolved_file_delivery_deferred_to_agent_loop",
+        ) => "post_route_unresolved_file_delivery_requires_locator",
         _ => return,
     };
 
@@ -166,6 +174,12 @@ fn defer_locator_boundary_clarify_to_agent_loop(
             }
             "post_route_fuzzy_locator_candidates" => {
                 "post_route_fuzzy_locator_candidates_deferred_to_agent_loop"
+            }
+            "post_route_file_delivery_current_request_locator" => {
+                "post_route_file_delivery_current_request_locator_deferred_to_agent_loop"
+            }
+            "post_route_unresolved_file_delivery_requires_locator" => {
+                "post_route_unresolved_file_delivery_deferred_to_agent_loop"
             }
             _ => "post_route_locator_boundary_deferred_to_agent_loop",
         },
