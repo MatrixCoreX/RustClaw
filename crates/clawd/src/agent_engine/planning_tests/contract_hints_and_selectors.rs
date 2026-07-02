@@ -1465,8 +1465,9 @@ fn package_manager_dry_run_ignores_auto_locator_path_when_package_token_is_struc
 #[test]
 fn structured_dry_run_response_emits_task_cancel_machine_contract() {
     let mut route = base_route_result();
-    route.route_reason = "semantic=task_control.cancel mode=dry_run would_mutate=false".to_string();
-    route.resolved_intent = "capability=task_control.cancel action=cancel_one".to_string();
+    route.route_reason =
+        "capability_ref=task_control.cancel_one dry_run=true would_mutate=false".to_string();
+    route.resolved_intent = "task_control.cancel_one action=cancel_one".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = structured_dry_run_response_deterministic_plan_result(
