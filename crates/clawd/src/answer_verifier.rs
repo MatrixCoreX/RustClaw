@@ -136,6 +136,9 @@ pub(crate) fn should_verify_answer(
     if context_only_tool_discovery_answer_can_skip_answer_verifier(route_result) {
         return false;
     }
+    if terminal_answer_only_can_skip_answer_verifier(route_result, journal) {
+        return false;
+    }
     if pure_chat_agent_loop_submode_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
@@ -204,6 +207,20 @@ fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &Ro
         && !route_result.wants_file_delivery
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
+}
+
+fn terminal_answer_only_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    !route_reason_has_backend_identity_metadata_marker(route_result)
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && !route_result.wants_file_delivery
+        && !route_has_output_contract_marker(route_result)
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route_result.output_contract.locator_hint.trim().is_empty()
+        && pure_chat_agent_loop_has_no_tool_observations(journal)
 }
 
 pub(crate) fn structurally_satisfies_answer_contract(
