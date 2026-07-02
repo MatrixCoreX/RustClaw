@@ -932,9 +932,10 @@ fn latest_observation_is_explicitly_forbidden_by_contract(
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    crate::contract_matrix::action_policy_for_route(Some(route), &step.skill, &args).is_some_and(
-        |policy| policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden,
-    )
+    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), &step.skill, &args)
+        .is_some_and(|policy| {
+            policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+        })
 }
 
 fn route_uses_enforced_generic_path_content_profile(route: &crate::RouteResult) -> bool {

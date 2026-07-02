@@ -1759,7 +1759,7 @@ pub(crate) fn verify_plan(
                     &normalized_skill,
                     &step.args,
                 );
-            if let Some(policy) = crate::contract_matrix::action_policy_for_route(
+            if let Some(policy) = crate::contract_matrix::capability_ref_action_policy_for_route(
                 input.route_result,
                 &normalized_skill,
                 &step.args,

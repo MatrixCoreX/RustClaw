@@ -57,7 +57,7 @@ pub(super) fn planned_action_allowed_by_current_contract(
     let Some((skill, args)) = planned_execution_action_ref(action) else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
 }
 

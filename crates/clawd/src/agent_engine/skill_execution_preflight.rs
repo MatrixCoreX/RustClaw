@@ -171,7 +171,7 @@ pub(super) fn contract_matrix_action_policy_error(
         return Some(err);
     }
     let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
-        crate::contract_matrix::action_policy_for_route(
+        crate::contract_matrix::capability_ref_action_policy_for_route(
             Some(route),
             normalized_skill,
             classification_args,

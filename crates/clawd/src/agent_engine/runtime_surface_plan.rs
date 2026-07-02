@@ -393,7 +393,7 @@ fn runtime_surface_action_allowed(route: &RouteResult, action: &AgentAction) -> 
     let Some((skill, args)) = runtime_surface_action_call_ref(action) else {
         return false;
     };
-    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
 }
 

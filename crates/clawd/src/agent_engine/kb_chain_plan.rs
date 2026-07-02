@@ -185,6 +185,6 @@ fn kb_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
     let AgentAction::CallSkill { skill, args } = action else {
         return true;
     };
-    crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed() && policy.action_matches_preferred())
 }
