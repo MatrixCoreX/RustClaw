@@ -7,7 +7,6 @@
   "additionalProperties": true,
   "required": [
     "resolved_user_intent",
-    "decision",
     "needs_clarify",
     "reason",
     "confidence",
