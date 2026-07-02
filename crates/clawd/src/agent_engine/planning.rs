@@ -373,29 +373,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_recent_scalar_current_workspace"
         );
         return_deterministic_plan!(
-            path_metadata_compare_deterministic_plan_result(goal, route_result, loop_state),
-            "plan_deterministic_path_metadata_compare"
-        );
-        return_deterministic_plan!(
-            scalar_path_current_workspace_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-            ),
-            "plan_deterministic_scalar_path_current_workspace"
-        );
-        return_deterministic_plan!(
-            scalar_path_directory_locator_search_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-                &original_user_text_for_policy,
-            ),
-            "plan_deterministic_scalar_path_directory_locator_search"
-        );
-        return_deterministic_plan!(
             scalar_content_auto_locator_deterministic_plan_result(
                 state,
                 goal,
@@ -418,15 +395,6 @@ pub(super) async fn plan_round_actions(
                 auto_locator_path,
             ),
             "plan_deterministic_structured_scalar_field_auto_locator"
-        );
-        return_deterministic_plan!(
-            scalar_path_auto_locator_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_scalar_path_auto_locator"
         );
         return_deterministic_plan!(
             quantity_compare_pair_locator_deterministic_plan_result(
