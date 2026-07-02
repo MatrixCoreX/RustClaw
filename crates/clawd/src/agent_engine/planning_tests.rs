@@ -87,7 +87,7 @@ use super::{
     rewrite_terminal_placeholder_respond_to_synthesize_answer,
     rewrite_terminal_synthesis_placeholder_respond,
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
-    route_uses_runtime_owned_observed_finalizer,
+    route_clarify_terminal_respond_fallback_actions, route_uses_runtime_owned_observed_finalizer,
     scalar_content_auto_locator_deterministic_plan_result,
     scalar_content_auto_locator_observation_plan, scalar_count_filter_deterministic_plan_result,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
@@ -155,6 +155,40 @@ fn planner_notes_record_repair_fallback_reason_codes() {
         ),
         "fallback_reason_code=plan_repair_llm_failed_fallback_to_initial initial_fallback_reason_code=plan_parse_failed_scalar_path_auto_locator"
     );
+}
+
+#[test]
+fn route_clarify_fallback_uses_structured_boundary_question() {
+    let mut route = base_route_result();
+    route.needs_clarify = true;
+    route.clarify_question = "Which file should I read?".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+    let actions = route_clarify_terminal_respond_fallback_actions(Some(&route))
+        .expect("clarify fallback action");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::Respond { content }] if content == "Which file should I read?"
+    ));
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &LoopState::new(1),
+        &actions
+    ));
+}
+
+#[test]
+fn route_clarify_fallback_rejects_evidence_execution_contract() {
+    let mut route = base_route_result();
+    route.needs_clarify = true;
+    route.clarify_question = "Which file should I read?".to_string();
+    route.output_contract.requires_content_evidence = true;
+
+    assert!(route_clarify_terminal_respond_fallback_actions(Some(&route)).is_none());
 }
 
 #[test]

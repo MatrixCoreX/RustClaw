@@ -943,6 +943,18 @@ pub(super) async fn plan_round_actions(
     let mut initial_fallback_reason_code: Option<&'static str> = None;
     let initial_actions = parsed_actions
         .or_else(|| {
+            let fallback = route_clarify_terminal_respond_fallback_actions(route_result);
+            if fallback.is_some() {
+                initial_fallback_reason_code =
+                    Some("plan_parse_failed_route_clarify_terminal_respond");
+                warn!(
+                    "plan_parse_failed_using_route_clarify_terminal_respond task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
+        .or_else(|| {
             let fallback = plain_text_terminal_respond_fallback_actions(route_result, &plan_raw);
             if fallback.is_some() {
                 initial_fallback_reason_code =
@@ -1393,6 +1405,26 @@ fn plain_text_terminal_respond_fallback_actions(
         || route.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route.output_contract.locator_hint.trim().is_empty()
         || !route_allows_model_language_terminal_respond(Some(route))
+    {
+        return None;
+    }
+    Some(vec![AgentAction::Respond {
+        content: content.to_string(),
+    }])
+}
+
+pub(super) fn route_clarify_terminal_respond_fallback_actions(
+    route_result: Option<&RouteResult>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    let content = route.clarify_question.trim();
+    if !route.needs_clarify
+        || content.is_empty()
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !route.output_contract_is_unclassified()
     {
         return None;
     }

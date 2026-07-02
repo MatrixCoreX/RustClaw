@@ -6,6 +6,7 @@ use super::{
     parse_log_analyze_finding, record_agent_loop_decision_envelope_output_vars,
     selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
     structured_respond_terminal_intent_from_plan,
+    structured_respond_terminal_intent_from_route_owned_clarify,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
@@ -171,6 +172,40 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
             .get("agent_loop.message_key")
             .map(String::as_str),
         Some("clawd.clarify.locator_required")
+    );
+}
+
+#[test]
+fn route_owned_respond_only_clarify_marks_loop_pending_user_input() {
+    let question = "Which file should I read?";
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.needs_clarify = true;
+    route.clarify_question = question.to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = false;
+    let actions = vec![AgentAction::Respond {
+        content: question.to_string(),
+    }];
+    let intent =
+        structured_respond_terminal_intent_from_route_owned_clarify(Some(&route), &actions)
+            .expect("route clarify intent");
+    let mut loop_state = LoopState::new(1);
+
+    let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
+
+    assert!(loop_state.pending_user_input_required);
+    assert_eq!(loop_state.delivery_messages, vec![question.to_string()]);
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("structured_respond_clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.locator_kind")
+            .map(String::as_str),
+        Some("path")
     );
 }
 

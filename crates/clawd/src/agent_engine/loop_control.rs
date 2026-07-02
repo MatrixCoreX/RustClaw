@@ -347,6 +347,32 @@ fn structured_respond_terminal_intent_from_plan(
         })
 }
 
+fn structured_respond_terminal_intent_from_route_owned_clarify(
+    route: Option<&RouteResult>,
+    actions: &[AgentAction],
+) -> Option<StructuredRespondTerminalIntent> {
+    let route = route?;
+    if !route.needs_clarify || !actions_allow_structured_respond_terminal_intent(actions) {
+        return None;
+    }
+    let content = actions.iter().find_map(|action| match action {
+        AgentAction::Respond { content } => Some(content.trim()),
+        _ => None,
+    })?;
+    if content.is_empty() {
+        return None;
+    }
+    Some(StructuredRespondTerminalIntent {
+        terminal_intent: "clarify".to_string(),
+        content: Some(content.to_string()),
+        clarify_reason_code: None,
+        missing_slot: None,
+        message_key: None,
+        field_path: None,
+        locator_kind: Some(route.output_contract.locator_kind.as_str().to_string()),
+    })
+}
+
 fn actions_allow_structured_respond_terminal_intent(actions: &[AgentAction]) -> bool {
     actions.iter().all(|action| {
         matches!(
@@ -911,6 +937,12 @@ async fn run_agent_round(
     if let Some(intent) = structured_respond_terminal_intent_from_plan(&prepared_round.plan_result)
         .filter(|intent| intent.terminal_intent == "clarify")
         .filter(|_| actions_allow_structured_respond_terminal_intent(&prepared_round.actions))
+        .or_else(|| {
+            structured_respond_terminal_intent_from_route_owned_clarify(
+                route_result,
+                &prepared_round.actions,
+            )
+        })
     {
         let outcome = apply_structured_respond_clarify_to_loop_state(loop_state, &intent);
         info!(
