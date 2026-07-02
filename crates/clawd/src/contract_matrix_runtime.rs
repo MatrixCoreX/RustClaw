@@ -1,7 +1,9 @@
+#[cfg(test)]
+use super::MatchedContract;
 use super::{
     ActionPolicyDecision, ActionRef, ArgPolicyDecision, ContractMatrix, EvidenceExpression,
-    FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract, MatchedContract,
-    ObservationExtractor, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+    FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
     BUNDLED_CONTRACT_MATRIX,
 };
 #[cfg(test)]
@@ -669,6 +671,7 @@ fn route_capability_ref_action_refs(route: &RouteResult, preferred_only: bool) -
     action_refs.into_iter().collect()
 }
 
+#[cfg(test)]
 fn policy_action_ref_for_match(
     matched: &MatchedContract<'_>,
     normalized_skill: &str,
@@ -932,6 +935,7 @@ fn route_registry_capability_ref_allows_action_ref(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn arg_policy_decision(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
@@ -1015,11 +1019,7 @@ pub(crate) fn arg_policy_decision_for_route(
     resolved_args: &Value,
 ) -> Option<ContractArgPolicy> {
     let route = route?;
-    if let Some(policy) = route_capability_ref_arg_policy(route, normalized_skill, resolved_args) {
-        return Some(policy);
-    }
-    let output_contract = route.effective_output_contract();
-    arg_policy_decision(Some(&output_contract), normalized_skill, resolved_args)
+    route_capability_ref_arg_policy(route, normalized_skill, resolved_args)
 }
 
 fn route_capability_ref_arg_policy(

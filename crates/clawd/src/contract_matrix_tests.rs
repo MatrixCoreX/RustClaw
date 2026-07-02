@@ -836,6 +836,41 @@ fn route_capability_ref_arg_policy_does_not_inherit_wrong_semantic_shape() {
 }
 
 #[test]
+fn route_arg_policy_ignores_legacy_marker_without_capability_ref() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "contract_marker=config_validation".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::ConfigValidation,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let policy = arg_policy_decision_for_route(
+        Some(&route),
+        "config_basic",
+        &serde_json::json!({"action": "validate"}),
+    );
+
+    assert!(policy.is_none());
+}
+
+#[test]
 fn route_capability_ref_action_trace_does_not_inherit_wrong_semantic_shape() {
     let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;

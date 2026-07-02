@@ -779,8 +779,37 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
         "end_line": 20
     });
 
+    assert!(
+        contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args).is_none(),
+        "legacy output-contract marker alone must not reject planner-selected args"
+    );
+
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "capability_ref=filesystem.read_text_range".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..crate::IntentOutputContract::default()
+        },
+    };
+    loop_state.route_policy_context = Some(route);
+
     let err = contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args)
-        .expect("contract arg policy should reject missing path");
+        .expect("capability-ref arg policy should reject missing path");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract arg policy error should be structured");
 
