@@ -804,7 +804,7 @@ fn directory_file_delivery_without_structured_selection_defers_to_loop_evidence(
     ));
     assert!(route_reason_has_marker(
         &applied.execution_route_result,
-        "unresolved_file_delivery_requires_clarify"
+        "unresolved_file_delivery_requires_locator"
     ));
     assert!(route_reason_has_marker(
         &applied.execution_route_result,
