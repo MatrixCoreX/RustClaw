@@ -696,38 +696,6 @@ fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd_only_without_syste
 }
 
 #[test]
-fn runtime_status_scalar_tool_marker_without_kind_defers_to_planner() {
-    let state = test_state_with_enabled_skills(&["system_basic"]);
-    let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
-    route.route_reason = "execution_recipe_scalar_runtime_tool_observation".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
-
-    assert!(
-        super::super::runtime_status_scalar_info_fallback_plan_result(
-            &state,
-            "return runtime scalar",
-            Some(&route),
-            &loop_state,
-            Some(&analysis),
-        )
-        .is_none()
-    );
-}
-
-#[test]
 fn file_delivery_route_allows_plain_not_found_terminal_reply() {
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::Respond {
