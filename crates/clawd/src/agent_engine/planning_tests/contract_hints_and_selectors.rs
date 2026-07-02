@@ -52,7 +52,7 @@ fn contract_hint_preferred_config_guard_uses_runtime_equivalent_action() {
         Some(&route),
         &LoopState::new(1),
         request,
-        None,
+        Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"),
     )
     .expect("virtual config guard should map to runtime guard action");
 
@@ -275,7 +275,10 @@ fn contract_hint_archive_read_uses_capability_ref_without_nl_matching() {
 fn contract_hint_content_presence_uses_machine_query_and_case_selector() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
-    route.route_reason = "structured_contract_hint_fast_path; contract_hint_fast_path".into();
+    route.route_reason =
+        "structured_contract_hint_fast_path; contract_hint_fast_path; capability_ref=document.parse"
+            .into();
+    route.resolved_intent = "capability_ref=document.parse".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
@@ -314,7 +317,7 @@ fn contract_hint_content_presence_uses_machine_query_and_case_selector() {
 }
 
 #[test]
-fn contract_hint_preferred_doc_parse_uses_structured_parse_doc_action() {
+fn contract_hint_preferred_doc_parse_no_longer_bypasses_agent_loop() {
     let state = test_state_with_enabled_skills(&["doc_parse"]);
     let mut route = base_route_result();
     route.route_reason = "structured_contract_hint_fast_path; contract_hint_fast_path".into();
@@ -324,7 +327,7 @@ fn contract_hint_preferred_doc_parse_uses_structured_parse_doc_action() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=content_presence_check\npreferred_action_ref=doc_parse\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]";
+    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=content_presence_check\npreferred_action_ref=doc_parse.parse_doc\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]";
 
     let plan = contract_hint_preferred_action_deterministic_plan_result(
         &state,
@@ -333,19 +336,9 @@ fn contract_hint_preferred_doc_parse_uses_structured_parse_doc_action() {
         &LoopState::new(1),
         request,
         None,
-    )
-    .expect("doc_parse preference should be planned without model fallback");
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "doc_parse");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("parse_doc")
-    );
-    assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
-        Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md")
-    );
+    assert!(plan.is_none());
 }
 
 #[test]
