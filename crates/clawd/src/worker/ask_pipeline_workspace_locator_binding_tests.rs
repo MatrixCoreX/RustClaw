@@ -7,7 +7,7 @@ use super::{
     current_request_resolves_workspace_child_locator,
     implicit_workspace_file_locator_route_should_force_clarify,
     model_completed_workspace_file_locator_hint_should_force_clarify,
-    workspace_root_name_token_present,
+    path_scoped_locator_guard_can_defer_to_prompt_targets, workspace_root_name_token_present,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -208,6 +208,21 @@ fn implicit_workspace_file_locator_without_model_locator_requires_clarify() {
         &route,
         None,
         &snapshot,
+    ));
+}
+
+#[test]
+fn path_scoped_locator_guard_defers_direct_answer_trace_to_prompt_targets() {
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::direct_answer();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+
+    assert!(path_scoped_locator_guard_can_defer_to_prompt_targets(
+        "Read README.md and summarize it",
+        &route,
     ));
 }
 
