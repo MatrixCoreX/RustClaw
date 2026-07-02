@@ -31,6 +31,75 @@ fn make_temp_root(label: &str) -> std::path::PathBuf {
     path
 }
 
+#[test]
+fn ordered_entry_binding_uses_contract_without_execute_gate() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "Read the selected ordered entry.".to_string(),
+        needs_clarify: false,
+        route_reason: String::new(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            requires_content_evidence: true,
+            response_shape: crate::OutputResponseShape::Strict,
+            ..Default::default()
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::List,
+            bound_target: Some("/tmp/workspace".to_string()),
+            ordered_entries: vec!["alpha.txt".to_string(), "beta.txt".to_string()],
+            source_request: "List files in /tmp/workspace".to_string(),
+            ..Default::default()
+        }),
+    };
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        attachment_processing_required: false,
+        state_patch: Some(json!({
+            "ordered_entry_ref": {
+                "index": 2,
+                "index_base": 1
+            }
+        })),
+    };
+
+    assert!(bind_ordered_entry_reference_from_active_frame(
+        &mut route,
+        &snapshot,
+        Some(&turn_analysis),
+        None,
+    ));
+
+    assert_eq!(route.ask_mode, crate::AskMode::direct_answer());
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+    );
+    assert_eq!(
+        route.output_contract.locator_hint,
+        "/tmp/workspace/beta.txt"
+    );
+    assert!(route
+        .route_reason
+        .contains("ordered_entry_reference_bound_from_active_frame"));
+}
+
 fn test_task() -> crate::ClaimedTask {
     crate::ClaimedTask {
         task_id: "ask-prepare-test".to_string(),

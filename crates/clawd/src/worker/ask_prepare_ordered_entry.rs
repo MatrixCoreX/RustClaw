@@ -278,10 +278,7 @@ pub(super) fn bind_ordered_entry_reference_from_active_frame(
         || (route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
             && route_result.output_contract.semantic_kind
                 == crate::OutputSemanticKind::ScalarPathOnly);
-    if route_result.needs_clarify
-        || !route_result.is_execute_gate()
-        || !supported_ordered_entry_contract
-    {
+    if route_result.needs_clarify || !supported_ordered_entry_contract {
         return false;
     }
     let Some(frame) = session_snapshot.active_followup_frame.as_ref() else {
