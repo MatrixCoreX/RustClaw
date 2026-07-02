@@ -1736,6 +1736,7 @@ fn runtime_status_query_kind_value(value: &Value) -> Option<&str> {
         .filter(|kind| !kind.is_empty())
 }
 
+#[cfg(test)]
 pub(super) fn runtime_status_query_system_basic_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "current_user" => Some("current_user"),

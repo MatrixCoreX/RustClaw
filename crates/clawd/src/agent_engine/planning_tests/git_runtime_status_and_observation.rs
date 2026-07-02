@@ -500,7 +500,7 @@ fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
 }
 
 #[tokio::test]
-async fn runtime_status_query_preempts_explicit_hostname_command_fast_path() {
+async fn runtime_status_query_reaches_planner_without_literal_command_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.standalone_commands = vec!["hostname".to_string()];
     let prompt = "只输出当前机器 hostname，不要解释";
@@ -536,7 +536,7 @@ async fn runtime_status_query_preempts_explicit_hostname_command_fast_path() {
     loop_state.round_no = 1;
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -548,24 +548,20 @@ async fn runtime_status_query_preempts_explicit_hostname_command_fast_path() {
         None,
     )
     .await
-    .expect("runtime status query should preempt explicit command fast path");
+    .expect_err("runtime status query should reach planner instead of pre-LLM capability choice");
 
-    assert!(plan
-        .planner_notes
-        .split_whitespace()
-        .any(|note| { note == "fallback_reason_code=plan_deterministic_runtime_status_scalar" }));
-    let actions = plan
-        .steps
-        .iter()
-        .filter_map(|step| step.to_agent_action())
-        .collect::<Vec<_>>();
-    assert!(matches!(
-        actions.first(),
-        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
-            if tool == "system_basic"
-                && args.get("action").and_then(Value::as_str) == Some("runtime_status")
-                && args.get("kind").and_then(Value::as_str) == Some("host_name")
-    ));
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic runtime-status removal, got: {err}"
+    );
+    assert!(
+        !err.contains("plan_deterministic_runtime_status_scalar"),
+        "old runtime-status deterministic fallback leaked into planner error: {err}"
+    );
+    assert!(
+        !err.contains("plan_deterministic_explicit_command_run_cmd"),
+        "runtime status query fell back to literal command fast path: {err}"
+    );
 }
 
 #[test]
