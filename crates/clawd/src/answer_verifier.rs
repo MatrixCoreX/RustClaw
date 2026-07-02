@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{AppState, ClaimedTask, RouteResult, TaskContract};
+use crate::{AppState, ClaimedTask, RouteResult};
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
 const MAX_VERIFIER_STEPS: usize = 8;
@@ -142,12 +142,11 @@ pub(crate) fn should_verify_answer(
     if pure_chat_agent_loop_submode_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
-    let task_contract = TaskContract::from_route_result(route_result);
     let pure_chat_agent_loop = pure_chat_agent_loop_submode_should_verify(route_result, journal);
     if pure_chat_agent_loop {
         return true;
     }
-    task_contract.evidence_required
+    evidence_policy_requires_observation(route_result)
         || !journal.step_results.is_empty()
         || route_has_output_contract_marker(route_result)
 }
@@ -198,6 +197,12 @@ fn route_has_output_contract_marker(route_result: &RouteResult) -> bool {
     OUTPUT_CONTRACT_ROUTE_MARKERS
         .iter()
         .any(|marker| route_result.has_route_reason_machine_marker(marker))
+}
+
+fn evidence_policy_requires_observation(route_result: &RouteResult) -> bool {
+    route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !crate::task_contract::required_evidence_fields_for_route(route_result).is_empty()
 }
 
 fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {
