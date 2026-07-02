@@ -1444,6 +1444,48 @@ fn workspace_default_evidence_requires_content_evidence_contract() {
 }
 
 #[test]
+fn workspace_summary_default_text_evidence_uses_contract_without_execute_gate() {
+    let mut route = route_result(
+        crate::AskMode::direct_answer(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.delivery_required = false;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action": "workspace_glance"}),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = ensure_workspace_synthesis_has_default_text_evidence(
+        Some(&route),
+        &LoopState::new(1),
+        actions,
+    );
+
+    assert_eq!(normalized.len(), 4);
+    assert!(matches!(
+        &normalized[1],
+        AgentAction::CallSkill { skill, args }
+            if skill == "git_basic"
+                && args.get("action").and_then(Value::as_str) == Some("log")
+    ));
+    assert!(matches!(
+        &normalized[2],
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+                && args.get("path").and_then(Value::as_str) == Some("README.md")
+    ));
+}
+
+#[test]
 fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_loose_doc() {
     let root = TempDirGuard::new("content_excerpt_deterministic_plan");
     let readme = root.path.join("README.md");

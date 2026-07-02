@@ -680,7 +680,6 @@ pub(super) fn ensure_workspace_synthesis_has_default_text_evidence(
         return actions;
     };
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route_needs_workspace_summary_default_evidence(route)
         || !has_executable_observation_or_action(&actions)
         || !has_discussion_followup_action(&actions)
