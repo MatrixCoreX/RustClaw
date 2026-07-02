@@ -887,6 +887,7 @@ fn output_contract_looks_like_contextual_text_followup(
         )
 }
 
+#[cfg(test)]
 pub(super) fn active_context_has_structured_observation_anchor(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> bool {

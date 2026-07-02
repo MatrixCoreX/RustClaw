@@ -6,9 +6,8 @@ use super::{
     append_route_reason, is_meaningful_state_patch, normalize_schema_token, parse_output_contract,
     parse_output_delivery_intent, parse_output_response_shape, parse_output_semantic_kind,
     parse_target_task_policy, parse_turn_type, ContractRepairReport, FirstLayerDecision,
-    IntentExecutionRecipeOut, IntentNormalizerOut, IntentOutputContract, IntentOutputContractOut,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-    TargetTaskPolicy, TurnType,
+    IntentExecutionRecipeOut, IntentNormalizerOut, IntentOutputContractOut, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, TargetTaskPolicy, TurnType,
 };
 use crate::{llm_gateway, AppState, ClaimedTask};
 
@@ -19,8 +18,6 @@ const ACTIVE_TASK_INVALID_BINDING_CONTINUATION_MARKER: &str =
     "active_task_invalid_turn_binding_repaired_continuation_request";
 const GENERATED_FILE_DELIVERY_RUNTIME_TARGET_MARKER: &str =
     "generated_file_delivery_allows_runtime_target";
-const GENERATED_FILE_DELIVERY_ATTACHMENT_REPAIR_MARKER: &str =
-    "generated_file_delivery_cleared_spurious_attachment_processing";
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ContractRepairJudgeOut {
@@ -432,30 +429,6 @@ fn generated_file_delivery_repair_allows_runtime_target(
         && contract.delivery_required
         && contract.delivery_intent == OutputDeliveryIntent::FileSingle
         && contract.response_shape == OutputResponseShape::FileToken
-}
-
-pub(super) fn clear_spurious_generated_file_delivery_attachment_processing(
-    attachment_processing_required: &mut bool,
-    output_contract: &IntentOutputContract,
-    wants_file_delivery: bool,
-) -> Option<&'static str> {
-    if !*attachment_processing_required {
-        return None;
-    }
-    let delivery_signal = wants_file_delivery
-        || output_contract.delivery_required
-        || output_contract.response_shape == OutputResponseShape::FileToken
-        || output_contract.delivery_intent == OutputDeliveryIntent::FileSingle;
-    if delivery_signal
-        && output_contract.delivery_required
-        && output_contract.response_shape == OutputResponseShape::FileToken
-        && output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
-    {
-        *attachment_processing_required = false;
-        Some(GENERATED_FILE_DELIVERY_ATTACHMENT_REPAIR_MARKER)
-    } else {
-        None
-    }
 }
 
 fn repair_reason_has_machine_marker(reason: &str, marker: &str) -> bool {

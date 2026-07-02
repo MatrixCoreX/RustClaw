@@ -30,11 +30,15 @@ use missing_target::apply_missing_read_target_mutation_clarify;
 mod contract_repair_report;
 use contract_repair_report::ContractRepairReport;
 
+#[path = "intent_router_boundary_contract_cleanup.rs"]
+mod boundary_contract_cleanup;
+use boundary_contract_cleanup::clear_spurious_generated_file_delivery_attachment_processing;
+
+#[cfg(test)]
 #[path = "intent_router_contract_repair_judge.rs"]
 mod contract_repair_judge;
 #[cfg(test)]
 use contract_repair_judge::apply_contract_repair_judge_output;
-use contract_repair_judge::clear_spurious_generated_file_delivery_attachment_processing;
 #[cfg(test)]
 use contract_repair_judge::ContractRepairJudgeOut;
 
@@ -288,7 +292,6 @@ mod active_task_repair;
 #[cfg(test)]
 use active_task_repair::unresolved_deictic_observable_target_should_clarify;
 use active_task_repair::{
-    active_context_has_structured_observation_anchor, active_primary_text_context,
     active_task_append_loop_context_hint, active_task_mutation_loop_context_hint,
     active_task_replace_loop_context_hint, active_task_scope_update_loop_context_hint,
     apply_active_task_scope_refinement_repair, apply_active_task_structured_patch_repair,
@@ -310,6 +313,7 @@ use structural_schedule::{
     structural_alias_binding_fallback_decision,
 };
 
+#[cfg(test)]
 #[path = "intent_router_answer_candidate_binding.rs"]
 mod answer_candidate_binding;
 #[cfg(test)]
@@ -393,6 +397,7 @@ struct IntentNormalizerOut {
     #[serde(default)]
     confidence: f64,
     #[serde(default)]
+    #[allow(dead_code)]
     decision: String,
     #[serde(default)]
     schedule_intent: Option<crate::ScheduleIntentOutput>,

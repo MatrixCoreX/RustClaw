@@ -1,7 +1,9 @@
 use serde_json::Value;
 
 use super::{
-    active_context_has_structured_observation_anchor, active_primary_text_context,
+    active_task_repair::{
+        active_context_has_structured_observation_anchor, active_primary_text_context,
+    },
     parse_output_locator_kind, parse_target_task_policy, parse_turn_type, scalar_json_value_text,
     OutputLocatorKind,
 };

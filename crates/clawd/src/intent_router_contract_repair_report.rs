@@ -47,6 +47,7 @@ impl ContractRepairReport {
         self.details.contains(detail)
     }
 
+    #[cfg(test)]
     pub(super) fn needs_llm_contract_integrity_repair(&self) -> bool {
         if self.sources.contains("tool_payload") {
             return true;
@@ -110,6 +111,7 @@ fn contract_repair_detail_class(detail: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn contract_repair_detail_requires_llm_integrity_repair(detail: &str) -> bool {
     matches!(
         detail,
