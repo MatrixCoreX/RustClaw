@@ -185,6 +185,9 @@ pub(super) fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static s
         | "git_remote"
         | "git_changed_files"
         | "git_rev_parse" => OutputSemanticKind::GitRepositoryState.as_str(),
+        "sqlite_table_names" | "sqlite_table_names_only" | "sqlite_names_only" => {
+            OutputSemanticKind::SqliteTableNamesOnly.as_str()
+        }
         "one_line_comparison" | "single_line_comparison" => {
             OutputSemanticKind::RecentScalarEqualityCheck.as_str()
         }
