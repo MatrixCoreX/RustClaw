@@ -589,6 +589,7 @@ fn fs_basic_read_text_range_negative_start_line_count_becomes_tail_count() {
 fn service_status_process_request_uses_process_basic_filter_plan() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.resolved_intent = "capability_ref=process.ps filter=clawd".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -921,6 +922,7 @@ fn service_status_task_id_token_uses_task_control_get_plan() {
 fn command_output_summary_task_id_token_uses_task_control_get_plan() {
     let state = test_state_with_enabled_skills(&["git_basic", "task_control"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
@@ -947,6 +949,7 @@ fn command_output_summary_task_id_token_uses_task_control_get_plan() {
 fn content_presence_task_control_list_get_marker_uses_first_detail_plan() {
     let state = test_state_with_enabled_skills(&["task_control"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
@@ -1047,6 +1050,7 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
 fn web_search_summary_contract_uses_web_search_extract_plan() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.resolved_intent = "capability_ref=web.search_results".to_string();
     route.output_contract.locator_hint = "query=rust async tutorial".to_string();
     route.output_contract.requires_content_evidence = true;
