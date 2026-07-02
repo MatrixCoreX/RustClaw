@@ -1,6 +1,6 @@
 use crate::{agent_engine::LoopState, AppState};
 
-use super::{matrix_checked_direct_candidate, normalized_success_body_for_direct_answer};
+use super::{evidence_policy_checked_direct_candidate, normalized_success_body_for_direct_answer};
 
 pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -117,7 +117,7 @@ pub(crate) fn direct_answer_from_referenced_observation_i18n(
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
-    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+    evidence_policy_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
 }
 
 #[cfg(test)]

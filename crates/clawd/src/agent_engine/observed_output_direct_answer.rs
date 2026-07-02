@@ -69,7 +69,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
             prefers_english_free_text,
         )
         .and_then(|answer| {
-            matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+            evidence_policy_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
         }) {
             return Some(answer);
         }
@@ -90,7 +90,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
         if let Some(answer) =
             structured_scalar_equality_direct_answer(state, route, loop_state, agent_run_context)
         {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -105,7 +105,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
             allow_localized_direct_template,
             prefers_english_free_text,
         ) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -115,10 +115,10 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
         if let Some(answer) =
             hidden_entries_direct_answer(state, route, loop_state, prefers_english_free_text)
         {
-            if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
+            if latest_observation_lacks_required_content_evidence(route, loop_state) {
                 return None;
             }
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -131,7 +131,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
             current_turn_request_text(Some(route), agent_run_context),
             prefers_english_free_text,
         ) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -140,14 +140,24 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
         }
         if let Some(answer) = directory_purpose_summary_find_ext_answer_candidate(route, loop_state)
             .and_then(|answer| {
-                matrix_checked_direct_candidate(Some(route), loop_state, auto_locator_path, answer)
+                evidence_policy_checked_direct_candidate(
+                    Some(route),
+                    loop_state,
+                    auto_locator_path,
+                    answer,
+                )
             })
         {
             return Some(answer);
         }
         if let Some(answer) =
             multi_status_json_summary_candidate(route, loop_state).and_then(|answer| {
-                matrix_checked_direct_candidate(Some(route), loop_state, auto_locator_path, answer)
+                evidence_policy_checked_direct_candidate(
+                    Some(route),
+                    loop_state,
+                    auto_locator_path,
+                    answer,
+                )
             })
         {
             return Some(answer);
@@ -611,7 +621,7 @@ pub(super) fn extract_direct_answer_from_generic_output_impl(
     {
         return None;
     }
-    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+    evidence_policy_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
 }
 
 pub(super) fn fs_search_output_direct_answer_candidate(

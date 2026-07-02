@@ -269,8 +269,8 @@ fn observed_answer_language_compatible_for_route(
     request_language_hint: &str,
 ) -> bool {
     if let Some(route) = route {
-        if route_requires_matrix_grounded_direct_candidate(route)
-            && matrix_direct_candidate_satisfies_contract(
+        if route_requires_evidence_policy_grounded_direct_candidate(route)
+            && evidence_policy_direct_candidate_satisfies_contract(
                 route,
                 loop_state,
                 auto_locator_path,
@@ -721,7 +721,12 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     prefer_english: bool,
 ) -> Option<String> {
     if let Some(path) = recent_file_path_candidate_for_scalar_path(loop_state, route) {
-        return matrix_checked_direct_candidate(route, loop_state, auto_locator_path, path);
+        return evidence_policy_checked_direct_candidate(
+            route,
+            loop_state,
+            auto_locator_path,
+            path,
+        );
     }
     if let Some(answer) = latest_successful_list_dir_answer_candidate(
         loop_state,
@@ -732,7 +737,12 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         if !crate::finalize::looks_like_planner_artifact(&answer)
             && !crate::finalize::looks_like_internal_trace_artifact(&answer)
         {
-            return matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer);
+            return evidence_policy_checked_direct_candidate(
+                route,
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
     }
     let observed_output = extract_latest_generic_successful_output_with_state(state, loop_state)?;
@@ -770,10 +780,10 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     {
         return None;
     }
-    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+    evidence_policy_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
 }
 
-fn matrix_checked_direct_candidate(
+fn evidence_policy_checked_direct_candidate(
     route: Option<&crate::RouteResult>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
@@ -782,21 +792,28 @@ fn matrix_checked_direct_candidate(
     let Some(route) = route else {
         return Some(answer);
     };
-    if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
+    if latest_observation_lacks_required_content_evidence(route, loop_state) {
         return None;
     }
     if hidden_entries_direct_candidate_satisfies_contract(route, loop_state, &answer) {
         return Some(answer);
     }
-    if route_requires_matrix_grounded_direct_candidate(route)
-        && matrix_direct_candidate_satisfies_contract(route, loop_state, auto_locator_path, &answer)
+    let requires_evidence_policy_grounding =
+        route_requires_evidence_policy_grounding_for_direct_candidate(route);
+    if requires_evidence_policy_grounding
+        && evidence_policy_direct_candidate_satisfies_contract(
+            route,
+            loop_state,
+            auto_locator_path,
+            &answer,
+        )
     {
         return Some(answer);
     }
     if hidden_entries_empty_direct_candidate_satisfies_contract(route, loop_state, &answer) {
         return Some(answer);
     }
-    if route_requires_matrix_grounded_direct_candidate(route) {
+    if requires_evidence_policy_grounding {
         return None;
     }
     Some(answer)
@@ -862,9 +879,15 @@ fn hidden_entries_contract_limit(route: &crate::RouteResult) -> usize {
         .min(8)
 }
 
-fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
+fn route_requires_evidence_policy_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
     crate::contract_matrix::final_answer_shape_for_route(route)
         .is_some_and(|shape| !shape.allows_model_language())
+}
+
+fn route_requires_evidence_policy_grounding_for_direct_candidate(
+    route: &crate::RouteResult,
+) -> bool {
+    route_requires_evidence_policy_grounded_direct_candidate(route)
 }
 
 fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> bool {
@@ -872,7 +895,7 @@ fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> b
         .is_some_and(|shape| shape.allows_model_language())
 }
 
-fn matrix_direct_candidate_satisfies_contract(
+fn evidence_policy_direct_candidate_satisfies_contract(
     route: &crate::RouteResult,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
@@ -911,7 +934,7 @@ fn matrix_direct_candidate_satisfies_contract(
     crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
 }
 
-fn latest_observation_is_explicitly_forbidden_by_contract(
+fn latest_observation_lacks_required_content_evidence(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
@@ -927,6 +950,9 @@ fn latest_observation_is_explicitly_forbidden_by_contract(
     }) else {
         return false;
     };
+    if step.skill == "run_cmd" && !step_provides_path_content_evidence(step) {
+        return true;
+    }
     let args = step
         .output
         .as_deref()
@@ -936,6 +962,46 @@ fn latest_observation_is_explicitly_forbidden_by_contract(
         .is_some_and(|policy| {
             policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
         })
+}
+
+fn step_provides_path_content_evidence(step: &crate::executor::StepExecutionResult) -> bool {
+    let Some(body) = step
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|body| !body.is_empty())
+    else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let value = structured_observed_body_value(&value);
+    match step.skill.as_str() {
+        "system_basic" | "fs_basic" => {
+            matches!(
+                value.get("action").and_then(serde_json::Value::as_str),
+                Some("read_range")
+            ) && value
+                .get("excerpt")
+                .or_else(|| value.get("content"))
+                .or_else(|| value.get("text"))
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+        }
+        "doc_parse" => value
+            .get("content")
+            .or_else(|| value.get("text"))
+            .or_else(|| value.get("excerpt"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty()),
+        "log_analyze" => value
+            .get("recent_matches")
+            .or_else(|| value.get("recent_notable_lines"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| !items.is_empty()),
+        _ => false,
+    }
 }
 
 fn route_uses_enforced_generic_path_content_profile(route: &crate::RouteResult) -> bool {
@@ -995,7 +1061,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         if let Some(answer) =
             structured_scalar_equality_direct_answer(None, route, loop_state, agent_run_context)
         {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1008,7 +1074,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         if let Some(answer) =
             count_inventory_planned_file_dir_breakdown_answer(None, loop_state, false)
         {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1016,7 +1082,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
             );
         }
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1024,7 +1090,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
             );
         }
         if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1069,7 +1135,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             loop_state,
             agent_run_context,
         ) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1084,7 +1150,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             loop_state,
             prefer_english,
         ) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1092,7 +1158,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             );
         }
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
@@ -1100,7 +1166,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             );
         }
         if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
-            return matrix_checked_direct_candidate(
+            return evidence_policy_checked_direct_candidate(
                 Some(route),
                 loop_state,
                 auto_locator_path,
