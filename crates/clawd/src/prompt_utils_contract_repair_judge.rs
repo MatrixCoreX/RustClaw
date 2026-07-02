@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
 
 use super::{
-    canonicalize_direct_answer_gate_contract, normalize_direct_answer_gate_delivery_intent,
-    normalize_direct_answer_gate_locator_kind, normalize_direct_answer_gate_semantic_kind,
-    normalize_schema_token_for_gate,
+    canonicalize_output_contract, normalize_output_contract_delivery_intent,
+    normalize_output_contract_locator_kind, normalize_output_contract_semantic_kind,
+    normalize_schema_token_for_contract,
 };
 
 fn canonicalize_contract_repair_judge_execution_recipe(value: Value) -> (Value, bool) {
@@ -70,7 +70,7 @@ fn canonicalize_contract_repair_judge_turn_type(value: Option<Value>) -> (Value,
     let Some(Value::String(raw)) = value else {
         return (Value::String(String::new()), true);
     };
-    let normalized = normalize_schema_token_for_gate(&raw);
+    let normalized = normalize_schema_token_for_contract(&raw);
     let canonical = match normalized.as_str() {
         "" | "none" | "null" => "",
         "task_request" => "task_request",
@@ -95,7 +95,7 @@ fn canonicalize_contract_repair_judge_target_task_policy(value: Option<Value>) -
     let Some(Value::String(raw)) = value else {
         return (Value::String(String::new()), true);
     };
-    let normalized = normalize_schema_token_for_gate(&raw);
+    let normalized = normalize_schema_token_for_contract(&raw);
     let canonical = match normalized.as_str() {
         "" | "none" | "null" => "",
         "reuse_active" => "reuse_active",
@@ -114,7 +114,7 @@ fn infer_contract_repair_judge_apply(map: &serde_json::Map<String, Value>) -> bo
     let decision = map
         .get("decision")
         .and_then(Value::as_str)
-        .map(normalize_schema_token_for_gate)
+        .map(normalize_schema_token_for_contract)
         .unwrap_or_default();
     if decision == "planner_execute"
         || map.get("needs_clarify").and_then(Value::as_bool) == Some(true)
@@ -130,17 +130,18 @@ fn infer_contract_repair_judge_apply(map: &serde_json::Map<String, Value>) -> bo
         == Some(true)
         || contract.get("delivery_required").and_then(Value::as_bool) == Some(true)
         || contract
-            .get("semantic_kind")
+            .get("contract_marker")
+            .or_else(|| contract.get("semantic_kind"))
             .and_then(Value::as_str)
-            .is_some_and(|raw| normalize_direct_answer_gate_semantic_kind(raw) != "none")
+            .is_some_and(|raw| normalize_output_contract_semantic_kind(raw) != "none")
         || contract
             .get("locator_kind")
             .and_then(Value::as_str)
-            .is_some_and(|raw| normalize_direct_answer_gate_locator_kind(raw, "") != "none")
+            .is_some_and(|raw| normalize_output_contract_locator_kind(raw, "") != "none")
         || contract
             .get("delivery_intent")
             .and_then(Value::as_str)
-            .is_some_and(|raw| normalize_direct_answer_gate_delivery_intent(raw) != "none")
+            .is_some_and(|raw| normalize_output_contract_delivery_intent(raw) != "none")
 }
 
 fn canonicalize_contract_repair_judge_confidence(value: Option<Value>) -> (Value, bool) {
@@ -152,7 +153,7 @@ fn canonicalize_contract_repair_judge_confidence(value: Option<Value>) -> (Value
                 let clamped = parsed.clamp(0.0, 1.0);
                 return (json!(clamped), true);
             }
-            let canonical = match normalize_schema_token_for_gate(trimmed).as_str() {
+            let canonical = match normalize_schema_token_for_contract(trimmed).as_str() {
                 "very_high" | "high" => 0.9,
                 "medium" | "moderate" => 0.7,
                 "low" => 0.4,
@@ -171,6 +172,7 @@ pub(super) fn canonicalize_contract_repair_judge_object(
     let allowed_keys = [
         "apply",
         "reason",
+        "repair_target",
         "confidence",
         "decision",
         "needs_clarify",
@@ -191,8 +193,7 @@ pub(super) fn canonicalize_contract_repair_judge_object(
     map.insert("confidence".to_string(), confidence);
 
     if let Some(output_contract) = map.remove("output_contract") {
-        let (output_contract, contract_normalized) =
-            canonicalize_direct_answer_gate_contract(output_contract);
+        let (output_contract, contract_normalized) = canonicalize_output_contract(output_contract);
         normalized |= contract_normalized;
         map.insert("output_contract".to_string(), output_contract);
     }

@@ -8,7 +8,7 @@ fn default_output_contract() -> Value {
         "delivery_required": false,
         "locator_kind": "none",
         "delivery_intent": "none",
-        "semantic_kind": "none",
+        "contract_marker": "none",
         "locator_hint": "",
         "self_extension": {
             "mode": "none",
@@ -176,11 +176,16 @@ pub(super) fn normalize_output_contract_semantic_kind(raw: &str) -> &'static str
         "workspace_summary" | "workspace_project_summary" => "workspace_project_summary",
         "scalar_count" | "count" => "scalar_count",
         "quantity_comparison" | "comparison" => "quantity_comparison",
-        "failed_step" | "failed_command_step" | "execution_failure_step" => "execution_failed_step",
-        "new_file_delivery" | "created_file_delivery" | "write_then_send_file" => {
-            "generated_file_delivery"
-        }
-        "filesystem_mutation"
+        "execution_failed_step"
+        | "failed_step"
+        | "failed_command_step"
+        | "execution_failure_step" => "execution_failed_step",
+        "generated_file_delivery"
+        | "new_file_delivery"
+        | "created_file_delivery"
+        | "write_then_send_file" => "generated_file_delivery",
+        "filesystem_mutation_result"
+        | "filesystem_mutation"
         | "fs_mutation_result"
         | "file_mutation_result"
         | "path_mutation_result" => "filesystem_mutation_result",
@@ -229,12 +234,19 @@ pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
         "delivery_required",
         "locator_kind",
         "delivery_intent",
+        "contract_marker",
         "semantic_kind",
         "locator_hint",
         "self_extension",
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
+    if !map.contains_key("contract_marker") {
+        if let Some(value) = map.get("semantic_kind").cloned() {
+            map.insert("contract_marker".to_string(), value);
+            normalized = true;
+        }
+    }
     let defaults = default_output_contract();
     let default_obj = defaults
         .as_object()
@@ -283,16 +295,32 @@ pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
         }
     }
     let mut semantic_token_requests_scalar_shape = false;
-    if let Some(Value::String(raw)) = map.get("semantic_kind").cloned() {
+    let marker_value = map
+        .get("contract_marker")
+        .cloned()
+        .or_else(|| map.get("semantic_kind").cloned());
+    if let Some(Value::String(raw)) = marker_value {
         semantic_token_requests_scalar_shape =
             output_contract_semantic_token_requests_scalar_shape(&raw);
         let canonical = normalize_output_contract_semantic_kind(&raw);
         if canonical != raw {
             map.insert(
-                "semantic_kind".to_string(),
+                "contract_marker".to_string(),
                 Value::String(canonical.to_string()),
             );
             normalized = true;
+        } else if map.get("contract_marker").is_none() {
+            map.insert(
+                "contract_marker".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+        if map.contains_key("semantic_kind") {
+            map.insert(
+                "semantic_kind".to_string(),
+                Value::String(canonical.to_string()),
+            );
         }
     }
     if semantic_token_requests_scalar_shape

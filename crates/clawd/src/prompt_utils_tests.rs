@@ -152,12 +152,12 @@ fn validate_against_schema_preserves_structured_respond_intent_fields() {
 fn validate_against_schema_normalizes_contract_repair_confidence_label() {
     let raw = r#"{
         "apply": true,
-        "reason": "config_risk_assessment_contract_repair",
+        "reason": "content_excerpt_summary_contract_repair",
         "confidence": "high",
         "decision": "planner_execute",
         "needs_clarify": false,
         "clarify_question": "",
-        "resolved_user_intent": "Check configs/config.toml for obvious configuration issues.",
+        "resolved_user_intent": "Read a bounded excerpt from configs/config.toml.",
         "output_contract": {
             "response_shape": "one_sentence",
             "exact_sentence_count": 1,
@@ -165,7 +165,7 @@ fn validate_against_schema_normalizes_contract_repair_confidence_label() {
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "semantic_kind": "config_risk_assessment",
+            "semantic_kind": "content_excerpt_summary",
             "locator_hint": "/home/guagua/rustclaw/configs/config.toml",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
         },
@@ -189,8 +189,52 @@ fn validate_against_schema_normalizes_contract_repair_confidence_label() {
             .value
             .pointer("/output_contract/semantic_kind")
             .and_then(|v| v.as_str()),
-        Some("config_risk_assessment")
+        Some("content_excerpt_summary")
     );
+}
+
+#[test]
+fn validate_against_schema_accepts_contract_repair_contract_marker() {
+    let raw = r#"{
+        "apply": true,
+        "reason": "execution_failed_step_contract_preserves_ordered_command_sequence",
+        "confidence": 0.9,
+        "decision": "planner_execute",
+        "needs_clarify": false,
+        "clarify_question": "",
+        "resolved_user_intent": "Preserve ordered command failure evidence.",
+        "output_contract": {
+            "response_shape": "strict",
+            "exact_sentence_count": null,
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "none",
+            "delivery_intent": "none",
+            "contract_marker": "execution_failed_step",
+            "locator_hint": "",
+            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
+        },
+        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"},
+        "turn_type": "task_request",
+        "target_task_policy": "standalone",
+        "state_patch": null
+    }"#;
+
+    let validated =
+        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
+            .expect("contract_marker repair judge output should validate");
+
+    assert_eq!(
+        validated
+            .value
+            .pointer("/output_contract/contract_marker")
+            .and_then(Value::as_str),
+        Some("execution_failed_step")
+    );
+    assert!(validated
+        .value
+        .pointer("/output_contract/semantic_kind")
+        .is_none());
 }
 
 #[test]

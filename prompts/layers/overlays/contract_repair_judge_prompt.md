@@ -41,10 +41,10 @@ decide from registry capabilities and boundary observations.
   - `planner_execute` when repaired fields require fresh observation, delivery,
     or execution
   - `direct_answer` when no action signal remains
-- Use `semantic_kind="none"` by default.
-- Use `semantic_kind="execution_failed_step"` only with
+- Use `contract_marker="none"` by default.
+- Use `contract_marker="execution_failed_step"` only with
   `execution_failed_step_contract_preserves_ordered_command_sequence`.
-- Use `semantic_kind="generated_file_delivery"` only with
+- Use `contract_marker="generated_file_delivery"` only with
   `generated_file_delivery_allows_runtime_target`.
 - Do not encode routing authority in free-text `reason`; use canonical marker
   tokens and structured fields.
@@ -87,7 +87,7 @@ No boundary marker, ordinary semantic decision belongs to planner:
     "delivery_required": false,
     "locator_kind": "none",
     "delivery_intent": "none",
-    "semantic_kind": "none",
+    "contract_marker": "none",
     "locator_hint": "",
     "scalar_count_filter": null,
     "list_selector": null,
@@ -115,7 +115,7 @@ Execution-failure boundary marker:
     "delivery_required": false,
     "locator_kind": "none",
     "delivery_intent": "none",
-    "semantic_kind": "execution_failed_step",
+    "contract_marker": "execution_failed_step",
     "locator_hint": "",
     "scalar_count_filter": null,
     "list_selector": null,

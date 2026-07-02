@@ -57,7 +57,7 @@
         "delivery_required",
         "locator_kind",
         "delivery_intent",
-        "semantic_kind",
+        "contract_marker",
         "locator_hint",
         "self_extension"
       ],
@@ -84,8 +84,44 @@
           "type": "string",
           "enum": ["none", "file_single", "directory_lookup", "directory_batch_files"]
         },
+        "contract_marker": {
+          "type": "string",
+          "description": "Preferred machine output-contract marker. Accepts the same stable marker tokens as legacy semantic_kind.",
+          "enum": [
+            "none",
+            "raw_command_output",
+            "command_output_summary",
+            "service_status",
+            "hidden_entries_check",
+            "file_names",
+            "directory_names",
+            "directory_entry_groups",
+            "file_paths",
+            "directory_purpose_summary",
+            "content_excerpt_summary",
+            "document_heading",
+            "content_excerpt_with_summary",
+            "content_presence_check",
+            "excerpt_kind_judgment",
+            "recent_artifacts_judgment",
+            "workspace_project_summary",
+            "scalar_count",
+            "quantity_comparison",
+            "execution_failed_step",
+            "generated_file_delivery",
+            "generated_file_path_report",
+            "filesystem_mutation_result",
+            "scalar_path_only",
+            "file_basename",
+            "existence_with_path",
+            "existence_with_path_summary",
+            "recent_scalar_equality_check",
+            "structured_keys"
+          ]
+        },
         "semantic_kind": {
           "type": "string",
+          "description": "Legacy compatibility input. New repair judge prompts should emit contract_marker.",
           "enum": [
             "none",
             "raw_command_output",
