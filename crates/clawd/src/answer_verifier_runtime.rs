@@ -67,7 +67,7 @@ pub(crate) async fn verify_answer_observe_only(
             return None;
         }
     };
-    let task_contract = TaskContract::from_route_result(route_result);
+    let task_contract_prompt = task_contract_prompt_block(route_result);
     let user_request_for_prompt = answer_verifier_user_request_for_prompt(task, user_request);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
@@ -76,10 +76,7 @@ pub(crate) async fn verify_answer_observe_only(
         &[
             ("__USER_REQUEST__", user_request_for_prompt.trim()),
             ("__REQUEST_LANGUAGE_HINT__", request_language_hint.as_str()),
-            (
-                "__TASK_CONTRACT__",
-                &task_contract_prompt_block(&task_contract),
-            ),
+            ("__TASK_CONTRACT__", &task_contract_prompt),
             (
                 "__OUTPUT_CONTRACT__",
                 &output_contract_prompt_block(route_result),
@@ -457,8 +454,9 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<AnswerVerifierOut> {
-    let task_contract = TaskContract::from_route_result(route_result);
-    if task_contract.required_evidence_fields.is_empty() {
+    let required_evidence_fields =
+        crate::task_contract::required_evidence_fields_for_route(route_result);
+    if required_evidence_fields.is_empty() {
         return None;
     }
     let coverage = crate::task_journal::evidence_coverage_for_route(route_result, journal);
@@ -1192,8 +1190,8 @@ pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde
     values
 }
 
-pub(super) fn task_contract_prompt_block(task_contract: &TaskContract) -> String {
-    task_contract.compact_prompt_line()
+pub(super) fn task_contract_prompt_block(route_result: &RouteResult) -> String {
+    crate::TaskContract::from_route_result(route_result).compact_prompt_line()
 }
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {
