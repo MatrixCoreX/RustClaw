@@ -917,11 +917,8 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
 
 fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["archive"],
-            &["pack"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::CreatedArchivePath)
 }
 
 fn archive_pack_has_later_terminal_respond(loop_state: &LoopState) -> bool {
