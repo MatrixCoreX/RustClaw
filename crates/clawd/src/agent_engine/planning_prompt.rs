@@ -232,7 +232,7 @@ pub(super) fn build_lightweight_tool_spec(
     if let Some(route) = route_result {
         lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
         lines.push(format!(
-            "- route_gate_kind={} response_shape={} semantic_kind={} locator_kind={}",
+            "- route_gate_kind={} response_shape={} contract_marker={} locator_kind={}",
             route.gate_kind().as_str(),
             route.output_contract.response_shape.as_str(),
             route.effective_output_contract_semantic_kind().as_str(),

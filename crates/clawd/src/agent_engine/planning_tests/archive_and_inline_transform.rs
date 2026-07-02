@@ -687,6 +687,12 @@ fn lightweight_tool_spec_includes_route_task_contract() {
 
     assert!(spec.contains("task_contract"));
     assert!(spec.contains("route_gate_kind=execute"));
+    assert!(spec.lines().any(|line| line
+        .split_whitespace()
+        .any(|part| part == "contract_marker=file_paths")));
+    assert!(!spec.lines().any(|line| line
+        .split_whitespace()
+        .any(|part| part.starts_with("semantic_kind="))));
     assert!(!spec.contains("ask_mode="));
     assert!(!spec.contains("derived_route_label="));
     assert!(spec.contains("intent_kind=planner_execute"));
@@ -971,6 +977,10 @@ fn lightweight_tool_spec_includes_contract_and_auto_locator() {
     assert!(rendered.contains("planning_class=lightweight_execution"));
     assert!(rendered.contains("route_gate_kind=execute"));
     assert!(rendered.contains("response_shape=scalar"));
+    assert!(rendered.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part == "contract_marker=scalar_path_only")
+    }));
     assert!(rendered.contains("locator_hint=UI/package.json"));
     assert!(rendered.contains("auto_locator_path=/tmp/UI/package.json"));
 }
