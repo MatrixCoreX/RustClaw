@@ -187,7 +187,7 @@ pub(super) fn apply_contract_repair_judge_output(
         output_contract.delivery_required = false;
         output_contract.locator_kind = OutputLocatorKind::None.as_str().to_string();
         output_contract.delivery_intent = OutputDeliveryIntent::None.as_str().to_string();
-        output_contract.semantic_kind = OutputSemanticKind::None.as_str().to_string();
+        output_contract.contract_marker = OutputSemanticKind::None.as_str().to_string();
         output_contract.locator_hint.clear();
         execution_recipe = IntentExecutionRecipeOut::default();
     } else if missing_turn_binding_for_content_read {
@@ -210,7 +210,7 @@ pub(super) fn apply_contract_repair_judge_output(
         output_contract.delivery_required = false;
         output_contract.locator_kind = OutputLocatorKind::None.as_str().to_string();
         output_contract.delivery_intent = OutputDeliveryIntent::None.as_str().to_string();
-        output_contract.semantic_kind =
+        output_contract.contract_marker =
             OutputSemanticKind::ExecutionFailedStep.as_str().to_string();
         output_contract.locator_hint.clear();
         execution_recipe = IntentExecutionRecipeOut::default();
@@ -223,7 +223,7 @@ pub(super) fn apply_contract_repair_judge_output(
         output_contract.delivery_required = true;
         output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace.as_str().to_string();
         output_contract.delivery_intent = OutputDeliveryIntent::FileSingle.as_str().to_string();
-        output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery
+        output_contract.contract_marker = OutputSemanticKind::GeneratedFileDelivery
             .as_str()
             .to_string();
         execution_recipe = IntentExecutionRecipeOut::default();
@@ -303,7 +303,7 @@ fn append_contract_repair_machine_tokens(
     repair_reason: &str,
 ) {
     let explicit_target = parse_output_semantic_kind(repair_target);
-    let output_target = parse_output_semantic_kind(&output_contract.semantic_kind);
+    let output_target = parse_output_semantic_kind(&output_contract.contract_marker);
     let target = if explicit_target != OutputSemanticKind::None {
         explicit_target
     } else {

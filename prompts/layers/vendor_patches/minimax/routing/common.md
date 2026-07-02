@@ -25,7 +25,7 @@ Boundary fields this layer may extract:
 
 Output contract discipline:
 - `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
-- Set `contract_marker="none"` in live normalizer output. Historical `semantic_kind` tokens may be accepted by downstream compatibility parsers, but this vendor patch must not ask MiniMax to choose them.
+- Set `contract_marker="none"` in live normalizer output. Do not emit legacy semantic-route field names.
 - Express boundary/output requirements through `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `response_shape`, `state_patch`, and exact machine selectors instead of legacy semantic kinds.
 - Preserve exact constraints as machine tokens in `resolved_user_intent` or structured fields: slice mode/count, selector target kind, selector limit, selector sort, include hidden, include metadata, structured field path, quantity comparison selection, and async job metadata.
 

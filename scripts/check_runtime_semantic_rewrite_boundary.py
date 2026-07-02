@@ -115,6 +115,12 @@ PROMPT_LAYERS_ROOT = ROOT / "prompts/layers"
 INTENT_NORMALIZER_PROMPT = PROMPT_LAYERS_ROOT / "overlays/intent_normalizer_prompt.md"
 INTENT_NORMALIZER_SCHEMA = ROOT / "prompts/schemas/intent_normalizer.schema.json"
 CONTRACT_REPAIR_JUDGE_SCHEMA = ROOT / "prompts/schemas/contract_repair_judge.schema.json"
+BOUNDARY_PROMPT_SCHEMA_NO_LEGACY_SEMANTIC_KIND_FILES: tuple[Path, ...] = (
+    INTENT_NORMALIZER_PROMPT,
+    INTENT_NORMALIZER_SCHEMA,
+    CONTRACT_REPAIR_JUDGE_SCHEMA,
+    PROMPT_LAYERS_ROOT / "vendor_patches/minimax/routing/common.md",
+)
 SKILL_REGISTRY_METADATA_FILES: tuple[Path, ...] = (
     ROOT / "configs/skills_registry.toml",
     ROOT / "docker/config/skills_registry.toml",
@@ -312,6 +318,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
+    findings.extend(scan_boundary_prompt_schema_legacy_semantic_kind_fields())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
@@ -572,6 +579,31 @@ def scan_intent_normalizer_prompt_contract_marker() -> list[Finding]:
                 "intent_normalizer_semantic_kind_output_target",
                 f"forbidden normalizer prompt output target: {token}",
             )
+        )
+    return findings
+
+
+def scan_boundary_semantic_kind_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if "semantic_kind" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                line_no,
+                "boundary_prompt_schema_legacy_semantic_kind",
+                line.strip(),
+            )
+        )
+    return findings
+
+
+def scan_boundary_prompt_schema_legacy_semantic_kind_fields() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in BOUNDARY_PROMPT_SCHEMA_NO_LEGACY_SEMANTIC_KIND_FILES:
+        findings.extend(
+            scan_boundary_semantic_kind_text(rel(path), path.read_text(encoding="utf-8"))
         )
     return findings
 
@@ -2139,7 +2171,17 @@ def run_self_test() -> int:
         blocked_prompt
         and blocked_prompt[0].kind == "prompt_layer_ordinary_semantic_token"
     )
+    blocked_boundary_semantic_kind = scan_boundary_semantic_kind_text(
+        "prompts/schemas/intent_normalizer.schema.json",
+        '"semantic_kind": {"type": "string"}\n',
+    )
+    assert (
+        blocked_boundary_semantic_kind
+        and blocked_boundary_semantic_kind[0].kind
+        == "boundary_prompt_schema_legacy_semantic_kind"
+    )
     assert not scan_prompt_layer_ordinary_semantic_tokens()
+    assert not scan_boundary_prompt_schema_legacy_semantic_kind_fields()
     blocked_schema = scan_schema_text(
         "prompts/schemas/intent_normalizer.schema.json",
         '"weather_query"\n',
