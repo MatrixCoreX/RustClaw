@@ -570,7 +570,9 @@ fn recent_artifacts_contract_overrides_literal_command_guard_for_deterministic_p
         ..IntentOutputContract::default()
     });
 
-    assert!(structural_contract_deterministic_plan_overrides_literal_command_guard(Some(&route)));
+    assert!(route_contract_defers_literal_command_to_planner(Some(
+        &route
+    )));
 }
 
 #[test]

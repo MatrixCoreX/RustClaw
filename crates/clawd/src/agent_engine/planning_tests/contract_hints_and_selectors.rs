@@ -1194,7 +1194,9 @@ fn structural_contracts_are_not_blocked_by_literal_command_guard() {
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_hint = "package.json".to_string();
 
-    assert!(structural_contract_deterministic_plan_overrides_literal_command_guard(Some(&route)));
+    assert!(route_contract_defers_literal_command_to_planner(Some(
+        &route
+    )));
 }
 
 #[test]
