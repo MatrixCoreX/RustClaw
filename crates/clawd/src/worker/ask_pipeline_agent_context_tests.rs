@@ -1,6 +1,6 @@
 use super::{
     agent_loop_boundary_observations_block, agent_loop_default_context,
-    build_agent_run_context_from_prepared_flow, PreparedAskFlow,
+    apply_post_route_refinements, build_agent_run_context_from_prepared_flow, PreparedAskFlow,
 };
 
 fn base_route() -> crate::RouteResult {
@@ -105,6 +105,160 @@ fn agent_loop_default_context_demotes_post_route_clarify_to_loop_context() {
     assert!(route.clarify_question.is_empty());
     assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
     assert!(route.route_reason.contains("agent_loop_default_entry"));
+}
+
+fn claimed_task(task_id: &str) -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
+fn boundary_locator_post_route(
+    reason_code: &'static str,
+) -> crate::post_route_policy::PostRoutePolicyResult {
+    let mut route = base_route();
+    route.needs_clarify = true;
+    route.clarify_question = "missing locator".to_string();
+    route.set_clarify_gate();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: reason_code
+            == "post_route_missing_path_scoped_locator",
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "boundary_locator_gate",
+            reason_code,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
+        ),
+    }
+}
+
+#[test]
+fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = claimed_task("missing-locator-boundary-defer");
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut post_route = boundary_locator_post_route("post_route_missing_path_scoped_locator");
+    let mut candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "inspect project file",
+        None,
+        &session_snapshot,
+        &mut candidates,
+        &mut post_route,
+    );
+
+    assert!(!post_route.execution_route_result.needs_clarify);
+    assert!(post_route
+        .execution_route_result
+        .clarify_question
+        .is_empty());
+    assert_eq!(
+        candidates.as_slice(),
+        ["post_route_missing_path_scoped_locator"]
+    );
+    assert_eq!(
+        post_route.gate_record.owner_layer,
+        "agent_loop_boundary_defer"
+    );
+    assert_eq!(
+        post_route.gate_record.reason_code,
+        "post_route_missing_path_scoped_locator_deferred_to_agent_loop"
+    );
+}
+
+#[test]
+fn post_route_fuzzy_locator_boundary_defers_to_agent_loop_candidate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = claimed_task("fuzzy-locator-boundary-defer");
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut post_route = boundary_locator_post_route("post_route_fuzzy_locator_candidates");
+    post_route.fuzzy_locator_suggestions =
+        vec!["README.md".to_string(), "README.zh-CN.md".to_string()];
+    let mut candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "inspect readme",
+        None,
+        &session_snapshot,
+        &mut candidates,
+        &mut post_route,
+    );
+
+    assert!(!post_route.execution_route_result.needs_clarify);
+    assert_eq!(
+        candidates.as_slice(),
+        ["post_route_fuzzy_locator_candidates"]
+    );
+    assert_eq!(
+        post_route.gate_record.reason_code,
+        "post_route_fuzzy_locator_candidates_deferred_to_agent_loop"
+    );
+}
+
+#[test]
+fn post_route_non_locator_boundary_clarify_stays_boundary_owned() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = claimed_task("non-locator-boundary-stays");
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut post_route = boundary_locator_post_route("post_route_boundary_clarify_required");
+    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
+        "boundary_clarify_gate",
+        "post_route_boundary_clarify_required",
+        crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
+    );
+    let mut candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "send workspace root as a file",
+        None,
+        &session_snapshot,
+        &mut candidates,
+        &mut post_route,
+    );
+
+    assert!(post_route.execution_route_result.needs_clarify);
+    assert!(candidates.is_empty());
+    assert_eq!(
+        post_route.gate_record.reason_code,
+        "post_route_boundary_clarify_required"
+    );
 }
 
 #[test]
