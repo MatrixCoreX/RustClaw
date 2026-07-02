@@ -651,9 +651,7 @@ pub(super) fn archive_format_for_path(path: &str) -> &'static str {
 }
 
 pub(super) fn archive_unpack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
-    if !route_has_archive_capability_action(route, "unpack")
-        && !route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveUnpack)
-    {
+    if !route_has_archive_capability_action(route, "unpack") {
         return None;
     }
     let (archive, dest) = split_archive_locator_pair(&route.output_contract.locator_hint)?;
@@ -705,8 +703,7 @@ pub(super) fn rewrite_archive_unpack_run_cmd_to_archive_basic(
 }
 
 pub(super) fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
-    if (!route_has_archive_capability_action(route, "pack")
-        && !route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack))
+    if !route_has_archive_capability_action(route, "pack")
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
     {
@@ -729,14 +726,7 @@ pub(super) fn archive_pack_pair_for_route_or_text(
     if let Some(pair) = archive_pack_pair_for_route(route) {
         return Some(pair);
     }
-    if !route_has_archive_capability_action(route, "pack")
-        && !matches!(
-            route.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::ArchivePack
-                | crate::OutputSemanticKind::FilesystemMutationResult
-                | crate::OutputSemanticKind::GeneratedFileDelivery
-        )
-    {
+    if !route_has_archive_capability_action(route, "pack") {
         return None;
     }
 

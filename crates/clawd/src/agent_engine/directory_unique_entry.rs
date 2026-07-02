@@ -1227,8 +1227,7 @@ pub(super) fn archive_unpack_deterministic_plan_result(
         route,
         &["archive"],
         &["unpack"],
-    ) || route
-        .output_contract_marker_is(crate::OutputSemanticKind::ArchiveUnpack);
+    );
     if route.needs_clarify || !route_requests_unpack {
         return None;
     }
