@@ -8,7 +8,6 @@ pub(super) fn directory_entry_groups_auto_locator_observation_plan(
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
@@ -210,7 +209,6 @@ pub(super) fn file_names_auto_locator_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::FileNames
@@ -264,7 +262,6 @@ pub(super) fn directory_tree_auto_locator_observation_plan(
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !route_expects_terminal_user_answer(route)
@@ -654,7 +651,6 @@ pub(super) fn directory_purpose_auto_locator_deterministic_plan_result(
     }
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
@@ -755,7 +751,6 @@ pub(super) fn directory_purpose_auto_locator_deterministic_plan_result(
 
 pub(super) fn directory_purpose_extension_locator(route: &RouteResult) -> Option<String> {
     if route.needs_clarify
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
@@ -1038,7 +1033,6 @@ pub(super) fn directory_compare_locator_deterministic_plan_result(
     }
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
     {
@@ -1088,7 +1082,6 @@ pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
     }
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison

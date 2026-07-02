@@ -683,7 +683,7 @@ fn file_names_auto_locator_builds_list_dir_with_structural_extension_filter() {
     fs::write(root.path.join("beta.txt"), "beta").expect("write txt");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );

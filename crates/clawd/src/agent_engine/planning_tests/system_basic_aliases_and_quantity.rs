@@ -1193,7 +1193,7 @@ fn quantity_compare_directory_pair_uses_deterministic_dir_compare_plan() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
