@@ -101,6 +101,63 @@ fn route_capability_ref_allows_config_archive_policy_without_semantic_kind() {
 }
 
 #[test]
+fn route_capability_ref_allows_filesystem_observe_policy_without_semantic_kind() {
+    for (capability_ref, skill, args, expected_action) in [
+        (
+            "capability_ref=filesystem.stat_paths",
+            "system_basic",
+            serde_json::json!({"action":"path_batch_facts","paths":["README.md"]}),
+            "fs_basic.stat_paths",
+        ),
+        (
+            "capability_ref=filesystem.list_entries",
+            "system_basic",
+            serde_json::json!({"action":"inventory_dir","path":"crates","names_only":true}),
+            "fs_basic.list_dir",
+        ),
+        (
+            "capability_ref=filesystem.count_entries",
+            "system_basic",
+            serde_json::json!({"action":"count_inventory","path":"crates"}),
+            "fs_basic.count_entries",
+        ),
+        (
+            "capability_ref=filesystem.read_text",
+            "system_basic",
+            serde_json::json!({"action":"read_range","path":"README.md","start_line":1,"end_line":8}),
+            "fs_basic.read_text_range",
+        ),
+        (
+            "capability_ref=filesystem.find_entries",
+            "system_basic",
+            serde_json::json!({"action":"find_path","path":".","name":"Cargo.toml"}),
+            "fs_basic.find_entries",
+        ),
+        (
+            "capability_ref=filesystem.grep_text",
+            "fs_basic",
+            serde_json::json!({"action":"grep_text","root":"crates","query":"capability_ref"}),
+            "fs_basic.grep_text",
+        ),
+        (
+            "capability_ref=filesystem.compare_paths",
+            "system_basic",
+            serde_json::json!({"action":"compare_paths","left_path":"README.md","right_path":"README.zh-CN.md"}),
+            "fs_basic.compare_paths",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (

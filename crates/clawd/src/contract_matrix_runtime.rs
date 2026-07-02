@@ -966,6 +966,55 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 &["list_keys", "structured_keys"],
             )
         }
+        ("fs_basic", "stat_paths") | ("system_basic", "path_batch_facts") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["stat_paths", "stat_path", "path_batch_facts"],
+            )
+        }
+        ("fs_basic", "list_dir") | ("system_basic", "inventory_dir") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["list_dir", "list_entries", "inventory_dir"],
+            )
+        }
+        ("fs_basic", "count_entries") | ("system_basic", "count_inventory") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["count_entries", "count_inventory"],
+            )
+        }
+        ("fs_basic", "read_text_range") | ("system_basic", "read_range") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["read_text_range", "read_text", "read_file", "read_range"],
+            )
+        }
+        ("fs_basic", "find_entries") | ("system_basic", "find_path") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["find_entries", "find_files", "find_paths", "find_path"],
+            )
+        }
+        ("fs_basic", "grep_text") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic"],
+                &["grep_text", "search_text"],
+            )
+        }
+        ("fs_basic", "compare_paths") | ("system_basic", "compare_paths") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["compare_paths"],
+            )
+        }
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
