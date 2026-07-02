@@ -284,6 +284,20 @@ fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<Fi
     ) {
         return Some(FinalAnswerShape::KeyListOrKeySummary);
     }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["config", "config_basic", "config_edit", "config_guard"],
+        &[
+            "guard_after_change",
+            "guard_config",
+            "guard_rustclaw_config",
+            "validate",
+            "validate_after_change",
+            "validate_config",
+        ],
+    ) {
+        return Some(FinalAnswerShape::ValidationVerdict);
+    }
     None
 }
 

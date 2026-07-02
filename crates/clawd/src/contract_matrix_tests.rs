@@ -168,6 +168,24 @@ fn config_list_keys_capability_ref_supplies_key_list_shape_without_semantic_kind
 }
 
 #[test]
+fn config_validation_capability_refs_supply_verdict_shape_without_semantic_kind() {
+    for capability_ref in [
+        "capability_ref=config.validate",
+        "capability_ref=config.guard_rustclaw_config",
+        "capability_ref=config.validate_after_change",
+        "capability_ref=config.guard_config",
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        assert_eq!(
+            final_answer_shape_for_route(&route),
+            Some(FinalAnswerShape::ValidationVerdict),
+            "{capability_ref}"
+        );
+    }
+}
+
+#[test]
 fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semantic_kind() {
     let mut route = route_with_machine_capability_ref("capability_ref=filesystem.count_entries");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
