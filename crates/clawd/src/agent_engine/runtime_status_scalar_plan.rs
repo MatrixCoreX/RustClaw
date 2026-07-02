@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn runtime_status_scalar_deterministic_plan_result(
     state: &AppState,
     goal: &str,
