@@ -197,6 +197,23 @@ fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semanti
 }
 
 #[test]
+fn system_runtime_status_capability_ref_supplies_scalar_shape_only_for_scalar_contract() {
+    let mut route = route_with_machine_capability_ref("capability_ref=system.runtime_status");
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    assert_ne!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+}
+
+#[test]
 fn route_capability_ref_arg_policy_does_not_require_semantic_bridge() {
     let route = route_with_machine_capability_ref("capability_ref=config.validate");
 
