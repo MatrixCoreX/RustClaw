@@ -27,6 +27,8 @@ pub(super) struct IntentOutputContractOut {
     #[serde(default)]
     pub(super) delivery_intent: String,
     #[serde(default)]
+    pub(super) contract_marker: String,
+    #[serde(default)]
     pub(super) semantic_kind: String,
     #[serde(default)]
     pub(super) locator_hint: String,
@@ -36,6 +38,15 @@ pub(super) struct IntentOutputContractOut {
     pub(super) list_selector: Option<Value>,
     #[serde(default)]
     pub(super) self_extension: Option<SelfExtensionContractOut>,
+}
+
+fn output_contract_marker_token(raw: &IntentOutputContractOut) -> &str {
+    let contract_marker = raw.contract_marker.trim();
+    if contract_marker.is_empty() {
+        raw.semantic_kind.trim()
+    } else {
+        contract_marker
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -555,8 +566,9 @@ pub(super) fn parse_output_contract(
 ) -> IntentOutputContract {
     let mut contract = IntentOutputContract::default();
     if let Some(raw) = out {
+        let contract_marker = output_contract_marker_token(&raw);
         let semantic_token_requests_scalar_shape =
-            semantic_kind_token_requests_scalar_response_shape(&raw.semantic_kind);
+            semantic_kind_token_requests_scalar_response_shape(contract_marker);
         contract.response_shape = parse_output_response_shape(&raw.response_shape);
         contract.exact_sentence_count = raw
             .exact_sentence_count
@@ -566,7 +578,7 @@ pub(super) fn parse_output_contract(
         contract.delivery_required = raw.delivery_required;
         contract.locator_kind = parse_output_locator_kind(&raw.locator_kind);
         contract.delivery_intent = parse_output_delivery_intent(&raw.delivery_intent);
-        contract.semantic_kind = parse_output_semantic_kind(&raw.semantic_kind);
+        contract.semantic_kind = parse_output_semantic_kind(contract_marker);
         contract.locator_hint = raw.locator_hint.trim().to_string();
         contract.self_extension.scalar_count_filter =
             parse_scalar_count_filter(raw.scalar_count_filter);

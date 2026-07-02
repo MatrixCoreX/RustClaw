@@ -269,7 +269,7 @@ fn normalizer_schema_normalization_treats_one_line_comparison_as_strict_shape() 
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );

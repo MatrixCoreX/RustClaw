@@ -91,6 +91,7 @@ ROUTE_RESULT_RAW_SEMANTIC_CLEAR = re.compile(
 ALLOWED_PRODUCTION_FILES: set[str] = set()
 
 PROMPT_LAYERS_ROOT = ROOT / "prompts/layers"
+INTENT_NORMALIZER_PROMPT = PROMPT_LAYERS_ROOT / "overlays/intent_normalizer_prompt.md"
 INTENT_NORMALIZER_SCHEMA = ROOT / "prompts/schemas/intent_normalizer.schema.json"
 CONTRACT_REPAIR_JUDGE_SCHEMA = ROOT / "prompts/schemas/contract_repair_judge.schema.json"
 SKILL_REGISTRY_METADATA_FILES: tuple[Path, ...] = (
@@ -288,6 +289,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_static_capability_compat_boundary())
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
+    findings.extend(scan_intent_normalizer_prompt_contract_marker())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
@@ -487,6 +489,37 @@ def scan_prompt_layer_text(rel_path: str, text: str) -> list[Finding]:
                     line.strip(),
                 )
             )
+    return findings
+
+
+def scan_intent_normalizer_prompt_contract_marker() -> list[Finding]:
+    rel_path = rel(INTENT_NORMALIZER_PROMPT)
+    text = INTENT_NORMALIZER_PROMPT.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if "output_contract.contract_marker" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "intent_normalizer_contract_marker_missing",
+                "intent normalizer prompt should emit output_contract.contract_marker",
+            )
+        )
+    forbidden_tokens = [
+        "Set `output_contract.semantic_kind",
+        "`delivery_intent`, `semantic_kind`, `locator_hint`",
+    ]
+    for token in forbidden_tokens:
+        if token not in text:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "intent_normalizer_semantic_kind_output_target",
+                f"forbidden normalizer prompt output target: {token}",
+            )
+        )
     return findings
 
 

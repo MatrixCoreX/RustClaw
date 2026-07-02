@@ -163,10 +163,15 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
             }
         }
     }
-    if !contract.contains_key("semantic_kind") {
+    if !contract.contains_key("contract_marker") {
+        if let Some(value) = contract.get("semantic_kind").cloned() {
+            contract.insert("contract_marker".to_string(), value);
+        }
+    }
+    if !contract.contains_key("contract_marker") {
         for alias in ["semantic", "kind", "answer_kind", "semantic_type"] {
             if let Some(value) = contract.get(alias).cloned() {
-                contract.insert("semantic_kind".to_string(), value);
+                contract.insert("contract_marker".to_string(), value);
                 break;
             }
         }
@@ -188,7 +193,12 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
     let raw_response_shape_token = contract_value_token(contract, "response_shape");
     let raw_locator_kind_token = contract_value_token(contract, "locator_kind");
     let raw_delivery_required_token = contract_value_token(contract, "delivery_required");
-    let raw_semantic_kind_token = contract_value_token(contract, "semantic_kind");
+    let raw_contract_marker_token = contract_value_token(contract, "contract_marker");
+    let raw_semantic_kind_token = if raw_contract_marker_token.is_empty() {
+        contract_value_token(contract, "semantic_kind")
+    } else {
+        raw_contract_marker_token.clone()
+    };
     let raw_locator_hint_token = contract_value_token(contract, "locator_hint");
     contract.retain(|key, _| {
         matches!(
@@ -199,6 +209,7 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
                 | "delivery_required"
                 | "locator_kind"
                 | "delivery_intent"
+                | "contract_marker"
                 | "semantic_kind"
                 | "locator_hint"
                 | "scalar_count_filter"
@@ -267,10 +278,10 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
         Value::String(delivery_intent.to_string()),
     );
     contract
-        .entry("semantic_kind".to_string())
+        .entry("contract_marker".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
     let semantic_kind = contract
-        .get("semantic_kind")
+        .get("contract_marker")
         .and_then(|value| value.as_str())
         .map(normalize_output_semantic_kind_for_schema)
         .unwrap_or("none");
@@ -294,9 +305,15 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
     }
     contract.insert(
-        "semantic_kind".to_string(),
+        "contract_marker".to_string(),
         Value::String(semantic_kind.clone()),
     );
+    if contract.contains_key("semantic_kind") {
+        contract.insert(
+            "semantic_kind".to_string(),
+            Value::String(semantic_kind.clone()),
+        );
+    }
     let semantic_kind_enum = parse_output_semantic_kind(&semantic_kind);
     if matches!(
         semantic_kind.as_str(),
@@ -422,9 +439,15 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
             Value::String("scalar".to_string()),
         );
         contract.insert(
-            "semantic_kind".to_string(),
+            "contract_marker".to_string(),
             Value::String("scalar_path_only".to_string()),
         );
+        if contract.contains_key("semantic_kind") {
+            contract.insert(
+                "semantic_kind".to_string(),
+                Value::String("scalar_path_only".to_string()),
+            );
+        }
         contract.insert(
             "locator_kind".to_string(),
             Value::String("current_workspace".to_string()),
@@ -445,9 +468,15 @@ pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<Str
             Value::String("scalar".to_string()),
         );
         contract.insert(
-            "semantic_kind".to_string(),
+            "contract_marker".to_string(),
             Value::String("scalar_path_only".to_string()),
         );
+        if contract.contains_key("semantic_kind") {
+            contract.insert(
+                "semantic_kind".to_string(),
+                Value::String("scalar_path_only".to_string()),
+            );
+        }
         contract.insert(
             "locator_kind".to_string(),
             Value::String("current_workspace".to_string()),
