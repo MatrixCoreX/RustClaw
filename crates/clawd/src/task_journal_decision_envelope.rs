@@ -386,7 +386,7 @@ fn agent_loop_clarify_reason_code(
 }
 
 fn agent_loop_answer_shape(route: &crate::RouteResult) -> String {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .map(|shape| shape.as_str().to_string())
         .unwrap_or_else(|| route.output_contract.response_shape.as_str().to_string())
 }
