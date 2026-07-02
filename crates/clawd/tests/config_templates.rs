@@ -568,9 +568,8 @@ fn registry_entries_have_group_and_tools_have_platform_metadata() {
             path.display()
         );
         assert!(
-            !list_dir.runtime_rewrite_arg_keys.is_empty()
-                && !list_dir.runtime_rewrite_semantic_kinds.is_empty(),
-            "{}: list_dir runtime mapping must declare structured rewrite triggers",
+            !list_dir.runtime_rewrite_arg_keys.is_empty(),
+            "{}: list_dir runtime mapping must declare structured argument rewrite triggers",
             path.display()
         );
     }

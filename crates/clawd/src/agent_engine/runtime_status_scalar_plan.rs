@@ -281,16 +281,11 @@ pub(super) fn normalize_schema_token(raw: &str) -> String {
 
 pub(super) fn list_dir_args_need_inventory_dir(
     state: &AppState,
-    route_result: Option<&RouteResult>,
+    _route_result: Option<&RouteResult>,
     obj: &serde_json::Map<String, Value>,
 ) -> bool {
     let Some(manifest) = state.skill_manifest("list_dir") else {
-        return route_result.is_some_and(|route| {
-            route.output_contract_marker_is_any(&[
-                crate::OutputSemanticKind::DirectoryNames,
-                crate::OutputSemanticKind::FileNames,
-            ])
-        }) || obj.contains_key("dirs_only")
+        return obj.contains_key("dirs_only")
             || obj.contains_key("directories_only")
             || obj.contains_key("directory_only")
             || obj.contains_key("folders_only")
@@ -304,15 +299,6 @@ pub(super) fn list_dir_args_need_inventory_dir(
             || obj.contains_key("extension")
             || obj.contains_key("extensions");
     };
-    if let Some(route) = route_result {
-        if manifest
-            .runtime_rewrite_semantic_kinds
-            .iter()
-            .any(|kind| route_matches_semantic_kind_name(route, kind))
-        {
-            return true;
-        }
-    }
     obj.keys().any(|key| {
         let normalized = normalize_schema_token(key);
         manifest
@@ -320,21 +306,6 @@ pub(super) fn list_dir_args_need_inventory_dir(
             .iter()
             .any(|candidate| candidate == &normalized)
     })
-}
-
-fn route_matches_semantic_kind_name(route: &RouteResult, kind: &str) -> bool {
-    let kind = kind.trim();
-    if kind.is_empty() {
-        return false;
-    }
-    if let Some(semantic_kind) = crate::OutputSemanticKind::ALL
-        .iter()
-        .copied()
-        .find(|semantic_kind| semantic_kind.as_str() == kind)
-    {
-        return route.output_contract_marker_is(semantic_kind);
-    }
-    route.has_route_reason_machine_marker(kind)
 }
 
 pub(super) fn list_dir_runtime_mapping_from_registry(

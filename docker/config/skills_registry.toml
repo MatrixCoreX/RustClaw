@@ -96,7 +96,6 @@ runtime_skill = "system_basic"
 runtime_action = "inventory_dir"
 runtime_default_args = { names_only = true }
 runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions"]
-runtime_rewrite_semantic_kinds = ["file_names", "directory_names"]
 input_schema = { type = "object", properties = { path = { type = "string" }, names_only = { type = "boolean" }, limit = { type = "integer" }, max_entries = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
