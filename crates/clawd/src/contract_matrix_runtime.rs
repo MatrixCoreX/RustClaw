@@ -1146,6 +1146,45 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 &["tree_summary"],
             )
         }
+        ("process_basic", "ps") => crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["process", "process_basic"],
+            &["ps"],
+        ),
+        ("process_basic", "port_list") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["process", "process_basic"],
+                &["port_list"],
+            )
+        }
+        ("process_basic", "kill") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["process", "process_basic"],
+                &["kill"],
+            )
+        }
+        ("process_basic", "tail_log") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["process", "process_basic"],
+                &["tail_log"],
+            )
+        }
+        ("task_control", "list")
+        | ("task_control", "list_with_first_detail")
+        | ("task_control", "get")
+        | ("task_control", "cancel_all")
+        | ("task_control", "cancel_one")
+        | ("task_control", "resume")
+        | ("task_control", "pause") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["task_control"],
+                &[action_name],
+            )
+        }
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
