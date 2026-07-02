@@ -342,7 +342,8 @@ fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObj
     let capability = crate::machine_capability_ref::route_first_capability_ref(route)?;
     Some(match capability.namespace() {
         "config" | "config_basic" | "config_edit" => TaskTargetObject::ConfigKey,
-        "docker" | "process" | "service" => TaskTargetObject::Process,
+        "service" | "service_control" => TaskTargetObject::Service,
+        "docker" | "process" => TaskTargetObject::Process,
         "db" | "database" | "sqlite" => TaskTargetObject::Db,
         "filesystem" | "fs_basic" | "file" | "archive" | "photo" => TaskTargetObject::Path,
         "git" => TaskTargetObject::Directory,
@@ -805,3 +806,7 @@ fn failure_policy_for_route(
 #[cfg(test)]
 #[path = "task_contract_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_contract_service_capability_tests.rs"]
+mod service_capability_tests;
