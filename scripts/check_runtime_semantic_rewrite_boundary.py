@@ -38,6 +38,7 @@ PRE_ROUTE_REPAIR_MARKER_ALLOWLIST_FILES: tuple[Path, ...] = (
 )
 ANSWER_VERIFIER_FILE = SRC_ROOT / "answer_verifier.rs"
 ANSWER_VERIFIER_RUNTIME_FILE = SRC_ROOT / "answer_verifier_runtime.rs"
+VERIFIER_FILE = SRC_ROOT / "verifier.rs"
 PROMPT_UTILS_OUTPUT_CONTRACT_FILE = SRC_ROOT / "prompt_utils_output_contract.rs"
 EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_execution_recipe_schema.rs",
@@ -308,6 +309,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_pre_route_repair_marker_allowlists())
     findings.extend(scan_answer_verifier_registry_bridge_markers())
     findings.extend(scan_answer_verifier_output_contract_prompt_marker())
+    findings.extend(scan_verifier_contract_missing_detail_marker())
+    findings.extend(scan_route_guard_record_contract_marker())
     findings.extend(scan_loop_control_output_contract_marker_key())
     findings.extend(scan_dry_run_contract_plan_marker_payloads())
     findings.extend(scan_observed_output_contract_marker_payload())
@@ -880,6 +883,68 @@ def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
                 1,
                 "answer_verifier_semantic_kind_emission",
                 "answer verifier output contract prompt must not expose legacy semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_verifier_contract_missing_detail_marker() -> list[Finding]:
+    rel_path = rel(VERIFIER_FILE)
+    text = VERIFIER_FILE.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if "error_code=contract_matrix_entry_missing contract_marker=" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "verifier_contract_marker_detail_missing",
+                "contract-missing verifier detail should emit machine fields with contract_marker",
+            )
+        )
+    if "no contract matrix entry matched semantic kind" in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "verifier_semantic_kind_detail",
+                "contract-missing verifier detail must not name legacy semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_route_guard_record_contract_marker() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE)
+    text = ASK_PIPELINE_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn log_route_guard_record(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "route_guard_record_missing",
+                "missing log_route_guard_record",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if "contract_marker={}" not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "route_guard_record_contract_marker_missing",
+                "route guard record should log contract_marker, not legacy semantic_kind",
+            )
+        )
+    if "semantic_kind={}" in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "route_guard_record_semantic_kind_field",
+                "route guard record must not expose legacy semantic_kind field name",
             )
         )
     return findings

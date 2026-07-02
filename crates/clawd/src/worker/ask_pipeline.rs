@@ -179,7 +179,7 @@ fn log_route_guard_record(
     route_result: &crate::RouteResult,
 ) {
     info!(
-        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_gate_kind={} after_gate_kind={} needs_clarify={} locator_kind={} semantic_kind={} response_shape={} delivery_required={} content_evidence={}",
+        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_gate_kind={} after_gate_kind={} needs_clarify={} locator_kind={} contract_marker={} response_shape={} delivery_required={} content_evidence={}",
         task.task_id,
         owner_layer,
         reason_code,
