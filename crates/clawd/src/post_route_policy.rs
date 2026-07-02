@@ -37,8 +37,8 @@ pub(crate) enum ClarifyReasonKind {
 pub(crate) enum PostRoutePolicyOutcome {
     #[default]
     NoChange,
-    Clarify,
-    Execute,
+    BoundaryClarify,
+    BoundaryReady,
     RefineContract,
 }
 
@@ -46,8 +46,8 @@ impl PostRoutePolicyOutcome {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::NoChange => "no_change",
-            Self::Clarify => "clarify",
-            Self::Execute => "execute",
+            Self::BoundaryClarify => "boundary_clarify",
+            Self::BoundaryReady => "boundary_ready",
             Self::RefineContract => "refine_contract",
         }
     }
@@ -284,25 +284,25 @@ pub(crate) fn apply_post_route_policy(
         PostRouteGateRecord::with_owner(
             "boundary_locator_gate",
             "post_route_missing_path_scoped_locator",
-            PostRoutePolicyOutcome::Clarify,
+            PostRoutePolicyOutcome::BoundaryClarify,
         )
     } else if !fuzzy_locator_suggestions.is_empty() {
         PostRouteGateRecord::with_owner(
             "boundary_locator_gate",
             "post_route_fuzzy_locator_candidates",
-            PostRoutePolicyOutcome::Clarify,
+            PostRoutePolicyOutcome::BoundaryClarify,
         )
     } else if direct_auto_locator_satisfies_background_clarify {
         PostRouteGateRecord::with_owner(
             "boundary_locator_gate",
             "post_route_auto_locator_satisfied_path_scoped_content",
-            PostRoutePolicyOutcome::Execute,
+            PostRoutePolicyOutcome::BoundaryReady,
         )
     } else if existing_file_delivery_can_try_locator_hint {
         PostRouteGateRecord::with_owner(
             "boundary_delivery_gate",
             "post_route_file_delivery_locator_hint_deferred_to_execution",
-            PostRoutePolicyOutcome::Execute,
+            PostRoutePolicyOutcome::BoundaryReady,
         )
     } else if non_boundary_clarify_requested {
         PostRouteGateRecord::with_owner(
@@ -314,7 +314,7 @@ pub(crate) fn apply_post_route_policy(
         PostRouteGateRecord::with_owner(
             "boundary_clarify_gate",
             "post_route_boundary_clarify_required",
-            PostRoutePolicyOutcome::Clarify,
+            PostRoutePolicyOutcome::BoundaryClarify,
         )
     } else if forced_content_evidence
         || cleared_scalar_count_marker
