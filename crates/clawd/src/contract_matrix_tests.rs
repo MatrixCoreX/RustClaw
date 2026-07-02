@@ -186,6 +186,29 @@ fn config_validation_capability_refs_supply_verdict_shape_without_semantic_kind(
 }
 
 #[test]
+fn service_status_capability_refs_supply_status_shape_without_semantic_kind() {
+    for capability_ref in [
+        "capability_ref=service.status",
+        "capability_ref=service_control.status",
+        "capability_ref=system.health_check",
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        assert_eq!(
+            final_answer_shape_for_route(&route),
+            Some(FinalAnswerShape::StatusWithSource),
+            "{capability_ref}"
+        );
+    }
+
+    let route = route_with_machine_capability_ref("capability_ref=service.logs");
+    assert_ne!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::StatusWithSource)
+    );
+}
+
+#[test]
 fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semantic_kind() {
     let mut route = route_with_machine_capability_ref("capability_ref=filesystem.count_entries");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
