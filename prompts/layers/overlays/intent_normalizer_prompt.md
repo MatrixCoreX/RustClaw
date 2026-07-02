@@ -20,7 +20,7 @@ Architecture boundary:
 
 Compatibility fields:
 - Always emit boundary schema keys: `resolved_user_intent`, `answer_candidate`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, `attachment_processing_required`.
-- `decision` is an optional legacy compatibility slot. Omit it, or emit `""`; runtime derives any trace value from machine boundary fields. Do not put ordinary semantic decisions here.
+- Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. Do not put ordinary semantic decisions here.
 - `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
 - Set `output_contract.contract_marker="none"` in normalizer output. Do not emit legacy semantic-route field names.
 - Never create or select feature-specific semantic kinds to make one NL case pass.

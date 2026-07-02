@@ -7,7 +7,7 @@ Role:
 
 Required top-level fields:
 - Always include `resolved_user_intent`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, and `attachment_processing_required`.
-- `decision` is optional and only a compatibility trace derived from machine fields. Omit it, or emit `""`; it is not the routing authority.
+- Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. It is not the routing authority.
 - The planner/agent loop owns ordinary `respond`, `clarify`, `act`, capability choice, argument completion, confirmation, background wait, done state, and final wording.
 
 Capability boundary:

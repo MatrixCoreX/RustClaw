@@ -18,10 +18,7 @@ fn normalizer_schema_normalization_coerces_hidden_files_check_synonym() {
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     let contract = value
         .get("output_contract")
         .and_then(|value| value.as_object())
@@ -58,10 +55,7 @@ fn normalizer_schema_normalization_does_not_recover_filename_listing_from_string
         "列出 logs 目录下的前 10 个文件名，不要读内容",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value.get("answer_candidate").and_then(|v| v.as_str()),
         Some("")
@@ -309,10 +303,7 @@ fn normalizer_schema_normalization_does_not_recover_files_listing_from_string_co
     let contract = super::parse_output_contract(validated.output_contract, false);
     assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::None);
     assert!(!contract.requires_content_evidence);
-    assert_eq!(
-        super::parse_first_layer_decision_text(&validated.decision),
-        Some(crate::FirstLayerDecision::DirectAnswer)
-    );
+    assert!(validated.decision.is_empty());
 }
 
 #[test]
@@ -378,10 +369,7 @@ fn normalizer_schema_normalization_recovers_detection_payload_as_planner_execute
         "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -406,10 +394,7 @@ fn normalizer_schema_normalization_preserves_recognized_execution_recipe_signal(
         "列出 document 目录下有哪些文件，只输出文件名列表",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     let contract = value
         .get("output_contract")
         .and_then(|value| value.as_object())

@@ -465,10 +465,7 @@ fn normalizer_schema_normalization_recovers_commands_payload_as_execution_signal
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "看一下 target 大概多大");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
@@ -516,10 +513,7 @@ fn normalizer_schema_normalization_ignores_response_recipe_as_execution_signal()
         "你好，我正在做 RustClaw 的真实客户端连续会话测试，请用一句中文回复确认。",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")

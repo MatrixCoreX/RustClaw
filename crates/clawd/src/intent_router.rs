@@ -88,8 +88,6 @@ use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};
 
 #[path = "intent_router_schema_tokens.rs"]
 mod schema_tokens;
-#[cfg(test)]
-use schema_tokens::parse_first_layer_decision_text;
 use schema_tokens::{
     contract_value_token, execution_finalize_style_for_contract,
     looks_like_current_workspace_path_alias, machine_context_has_capability_ref,
@@ -111,7 +109,7 @@ use normalizer_schema_core::{
     normalize_bool_field_with_default, normalize_execution_recipe_for_schema,
     normalize_intent_normalizer_scalar_types_for_schema,
     normalize_intent_normalizer_top_level_for_schema, normalize_optional_string_field,
-    normalize_plain_intent_normalizer_text_for_schema, sync_compat_decision_trace_for_schema,
+    normalize_plain_intent_normalizer_text_for_schema,
 };
 
 #[path = "intent_router_normalizer_raw_schema.rs"]
