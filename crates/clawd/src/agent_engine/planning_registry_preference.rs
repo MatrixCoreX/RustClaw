@@ -6,7 +6,14 @@ use super::planning_actions::planned_action_skill_name;
 use crate::{AgentAction, AppState, RouteResult};
 
 fn route_registry_preference_tags(route_result: &RouteResult) -> Vec<String> {
-    route_capability_registry_tags(route_result)
+    let mut tags = route_capability_registry_tags(route_result);
+    append_registry_bridge_semantic_tags(
+        &mut tags,
+        route_result.effective_output_contract_semantic_kind(),
+    );
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 fn route_capability_registry_tags(route_result: &RouteResult) -> Vec<String> {
@@ -21,6 +28,33 @@ fn route_capability_registry_tags(route_result: &RouteResult) -> Vec<String> {
     tags.sort();
     tags.dedup();
     tags
+}
+
+fn append_registry_bridge_semantic_tags(
+    tags: &mut Vec<String>,
+    semantic_kind: crate::OutputSemanticKind,
+) {
+    if !semantic_kind.is_registry_capability_bridge() {
+        return;
+    }
+    match semantic_kind {
+        crate::OutputSemanticKind::DockerPs => {
+            tags.push("docker.list_containers".to_string());
+        }
+        crate::OutputSemanticKind::DockerImages => {
+            tags.push("docker.list_images".to_string());
+        }
+        crate::OutputSemanticKind::DockerLogs => {
+            tags.push("docker.read_logs".to_string());
+        }
+        crate::OutputSemanticKind::DockerContainerLifecycle => {
+            tags.push("docker.lifecycle".to_string());
+        }
+        crate::OutputSemanticKind::PackageManagerDetection => {
+            tags.push("package.detect_manager".to_string());
+        }
+        _ => tags.push(semantic_kind.as_str().to_string()),
+    }
 }
 
 fn append_capability_alias_tags(tags: &mut Vec<String>, namespace: &str, action: &str) {
