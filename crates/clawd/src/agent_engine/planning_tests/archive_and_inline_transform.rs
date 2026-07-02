@@ -686,7 +686,8 @@ fn lightweight_tool_spec_includes_route_task_contract() {
     let spec = build_lightweight_tool_spec(Some(&route), None);
 
     assert!(spec.contains("task_contract"));
-    assert!(spec.contains("route_gate_kind=execute"));
+    assert!(spec.contains("boundary_contract_hint"));
+    assert!(!spec.contains("route_gate_kind="));
     assert!(spec.lines().any(|line| line
         .split_whitespace()
         .any(|part| part == "contract_marker=file_paths")));
@@ -975,7 +976,8 @@ fn lightweight_tool_spec_includes_contract_and_auto_locator() {
     route.output_contract.locator_hint = "UI/package.json".to_string();
     let rendered = build_lightweight_tool_spec(Some(&route), Some("/tmp/UI/package.json"));
     assert!(rendered.contains("planning_class=lightweight_execution"));
-    assert!(rendered.contains("route_gate_kind=execute"));
+    assert!(rendered.contains("boundary_contract_hint"));
+    assert!(!rendered.contains("route_gate_kind="));
     assert!(rendered.contains("response_shape=scalar"));
     assert!(rendered.lines().any(|line| {
         line.split_whitespace()

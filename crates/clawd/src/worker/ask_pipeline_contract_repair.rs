@@ -25,7 +25,6 @@ pub(super) fn registry_capability_contract_observation(
         "source": "registry_capability_ref",
         "capability_refs": capability_refs,
         "has_conflicting_route_contract": has_conflicting_contract,
-        "route_gate_kind": route_result.gate_kind().as_str(),
         "needs_clarify": route_result.needs_clarify,
         "locator_kind": route_result.output_contract.locator_kind.as_str(),
         "locator_hint": route_result.output_contract.locator_hint.trim(),
