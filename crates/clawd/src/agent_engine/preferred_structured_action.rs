@@ -1095,13 +1095,6 @@ pub(super) fn git_basic_available_for_plan(state: &AppState) -> bool {
     enabled_skills.is_empty() || enabled_skills.contains("git_basic")
 }
 
-pub(super) fn normalizer_answer_candidate_from_resolved_prompt(
-    resolved_prompt: &str,
-) -> Option<String> {
-    let _ = resolved_prompt;
-    None
-}
-
 pub(super) fn package_manager_detect_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1275,7 +1268,6 @@ pub(super) fn package_manager_dry_run_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    original_user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.round_no > 1
@@ -1288,13 +1280,7 @@ pub(super) fn package_manager_dry_run_deterministic_plan_result(
     {
         return None;
     }
-    let packages = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
-        .and_then(|candidate| {
-            crate::package_commands::package_install_packages_from_commandish_text(&candidate)
-        })
-        .or_else(|| {
-            crate::package_commands::package_install_packages_from_preview_text(original_user_text)
-        })?;
+    let packages = package_manager_dry_run_packages_from_route(route)?;
     let actions = vec![
         AgentAction::CallSkill {
             skill: "package_manager".to_string(),
@@ -1320,6 +1306,82 @@ pub(super) fn package_manager_dry_run_deterministic_plan_result(
         PlanKind::Single,
         &actions,
     ))
+}
+
+fn package_manager_dry_run_packages_from_route(route: &RouteResult) -> Option<Vec<String>> {
+    let action = crate::machine_capability_ref::route_capability_action_for_namespaces(
+        route,
+        &["package", "package_manager"],
+    )?;
+    if !action_has_any_segment(
+        action,
+        &["smart_install_preview", "smart_install", "install"],
+    ) {
+        return None;
+    }
+    let route_machine_text = format!("{}\n{}", route.route_reason, route.resolved_intent);
+    if !package_manager_dry_run_machine_token_present(&route_machine_text) {
+        return None;
+    }
+    package_manager_machine_package_values(&route_machine_text)
+}
+
+fn package_manager_dry_run_machine_token_present(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("dry_run") || normalized.contains("would_mutate=false")
+}
+
+fn package_manager_machine_package_values(text: &str) -> Option<Vec<String>> {
+    let mut packages = Vec::new();
+    for key in ["packages", "package", "modules", "module"] {
+        packages.extend(
+            machine_assignment_values(text, key)
+                .into_iter()
+                .filter(|value| package_manager_safe_machine_package_token(value)),
+        );
+    }
+    packages.sort();
+    packages.dedup();
+    (!packages.is_empty()).then_some(packages)
+}
+
+fn machine_assignment_values(text: &str, key: &str) -> Vec<String> {
+    let normalized = text.to_ascii_lowercase();
+    let markers = [
+        format!("{key}="),
+        format!("{key}:"),
+        format!("\"{key}\":\""),
+        format!("\"{key}\": \""),
+    ];
+    let mut values = Vec::new();
+    for marker in markers {
+        let Some(start) = normalized.find(&marker).map(|idx| idx + marker.len()) else {
+            continue;
+        };
+        let raw_value = text[start..]
+            .chars()
+            .skip_while(|ch| ch.is_ascii_whitespace())
+            .take_while(|ch| {
+                ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_' | '.' | '+' | ':' | ',' | ';')
+            })
+            .collect::<String>();
+        values.extend(
+            raw_value
+                .split([',', ';'])
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+        );
+    }
+    values
+}
+
+fn package_manager_safe_machine_package_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= 128
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '+' | ':'))
 }
 
 pub(super) fn existence_with_path_locator_observation_plan(

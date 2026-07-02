@@ -285,13 +285,7 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_package_manager_detect"
     );
     return_deterministic_plan!(
-        package_manager_dry_run_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
+        package_manager_dry_run_deterministic_plan_result(state, goal, route_result, loop_state),
         "plan_deterministic_package_manager_dry_run"
     );
     return_deterministic_plan!(

@@ -1355,11 +1355,13 @@ fn service_status_generic_status_without_machine_target_defers_to_planner() {
 }
 
 #[test]
-fn package_manager_dry_run_ignores_legacy_answer_candidate_and_uses_current_request() {
+fn package_manager_dry_run_uses_structured_route_package_and_ignores_legacy_answer_candidate() {
     let state = test_state_with_enabled_skills(&["package_manager"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.route_reason =
+        "capability_ref=package.smart_install_preview package=ripgrep dry_run=true".to_string();
     route.resolved_intent =
         "Show package preview\nanswer_candidate: command: sudo -n apt-get install -y ripgrep"
             .to_string();
@@ -1370,9 +1372,8 @@ fn package_manager_dry_run_ignores_legacy_answer_candidate_and_uses_current_requ
         "dry-run package install",
         Some(&route),
         &loop_state,
-        "ripgrep 설치는 하지 말고 dry-run 으로 어떤 명령이 될지만 알려줘.",
     )
-    .expect("package manager dry-run should use deterministic plan");
+    .expect("package manager dry-run should use structured route fields");
 
     let action = plan.steps[0].to_agent_action().expect("agent action");
     let args = expect_planned_call(&action, "package_manager", "smart_install");
@@ -1391,7 +1392,7 @@ fn package_manager_dry_run_ignores_legacy_answer_candidate_and_uses_current_requ
 }
 
 #[test]
-fn package_manager_dry_run_falls_back_to_current_request_package_token() {
+fn package_manager_dry_run_without_structured_package_defers_to_planner() {
     let state = test_state_with_enabled_skills(&["package_manager"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -1400,28 +1401,13 @@ fn package_manager_dry_run_falls_back_to_current_request_package_token() {
         "ripgrep install dry-run preview without executing installation".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = package_manager_dry_run_deterministic_plan_result(
+    assert!(package_manager_dry_run_deterministic_plan_result(
         &state,
         "dry-run package install",
         Some(&route),
         &loop_state,
-        "ripgrep 설치는 하지 말고 dry-run 으로 어떤 명령이 될지만 알려줘.",
     )
-    .expect("package manager dry-run should extract the safe current-request package token");
-
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "package_manager", "smart_install");
-    assert_eq!(
-        args.get("packages")
-            .and_then(Value::as_array)
-            .map(|packages| {
-                packages
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-            }),
-        Some(vec!["ripgrep"])
-    );
+    .is_none());
 }
 
 #[test]
@@ -1434,7 +1420,7 @@ fn package_manager_dry_run_ignores_auto_locator_path_when_package_token_is_struc
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/home/guagua/rustclaw/run".to_string();
     route.resolved_intent =
-        "package dry-run preview; current package token is jq; do not execute install".to_string();
+        "capability_ref=package.smart_install_preview package=jq dry_run=true".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = package_manager_dry_run_deterministic_plan_result(
@@ -1442,9 +1428,8 @@ fn package_manager_dry_run_ignores_auto_locator_path_when_package_token_is_struc
         "dry-run package install",
         Some(&route),
         &loop_state,
-        "假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装。",
     )
-    .expect("package manager dry-run should not be blocked by auto locator");
+    .expect("package manager dry-run should use structured route package");
 
     let action = plan.steps[0].to_agent_action().expect("agent action");
     let args = expect_planned_call(&action, "package_manager", "smart_install");
