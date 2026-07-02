@@ -468,8 +468,7 @@ fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResul
     if route_result.is_resume_discussion_mode() {
         return true;
     }
-    route_result.is_execute_gate()
-        && route_result.uses_pure_chat_agent_loop_submode()
+    route_result.uses_pure_chat_agent_loop_submode()
         && route_result.schedule_kind == crate::ScheduleKind::None
         && !route_result.needs_clarify
         && !route_result.wants_file_delivery
