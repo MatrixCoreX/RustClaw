@@ -36,7 +36,6 @@ fn file_path_search_contract_is_list_with_candidate_evidence() {
 
     let contract = TaskContract::from_route_result(&route);
 
-    assert_eq!(contract.intent_kind, TaskIntentKind::PlannerExecute);
     assert_eq!(contract.target_object, TaskTargetObject::Directory);
     assert_eq!(contract.operation, TaskOperation::List);
     assert_eq!(contract.delivery_shape, TaskDeliveryShape::List);
@@ -61,8 +60,8 @@ fn missing_locator_contract_prefers_clarify_policy() {
 
     let contract = TaskContract::from_route_result(&route);
 
-    assert_eq!(contract.intent_kind, TaskIntentKind::Clarify);
     assert_eq!(contract.missing_parameters, vec!["locator"]);
+    assert_eq!(contract.target_object, TaskTargetObject::Path);
     assert_eq!(contract.failure_policy, TaskFailurePolicy::Clarify);
 }
 
@@ -147,8 +146,8 @@ fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
 
     let contract = TaskContract::from_route_result(&route);
 
-    assert_eq!(contract.intent_kind, TaskIntentKind::DirectAnswer);
     assert_eq!(contract.operation, TaskOperation::Inspect);
+    assert_eq!(contract.target_object, TaskTargetObject::Path);
     assert_eq!(
         contract.failure_policy,
         TaskFailurePolicy::RetryWithAlternatives

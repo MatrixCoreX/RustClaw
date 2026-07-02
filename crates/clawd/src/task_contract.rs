@@ -7,13 +7,6 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskIntentKind {
-    Clarify,
-    DirectAnswer,
-    PlannerExecute,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskTargetObject {
     Path,
     Directory,
@@ -145,7 +138,6 @@ impl TargetContract {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskContract {
-    pub(crate) intent_kind: TaskIntentKind,
     pub(crate) targets: Vec<TargetContract>,
     pub(crate) target_object: TaskTargetObject,
     pub(crate) structured_field_selector: Option<String>,
@@ -164,13 +156,6 @@ impl TaskContract {
             || route.output_contract.delivery_required
             || !required_evidence_fields_for_route(route).is_empty();
         Self {
-            intent_kind: if route.needs_clarify {
-                TaskIntentKind::Clarify
-            } else if route.is_execute_gate() {
-                TaskIntentKind::PlannerExecute
-            } else {
-                TaskIntentKind::DirectAnswer
-            },
             targets: targets_for_route(route),
             target_object: target_object_for_route(route),
             structured_field_selector: route
