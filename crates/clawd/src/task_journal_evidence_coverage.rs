@@ -50,7 +50,7 @@ pub(crate) fn evidence_coverage_for_route(
         &mut observed_canonical,
     );
     let effective_output_contract = route.effective_output_contract();
-    let evidence_expression = crate::contract_matrix::bundled_contract_matrix()
+    let evidence_expression = crate::evidence_policy::bundled_contract_matrix()
         .and_then(|matrix| matrix.match_output_contract(&effective_output_contract))
         .map(|matched| matched.evidence_expression());
     let missing_evidence = evidence_expression
@@ -136,7 +136,7 @@ pub(super) fn missing_required_evidence(
 }
 
 pub(super) fn missing_evidence_for_expression(
-    expression: &crate::contract_matrix::EvidenceExpression,
+    expression: &crate::evidence_policy::EvidenceExpression,
     observed_canonical: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut missing = Vec::new();
@@ -920,7 +920,7 @@ pub(super) fn structured_error_failure_attribution(
     structured_error: Option<&crate::skills::StructuredSkillError>,
 ) -> Option<String> {
     if let Some(raw) = structured_error_extra_string(structured_error, "failure_attribution") {
-        return crate::contract_matrix::FailureAttribution::parse(&raw)
+        return crate::evidence_policy::FailureAttribution::parse(&raw)
             .map(|kind| kind.as_str().to_string())
             .or(Some(raw));
     }
@@ -931,14 +931,14 @@ pub(super) fn structured_error_failure_attribution(
 
 pub(crate) fn failure_attribution_for_error_text(
     error_text: &str,
-) -> Option<crate::contract_matrix::FailureAttribution> {
+) -> Option<crate::evidence_policy::FailureAttribution> {
     let trimmed = error_text.trim();
     if trimmed.is_empty() {
         return None;
     }
     if let Some(structured) = crate::skills::parse_structured_skill_error(trimmed) {
         if let Some(raw) = structured_error_extra_string(Some(&structured), "failure_attribution") {
-            if let Some(kind) = crate::contract_matrix::FailureAttribution::parse(&raw) {
+            if let Some(kind) = crate::evidence_policy::FailureAttribution::parse(&raw) {
                 return Some(kind);
             }
         }
@@ -953,10 +953,10 @@ pub(crate) fn failure_attribution_for_error_text(
         || normalized.contains("json schema")
         || normalized.contains("invalid schema")
     {
-        return Some(crate::contract_matrix::FailureAttribution::SchemaError);
+        return Some(crate::evidence_policy::FailureAttribution::SchemaError);
     }
     if normalized.contains("answer_verifier_required_evidence_block") {
-        return Some(crate::contract_matrix::FailureAttribution::ContractGap);
+        return Some(crate::evidence_policy::FailureAttribution::ContractGap);
     }
     if normalized.contains("all llm providers in circuit_breaker cooldown")
         || normalized.contains("unknown llm error")
@@ -967,21 +967,21 @@ pub(crate) fn failure_attribution_for_error_text(
         || normalized.contains("rate_limited")
         || normalized.contains("quota_exhausted")
     {
-        return Some(crate::contract_matrix::FailureAttribution::ProviderError);
+        return Some(crate::evidence_policy::FailureAttribution::ProviderError);
     }
     if normalized.contains("channel_send_failed")
         || normalized.contains("delivery_error")
         || normalized.contains("delivery failed")
         || normalized.contains("send status=")
     {
-        return Some(crate::contract_matrix::FailureAttribution::DeliveryError);
+        return Some(crate::evidence_policy::FailureAttribution::DeliveryError);
     }
     None
 }
 
 pub(super) fn failure_attribution_for_structured_error_kind(
     error_kind: &str,
-) -> Option<crate::contract_matrix::FailureAttribution> {
+) -> Option<crate::evidence_policy::FailureAttribution> {
     let normalized = error_kind.trim().to_ascii_lowercase().replace('-', "_");
     match normalized.as_str() {
         "schema_error"
@@ -989,7 +989,7 @@ pub(super) fn failure_attribution_for_structured_error_kind(
         | "schema_recovery_failed"
         | "json_schema_error"
         | "invalid_json_schema"
-        | "missing_required_field" => Some(crate::contract_matrix::FailureAttribution::SchemaError),
+        | "missing_required_field" => Some(crate::evidence_policy::FailureAttribution::SchemaError),
         "provider_error"
         | "provider_retryable_response"
         | "provider_retryable_business"
@@ -1002,7 +1002,7 @@ pub(super) fn failure_attribution_for_structured_error_kind(
         | "quota_exhausted"
         | "llm_provider_error"
         | "llm_provider_unavailable" => {
-            Some(crate::contract_matrix::FailureAttribution::ProviderError)
+            Some(crate::evidence_policy::FailureAttribution::ProviderError)
         }
         "delivery_error"
         | "delivery_failed"
@@ -1011,19 +1011,19 @@ pub(super) fn failure_attribution_for_structured_error_kind(
         | "media_delivery_failed"
         | "missing_delivery_artifact"
         | "delivery_token_invalid" => {
-            Some(crate::contract_matrix::FailureAttribution::DeliveryError)
+            Some(crate::evidence_policy::FailureAttribution::DeliveryError)
         }
         "permission_denied" | "policy_denied" | "skill_disabled" | "requires_confirmation" => {
-            Some(crate::contract_matrix::FailureAttribution::PermissionDenied)
+            Some(crate::evidence_policy::FailureAttribution::PermissionDenied)
         }
         "contract_action_rejected" | "contract_policy_violation" | "contract_missing" => {
-            Some(crate::contract_matrix::FailureAttribution::ContractGap)
+            Some(crate::evidence_policy::FailureAttribution::ContractGap)
         }
         "budget_exhausted" | "round_budget_exhausted" | "tool_budget_exhausted" => {
-            Some(crate::contract_matrix::FailureAttribution::BudgetExhausted)
+            Some(crate::evidence_policy::FailureAttribution::BudgetExhausted)
         }
         "prompt_budget_error" => {
-            Some(crate::contract_matrix::FailureAttribution::PromptBudgetError)
+            Some(crate::evidence_policy::FailureAttribution::PromptBudgetError)
         }
         _ => None,
     }
