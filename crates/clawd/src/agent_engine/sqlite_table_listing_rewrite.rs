@@ -716,6 +716,7 @@ pub(super) fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String
     Some((source, archive))
 }
 
+#[cfg(test)]
 pub(super) fn archive_pack_pair_for_route_or_text(
     workspace_root: &Path,
     route: &RouteResult,
@@ -779,6 +780,7 @@ pub(super) fn archive_pack_pair_for_route_or_text(
     Some((source, archive))
 }
 
+#[cfg(test)]
 pub(super) fn collect_archive_locator_candidates(out: &mut Vec<String>, text: &str) {
     let text = text.trim();
     if text.is_empty() {

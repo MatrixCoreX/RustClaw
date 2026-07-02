@@ -601,43 +601,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_directory_tree_auto_locator"
         );
         return_deterministic_plan!(
-            archive_read_deterministic_plan_result(
-                goal,
-                state,
-                route_result,
-                loop_state,
-                auto_locator_path,
-                &original_user_text_for_policy,
-            ),
-            "plan_deterministic_archive_read"
-        );
-        return_deterministic_plan!(
-            archive_pack_deterministic_plan_result(
-                goal,
-                state,
-                route_result,
-                loop_state,
-                &original_user_text_for_policy,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_archive_pack"
-        );
-        return_deterministic_plan!(
-            archive_unpack_deterministic_plan_result(goal, state, route_result, loop_state),
-            "plan_deterministic_archive_unpack"
-        );
-        return_deterministic_plan!(
-            archive_list_auto_locator_deterministic_plan_result(
-                goal,
-                state,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_archive_list_auto_locator"
-        );
-        return_deterministic_plan!(
             content_excerpt_summary_auto_locator_deterministic_plan_result(
                 state,
                 goal,
