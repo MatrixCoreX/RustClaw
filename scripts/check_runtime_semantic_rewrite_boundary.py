@@ -45,6 +45,9 @@ ANSWER_VERIFIER_FILE = SRC_ROOT / "answer_verifier.rs"
 ANSWER_VERIFIER_RUNTIME_FILE = SRC_ROOT / "answer_verifier_runtime.rs"
 VERIFIER_FILE = SRC_ROOT / "verifier.rs"
 PROMPT_UTILS_OUTPUT_CONTRACT_FILE = SRC_ROOT / "prompt_utils_output_contract.rs"
+PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE = (
+    SRC_ROOT / "prompt_utils_contract_repair_judge.rs"
+)
 EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_execution_recipe_schema.rs",
     SRC_ROOT / "intent_router_execution_recipe_contract.rs",
@@ -329,6 +332,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_schedule_preview_contract_marker())
     findings.extend(scan_current_workspace_scope_legacy_semantic_marker_removed())
     findings.extend(scan_runtime_status_recipe_contract_marker())
+    findings.extend(scan_prompt_utils_contract_repair_judge_marker_only())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
@@ -1283,6 +1287,31 @@ def scan_runtime_status_recipe_contract_marker() -> list[Finding]:
                 1,
                 "runtime_status_recipe_semantic_kind_reader",
                 "runtime status recipe must not read legacy output_contract.semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_prompt_utils_contract_repair_judge_marker_only() -> list[Finding]:
+    rel_path = rel(PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE)
+    text = PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if '.get("contract_marker")' not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_repair_judge_contract_marker_missing",
+                "contract repair judge should read output_contract.contract_marker",
+            )
+        )
+    if 'contract.get("semantic_kind")' in text or '.or_else(|| contract.get("semantic_kind"))' in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_repair_judge_semantic_kind_fallback",
+                "contract repair judge must not fall back to legacy output_contract.semantic_kind",
             )
         )
     return findings

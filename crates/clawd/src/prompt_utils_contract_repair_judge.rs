@@ -131,7 +131,6 @@ fn infer_contract_repair_judge_apply(map: &serde_json::Map<String, Value>) -> bo
         || contract.get("delivery_required").and_then(Value::as_bool) == Some(true)
         || contract
             .get("contract_marker")
-            .or_else(|| contract.get("semantic_kind"))
             .and_then(Value::as_str)
             .is_some_and(|raw| normalize_output_contract_semantic_kind(raw) != "none")
         || contract
