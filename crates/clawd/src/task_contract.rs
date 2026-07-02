@@ -366,19 +366,9 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
     }
     match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
-        OutputSemanticKind::SqliteTableListing
-        | OutputSemanticKind::SqliteTableNamesOnly
-        | OutputSemanticKind::SqliteDatabaseKindJudgment
-        | OutputSemanticKind::SqliteSchemaVersion => return TaskTargetObject::Db,
         OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
-        OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::ConfigValidation
-        | OutputSemanticKind::ConfigMutation
-        | OutputSemanticKind::ConfigRiskAssessment => {
-            return TaskTargetObject::ConfigKey;
-        }
+        OutputSemanticKind::StructuredKeys => return TaskTargetObject::ConfigKey,
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
-        OutputSemanticKind::ToolDiscovery => return TaskTargetObject::System,
         _ => {}
     }
     target_object_for_locator_kind(route.output_contract.locator_kind)
@@ -459,11 +449,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
         | OutputSemanticKind::DirectoryEntryGroups
-        | OutputSemanticKind::FilePaths
-        | OutputSemanticKind::SqliteTableListing
-        | OutputSemanticKind::SqliteTableNamesOnly
-        | OutputSemanticKind::ArchiveList
-        | OutputSemanticKind::ToolDiscovery => TaskOperation::List,
+        | OutputSemanticKind::FilePaths => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
         OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ContentExcerptSummary
@@ -475,11 +461,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::GeneratedFilePathReport
-        | OutputSemanticKind::ArchivePack
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
-        OutputSemanticKind::ArchiveUnpack | OutputSemanticKind::ConfigMutation => {
-            TaskOperation::Modify
-        }
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
@@ -487,14 +469,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
-        | OutputSemanticKind::GitCommitSubject
-        | OutputSemanticKind::GitRepositoryState
-        | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::ConfigValidation
-        | OutputSemanticKind::ConfigRiskAssessment
-        | OutputSemanticKind::SqliteDatabaseKindJudgment
-        | OutputSemanticKind::SqliteSchemaVersion
-        | OutputSemanticKind::ArchiveRead => TaskOperation::Inspect,
+        | OutputSemanticKind::StructuredKeys => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
@@ -541,10 +516,6 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
             | OutputSemanticKind::DirectoryNames
             | OutputSemanticKind::DirectoryEntryGroups
             | OutputSemanticKind::FilePaths
-            | OutputSemanticKind::SqliteTableListing
-            | OutputSemanticKind::SqliteTableNamesOnly
-            | OutputSemanticKind::ArchiveList
-            | OutputSemanticKind::ToolDiscovery
     ) {
         return TaskDeliveryShape::List;
     }
