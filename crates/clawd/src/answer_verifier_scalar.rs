@@ -5,10 +5,10 @@ pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observatio
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
         return false;
     };
-    if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
+    if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue {
         return false;
     }
     if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
