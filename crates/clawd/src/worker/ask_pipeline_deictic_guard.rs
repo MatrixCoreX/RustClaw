@@ -4,7 +4,7 @@ use super::*;
 #[path = "ask_pipeline_deictic_guard_tests.rs"]
 mod tests;
 
-pub(super) fn deictic_bare_locator_should_force_clarify(
+pub(super) fn deictic_bare_locator_should_defer_to_agent_loop(
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,

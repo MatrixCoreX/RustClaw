@@ -20,7 +20,7 @@ pub(super) fn boundary_safety_preflight(
     pre_loop_clarify_candidates: &mut Vec<&'static str>,
     route_result: &mut crate::RouteResult,
 ) {
-    if deictic_memory_only_route_should_force_clarify(
+    if deictic_memory_only_route_should_defer_to_agent_loop(
         prompt,
         route_result,
         turn_analysis,
@@ -38,7 +38,7 @@ pub(super) fn boundary_safety_preflight(
             route_result,
         );
     }
-    if unbound_model_context_target_route_should_force_clarify(
+    if unbound_model_context_target_route_should_defer_to_agent_loop(
         state,
         prompt,
         route_result,
@@ -59,7 +59,7 @@ pub(super) fn boundary_safety_preflight(
             route_result,
         );
     }
-    if bare_topic_model_supplied_locator_route_should_force_clarify(
+    if bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
         prompt,
         route_result,
         turn_analysis,
@@ -80,7 +80,7 @@ pub(super) fn boundary_safety_preflight(
             route_result,
         );
     }
-    if implicit_workspace_file_locator_route_should_force_clarify(
+    if implicit_workspace_file_locator_route_should_defer_to_agent_loop(
         state,
         prompt,
         route_result,
@@ -113,7 +113,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
     pre_loop_clarify_candidates: &mut Vec<&'static str>,
     route_result: &mut crate::RouteResult,
 ) {
-    if model_completed_workspace_file_locator_hint_should_force_clarify(
+    if model_completed_workspace_file_locator_hint_should_defer_to_agent_loop(
         state,
         prompt,
         route_result,
@@ -135,7 +135,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
             route_result,
         );
     }
-    if inferred_missing_workspace_locator_hint_should_force_clarify(
+    if inferred_missing_workspace_locator_hint_should_defer_to_agent_loop(
         state,
         prompt,
         route_result,
@@ -178,7 +178,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
             route_result,
         );
     }
-    if bare_topic_model_supplied_locator_route_should_force_clarify(
+    if bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
         prompt,
         route_result,
         turn_analysis,
@@ -212,7 +212,7 @@ pub(super) fn boundary_context_locator_preflight(
     pre_loop_clarify_candidates: &mut Vec<&'static str>,
     route_result: &mut crate::RouteResult,
 ) {
-    if background_only_locator_route_should_force_clarify(
+    if background_only_locator_route_should_defer_to_agent_loop(
         state,
         prompt,
         resolved_prompt,
@@ -234,7 +234,7 @@ pub(super) fn boundary_context_locator_preflight(
         );
     }
     append_runtime_status_capability_context(route_result, turn_analysis);
-    if locatorless_observation_route_should_force_clarify(
+    if locatorless_observation_route_should_defer_to_agent_loop(
         state,
         prompt,
         route_result,
@@ -252,7 +252,7 @@ pub(super) fn boundary_context_locator_preflight(
             route_result,
         );
     }
-    if unbound_targeted_evidence_route_should_force_clarify(
+    if unbound_targeted_evidence_route_should_defer_to_agent_loop(
         prompt,
         route_result,
         session_snapshot,

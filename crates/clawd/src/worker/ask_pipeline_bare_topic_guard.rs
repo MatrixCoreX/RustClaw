@@ -4,7 +4,7 @@ use super::*;
 #[path = "ask_pipeline_bare_topic_guard_tests.rs"]
 mod tests;
 
-pub(super) fn bare_topic_memory_expansion_route_should_force_clarify(
+pub(super) fn bare_topic_memory_expansion_route_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -25,7 +25,7 @@ pub(super) fn bare_topic_memory_expansion_route_should_force_clarify(
     route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
 }
 
-pub(super) fn bare_topic_model_supplied_locator_route_should_force_clarify(
+pub(super) fn bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,

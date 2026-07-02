@@ -1,12 +1,12 @@
 use super::super::{
-    background_only_locator_route_should_force_clarify,
-    locatorless_observation_route_should_force_clarify,
-    unbound_model_context_target_route_should_force_clarify,
+    background_only_locator_route_should_defer_to_agent_loop,
+    locatorless_observation_route_should_defer_to_agent_loop,
+    unbound_model_context_target_route_should_defer_to_agent_loop,
 };
 use super::{
     current_request_resolves_workspace_child_locator,
-    implicit_workspace_file_locator_route_should_force_clarify,
-    model_completed_workspace_file_locator_hint_should_force_clarify,
+    implicit_workspace_file_locator_route_should_defer_to_agent_loop,
+    model_completed_workspace_file_locator_hint_should_defer_to_agent_loop,
     path_scoped_locator_guard_can_defer_to_prompt_targets, workspace_root_name_token_present,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
@@ -202,13 +202,15 @@ fn implicit_workspace_file_locator_without_model_locator_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(implicit_workspace_file_locator_route_should_force_clarify(
-        &state,
-        "读一下那个 README 开头并用一句话总结",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        implicit_workspace_file_locator_route_should_defer_to_agent_loop(
+            &state,
+            "读一下那个 README 开头并用一句话总结",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -247,13 +249,15 @@ fn generated_file_delivery_runtime_target_bypasses_implicit_workspace_file_locat
         active_observed_facts: None,
     };
 
-    assert!(!implicit_workspace_file_locator_route_should_force_clarify(
-        &state,
-        "Write a shell script that prints hello world, save it, and send me the file.",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !implicit_workspace_file_locator_route_should_defer_to_agent_loop(
+            &state,
+            "Write a shell script that prints hello world, save it, and send me the file.",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -275,13 +279,15 @@ fn implicit_workspace_directory_locator_still_allows_prebind() {
         active_observed_facts: None,
     };
 
-    assert!(!implicit_workspace_file_locator_route_should_force_clarify(
-        &state,
-        "先列出 prompts 目录下前 5 个条目名称",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !implicit_workspace_file_locator_route_should_defer_to_agent_loop(
+            &state,
+            "先列出 prompts 目录下前 5 个条目名称",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
@@ -336,12 +342,14 @@ fn explicit_command_failed_step_does_not_bind_workspace_child_from_current_reque
         crate::OutputLocatorKind::None
     );
     assert!(route.output_contract.locator_hint.is_empty());
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state, prompt, &route, None, &snapshot,
     ));
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state, prompt, &route, None, &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state, prompt, &route, None, &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -380,12 +388,14 @@ fn command_payload_failed_step_does_not_bind_workspace_child_from_current_reques
         crate::OutputLocatorKind::None
     );
     assert!(route.output_contract.locator_hint.is_empty());
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state, prompt, &route, None, &snapshot,
     ));
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state, prompt, &route, None, &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state, prompt, &route, None, &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -477,7 +487,7 @@ fn model_locator_hint_stem_from_current_request_exports_workspace_file_evidence(
         crate::OutputLocatorKind::Path
     );
     assert_eq!(route.output_contract.locator_hint, "README");
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         prompt,
         &route.resolved_intent,
@@ -540,7 +550,7 @@ fn model_completed_file_locator_without_current_request_match_still_requires_cla
     };
 
     assert!(
-        model_completed_workspace_file_locator_hint_should_force_clarify(
+        model_completed_workspace_file_locator_hint_should_defer_to_agent_loop(
             &state,
             "Summarize the project overview in one sentence",
             &route,

@@ -1,7 +1,7 @@
 use super::{
     bare_topic_clarify_question_should_drop_context_target,
-    bare_topic_memory_expansion_route_should_force_clarify,
-    bare_topic_model_supplied_locator_route_should_force_clarify,
+    bare_topic_memory_expansion_route_should_defer_to_agent_loop,
+    bare_topic_model_supplied_locator_route_should_defer_to_agent_loop,
 };
 
 fn executable_filename_route() -> crate::RouteResult {
@@ -52,9 +52,11 @@ fn bare_topic_command_marker_with_unmentioned_context_target_forces_clarify() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let snapshot = empty_session_snapshot();
 
-    assert!(bare_topic_memory_expansion_route_should_force_clarify(
-        "logs", &route, None, &snapshot,
-    ));
+    assert!(
+        bare_topic_memory_expansion_route_should_defer_to_agent_loop(
+            "logs", &route, None, &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -70,9 +72,11 @@ fn bare_topic_raw_command_without_command_marker_stays_executable() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let snapshot = empty_session_snapshot();
 
-    assert!(!bare_topic_memory_expansion_route_should_force_clarify(
-        "logs", &route, None, &snapshot,
-    ));
+    assert!(
+        !bare_topic_memory_expansion_route_should_defer_to_agent_loop(
+            "logs", &route, None, &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -86,7 +90,7 @@ fn bare_topic_model_supplied_locator_forces_clarify() {
 
     let snapshot = empty_session_snapshot();
     assert!(
-        bare_topic_model_supplied_locator_route_should_force_clarify(
+        bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
             "logs", &route, None, &snapshot,
         )
     );
@@ -120,7 +124,7 @@ fn bare_topic_model_supplied_locator_allows_active_clarify_locator_reply() {
 
     let snapshot = empty_session_snapshot();
     assert!(
-        !bare_topic_model_supplied_locator_route_should_force_clarify(
+        !bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
             "scripts", &route, None, &snapshot,
         )
     );
@@ -153,7 +157,7 @@ fn bare_topic_model_supplied_locator_allows_reused_structured_anchor() {
     };
 
     assert!(
-        !bare_topic_model_supplied_locator_route_should_force_clarify(
+        !bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
             "document",
             &route,
             Some(&analysis),
@@ -175,7 +179,7 @@ fn bare_topic_model_supplied_locator_keeps_existing_clarify() {
 
     let snapshot = empty_session_snapshot();
     assert!(
-        bare_topic_model_supplied_locator_route_should_force_clarify(
+        bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
             "logs", &route, None, &snapshot,
         )
     );
@@ -192,7 +196,7 @@ fn bare_topic_model_supplied_locator_preserves_non_bare_request() {
 
     let snapshot = empty_session_snapshot();
     assert!(
-        !bare_topic_model_supplied_locator_route_should_force_clarify(
+        !bare_topic_model_supplied_locator_route_should_defer_to_agent_loop(
             "check target size",
             &route,
             None,

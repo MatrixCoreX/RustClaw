@@ -191,7 +191,7 @@ fn workspace_child_locator_surface_can_bind_route(route_result: &crate::RouteRes
         || scalar_equality_route_requests_workspace_child_locator(route_result)
 }
 
-pub(super) fn implicit_workspace_file_locator_route_should_force_clarify(
+pub(super) fn implicit_workspace_file_locator_route_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
@@ -272,7 +272,7 @@ fn locator_hint_file_name_has_extension(locator_hint: &str) -> bool {
         })
 }
 
-pub(super) fn model_completed_workspace_file_locator_hint_should_force_clarify(
+pub(super) fn model_completed_workspace_file_locator_hint_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
@@ -319,7 +319,7 @@ pub(super) fn model_completed_workspace_file_locator_hint_should_force_clarify(
     current_request_resolved_workspace_child_matches_path(state, prompt, &path).is_none()
 }
 
-pub(super) fn inferred_missing_workspace_locator_hint_should_force_clarify(
+pub(super) fn inferred_missing_workspace_locator_hint_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     route_result: &crate::RouteResult,

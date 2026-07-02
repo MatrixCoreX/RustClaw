@@ -1,8 +1,8 @@
 use super::super::{
-    background_only_locator_route_should_force_clarify,
-    locatorless_observation_route_should_force_clarify, route_reason_has_marker,
+    background_only_locator_route_should_defer_to_agent_loop,
+    locatorless_observation_route_should_defer_to_agent_loop, route_reason_has_marker,
     runtime_status_query_route_can_plan_without_locator,
-    unbound_model_context_target_route_should_force_clarify,
+    unbound_model_context_target_route_should_defer_to_agent_loop,
 };
 use super::*;
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -135,7 +135,7 @@ fn status_query_locatorless_route_can_plan_without_semantic_promotion() {
         crate::OutputSemanticKind::None
     );
     assert!(
-        !super::super::locatorless_observation_route_should_force_clarify(
+        !super::super::locatorless_observation_route_should_defer_to_agent_loop(
             &state,
             "status overview",
             &route,
@@ -158,7 +158,7 @@ fn status_query_bare_fragment_does_not_mutate_semantic_kind() {
         crate::OutputSemanticKind::None
     );
     assert!(
-        !super::super::locatorless_observation_route_should_force_clarify(
+        !super::super::locatorless_observation_route_should_defer_to_agent_loop(
             &state,
             "logs",
             &route,
@@ -204,7 +204,7 @@ fn runtime_status_patch_status_query_stays_raw_command_output() {
         crate::OutputSemanticKind::RawCommandOutput
     );
     assert!(
-        !super::super::locatorless_observation_route_should_force_clarify(
+        !super::super::locatorless_observation_route_should_defer_to_agent_loop(
             &state,
             "current runtime user",
             &route,
@@ -225,7 +225,7 @@ fn runtime_status_query_machine_patch_overrides_spurious_semantic_kind() {
     })));
 
     assert!(
-        !super::super::locatorless_observation_route_should_force_clarify(
+        !super::super::locatorless_observation_route_should_defer_to_agent_loop(
             &state,
             "current runtime user",
             &route,
@@ -293,7 +293,7 @@ fn runtime_status_scalar_query_can_plan_without_locator_prebind() {
         attachment_processing_required: false,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "return cwd",
         &route,
@@ -370,7 +370,7 @@ fn locatorless_service_status_without_capability_ref_defers_to_agent_loop() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check whether telegramd is currently running",
         &route,
@@ -397,7 +397,7 @@ fn locatorless_service_status_with_capability_ref_does_not_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check whether telegramd is currently running",
         &route,
@@ -444,7 +444,7 @@ fn locatorless_status_query_clarify_is_not_promoted_before_planner() {
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::None
     );
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "status overview",
         &route,
@@ -505,14 +505,16 @@ fn system_health_selector_clarify_adds_capability_context_without_semantic_promo
             .as_deref(),
         Some("system_health.*")
     );
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "status overview",
-        &route,
-        Some(&analysis),
-        &snapshot,
-    ));
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "status overview",
+            &route,
+            Some(&analysis),
+            &snapshot,
+        )
+    );
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "status overview",
         &route,
@@ -541,7 +543,7 @@ fn generic_service_status_with_model_background_locator_requires_capability_ref(
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "run a basic health check here and summarize only the most important findings",
         &route.resolved_intent,
@@ -552,7 +554,7 @@ fn generic_service_status_with_model_background_locator_requires_capability_ref(
     ));
 
     route.route_reason = "capability_ref=system.health_check".to_string();
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "run a basic health check here and summarize only the most important findings",
         &route.resolved_intent,
@@ -584,7 +586,7 @@ fn legacy_health_check_capability_ref_no_longer_bypasses_background_locator_guar
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "run a basic health check here and summarize only the most important findings",
         &route.resolved_intent,
@@ -625,7 +627,7 @@ fn runtime_status_scalar_path_query_enters_planner_without_locator_prebind() {
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "return cwd",
         &route,
@@ -676,7 +678,7 @@ fn runtime_status_scalar_path_query_enters_planner_without_locator_prebind() {
         route_without_analysis.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "return cwd",
         &route_without_analysis,
@@ -714,7 +716,7 @@ fn locatorless_raw_status_query_can_plan_without_semantic_promotion() {
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::RawCommandOutput
     );
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check whether the local clawd process is present",
         &route,
@@ -821,7 +823,7 @@ fn locatorless_status_query_with_runtime_status_patch_does_not_bind_to_service_s
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "current runtime user",
         &route,
@@ -890,14 +892,16 @@ fn locatorless_scalar_status_query_without_kind_does_not_mutate_semantic_kind() 
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "current runtime scalar",
-        &route,
-        Some(&analysis),
-        &snapshot,
-    ));
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "current runtime scalar",
+            &route,
+            Some(&analysis),
+            &snapshot,
+        )
+    );
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "current runtime scalar",
         &route,
@@ -948,14 +952,16 @@ fn locatorless_scalar_status_query_with_runtime_kind_adds_capability_context() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "current runtime scalar",
-        &route,
-        Some(&analysis),
-        &snapshot,
-    ));
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "current runtime scalar",
+            &route,
+            Some(&analysis),
+            &snapshot,
+        )
+    );
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "current runtime scalar",
         &route,
@@ -982,7 +988,7 @@ fn locatorless_observation_with_command_payload_raw_output_without_input_require
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "current runtime user",
         &route,
@@ -1010,7 +1016,7 @@ fn locatorless_command_output_summary_does_not_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "run pwd, then run a missing command, then summarize what succeeded and failed",
         &route,
@@ -1046,7 +1052,7 @@ fn locatorless_raw_command_with_path_structural_args_does_not_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "please run uname -a and tell me the result",
         &route,
@@ -1076,14 +1082,16 @@ fn locatorless_raw_command_grounded_summary_can_plan_without_path_clarify() {
         "runtime_status_query": {"kind": "current_user"}
     }));
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "collect current local runtime identity values and summarize them briefly",
-        &route,
-        Some(&turn_analysis),
-        &snapshot,
-    ));
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "collect current local runtime identity values and summarize them briefly",
+            &route,
+            Some(&turn_analysis),
+            &snapshot,
+        )
+    );
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "collect current local runtime identity values and summarize them briefly",
         &route,

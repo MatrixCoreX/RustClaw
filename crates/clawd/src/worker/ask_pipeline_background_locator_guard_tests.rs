@@ -1,5 +1,5 @@
 use super::{
-    background_only_locator_route_should_force_clarify,
+    background_only_locator_route_should_defer_to_agent_loop,
     recover_background_locator_clarify_to_agent_loop, route_has_model_supplied_concrete_locator,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
@@ -102,7 +102,7 @@ fn background_only_locator_rewrite_requires_clarify_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "读一下那个文件前 3 行",
         &route.resolved_intent,
@@ -138,7 +138,7 @@ fn background_locator_guard_ignores_embedded_answer_candidate_path() {
         &route,
         &resolved_prompt
     ));
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "return the runtime scalar",
         &resolved_prompt,
@@ -176,7 +176,7 @@ fn generated_file_delivery_runtime_target_bypasses_background_locator_clarify() 
         &route,
         &route.resolved_intent
     ));
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "Create a shell script that prints hello world, save it, and send me the file.",
         &route.resolved_intent,
@@ -207,7 +207,7 @@ fn model_supplied_manifest_locator_from_deictic_prompt_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "extract name from that package file",
         &route.resolved_intent,
@@ -237,7 +237,7 @@ fn background_only_extensionless_file_locator_with_current_request_evidence_can_
         active_observed_facts: None,
     };
 
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "读一下那个 README 开头并用一句话总结",
         &route.resolved_intent,
@@ -272,7 +272,7 @@ fn background_only_field_selector_without_file_locator_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(background_only_locator_route_should_force_clarify(
+    assert!(background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "去那个配置里找 app.name，只把值给我",
         "去那个配置里找 app.name，只把值给我",
@@ -303,7 +303,7 @@ fn background_only_locator_rewrite_allows_active_ordered_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "看最后一个的基本信息",
         &route.resolved_intent,
@@ -344,7 +344,7 @@ gen-1778122040.png
         active_observed_facts: None,
     };
 
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         "send the selected entry",
         &route.resolved_intent,

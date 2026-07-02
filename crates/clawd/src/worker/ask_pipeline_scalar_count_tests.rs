@@ -1,7 +1,7 @@
 use super::test_support::{executable_filename_route, make_temp_root, test_state_with_root};
 use super::{
     apply_ask_post_route, route_reason_has_marker,
-    unbound_targeted_evidence_route_should_force_clarify,
+    unbound_targeted_evidence_route_should_defer_to_agent_loop,
 };
 
 fn assert_current_workspace_scope_boundary(prompt: &str, root: &std::path::Path) {
@@ -52,7 +52,7 @@ fn unbound_targeted_evidence_allows_current_workspace_scalar_count_scope() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count top-level repository directories",
         &route,
         &snapshot,
@@ -339,7 +339,7 @@ fn current_workspace_scalar_count_with_unmentioned_root_path_requires_clarify() 
         active_observed_facts: None,
     };
 
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
+    assert!(unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count that directory's direct children and output only the number",
         &route,
         &snapshot,
