@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn directory_entry_groups_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -47,6 +48,7 @@ pub(super) fn directory_entry_groups_auto_locator_observation_plan(
     }])
 }
 
+#[cfg(test)]
 pub(super) fn directory_entry_groups_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -85,6 +87,7 @@ pub(super) fn directory_entry_groups_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn requested_directory_entry_groups_result_limit(
     route: &RouteResult,
     user_text: &str,
@@ -105,6 +108,7 @@ pub(super) fn requested_directory_entry_groups_result_limit(
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
 }
 
+#[cfg(test)]
 pub(super) fn requested_directory_entry_groups_inventory_sort_by(
     route: &RouteResult,
     user_text: &str,
@@ -137,6 +141,7 @@ pub(super) fn requested_directory_entry_groups_inventory_sort_by(
         })
 }
 
+#[cfg(test)]
 pub(super) fn directory_entry_groups_sort_by_has_structural_support(
     route: &RouteResult,
     sort_by: &str,
@@ -180,6 +185,7 @@ pub(super) fn directory_entry_groups_sort_by_has_structural_support(
     .any(|hint| hint == sort_by)
 }
 
+#[cfg(test)]
 pub(super) fn directory_entry_groups_inventory_requires_metadata(
     route: &RouteResult,
     sort_by: &str,
@@ -196,6 +202,7 @@ pub(super) fn directory_entry_groups_inventory_requires_metadata(
         )
 }
 
+#[cfg(test)]
 pub(super) fn file_names_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -256,6 +263,7 @@ pub(super) fn file_names_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn directory_tree_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -340,6 +348,7 @@ pub(super) fn directory_tree_auto_locator_observation_plan(
     }
 }
 
+#[cfg(test)]
 pub(super) fn workspace_summary_readme_path(root: &str) -> Option<String> {
     ["README.md", "README.zh-CN.md", "readme.md"]
         .into_iter()
@@ -348,6 +357,7 @@ pub(super) fn workspace_summary_readme_path(root: &str) -> Option<String> {
         .map(|path| path.display().to_string())
 }
 
+#[cfg(test)]
 pub(super) fn directory_tree_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -387,12 +397,18 @@ pub(super) fn directory_tree_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) const DIRECTORY_PURPOSE_MAX_TEXT_READS: usize = 24;
+#[cfg(test)]
 pub(super) const DIRECTORY_PURPOSE_TREE_SUMMARY_TEXT_READ_THRESHOLD: usize = 8;
+#[cfg(test)]
 pub(super) const DIRECTORY_PURPOSE_EXTENSION_TEXT_READ_LIMIT: usize = 3;
+#[cfg(test)]
 const DIRECTORY_PURPOSE_EXTENSION_SCAN_DIR_LIMIT: usize = 256;
+#[cfg(test)]
 const DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT: usize = 5000;
 
+#[cfg(test)]
 pub(super) fn directory_purpose_text_like_path(path: &Path) -> bool {
     let Some(ext) = path
         .extension()
@@ -418,6 +434,7 @@ pub(super) fn directory_purpose_text_like_path(path: &Path) -> bool {
     )
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_direct_text_read_paths(root: &str) -> Vec<String> {
     let root_path = Path::new(root);
     let canonical_root = root_path
@@ -464,6 +481,7 @@ pub(super) fn directory_purpose_direct_text_read_paths(root: &str) -> Vec<String
     selected
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_extension_text_read_paths(root: &str, ext: &str) -> Vec<String> {
     let normalized_ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
     if normalized_ext.is_empty() {
@@ -549,6 +567,7 @@ pub(super) fn directory_purpose_extension_text_read_paths(root: &str, ext: &str)
     selected
 }
 
+#[cfg(test)]
 pub(super) fn directory_has_direct_child_dirs(root: &str) -> bool {
     fs::read_dir(root)
         .ok()
@@ -563,6 +582,7 @@ pub(super) fn directory_has_direct_child_dirs(root: &str) -> bool {
         })
 }
 
+#[cfg(test)]
 pub(super) fn selector_target_kind_from_machine_token(
     token: &str,
 ) -> Option<crate::OutputScalarCountTargetKind> {
@@ -574,6 +594,7 @@ pub(super) fn selector_target_kind_from_machine_token(
     }
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_selector_target_kind(
     route: &RouteResult,
 ) -> crate::OutputScalarCountTargetKind {
@@ -592,6 +613,7 @@ pub(super) fn directory_purpose_selector_target_kind(
         .unwrap_or(crate::OutputScalarCountTargetKind::Any)
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_selector_limit(route: &RouteResult) -> Option<u64> {
     route
         .output_contract
@@ -601,6 +623,7 @@ pub(super) fn directory_purpose_selector_limit(route: &RouteResult) -> Option<u6
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_selector_sort_by(route: &RouteResult) -> Option<String> {
     route
         .output_contract
@@ -611,6 +634,7 @@ pub(super) fn directory_purpose_selector_sort_by(route: &RouteResult) -> Option<
         .or_else(|| contract_hint_selector_sort_by(&route.route_reason))
 }
 
+#[cfg(test)]
 pub(super) fn apply_directory_purpose_selector_inventory_args(
     route: &RouteResult,
     obj: &mut serde_json::Map<String, Value>,
@@ -637,6 +661,7 @@ pub(super) fn apply_directory_purpose_selector_inventory_args(
     }
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_auto_locator_deterministic_plan_result(
     _state: &AppState,
     goal: &str,
@@ -749,6 +774,7 @@ pub(super) fn directory_purpose_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_extension_locator(route: &RouteResult) -> Option<String> {
     if route.needs_clarify
         || route.output_contract.delivery_required
@@ -766,12 +792,14 @@ pub(super) fn directory_purpose_extension_locator(route: &RouteResult) -> Option
         .or_else(|| structural_extension_filter_from_text(&route.resolved_intent))
 }
 
+#[cfg(test)]
 fn route_requests_extension_assess_gap(route: &RouteResult) -> bool {
     route_has_machine_token(route, "extension.assess_gap")
         || (route_has_machine_token(route, "extension_manager")
             && route_has_machine_token(route, "assess_gap"))
 }
 
+#[cfg(test)]
 fn route_has_machine_token(route: &RouteResult, token: &str) -> bool {
     let token = token.trim();
     if token.is_empty() {
@@ -782,11 +810,13 @@ fn route_has_machine_token(route: &RouteResult, token: &str) -> bool {
         .any(|text| machine_token_present(text, token))
 }
 
+#[cfg(test)]
 fn machine_token_present(text: &str, token: &str) -> bool {
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
         .any(|part| part == token || part.starts_with(&format!("{token}.")))
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_extension_inventory_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -883,6 +913,7 @@ pub(super) fn executed_step_is_successful_text_read(
         .is_some_and(|action| action == "read_text_range" || action == "read_range")
 }
 
+#[cfg(test)]
 pub(super) fn executed_find_entries_candidate_paths(
     step: &crate::executor::StepExecutionResult,
 ) -> Vec<String> {
@@ -922,6 +953,7 @@ pub(super) fn executed_find_entries_candidate_paths(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn safe_representative_find_result_paths(
     root: &str,
     candidates: Vec<String>,
@@ -966,6 +998,7 @@ pub(super) fn safe_representative_find_result_paths(
     selected
 }
 
+#[cfg(test)]
 pub(super) fn directory_purpose_representative_reads_after_find_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -1022,6 +1055,7 @@ pub(super) fn directory_purpose_representative_reads_after_find_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn directory_compare_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1070,6 +1104,7 @@ pub(super) fn directory_compare_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1178,6 +1213,7 @@ pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn explicit_existing_metadata_locator_pair_from_text(
     state: &AppState,
     text: &str,
@@ -1216,6 +1252,7 @@ pub(super) fn explicit_existing_metadata_locator_pair_from_text(
     (resolved.len() == 2).then_some(resolved)
 }
 
+#[cfg(test)]
 pub(super) fn push_unique_metadata_locator_candidate(out: &mut Vec<String>, value: &str) {
     let value = value.trim();
     if value.is_empty() {

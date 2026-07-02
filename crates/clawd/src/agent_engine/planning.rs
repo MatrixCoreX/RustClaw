@@ -129,6 +129,8 @@ pub(in crate::agent_engine) use configured_command_prefix::{
     explicit_command_segment, explicit_execution_command_segment,
 };
 use direct_observed_finalize_support::*;
+use directory_entry_group_locator::executed_step_is_successful_text_read;
+#[cfg(test)]
 use directory_entry_group_locator::*;
 use directory_unique_entry::*;
 use dry_run_contract_plan::*;
@@ -332,15 +334,6 @@ pub(super) async fn plan_round_actions(
     );
     if allow_structural_deterministic_plans {
         return_deterministic_plan!(
-            directory_purpose_representative_reads_after_find_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_directory_purpose_representative_reads"
-        );
-        return_deterministic_plan!(
             scalar_content_auto_locator_deterministic_plan_result(
                 state,
                 goal,
@@ -365,16 +358,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_structured_scalar_field_auto_locator"
         );
         return_deterministic_plan!(
-            quantity_compare_pair_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                Some(&original_user_text_for_policy),
-            ),
-            "plan_deterministic_quantity_compare_pair_locator"
-        );
-        return_deterministic_plan!(
             file_facts_auto_locator_deterministic_plan_result(
                 state,
                 goal,
@@ -387,60 +370,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_file_facts_auto_locator"
         );
         return_deterministic_plan!(
-            file_names_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_file_names_auto_locator"
-        );
-        return_deterministic_plan!(
-            directory_compare_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-            ),
-            "plan_deterministic_directory_compare_locator"
-        );
-        return_deterministic_plan!(
-            directory_entry_groups_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_directory_entry_groups_auto_locator"
-        );
-        return_deterministic_plan!(
-            directory_purpose_extension_inventory_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_directory_purpose_extension_inventory"
-        );
-        return_deterministic_plan!(
-            directory_purpose_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_directory_purpose_auto_locator"
-        );
-        return_deterministic_plan!(
             content_excerpt_explicit_file_targets_deterministic_plan_result(
                 state,
                 goal,
@@ -451,18 +380,6 @@ pub(super) async fn plan_round_actions(
                 auto_locator_path,
             ),
             "plan_deterministic_content_excerpt_explicit_file_targets"
-        );
-        return_deterministic_plan!(
-            directory_tree_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_directory_tree_auto_locator"
         );
     }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {

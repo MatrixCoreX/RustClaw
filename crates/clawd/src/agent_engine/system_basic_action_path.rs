@@ -720,6 +720,7 @@ pub(super) fn enforce_file_names_inventory_args(
     info!("plan_contract_enforce_file_names_inventory");
 }
 
+#[cfg(test)]
 pub(super) fn requested_file_names_result_limit(
     route: &RouteResult,
     user_text: &str,
@@ -740,6 +741,7 @@ pub(super) fn requested_file_names_result_limit(
         .or_else(|| contract_hint_selector_limit(&route.route_reason))
 }
 
+#[cfg(test)]
 pub(super) fn requested_file_names_inventory_sort_by(
     route: &RouteResult,
     user_text: &str,
@@ -760,6 +762,7 @@ pub(super) fn requested_file_names_inventory_sort_by(
         .unwrap_or_else(|| "name".to_string())
 }
 
+#[cfg(test)]
 pub(super) fn file_names_sort_by_has_structural_support(
     route: &RouteResult,
     sort_by: &str,
