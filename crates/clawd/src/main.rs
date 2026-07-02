@@ -61,6 +61,7 @@ mod memory;
 mod observed_facts;
 mod output_contract_verifier;
 mod output_paths;
+#[cfg(test)]
 mod package_commands;
 mod pipeline_types;
 mod policy_decision;
