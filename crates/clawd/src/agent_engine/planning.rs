@@ -233,16 +233,6 @@ pub(super) async fn plan_round_actions(
         );
     }
     return_deterministic_plan!(
-        active_task_append_current_locator_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            turn_analysis_for_prompt,
-            auto_locator_path,
-        ),
-        "plan_deterministic_active_task_append_current_locator"
-    );
-    return_deterministic_plan!(
         runtime_status_scalar_deterministic_plan_result(
             state,
             goal,
