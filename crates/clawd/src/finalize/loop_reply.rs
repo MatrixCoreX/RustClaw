@@ -167,18 +167,20 @@ use tail_read::{
 mod matrix_shape;
 pub(crate) use matrix_shape::deterministic_matrix_observed_shape_answer;
 #[cfg(test)]
+use matrix_shape::route_has_evidence_policy_final_shape;
+#[cfg(test)]
 use matrix_shape::{
     agent_context_allows_observed_output_language_fallback, matrix_strict_list_observed_answer,
 };
-#[cfg(test)]
-use matrix_shape::route_has_contract_matrix_final_shape;
 use matrix_shape::{
-    current_synthesis_satisfies_matrix_shape,
-    finalizer_summary_requires_matrix_observed_replacement, matrix_candidate_satisfies_final_shape,
+    current_synthesis_satisfies_evidence_policy_shape,
+    evidence_policy_candidate_satisfies_final_shape,
+    finalizer_summary_requires_matrix_observed_replacement,
     matrix_grouped_name_list_observed_answer, matrix_observed_shape_summary,
     replace_delivery_with_matrix_observed_shape_answer,
-    route_requires_matrix_deterministic_final_answer, route_requires_observed_semantic_projection,
-    should_try_observed_output_language_fallback, synthetic_task_for_matrix_shape_check,
+    route_requires_evidence_policy_deterministic_final_answer,
+    route_requires_observed_semantic_projection, should_try_observed_output_language_fallback,
+    synthetic_task_for_evidence_policy_shape_check,
 };
 
 #[path = "loop_reply_machine_envelope.rs"]

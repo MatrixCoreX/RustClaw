@@ -6,14 +6,14 @@ use super::{
     delivery_is_raw_read_observation, delivery_is_single_line_text,
     delivery_message_is_json_container, deterministic_missing_observed_target_answer,
     deterministic_scalar_markdown_heading_answer_from_loop, direct_raw_command_output_projection,
-    latest_contractual_synthesis_output, latest_path_batch_facts_has_implicit_metadata_fields,
-    latest_plan_requested_synthesis, latest_publishable_synthesis_step_matches,
-    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, matrix_candidate_satisfies_final_shape,
+    evidence_policy_candidate_satisfies_final_shape, latest_contractual_synthesis_output,
+    latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
+    latest_publishable_synthesis_step_matches, log_deterministic_delivery_record,
+    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
     planned_delivery_is_publishable_model_language_answer,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
-    route_prefers_observed_answer, route_requires_matrix_deterministic_final_answer,
-    service_status_system_basic_info_answer,
+    route_prefers_observed_answer, route_requires_evidence_policy_deterministic_final_answer,
+    service_status_system_basic_info_answer, valid_publishable_synthesis_output,
 };
 
 pub(super) fn direct_scalar_observed_answer(
@@ -559,8 +559,8 @@ pub(super) fn replace_delivery_with_loop_contract_observed_answer(
         return false;
     }
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
-        if route_requires_matrix_deterministic_final_answer(route)
-            && !matrix_candidate_satisfies_final_shape(
+        if route_requires_evidence_policy_deterministic_final_answer(route)
+            && !evidence_policy_candidate_satisfies_final_shape(
                 task,
                 &route.resolved_intent,
                 loop_state,
@@ -1126,7 +1126,7 @@ pub(super) async fn direct_publishable_observed_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return None;
     };
-    if route_requires_matrix_deterministic_final_answer(route) {
+    if route_requires_evidence_policy_deterministic_final_answer(route) {
         return None;
     }
     if route.output_contract.requires_content_evidence
