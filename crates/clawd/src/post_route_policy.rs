@@ -1,6 +1,4 @@
-use crate::{
-    ActFinalizeStyle, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-};
+use crate::{ActFinalizeStyle, OutputLocatorKind, OutputResponseShape, RouteResult};
 
 mod boundary_contract;
 mod boundary_delivery;
@@ -184,18 +182,10 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
     }
 
-    let cleared_scalar_count_marker =
+    let ignored_scalar_count_marker =
         should_clear_scalar_count_marker_for_non_scalar_contract(&execution_route_result);
-    if cleared_scalar_count_marker {
-        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
-        remove_route_reason_machine_marker(&mut execution_route_result, "scalar_count");
-    }
-    let cleared_scalar_path_only_marker =
+    let ignored_scalar_path_only_marker =
         should_clear_scalar_path_marker_without_locator_binding(&execution_route_result);
-    if cleared_scalar_path_only_marker {
-        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
-        remove_route_reason_machine_marker(&mut execution_route_result, "scalar_path_only");
-    }
 
     let forced_content_evidence =
         should_force_content_evidence_for_path_bound_chat_wrapped_execution(
@@ -319,12 +309,16 @@ pub(crate) fn apply_post_route_policy(
             PostRoutePolicyOutcome::BoundaryClarify,
         )
     } else if forced_content_evidence
-        || cleared_scalar_count_marker
-        || cleared_scalar_path_only_marker
+        || ignored_scalar_count_marker
+        || ignored_scalar_path_only_marker
     {
         PostRouteGateRecord::with_owner(
             "boundary_contract_gate",
-            "post_route_contract_refined",
+            if forced_content_evidence {
+                "post_route_contract_refined"
+            } else {
+                "post_route_contract_hint_ignored"
+            },
             PostRoutePolicyOutcome::RefineContract,
         )
     } else {
@@ -341,22 +335,6 @@ pub(crate) fn apply_post_route_policy(
         clarify_reason_kind,
         gate_record,
     }
-}
-
-fn remove_route_reason_machine_marker(route_result: &mut RouteResult, marker: &str) {
-    route_result.route_reason = route_result
-        .route_reason
-        .split(';')
-        .map(str::trim)
-        .filter(|part| {
-            !part.is_empty()
-                && *part != marker
-                && !part
-                    .rsplit_once(':')
-                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
 }
 
 #[cfg(test)]

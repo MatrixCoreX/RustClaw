@@ -46,6 +46,8 @@ fn verifier_contract_markers_do_not_require_semantic_enum() {
     assert!(strict_list_route_allows_observed_subset(&route));
 
     route.route_reason = "scalar_path_only".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     assert!(route_contract_marker_is_scalar_path_only(&route));
 }
 
