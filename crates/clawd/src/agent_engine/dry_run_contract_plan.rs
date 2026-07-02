@@ -345,13 +345,11 @@ struct TaskControlLifecycleDryRunIntent {
 
 fn task_control_lifecycle_dry_run_intent(text: &str) -> Option<TaskControlLifecycleDryRunIntent> {
     let normalized = text.to_ascii_lowercase();
-    if !normalized.contains("task_control") || !has_dry_run_machine_token(&normalized) {
+    if !has_dry_run_machine_token(&normalized) {
         return None;
     }
-    let include_resume =
-        normalized.contains("task_control.resume") || normalized.contains("action=resume");
-    let include_pause =
-        normalized.contains("task_control.pause") || normalized.contains("action=pause");
+    let include_resume = normalized.contains("capability_ref=task_control.resume");
+    let include_pause = normalized.contains("capability_ref=task_control.pause");
     if !include_resume && !include_pause {
         return None;
     }
