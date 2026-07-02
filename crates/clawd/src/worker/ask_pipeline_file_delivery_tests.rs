@@ -1,4 +1,4 @@
-use super::super::{apply_ask_post_route, route_reason_has_marker};
+use super::super::{apply_ask_post_route, apply_post_route_refinements, route_reason_has_marker};
 use super::{
     reject_direct_file_delivery_workspace_root_locator,
     unbound_existing_file_delivery_route_should_force_clarify,
@@ -693,7 +693,7 @@ fn unbound_existing_file_delivery_allows_resolved_workspace_child() {
 }
 
 #[test]
-fn directory_file_delivery_without_structured_selection_requires_clarify() {
+fn directory_file_delivery_without_structured_selection_requires_boundary_clarify() {
     let root = make_temp_root("directory_delivery_requires_selection");
     let device_dir = root.join("device_local");
     std::fs::create_dir_all(&device_dir).expect("device dir");
@@ -758,6 +758,84 @@ fn directory_file_delivery_without_structured_selection_requires_clarify() {
     assert_eq!(
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::None
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn post_route_directory_file_delivery_marker_defers_to_agent_loop() {
+    let root = make_temp_root("directory_delivery_marker_defer");
+    let device_dir = root.join("device_local");
+    std::fs::create_dir_all(&device_dir).expect("device dir");
+    std::fs::write(device_dir.join("package.json"), "{}\n").expect("package fixture");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "directory-delivery-marker-defer".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.needs_clarify = true;
+    route.clarify_question = "select a file".to_string();
+    route.route_reason = "directory_file_delivery_requires_structured_selection".to_string();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "device_local".to_string();
+    route.output_contract.requires_content_evidence = true;
+    let mut post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: Some(device_dir.display().to_string()),
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: true,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::default(),
+    };
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut pre_loop_clarify_candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "send ./device_local as a file",
+        None,
+        &session_snapshot,
+        &mut pre_loop_clarify_candidates,
+        &mut post_route,
+    );
+
+    assert!(!post_route.execution_route_result.needs_clarify);
+    assert!(post_route
+        .execution_route_result
+        .clarify_question
+        .is_empty());
+    assert_eq!(
+        post_route.gate_record.reason_code,
+        "post_route_directory_file_delivery_deferred_to_agent_loop"
+    );
+    assert_eq!(
+        post_route.gate_record.outcome,
+        crate::post_route_policy::PostRoutePolicyOutcome::RefineContract
+    );
+    assert_eq!(
+        pre_loop_clarify_candidates.as_slice(),
+        ["directory_file_delivery_requires_structured_selection"]
     );
     let _ = std::fs::remove_dir_all(root);
 }

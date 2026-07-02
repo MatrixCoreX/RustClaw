@@ -16,7 +16,7 @@ pub(super) fn apply_post_route_refinements(
             task.task_id
         );
     }
-    if auto_locator_scalar_file_without_current_locator_should_force_clarify(
+    if auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
         state,
         prompt,
         &post_route.execution_route_result,
@@ -108,7 +108,8 @@ pub(super) fn apply_post_route_refinements(
         "directory_file_delivery_requires_structured_selection",
     ) && !route_has_structured_list_selector(&post_route.execution_route_result)
     {
-        post_route.execution_route_result.needs_clarify = true;
+        post_route.execution_route_result.needs_clarify = false;
+        post_route.execution_route_result.clarify_question.clear();
         post_route
             .execution_route_result
             .output_contract
@@ -122,9 +123,13 @@ pub(super) fn apply_post_route_refinements(
         post_route.auto_locator_hint = None;
         post_route.auto_locator_resolved_direct = false;
         post_route.missing_locator_for_path_scoped_content = true;
+        push_pre_loop_clarify_candidate(
+            pre_loop_clarify_candidates,
+            "directory_file_delivery_requires_structured_selection",
+        );
         post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_directory_file_delivery_requires_structured_selection",
-            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
+            "post_route_directory_file_delivery_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
         );
     }
 }
