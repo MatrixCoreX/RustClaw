@@ -44,7 +44,7 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
     if let AgentAction::CallTool { tool: skill, args } | AgentAction::CallSkill { skill, args } =
         &action
     {
-        if !crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
+        if !crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
             .is_some_and(|policy| policy.is_allowed())
         {
             return None;

@@ -93,7 +93,7 @@ fn action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
     let AgentAction::CallTool { tool, args } = action else {
         return true;
     };
-    crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), tool, args)
+    crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), tool, args)
         .is_some_and(|policy| policy.is_allowed())
 }
 
