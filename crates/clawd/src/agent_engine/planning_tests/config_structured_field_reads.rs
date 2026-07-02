@@ -1455,7 +1455,7 @@ fn preferred_docker_basic_uses_capability_ref_with_semantic_none() {
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=docker.list_images".to_string();
-    let preferred = crate::contract_matrix::ActionRef {
+    let preferred = crate::evidence_policy::ActionRef {
         skill: "docker_basic".to_string(),
         action: None,
     };
@@ -1481,7 +1481,7 @@ fn preferred_docker_basic_ignores_legacy_semantic_without_capability_ref() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::DockerImages;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let preferred = crate::contract_matrix::ActionRef {
+    let preferred = crate::evidence_policy::ActionRef {
         skill: "docker_basic".to_string(),
         action: None,
     };
@@ -1510,7 +1510,7 @@ fn preferred_archive_basic_uses_capability_ref_with_semantic_none() {
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip|notes.txt".to_string();
     route.route_reason = "capability_ref=archive.read".to_string();
-    let preferred = crate::contract_matrix::ActionRef {
+    let preferred = crate::evidence_policy::ActionRef {
         skill: "archive_basic".to_string(),
         action: None,
     };
@@ -1551,7 +1551,7 @@ fn preferred_config_basic_uses_capability_ref_with_semantic_none() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     route.route_reason = "capability_ref=config.guard_rustclaw_config".to_string();
-    let preferred = crate::contract_matrix::ActionRef {
+    let preferred = crate::evidence_policy::ActionRef {
         skill: "config_basic".to_string(),
         action: None,
     };
@@ -1586,7 +1586,7 @@ fn preferred_config_edit_uses_capability_ref_with_semantic_none() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     route.route_reason = "capability_ref=config.validate_after_change".to_string();
-    let preferred = crate::contract_matrix::ActionRef {
+    let preferred = crate::evidence_policy::ActionRef {
         skill: "config_edit".to_string(),
         action: None,
     };
