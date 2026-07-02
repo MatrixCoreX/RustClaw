@@ -1114,14 +1114,7 @@ pub(super) fn preferred_config_basic_for_contract_hint(
     let capability_action =
         crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
             .and_then(config_basic_action_from_capability_action);
-    let action = capability_action.or(action_name).unwrap_or(
-        match route.effective_output_contract_semantic_kind() {
-            crate::OutputSemanticKind::ConfigRiskAssessment => "guard_rustclaw_config",
-            crate::OutputSemanticKind::ConfigValidation => "validate",
-            crate::OutputSemanticKind::StructuredKeys => "list_keys",
-            _ => "validate",
-        },
-    );
+    let action = capability_action.or(action_name).unwrap_or("validate");
     let path = config_path_for_contract_hint(route, auto_locator_path);
     if action == "validate" {
         return Some(config_basic_validate_action(path));
@@ -1156,13 +1149,7 @@ pub(super) fn preferred_config_edit_for_contract_hint(
     let capability_action =
         crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
             .and_then(config_edit_action_from_capability_action);
-    let action = capability_action.or(action_name).unwrap_or(
-        match route.effective_output_contract_semantic_kind() {
-            crate::OutputSemanticKind::ConfigRiskAssessment => "guard_config",
-            crate::OutputSemanticKind::ConfigValidation => "validate_config",
-            _ => "guard_config",
-        },
-    );
+    let action = capability_action.or(action_name).unwrap_or("guard_config");
     let path = config_path_for_contract_hint(route, auto_locator_path);
     let args = match action {
         "guard_config" => serde_json::json!({
@@ -1213,14 +1200,7 @@ pub(super) fn preferred_archive_basic_for_contract_hint(
     let capability_action =
         crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["archive"])
             .filter(|action| matches!(*action, "list" | "read" | "pack" | "unpack"));
-    let action = capability_action.or(action_name).unwrap_or(
-        match route.effective_output_contract_semantic_kind() {
-            crate::OutputSemanticKind::ArchiveRead => "read",
-            crate::OutputSemanticKind::ArchivePack => "pack",
-            crate::OutputSemanticKind::ArchiveUnpack => "unpack",
-            _ => "list",
-        },
-    );
+    let action = capability_action.or(action_name).unwrap_or("list");
     let args = match action {
         "list" => {
             let archive = archive_list_auto_locator_target_path(Some(route), auto_locator_path)
