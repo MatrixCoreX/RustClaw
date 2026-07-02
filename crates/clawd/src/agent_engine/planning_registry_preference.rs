@@ -386,19 +386,14 @@ fn action_uses_generic_fallback_capability_for_preferred_route(
         return false;
     }
 
-    if let Some(registry) = state.get_skills_registry() {
-        if registry.get(canonical_skill_name).is_some_and(|entry| {
+    state.get_skills_registry().is_some_and(|registry| {
+        registry.get(canonical_skill_name).is_some_and(|entry| {
             matches!(
                 entry.primary_fallback_role,
                 Some(PrimaryFallbackRole::Fallback)
             )
-        }) {
-            return true;
-        }
-    }
-
-    // Compatibility for older registries without `primary_fallback_role`.
-    canonical_skill_name.eq_ignore_ascii_case("run_cmd")
+        })
+    })
 }
 
 fn action_is_generic_file_observation(action: &AgentAction) -> bool {
