@@ -187,13 +187,17 @@ fn eligibility_uses_contract_not_legacy_route_trace() {
     assert!(eligibility
         .boundary_requirements
         .contains(&"agent_loop_entry"));
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"loop_owned_clarify"));
     assert!(!eligibility
         .boundary_requirements
         .contains(&"planner_execute"));
+    assert!(!eligibility.boundary_requirements.contains(&"no_clarify"));
 }
 
 #[test]
-fn unresolved_locator_marker_blocks_migration_class_even_when_gate_is_execute() {
+fn unresolved_locator_marker_stays_loop_owned_for_selected_evidence_guard() {
     let mut route = route_result(
         OutputResponseShape::Scalar,
         OutputSemanticKind::FileBasename,
@@ -206,9 +210,18 @@ fn unresolved_locator_marker_blocks_migration_class_even_when_gate_is_execute() 
 
     let eligibility = agent_loop_eligibility(&route);
 
-    assert!(!eligibility.eligible);
-    assert_eq!(eligibility.blocked_reason, "unresolved_clarify_or_locator");
-    assert_eq!(agent_decides_eligible_migration_class(&route), "none");
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskStructuredRead)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "structured_field_read"
+    );
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"loop_owned_clarify"));
 }
 
 #[test]

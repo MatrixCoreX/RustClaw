@@ -3,13 +3,11 @@ use crate::{
     ScheduleKind,
 };
 
-use super::planning_route_markers::route_has_unresolved_clarify_or_locator_marker;
-
 const LOW_RISK_READ_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
-    "no_clarify",
+    "loop_owned_clarify",
     "no_delivery",
     "evidence_required",
 ];
@@ -18,7 +16,7 @@ const LOW_RISK_CONTEXT_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
-    "no_clarify",
+    "loop_owned_clarify",
     "no_delivery",
     "planner_context_available",
 ];
@@ -27,7 +25,7 @@ const LOW_RISK_DIRECT_RESPONSE_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
-    "no_clarify",
+    "loop_owned_clarify",
     "no_delivery",
     "no_external_evidence_required",
 ];
@@ -42,6 +40,7 @@ const LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "single_file_delivery",
     "evidence_required",
     "bound_locator_or_selector",
+    "loop_owned_clarify",
     "delivery_consistency_gate",
 ];
 
@@ -172,9 +171,6 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     }
     if route.schedule_kind != ScheduleKind::None {
         return AgentLoopEligibility::blocked("schedule_active");
-    }
-    if route_has_unresolved_clarify_or_locator_marker(route) {
-        return AgentLoopEligibility::blocked("unresolved_clarify_or_locator");
     }
     if route_is_low_risk_single_file_delivery(route, &contract) {
         return AgentLoopEligibility::eligible_with_requirements(
