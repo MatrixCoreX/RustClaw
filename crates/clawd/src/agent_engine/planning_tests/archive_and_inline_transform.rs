@@ -494,7 +494,7 @@ fn planner_prompt_contract_guard_allows_present_compact_contract_block() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let contract_line =
-        crate::contract_matrix::compact_prompt_line_for_route(&route).expect("contract line");
+        crate::evidence_policy::compact_prompt_line_for_route(&route).expect("contract line");
     let prompt = format!("System\n{contract_line}\nUser");
 
     ensure_required_contract_block_present(Some(&route), &prompt).expect("contract present");
