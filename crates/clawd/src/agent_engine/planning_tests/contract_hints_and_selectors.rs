@@ -839,7 +839,7 @@ fn http_download_artifact_contract_uses_http_basic_download_plan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "document/http/download/nl-codex-parity-example.body".to_string();
-    route.resolved_intent = "https://example.com".to_string();
+    route.resolved_intent = "capability_ref=http_basic.get url=https://example.com".to_string();
     let loop_state = LoopState::new(1);
 
     let plan = http_download_artifact_deterministic_plan_result(
@@ -847,7 +847,7 @@ fn http_download_artifact_contract_uses_http_basic_download_plan() {
         "download URL artifact",
         Some(&route),
         &loop_state,
-        "https://example.com",
+        "download artifact",
     )
     .expect("URL plus output path contract should use http_basic download");
 
