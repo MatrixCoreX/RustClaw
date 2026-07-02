@@ -15,11 +15,7 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
         || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !route.output_contract_marker_is_any(&[
-            crate::OutputSemanticKind::CommandOutputSummary,
-            crate::OutputSemanticKind::ArchiveList,
-            crate::OutputSemanticKind::ContentExcerptSummary,
-        ])
+        || !route_requests_archive_database_aggregate_capabilities(route)
         || !archive_basic_enabled_for_planning(state)
         || !db_basic_enabled_for_planning(state)
     {
@@ -53,7 +49,7 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
             }),
         },
     ];
-    if route_requests_schema_version_machine_token(route, current_user_text) {
+    if route_requests_schema_version_machine_token(route) {
         actions.push(AgentAction::CallSkill {
             skill: "db_basic".to_string(),
             args: serde_json::json!({
@@ -87,6 +83,20 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
 fn db_basic_enabled_for_planning(state: &AppState) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains("db_basic")
+}
+
+fn route_requests_archive_database_aggregate_capabilities(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action_name(route, &["archive"], &["list"])
+        && crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["read"],
+        )
+        && crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["database"],
+            &["list_tables"],
+        )
 }
 
 fn aggregate_archive_path(
@@ -236,28 +246,12 @@ fn push_sqlite_path_candidate(out: &mut Vec<String>, candidate: &str) {
     }
 }
 
-fn route_requests_schema_version_machine_token(
-    route: &RouteResult,
-    current_user_text: &str,
-) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::SqliteSchemaVersion)
-        || [
-            route.route_reason.as_str(),
-            route.resolved_intent.as_str(),
-            current_user_text,
-        ]
-        .into_iter()
-        .any(text_has_schema_version_machine_token)
-}
-
-fn text_has_schema_version_machine_token(text: &str) -> bool {
-    [
-        "database.schema_version",
-        "sqlite_schema_version",
-        "schema_version",
-    ]
-    .iter()
-    .any(|token| text.contains(token))
+fn route_requests_schema_version_machine_token(route: &RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["database"],
+        &["schema_version"],
+    )
 }
 
 fn aggregate_action_allowed(route: &RouteResult, action: &AgentAction) -> bool {
