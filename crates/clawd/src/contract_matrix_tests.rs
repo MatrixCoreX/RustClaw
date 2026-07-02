@@ -158,6 +158,16 @@ fn route_capability_ref_action_policy_does_not_require_semantic_bridge() {
 }
 
 #[test]
+fn config_list_keys_capability_ref_supplies_key_list_shape_without_semantic_kind() {
+    let route = route_with_machine_capability_ref("capability_ref=config.list_keys");
+
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::KeyListOrKeySummary)
+    );
+}
+
+#[test]
 fn route_capability_ref_arg_policy_does_not_require_semantic_bridge() {
     let route = route_with_machine_capability_ref("capability_ref=config.validate");
 
