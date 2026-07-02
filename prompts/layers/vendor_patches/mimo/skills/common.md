@@ -1,15 +1,11 @@
-<!-- AUTO-GENERATED: sync_skill_docs.py -->
+Vendor tuning for Mimo models:
 
-
-Vendor tuning for MiniMax M-series models:
 - Treat each skill description as an operational contract, not loose inspiration.
+- Prefer registry capability names and explicit action tokens over translated skill names, colloquial user phrases, or inferred legacy semantic kinds.
 - Use only the capabilities explicitly described by the skill and keep arguments minimal and standalone.
 - Avoid stuffing unrelated prior outputs into skill arguments unless the user explicitly asks for grounding in those outputs.
-- Prefer the narrowest skill/tool that can finish the subtask correctly.
 - Keep downstream outputs compatible with the existing planner and parser expectations.
-- Avoid meta discussion; optimize for clean planner consumption rather than human-facing flourish.
-- Prefer registry capability names and explicit action tokens over translated skill names, colloquial user phrases, or inferred legacy semantic kinds.
-- Keep JSON action plans strict even when the current model is exposed through an OpenAI-compatible API surface.
+- Optimize for strict planner consumption instead of human-facing flourish.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
