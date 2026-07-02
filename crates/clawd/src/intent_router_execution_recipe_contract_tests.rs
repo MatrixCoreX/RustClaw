@@ -17,7 +17,7 @@ fn scalar_runtime_tool_recipe_home_locator_repairs_to_current_user_patch() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"scalar_path_only",
+            "contract_marker":"scalar_path_only",
             "locator_hint":"{}"
           }},
           "execution_recipe":{{"kind":"tool","tool_name":"system_basic","parameters":{{}}}},
@@ -33,7 +33,7 @@ fn scalar_runtime_tool_recipe_home_locator_repairs_to_current_user_patch() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -62,7 +62,7 @@ fn scalar_path_runtime_tool_recipe_without_locator_repairs_to_raw_command_contra
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"scalar_path_only",
+            "contract_marker":"scalar_path_only",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -80,7 +80,7 @@ fn scalar_path_runtime_tool_recipe_without_locator_repairs_to_raw_command_contra
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -109,7 +109,7 @@ fn scalar_path_pwd_recipe_preserves_path_contract() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"scalar_path_only",
+            "contract_marker":"scalar_path_only",
             "locator_hint":"",
             "self_extension":{"mode":"none","trigger":"none","execute_now":false}
           },
@@ -134,7 +134,7 @@ fn scalar_path_pwd_recipe_preserves_path_contract() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("scalar_path_only")
     );
@@ -225,7 +225,7 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
             "response_shape":"one_sentence",
             "requires_content_evidence":true,
             "locator_kind":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -264,7 +264,7 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -303,7 +303,7 @@ fn package_manager_capability_recipe_wins_over_scalar_runtime_shape() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -322,7 +322,7 @@ fn package_manager_capability_recipe_wins_over_scalar_runtime_shape() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -356,7 +356,7 @@ fn port_probe_tool_recipe_repairs_to_service_status_contract() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -378,7 +378,7 @@ fn port_probe_tool_recipe_repairs_to_service_status_contract() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("service_status")
     );
@@ -512,7 +512,7 @@ fn structured_field_recipe_repairs_structured_keys_contract_to_scalar_value() {
             "requires_content_evidence":true,
             "locator_kind":"path",
             "locator_hint":"crates/clawd/Cargo.toml",
-            "semantic_kind":"structured_keys"
+            "contract_marker":"structured_keys"
           },
           "execution_recipe":{
             "kind":"tool",
@@ -539,7 +539,7 @@ fn structured_field_recipe_repairs_structured_keys_contract_to_scalar_value() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -646,7 +646,7 @@ fn file_read_recipe_does_not_trust_model_only_filename_semantic() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -689,7 +689,7 @@ fn file_read_recipe_preserves_explicit_filename_only_schema_request() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("file_names")
     );
@@ -716,7 +716,7 @@ fn contract_repair_report_still_repairs_unknown_semantic_contracts() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"unknown_observable_semantic",
+            "contract_marker":"unknown_observable_semantic",
             "locator_hint":""
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"}

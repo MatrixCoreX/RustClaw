@@ -20,9 +20,9 @@ pub(super) fn mark_output_contract_requires_content_evidence(
     }
 }
 
-pub(super) fn force_output_contract_semantic_kind(
+pub(super) fn force_output_contract_marker(
     obj: &mut serde_json::Map<String, Value>,
-    semantic_kind: OutputSemanticKind,
+    contract_marker: OutputSemanticKind,
 ) {
     let value = obj
         .entry("output_contract".to_string())
@@ -32,8 +32,8 @@ pub(super) fn force_output_contract_semantic_kind(
     }
     if let Some(contract) = value.as_object_mut() {
         contract.insert(
-            "semantic_kind".to_string(),
-            Value::String(semantic_kind.as_str().to_string()),
+            "contract_marker".to_string(),
+            Value::String(contract_marker.as_str().to_string()),
         );
     }
 }
@@ -104,7 +104,7 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
     let model_only_filename_semantic = !request_declares_filename_only_schema_token
         && (recipe_declares_filename_only_output
             || contract
-                .get("semantic_kind")
+                .get("contract_marker")
                 .and_then(scalar_json_value_text)
                 .is_some_and(|value| {
                     parse_output_semantic_kind(&value) == OutputSemanticKind::FileNames
@@ -118,7 +118,7 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
     }
     if scalar_extraction || model_only_filename_semantic {
         contract.insert(
-            "semantic_kind".to_string(),
+            "contract_marker".to_string(),
             Value::String(OutputSemanticKind::None.as_str().to_string()),
         );
     }
@@ -128,7 +128,7 @@ pub(super) fn normalize_output_contract_for_structured_read_recipe(
             Value::String("strict".to_string()),
         );
         contract.insert(
-            "semantic_kind".to_string(),
+            "contract_marker".to_string(),
             Value::String(OutputSemanticKind::FileNames.as_str().to_string()),
         );
     }
@@ -183,7 +183,7 @@ pub(super) fn normalize_output_contract_for_package_detect_manager_capability(
     );
     contract.insert("locator_hint".to_string(), Value::String(String::new()));
     contract.insert(
-        "semantic_kind".to_string(),
+        "contract_marker".to_string(),
         Value::String(OutputSemanticKind::None.as_str().to_string()),
     );
 }
@@ -216,7 +216,7 @@ pub(super) fn normalize_output_contract_for_service_status_recipe(
     );
     contract.insert("locator_hint".to_string(), Value::String(String::new()));
     contract.insert(
-        "semantic_kind".to_string(),
+        "contract_marker".to_string(),
         Value::String(OutputSemanticKind::ServiceStatus.as_str().to_string()),
     );
 }
@@ -268,16 +268,16 @@ pub(super) fn normalize_output_contract_for_command_payload(
         );
     }
 
-    let semantic_kind = contract
-        .get("semantic_kind")
+    let contract_marker = contract
+        .get("contract_marker")
         .and_then(scalar_json_value_text)
         .unwrap_or_default();
     if matches!(
-        parse_output_semantic_kind(&semantic_kind),
+        parse_output_semantic_kind(&contract_marker),
         OutputSemanticKind::None
     ) {
         contract.insert(
-            "semantic_kind".to_string(),
+            "contract_marker".to_string(),
             Value::String(OutputSemanticKind::RawCommandOutput.as_str().to_string()),
         );
     }

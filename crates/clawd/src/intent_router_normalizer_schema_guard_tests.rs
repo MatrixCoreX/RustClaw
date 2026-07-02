@@ -561,7 +561,7 @@ fn normalizer_schema_normalization_keeps_structured_contract_over_recipe_text() 
           "reason":"requires actual directory observation",
           "confidence":0.95,
           "decision":"planner_execute",
-          "output_contract":{"response_shape":"strict","semantic_kind":"existence_with_path","requires_content_evidence":true},
+          "output_contract":{"response_shape":"strict","contract_marker":"existence_with_path","requires_content_evidence":true},
           "execution_recipe":{
             "command":"ls -la /home/guagua/rustclaw | grep '^\\.' | head -3",
             "action_type":"list_hidden_files"
@@ -1761,7 +1761,7 @@ fn normalizer_schema_normalization_recovers_command_output_contract_with_unknown
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("raw_command_output")
     );
