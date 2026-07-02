@@ -308,7 +308,7 @@ fn explicit_document_targets_win_over_workspace_log_analyze() {
     let mut state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Free,
     );
@@ -380,7 +380,7 @@ fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Free,
     );
@@ -444,7 +444,7 @@ fn explicit_raw_output_file_target_preserves_tail_slice_selector() {
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -542,7 +542,7 @@ fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Free,
     );

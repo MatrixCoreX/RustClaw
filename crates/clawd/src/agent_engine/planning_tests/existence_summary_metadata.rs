@@ -16,7 +16,7 @@ fn existence_summary_explicit_file_targets_collect_metadata_before_content_reads
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
