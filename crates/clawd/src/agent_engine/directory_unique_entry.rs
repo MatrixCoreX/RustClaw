@@ -1146,6 +1146,7 @@ pub(super) fn archive_member_path_is_safe(member: &str) -> bool {
         })
 }
 
+#[cfg(test)]
 pub(super) fn has_archive_read_observation(
     loop_state: &LoopState,
     archive: &str,
@@ -1175,6 +1176,7 @@ pub(super) fn has_archive_read_observation(
     })
 }
 
+#[cfg(test)]
 pub(super) fn archive_read_deterministic_plan_result(
     goal: &str,
     state: &AppState,
@@ -1213,6 +1215,7 @@ pub(super) fn archive_read_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn archive_unpack_deterministic_plan_result(
     goal: &str,
     state: &AppState,
@@ -1254,6 +1257,7 @@ pub(super) fn archive_unpack_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn archive_pack_deterministic_plan_result(
     goal: &str,
     state: &AppState,
@@ -1352,6 +1356,7 @@ fn route_requests_archive_list(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action_name(route, &["archive"], &["list"])
 }
 
+#[cfg(test)]
 pub(super) fn archive_list_auto_locator_deterministic_plan_result(
     goal: &str,
     state: &AppState,
