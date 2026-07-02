@@ -915,7 +915,7 @@ fn apply_ask_post_route(
     }
     if post_route.missing_locator_for_path_scoped_content {
         info!(
-            "{} worker_once: ask locator_boundary_requires_clarify task_id={} reason=locator_required_for_path_scoped_content raw_text={} resolved_text={}",
+            "{} worker_once: ask locator_boundary_needs_loop_decision task_id={} reason=locator_required_for_path_scoped_content raw_text={} resolved_text={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(prompt),

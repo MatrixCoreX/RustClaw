@@ -229,15 +229,16 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.set_planner_execute_finalize(finalize);
     }
 
-    let fuzzy_locator_requires_clarify = !fuzzy_locator_suggestions.is_empty()
+    let fuzzy_locator_has_boundary_choices = !fuzzy_locator_suggestions.is_empty()
         && (matches!(
             execution_route_result.output_contract.locator_kind,
             OutputLocatorKind::Path | OutputLocatorKind::Filename
         ) || current_workspace_content_summary_needs_concrete_locator);
-    let force_clarify = execution_route_result.needs_clarify
+    let boundary_clarify_requested = execution_route_result.needs_clarify
         || missing_locator_for_path_scoped_content
-        || fuzzy_locator_requires_clarify;
-    let force_clarify = force_clarify && !existing_file_delivery_can_try_locator_hint;
+        || fuzzy_locator_has_boundary_choices;
+    let boundary_clarify_requested =
+        boundary_clarify_requested && !existing_file_delivery_can_try_locator_hint;
     let content_evidence_has_boundary_scope = execution_route_result
         .output_contract
         .requires_content_evidence
@@ -250,7 +251,7 @@ pub(crate) fn apply_post_route_policy(
             )
             || current_workspace_content_summary_needs_concrete_locator);
     let clarify_has_boundary_contract = missing_locator_for_path_scoped_content
-        || fuzzy_locator_requires_clarify
+        || fuzzy_locator_has_boundary_choices
         || content_evidence_has_boundary_scope
         || locator_kind_requires_path_binding(execution_route_result.output_contract.locator_kind)
         || execution_route_result.output_contract.delivery_required
@@ -259,8 +260,9 @@ pub(crate) fn apply_post_route_policy(
             crate::OutputDeliveryIntent::None
         )
         || current_workspace_content_summary_needs_concrete_locator;
-    let non_boundary_clarify_requested = force_clarify && !clarify_has_boundary_contract;
-    let apply_force_clarify = force_clarify && !non_boundary_clarify_requested;
+    let non_boundary_clarify_requested =
+        boundary_clarify_requested && !clarify_has_boundary_contract;
+    let apply_boundary_clarify = boundary_clarify_requested && !non_boundary_clarify_requested;
     if non_boundary_clarify_requested {
         execution_route_result.needs_clarify = false;
         if !execution_route_result.is_execute_gate()
@@ -269,7 +271,7 @@ pub(crate) fn apply_post_route_policy(
             execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         }
     }
-    if apply_force_clarify {
+    if apply_boundary_clarify {
         execution_route_result.needs_clarify = true;
     }
 
@@ -310,7 +312,7 @@ pub(crate) fn apply_post_route_policy(
             "post_route_non_boundary_clarify_deferred_to_agent_loop",
             PostRoutePolicyOutcome::NoChange,
         )
-    } else if force_clarify {
+    } else if boundary_clarify_requested {
         PostRouteGateRecord::with_owner(
             "boundary_clarify_gate",
             "post_route_boundary_clarify_required",

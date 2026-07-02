@@ -126,7 +126,7 @@ fn deictic_synthesized_relative_path_forces_clarify() {
 }
 
 #[test]
-fn deictic_forced_clarify_uses_machine_reason_code() {
+fn deictic_defer_uses_machine_reason_code() {
     let mut route = executable_filename_route();
     route.route_reason = "search_locator_required".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -300,7 +300,7 @@ fn deictic_guards_allow_locator_bound_to_active_ordered_entry() {
 }
 
 #[test]
-fn deictic_memory_only_command_output_reference_does_not_force_clarify() {
+fn deictic_memory_only_command_output_reference_does_not_defer_to_agent_loop() {
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
