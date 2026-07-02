@@ -257,12 +257,6 @@ impl AgentLoopGuardPolicy {
             return LoopBudgetProfile::General;
         };
         let contract = crate::TaskContract::from_route_result(route);
-        if !matches!(
-            contract.intent_kind,
-            crate::task_contract::TaskIntentKind::PlannerExecute
-        ) {
-            return LoopBudgetProfile::FastRead;
-        }
         if route.output_contract.delivery_required
             || route.wants_file_delivery
             || matches!(
