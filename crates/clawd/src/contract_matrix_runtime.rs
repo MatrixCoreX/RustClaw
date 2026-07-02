@@ -279,6 +279,13 @@ fn scalar_contract_capability_ref_shape(route: &RouteResult) -> Option<FinalAnsw
     ) {
         return Some(FinalAnswerShape::Scalar);
     }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["system_basic"],
+        &["extract_field"],
+    ) {
+        return Some(FinalAnswerShape::Scalar);
+    }
     None
 }
 
@@ -778,6 +785,7 @@ impl PolicyActionRef {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn action_policy_for_output_contract(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
@@ -825,11 +833,10 @@ pub(crate) fn action_policy_for_route(
     args: &Value,
 ) -> Option<ContractActionPolicy> {
     let route = route?;
-    if let Some(policy) = route_capability_ref_action_policy(route, normalized_skill, args) {
-        return Some(policy);
+    if route_has_capability_refs(route) {
+        return route_capability_ref_action_policy(route, normalized_skill, args);
     }
-    let output_contract = route.effective_output_contract();
-    action_policy_for_output_contract(Some(&output_contract), normalized_skill, args)
+    None
 }
 
 fn route_capability_ref_action_policy(

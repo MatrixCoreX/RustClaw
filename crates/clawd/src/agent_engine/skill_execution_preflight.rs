@@ -157,6 +157,11 @@ pub(super) fn contract_matrix_action_policy_error(
     ) {
         return None;
     }
+    if let Some(err) =
+        run_cmd_async_start_policy_error(state, normalized_skill, classification_args)
+    {
+        return Some(err);
+    }
     if let Some(err) = generated_media_path_run_cmd_policy_error(
         state,
         loop_state,
@@ -165,23 +170,13 @@ pub(super) fn contract_matrix_action_policy_error(
     ) {
         return Some(err);
     }
-    let policy = loop_state
-        .route_policy_context
-        .as_ref()
-        .and_then(|route| {
-            crate::contract_matrix::action_policy_for_route(
-                Some(route),
-                normalized_skill,
-                classification_args,
-            )
-        })
-        .or_else(|| {
-            crate::contract_matrix::action_policy_for_output_contract(
-                loop_state.output_contract.as_ref(),
-                normalized_skill,
-                classification_args,
-            )
-        })?;
+    let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
+        crate::contract_matrix::action_policy_for_route(
+            Some(route),
+            normalized_skill,
+            classification_args,
+        )
+    })?;
     if policy.is_allowed() {
         return None;
     }
@@ -318,6 +313,46 @@ fn runtime_async_job_start_allows_run_cmd_despite_contract(
         && positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800)
 }
 
+fn run_cmd_async_start_policy_error(
+    state: &AppState,
+    normalized_skill: &str,
+    classification_args: &Value,
+) -> Option<String> {
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
+        || classification_args
+            .get("async_start")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    if positive_bounded_i64_arg(classification_args, "poll_after_seconds", 1, 86_400)
+        && positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800)
+    {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_action_rejected",
+        "async_start_requires_bounded_poll_and_expiry",
+        None,
+        Some(json!({
+            "reason_code": "async_start_requires_bounded_poll_and_expiry",
+            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
+            "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
+            "action": "run_cmd",
+            "required_fields": ["poll_after_seconds", "expires_in_seconds"],
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                classification_args,
+                "async_start_requires_bounded_poll_and_expiry",
+                "run_cmd_async_start_preflight",
+            ),
+        })),
+    ))
+}
+
 fn positive_bounded_i64_arg(args: &Value, key: &str, min: i64, max: i64) -> bool {
     args.get(key)
         .and_then(Value::as_i64)
@@ -336,7 +371,7 @@ fn generated_media_path_run_cmd_policy_error(
         return None;
     }
     let output_contract = loop_state.output_contract.as_ref()?;
-    if output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFilePathReport
+    if !output_contract.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
         || !crate::media_artifact_paths::is_media_artifact_path(&output_contract.locator_hint)
     {
         return None;
@@ -690,7 +725,7 @@ fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -
     )
 }
 
-fn preflight_permission_decision(
+pub(super) fn preflight_permission_decision(
     state: &AppState,
     normalized_skill: &str,
     args: &Value,

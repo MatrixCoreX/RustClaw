@@ -492,11 +492,8 @@ fn archive_pack_contract_allows_pack_and_post_pack_list_but_not_cleanup_delete()
             "path": "tmp/bundle.zip",
             "target_kind": "file"
         }),
-    )
-    .expect("cleanup policy decision");
-    assert!(!cleanup_policy.is_allowed(), "{cleanup_policy:?}");
-    assert_eq!(cleanup_policy.action_key, "fs_basic.remove_path");
-    assert_ne!(cleanup_policy.contract_match, "capability_ref");
+    );
+    assert!(cleanup_policy.is_none());
 }
 
 #[test]

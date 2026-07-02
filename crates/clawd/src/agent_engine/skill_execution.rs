@@ -28,6 +28,7 @@ use skill_execution_subagent::record_subagent_step_execution;
 #[cfg(test)]
 use skill_execution_preflight::{
     contains_unresolved_runtime_template_arg, preflight_failure_metadata,
+    preflight_permission_decision,
 };
 
 fn log_step_journal_summary(
