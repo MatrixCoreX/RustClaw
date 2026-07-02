@@ -1715,14 +1715,16 @@ pub(crate) fn verify_plan(
         .filter(|_| route_requires_contract(input.route_result))
         .is_some_and(|route| crate::contract_matrix::final_answer_shape_for_route(route).is_none());
     if route_contract_missing {
-        let semantic_kind = input
+        let contract_marker = input
             .route_result
             .map(|route| route.effective_output_contract_semantic_kind().as_str())
             .unwrap_or("unknown");
         issues.push(VerifyIssue {
             step_id: "route".to_string(),
             kind: VerifyIssueKind::ContractMissing,
-            detail: format!("no contract matrix entry matched semantic kind `{semantic_kind}`"),
+            detail: format!(
+                "error_code=contract_matrix_entry_missing contract_marker={contract_marker}"
+            ),
             missing_fields: Vec::new(),
         });
     }
