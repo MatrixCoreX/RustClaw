@@ -14,7 +14,7 @@ Capability boundary:
 - Do not choose a skill, tool, or capability family from natural-language wording in this normalizer.
 - Do not invent `capability_ref=<...>` from a user phrase.
 - If a machine `capability_ref=<registry.capability>` token is already present in context, preserve it in `resolved_user_intent` or `reason` for the planner.
-- For all ordinary registry-owned capabilities such as weather, search, market, image, audio, video, music, package, Docker, publishing, social, or account/order workflows, set `output_contract.semantic_kind="none"` and let the planner/resolver select the capability.
+- For all ordinary registry-owned capabilities such as weather, search, market, image, audio, video, music, package, Docker, publishing, social, or account/order workflows, set `output_contract.contract_marker="none"` and let the planner/resolver select the capability.
 
 Boundary fields this layer may extract:
 - Explicit locators: path, filename, URL, current-workspace scope, delivery target, attachment/media presence.
@@ -25,14 +25,14 @@ Boundary fields this layer may extract:
 
 Output contract discipline:
 - `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
-- Set `semantic_kind="none"` in live normalizer output. Historical semantic tokens may be accepted by downstream compatibility parsers, but this vendor patch must not ask MiniMax to choose them.
+- Set `contract_marker="none"` in live normalizer output. Historical `semantic_kind` tokens may be accepted by downstream compatibility parsers, but this vendor patch must not ask MiniMax to choose them.
 - Express boundary/output requirements through `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `response_shape`, `state_patch`, and exact machine selectors instead of legacy semantic kinds.
 - Preserve exact constraints as machine tokens in `resolved_user_intent` or structured fields: slice mode/count, selector target kind, selector limit, selector sort, include hidden, include metadata, structured field path, quantity comparison selection, and async job metadata.
 
 Execution signal discipline:
 - If fresh local/system/workspace/tool evidence is required, set `output_contract.requires_content_evidence=true`.
 - If the user wants a file token for an existing or generated local artifact, set `wants_file_delivery=true`, `output_contract.delivery_required=true`, `delivery_intent="file_single"`, and `response_shape="file_token"`.
-- If the request is ordinary conversation, writing, explanation, translation, or creative response without IO, keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`, `semantic_kind="none"`, and `execution_recipe.kind="none"`.
+- If the request is ordinary conversation, writing, explanation, translation, or creative response without IO, keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`, `contract_marker="none"`, and `execution_recipe.kind="none"`.
 - If the user explicitly says not to use tools, commands, inspection, search, or IO, preserve that as a constraint and do not manufacture an execution signal.
 
 Clarification discipline:
@@ -74,7 +74,7 @@ Minimal ordinary no-IO skeleton:
     "delivery_required": false,
     "locator_kind": "none",
     "delivery_intent": "none",
-    "semantic_kind": "none",
+    "contract_marker": "none",
     "locator_hint": "",
     "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
   },

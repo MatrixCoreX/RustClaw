@@ -9,7 +9,7 @@ Routing authority:
 - The planner/agent loop owns ordinary `respond`, `clarify`, `act`, capability choice, argument completion, confirmation, background wait, done state, and final wording.
 - Do not choose a skill, tool, or capability family from natural-language wording in this normalizer.
 - Do not invent `capability_ref=<...>` from a user phrase.
-- For ordinary registry-owned capabilities, set `output_contract.semantic_kind="none"` and let the planner/resolver select the capability.
+- For ordinary registry-owned capabilities, set `output_contract.contract_marker="none"` and let the planner/resolver select the capability.
 - `decision` is only a compatibility trace derived from machine fields. It is not routing authority.
 
 Boundary fields this layer may extract:
