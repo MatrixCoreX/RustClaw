@@ -8,14 +8,6 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     let route_only_tokens = route_result
         .map(|route| format!("{}\n{}", route.route_reason, route.resolved_intent))
         .unwrap_or_default();
-    let route_tokens = if let Some(route) = route_result {
-        format!(
-            "{}\n{}\n{}",
-            route.route_reason, route.resolved_intent, goal
-        )
-    } else {
-        goal.to_string()
-    };
     if loop_state.round_no <= 1
         && finalizer_language_policy_dry_run_tokens_present(&route_only_tokens)
     {
@@ -68,7 +60,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             }],
         ));
     }
-    if task_control_cancel_dry_run_tokens_present(&route_tokens) {
+    if task_control_cancel_dry_run_tokens_present(&route_only_tokens) {
         return Some(build_plan_result(
             goal,
             "deterministic:task_control_cancel_dry_run_contract",
@@ -105,7 +97,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             }],
         ));
     }
-    if let Some(intent) = task_control_lifecycle_dry_run_intent(&route_tokens) {
+    if let Some(intent) = task_control_lifecycle_dry_run_intent(&route_only_tokens) {
         let actions = task_control_lifecycle_dry_run_actions(intent);
         return Some(build_plan_result(
             goal,
@@ -171,7 +163,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             }],
         ));
     }
-    if async_job_dry_run_tokens_present(&route_tokens) {
+    if async_job_dry_run_tokens_present(&route_only_tokens) {
         return Some(build_plan_result(
             goal,
             "deterministic:async_job_poll_contract_dry_run",
@@ -294,12 +286,13 @@ fn answer_verifier_contract_dry_run_tokens_present(text: &str) -> bool {
 
 fn task_control_cancel_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    let has_explicit_cancel_action = normalized.contains("capability_ref=task_control.cancel_one")
-        || normalized.contains("capability_ref=task_control.cancel_all")
-        || normalized.contains("task_control.cancel_one")
-        || normalized.contains("task_control.cancel_all")
-        || normalized.contains("cancel_all")
-        || normalized.contains("cancel_one");
+    let has_explicit_cancel_action =
+        contains_machine_kv_or_json_pair(&normalized, "capability_ref", "task_control.cancel_one")
+            || contains_machine_kv_or_json_pair(
+                &normalized,
+                "capability_ref",
+                "task_control.cancel_all",
+            );
     has_explicit_cancel_action && has_dry_run_machine_token(&normalized)
 }
 
@@ -407,8 +400,10 @@ fn task_control_lifecycle_dry_run_intent(text: &str) -> Option<TaskControlLifecy
     if !has_dry_run_machine_token(&normalized) {
         return None;
     }
-    let include_resume = normalized.contains("capability_ref=task_control.resume");
-    let include_pause = normalized.contains("capability_ref=task_control.pause");
+    let include_resume =
+        contains_machine_kv_or_json_pair(&normalized, "capability_ref", "task_control.resume");
+    let include_pause =
+        contains_machine_kv_or_json_pair(&normalized, "capability_ref", "task_control.pause");
     if !include_resume && !include_pause {
         return None;
     }

@@ -52,6 +52,31 @@ fn generic_task_control_capability_ref_does_not_trigger_cancel_dry_run_contract(
 }
 
 #[test]
+fn task_control_cancel_dry_run_requires_capability_ref_assignment() {
+    let mut route = base_route_result();
+    route.route_reason = "task_control.cancel_one cancel_one dry_run=true".to_string();
+    route.resolved_intent =
+        "task_control.cancel_one action=cancel_one would_mutate=false".to_string();
+
+    assert!(structured_dry_run_response_deterministic_plan_result(
+        "dry-run task cancel contract",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .is_none());
+}
+
+#[test]
+fn task_control_dry_run_ignores_prompt_only_capability_refs() {
+    assert!(structured_dry_run_response_deterministic_plan_result(
+        "capability_ref=task_control.cancel_one capability_ref=task_control.resume dry_run=true",
+        None,
+        &LoopState::new(1),
+    )
+    .is_none());
+}
+
+#[test]
 fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projection() {
     let mut route = base_route_result();
     route.route_reason =
