@@ -7,8 +7,7 @@ use super::directory_observation::directory_pair_fallback_decision;
 use super::explicit_path_facts::explicit_surface_path_facts_fallback_decision;
 use super::inline_transform::inline_json_transform_fallback_decision;
 use super::parse_failed_fallback::{
-    empty_clarify_decision, parse_failed_explicit_capability_fallback_decision,
-    parse_failed_explicit_existing_path_observation_fallback_decision,
+    empty_clarify_decision, parse_failed_explicit_existing_path_observation_fallback_decision,
 };
 use super::{normalizer_output_from_fallback, IntentNormalizerOutput};
 use crate::intent::surface_signals::PromptSurfaceSignals;
@@ -119,25 +118,6 @@ pub(super) fn normalizer_llm_failed_fallback_output(
             None,
         );
     }
-    if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
-        surface_req,
-        req_surface,
-        &state.skill_rt.workspace_root,
-    ) {
-        info!(
-            "{} intent_normalizer task_id={} llm_failed_explicit_capability_fallback reason={} input={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            fallback.reason,
-            crate::truncate_for_log(req)
-        );
-        return normalizer_output_from_fallback(
-            req,
-            "llm_failed_structured_capability_fallback",
-            fallback,
-            None,
-        );
-    }
     if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
         surface_req,
         req_surface,
@@ -242,25 +222,6 @@ pub(super) fn normalizer_parse_failed_fallback_output(
         return normalizer_output_from_fallback(
             req,
             "parse_failed_contract_hint_fallback",
-            fallback,
-            None,
-        );
-    }
-    if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
-        surface_req,
-        req_surface,
-        &state.skill_rt.workspace_root,
-    ) {
-        info!(
-            "{} intent_normalizer task_id={} parse_failed_explicit_capability_fallback reason={} input={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            fallback.reason,
-            crate::truncate_for_log(req)
-        );
-        return normalizer_output_from_fallback(
-            req,
-            "parse_failed_structured_capability_fallback",
             fallback,
             None,
         );

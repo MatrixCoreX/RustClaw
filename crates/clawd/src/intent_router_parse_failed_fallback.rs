@@ -1,56 +1,9 @@
 use std::path::Path;
 
 use super::{
-    archive_pair_contract_from_surface, ascii_token_present, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-    RouteDecision, ScheduleKind,
+    archive_pair_contract_from_surface, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind,
 };
-
-pub(super) fn parse_failed_explicit_capability_fallback_decision(
-    req: &str,
-    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    workspace_root: &Path,
-) -> Option<RouteDecision> {
-    if !git_repository_state_surface_token_present(req)
-        || req_surface.has_explicit_path_or_url()
-        || req_surface.has_single_filename_candidate()
-        || req_surface.has_filename_candidates()
-        || req_surface.has_structured_target_refinement()
-        || req_surface.has_delivery_token_reference()
-    {
-        return None;
-    }
-
-    Some(RouteDecision {
-        resolved_user_intent: req.trim().to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        reason: "normalizer_parse_failed_explicit_git_repository_state".to_string(),
-        confidence: Some(0.55),
-        schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::GitRepositoryState,
-            locator_hint: workspace_root.display().to_string(),
-            ..Default::default()
-        },
-    })
-}
-
-fn git_repository_state_surface_token_present(req: &str) -> bool {
-    ascii_token_present(req, "git")
-        || ascii_token_present(req, "remote")
-        || ascii_token_present(req, "HEAD")
-        || ascii_token_present(req, "branch")
-}
 
 pub(super) fn parse_failed_explicit_existing_path_observation_fallback_decision(
     req: &str,

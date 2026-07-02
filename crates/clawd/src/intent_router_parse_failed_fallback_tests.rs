@@ -9,6 +9,20 @@ use super::{
     OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy, TurnType,
 };
 
+fn test_task(task_id: &str, text: &str) -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({ "text": text }).to_string(),
+    }
+}
+
 #[test]
 fn current_turn_locator_sanitizer_drops_contextual_path_prefix() {
     let req = "读一下 README.md 然后用恰好三句话总结，不要多也不要少";
@@ -368,61 +382,30 @@ fn fallback_normalizer_output_still_enforces_content_evidence_planner_execute() 
 }
 
 #[test]
-fn parse_failed_git_capability_fallback_builds_repository_state_contract() {
+fn parse_failed_fallback_no_longer_builds_git_semantic_contract() {
     let req = "只告诉我当前 git 分支名。";
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
-    let fallback = super::parse_failed_explicit_capability_fallback_decision(
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = test_task("parse-failed-no-git-semantic-contract", req);
+    let fallback = super::normalizer_parse_failed_fallback_output(
+        &state,
+        &task,
         req,
-        &surface,
-        std::path::Path::new("/workspace"),
-    )
-    .expect("explicit git capability fallback");
+        req,
+        &crate::intent::surface_signals::analyze_prompt_surface(req),
+        "{not-json",
+    );
 
-    assert!(!fallback.needs_clarify);
+    assert_eq!(fallback.route_trace_decision, FirstLayerDecision::Clarify);
+    assert!(fallback.needs_clarify);
     assert_eq!(
         fallback.output_contract.semantic_kind,
-        OutputSemanticKind::GitRepositoryState
+        OutputSemanticKind::None
     );
     assert_eq!(
         fallback.output_contract.locator_kind,
-        OutputLocatorKind::CurrentWorkspace
+        OutputLocatorKind::None
     );
-    assert!(fallback.output_contract.requires_content_evidence);
-}
-
-#[test]
-fn parse_failed_git_remote_fallback_builds_repository_state_contract() {
-    let req = "列出当前仓库 remote 名称和 URL";
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
-    let fallback = super::parse_failed_explicit_capability_fallback_decision(
-        req,
-        &surface,
-        std::path::Path::new("/workspace"),
-    )
-    .expect("explicit git remote fallback");
-
-    assert!(!fallback.needs_clarify);
-    assert_eq!(
-        fallback.output_contract.semantic_kind,
-        OutputSemanticKind::GitRepositoryState
-    );
-    assert_eq!(
-        fallback.output_contract.response_shape,
-        OutputResponseShape::Strict
-    );
-}
-
-#[test]
-fn parse_failed_git_capability_fallback_does_not_steal_path_targets() {
-    let req = "git show HEAD:README.md";
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
-
-    assert!(super::parse_failed_explicit_capability_fallback_decision(
-        req,
-        &surface,
-        std::path::Path::new("/workspace"),
-    )
-    .is_none());
+    assert!(!fallback.output_contract.requires_content_evidence);
 }
 
 #[test]

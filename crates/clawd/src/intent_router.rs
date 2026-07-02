@@ -4,9 +4,8 @@
 //! schedule_kind, route trace, needs_clarify, and output contract in one LLM call).
 //!
 //! **Fallback when normalizer LLM fails / parse fails:** stay on AskClarify unless the current
-//! request contains an explicit structured tool/capability domain with no competing locator.
-//! Those narrow fallbacks keep semantic routing owned by explicit contracts instead of
-//! natural-language hard-match recovery code.
+//! request contains an explicit structured boundary payload or locator contract that can be
+//! recovered without choosing an ordinary semantic capability before the planner loop.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -62,10 +61,7 @@ pub(crate) use clarify::{generate_or_reuse_clarify_question, try_handle_schedule
 #[path = "intent_router_parse_failed_fallback.rs"]
 mod parse_failed_fallback;
 #[cfg(test)]
-use parse_failed_fallback::{
-    parse_failed_explicit_capability_fallback_decision,
-    parse_failed_explicit_existing_path_observation_fallback_decision,
-};
+use parse_failed_fallback::parse_failed_explicit_existing_path_observation_fallback_decision;
 
 #[path = "intent_router_path_tokens.rs"]
 mod path_tokens;
