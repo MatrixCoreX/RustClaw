@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn matrix_strict_list_answer_is_grounded_in_successful_observation(
+pub(super) fn evidence_policy_strict_list_answer_is_grounded_in_successful_observation(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
@@ -109,7 +109,7 @@ fn route_contract_marker_is_directory_names(route: &RouteResult) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
 
-pub(super) fn matrix_table_answer_is_grounded_in_successful_observation(
+pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
@@ -125,7 +125,7 @@ pub(super) fn matrix_table_answer_is_grounded_in_successful_observation(
     candidate_cells.is_subset(&observed_cells) && observed_cells.is_subset(&candidate_cells)
 }
 
-pub(super) fn matrix_single_path_answer_is_grounded_in_successful_observation(
+pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
@@ -154,7 +154,7 @@ pub(super) fn matrix_single_path_answer_is_grounded_in_successful_observation(
         })
 }
 
-pub(super) fn matrix_delivery_artifact_answer_is_grounded_in_successful_observation(
+pub(super) fn evidence_policy_delivery_artifact_answer_is_grounded_in_successful_observation(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
