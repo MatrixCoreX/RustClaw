@@ -846,6 +846,35 @@ fn route_capability_ref_action_refs_do_not_inherit_wrong_semantic_matrix_scope()
 }
 
 #[test]
+fn route_capability_ref_compact_prompt_line_does_not_inherit_wrong_semantic_matrix_scope() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.validate");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    let line = compact_prompt_line_for_route(&route).expect("capability compact line");
+
+    assert!(line.contains("capability_policy"));
+    assert!(line.contains("match=capability_ref"));
+    assert!(line.contains("capability_refs=config.validate"));
+    assert!(line.contains("allowed_actions=config_basic.validate"));
+    assert!(!line.contains("contract_matrix"));
+    assert!(!line.contains("fs_basic.list_dir"));
+}
+
+#[test]
+fn unknown_route_capability_ref_does_not_fall_back_to_semantic_matrix_actions() {
+    let mut route = route_with_machine_capability_ref("capability_ref=unknown.future_action");
+    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+    assert!(allowed_action_refs_for_route(&route).is_empty());
+    assert!(preferred_action_refs_for_route(&route).is_empty());
+
+    let line = compact_prompt_line_for_route(&route).expect("unknown capability compact line");
+    assert!(line.contains("capability_refs=unknown.future_action"));
+    assert!(line.contains("allowed_actions=none"));
+    assert!(!line.contains("fs_basic.list_dir"));
+}
+
+#[test]
 fn route_policy_does_not_allow_config_action_without_capability_ref() {
     let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
     route.route_reason.clear();

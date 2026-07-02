@@ -105,8 +105,51 @@ fn bundled_skills_registry() -> Option<&'static SkillsRegistry> {
 }
 
 pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<String> {
+    if let Some(line) = compact_prompt_line_for_route_capability_ref(route) {
+        return Some(line);
+    }
     let output_contract = route.effective_output_contract();
     compact_prompt_line_for_output_contract(&output_contract)
+}
+
+fn compact_prompt_line_for_route_capability_ref(route: &RouteResult) -> Option<String> {
+    let capability_refs = crate::machine_capability_ref::route_capability_ref_tokens(route);
+    if capability_refs.is_empty() {
+        return None;
+    }
+    let capability_refs = capability_refs.join(",");
+    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence = if required_evidence.is_empty() {
+        "none".to_string()
+    } else {
+        required_evidence.join(",")
+    };
+    let allowed_actions = route_capability_ref_action_refs(route, false)
+        .into_iter()
+        .map(|action| action.as_key())
+        .collect::<Vec<_>>();
+    let allowed_actions = if allowed_actions.is_empty() {
+        "none".to_string()
+    } else {
+        allowed_actions.join(",")
+    };
+    let preferred_actions = route_capability_ref_action_refs(route, true)
+        .into_iter()
+        .map(|action| action.as_key())
+        .collect::<Vec<_>>();
+    let preferred_actions = if preferred_actions.is_empty() {
+        allowed_actions.clone()
+    } else {
+        preferred_actions.join(",")
+    };
+    let final_answer_shape = final_answer_shape_for_route_capability_ref(route)
+        .unwrap_or(FinalAnswerShape::Free)
+        .as_str();
+
+    Some(format!(
+        "- capability_policy source=registry match=capability_ref capability_refs={} evidence_profile=capability_ref required_evidence={} final_answer_shape={} allowed_actions={} preferred_actions={}",
+        capability_refs, required_evidence, final_answer_shape, allowed_actions, preferred_actions,
+    ))
 }
 
 pub(crate) fn compact_prompt_line_for_output_contract(
@@ -674,7 +717,7 @@ pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<Action
         return preferred_capability_refs;
     }
     let capability_refs = route_capability_ref_action_refs(route, false);
-    if !capability_refs.is_empty() {
+    if !capability_refs.is_empty() || route_has_capability_refs(route) {
         return capability_refs;
     }
     let output_contract = route.effective_output_contract();
@@ -698,11 +741,15 @@ fn allowed_action_refs_for_output_contract(
 
 pub(crate) fn allowed_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
     let capability_refs = route_capability_ref_action_refs(route, false);
-    if !capability_refs.is_empty() {
+    if !capability_refs.is_empty() || route_has_capability_refs(route) {
         return capability_refs;
     }
     let output_contract = route.effective_output_contract();
     allowed_action_refs_for_output_contract(&output_contract)
+}
+
+fn route_has_capability_refs(route: &RouteResult) -> bool {
+    !crate::machine_capability_ref::route_capability_ref_tokens(route).is_empty()
 }
 
 fn route_capability_ref_action_refs(route: &RouteResult, preferred_only: bool) -> Vec<ActionRef> {
