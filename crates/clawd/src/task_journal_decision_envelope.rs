@@ -226,10 +226,7 @@ pub(super) fn agent_loop_decision_envelope_json(
     json!({
         "schema_version": 1,
         "source": source,
-        "initial_hint_ref": route.route_trace_decision_for_legacy_journal().as_str(),
-        "initial_gate_ref": route.gate_kind().as_str(),
         "semantic_authority": semantic_authority,
-        "fallback_gate_policy": "fallback_safety_check_only",
         "decision": decision,
         "terminal_intent": terminal_intent,
         "control_intent": control_intent,
