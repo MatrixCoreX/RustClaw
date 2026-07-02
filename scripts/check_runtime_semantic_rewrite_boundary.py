@@ -124,6 +124,10 @@ PROMPT_LAYERS_ROOT = ROOT / "prompts/layers"
 INTENT_NORMALIZER_PROMPT = PROMPT_LAYERS_ROOT / "overlays/intent_normalizer_prompt.md"
 INTENT_NORMALIZER_SCHEMA = ROOT / "prompts/schemas/intent_normalizer.schema.json"
 CONTRACT_REPAIR_JUDGE_SCHEMA = ROOT / "prompts/schemas/contract_repair_judge.schema.json"
+PLANNER_EXECUTION_PROMPT_FILES: tuple[Path, ...] = (
+    PROMPT_LAYERS_ROOT / "overlays/loop_incremental_plan_prompt.md",
+    PROMPT_LAYERS_ROOT / "overlays/single_plan_execution_prompt.md",
+)
 BOUNDARY_PROMPT_SCHEMA_NO_LEGACY_SEMANTIC_KIND_FILES: tuple[Path, ...] = (
     INTENT_NORMALIZER_PROMPT,
     INTENT_NORMALIZER_SCHEMA,
@@ -328,6 +332,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_static_capability_compat_boundary())
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
+    findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
     findings.extend(scan_boundary_prompt_schema_legacy_semantic_kind_fields())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
@@ -559,6 +564,36 @@ def scan_prompt_layer_ordinary_semantic_tokens() -> list[Finding]:
         rel_path = rel(path)
         text = path.read_text(encoding="utf-8")
         findings.extend(scan_prompt_layer_text(rel_path, text))
+    return findings
+
+
+def scan_planner_prompt_legacy_semantic_kind_keys() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in PLANNER_EXECUTION_PROMPT_FILES:
+        findings.extend(
+            scan_planner_prompt_legacy_semantic_kind_keys_text(
+                rel(path),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return findings
+
+
+def scan_planner_prompt_legacy_semantic_kind_keys_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if "semantic_kind" not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                line_no,
+                "planner_prompt_legacy_semantic_kind_key",
+                line.strip(),
+            )
+        )
     return findings
 
 
@@ -2229,6 +2264,15 @@ def run_self_test() -> int:
     assert (
         blocked_prompt
         and blocked_prompt[0].kind == "prompt_layer_ordinary_semantic_token"
+    )
+    blocked_planner_legacy_key = scan_planner_prompt_legacy_semantic_kind_keys_text(
+        "prompts/layers/overlays/single_plan_execution_prompt.md",
+        "- For `semantic_kind=directory_purpose_summary`, do something.\n",
+    )
+    assert (
+        blocked_planner_legacy_key
+        and blocked_planner_legacy_key[0].kind
+        == "planner_prompt_legacy_semantic_kind_key"
     )
     blocked_boundary_semantic_kind = scan_boundary_semantic_kind_text(
         "prompts/schemas/intent_normalizer.schema.json",
