@@ -52,21 +52,13 @@ fn registry_capability_refs_from_route(
     })
     .filter_map(|part| {
         let capability = part.strip_prefix("capability_ref=")?.trim();
-        valid_capability_ref_token(capability).then_some(capability.to_string())
+        crate::machine_capability_ref::is_valid_capability_ref_value(capability)
+            .then_some(capability.to_string())
     })
     .collect::<Vec<_>>();
     refs.sort();
     refs.dedup();
     refs
-}
-
-fn valid_capability_ref_token(token: &str) -> bool {
-    let token = token.trim();
-    !token.is_empty()
-        && token.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-        && token.bytes().any(|byte| byte == b'.')
 }
 
 fn contract_marker_for_semantic_kind(semantic_kind: crate::OutputSemanticKind) -> &'static str {
