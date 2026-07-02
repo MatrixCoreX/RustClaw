@@ -69,6 +69,27 @@ fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> 
         .any(|marker| route_reason_has_machine_marker(route_reason, marker))
 }
 
+fn route_reason_has_capability_ref(route_reason: &str, capability: &str) -> bool {
+    let capability = capability.trim();
+    !capability.is_empty()
+        && machine_context_has_token(route_reason, &format!("capability_ref={capability}"))
+}
+
+fn route_reason_declares_archive_pair_capability(
+    route_reason: &str,
+    semantic_kind: OutputSemanticKind,
+) -> bool {
+    match semantic_kind {
+        OutputSemanticKind::ArchivePack => {
+            route_reason_has_capability_ref(route_reason, "archive.pack")
+        }
+        OutputSemanticKind::ArchiveUnpack => {
+            route_reason_has_capability_ref(route_reason, "archive.unpack")
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn should_detach_bare_acknowledgement_from_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -242,7 +263,11 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     if let Some((semantic_kind, locator_hint)) =
-        archive_pair_contract_from_surface(output_contract, req_surface)
+        archive_pair_contract_from_surface(output_contract, req_surface).filter(
+            |(semantic_kind, _)| {
+                route_reason_declares_archive_pair_capability(route_reason, *semantic_kind)
+            },
+        )
     {
         output_contract.semantic_kind = semantic_kind;
         output_contract.requires_content_evidence = true;
@@ -345,7 +370,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("generated_file_delivery_existing_content_summary_repair");
     }
 
-    if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface) {
+    if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface)
+        .filter(|_| route_reason_has_capability_ref(route_reason, "archive.read"))
+    {
         output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
@@ -356,7 +383,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("archive_read_member_contract_repair; capability_ref=archive.read");
     }
 
-    if let Some(locator_hint) = archive_list_contract_from_surface(output_contract, req_surface) {
+    if let Some(locator_hint) = archive_list_contract_from_surface(output_contract, req_surface)
+        .filter(|_| route_reason_has_capability_ref(route_reason, "archive.list"))
+    {
         let repaired_from_semantic_kind = output_contract.semantic_kind;
         output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
         output_contract.requires_content_evidence = true;
@@ -390,6 +419,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
 
     if let Some(locator_hint) =
         config_mutation_contract_from_surface(output_contract, req, req_surface)
+            .filter(|_| route_reason_has_capability_ref(route_reason, "config.plan_change"))
     {
         output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
         output_contract.requires_content_evidence = true;

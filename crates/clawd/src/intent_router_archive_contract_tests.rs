@@ -7,6 +7,11 @@ use super::{
     OutputSemanticKind,
 };
 
+const ARCHIVE_PACK_ROUTE: &str = "capability_ref=archive.pack";
+const ARCHIVE_UNPACK_ROUTE: &str = "capability_ref=archive.unpack";
+const ARCHIVE_READ_ROUTE: &str = "capability_ref=archive.read";
+const ARCHIVE_LIST_ROUTE: &str = "capability_ref=archive.list";
+
 #[test]
 fn archive_unpack_missing_archive_locator_forces_clarify_even_with_destination_path() {
     let req = "extract the referenced archive into /tmp/unpack_dest and report the result";
@@ -101,7 +106,7 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_PACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -125,6 +130,40 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
         contract.locator_hint,
         "scripts/nl_tests/fixtures/device_local/docs | tmp/contract_matrix_docs_bundle.zip"
     );
+}
+
+#[test]
+fn archive_pack_pair_without_capability_ref_does_not_select_archive_contract() {
+    let req = "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new("/workspace"),
+        "",
+        None,
+        None,
+    );
+
+    assert_ne!(
+        reason,
+        Some("archive_pack_pair_contract_repair; capability_ref=archive.pack")
+    );
+    assert!(!matches!(
+        contract.semantic_kind,
+        OutputSemanticKind::ArchivePack | OutputSemanticKind::ArchiveUnpack
+    ));
 }
 
 #[test]
@@ -179,7 +218,7 @@ fn archive_pack_pair_repairs_scalar_path_only_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_PACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -222,7 +261,7 @@ fn archive_unpack_pair_repairs_generated_file_delivery_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_UNPACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -267,7 +306,7 @@ fn archive_unpack_pair_repairs_generic_path_content_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_UNPACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -307,7 +346,7 @@ fn archive_unpack_pair_repairs_filesystem_mutation_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_UNPACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -345,7 +384,7 @@ fn archive_unpack_pair_repairs_content_excerpt_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_UNPACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -395,7 +434,7 @@ fn archive_unpack_pair_repairs_policy_suffix_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_UNPACK_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -452,7 +491,7 @@ fn archive_read_member_repairs_content_excerpt_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_READ_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -535,7 +574,7 @@ fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_READ_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -570,7 +609,7 @@ fn archive_read_member_repairs_archive_unpack_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_READ_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -606,7 +645,7 @@ fn archive_list_single_archive_repairs_archive_unpack_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_LIST_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -646,7 +685,7 @@ fn archive_list_single_archive_repairs_file_names_drift_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_LIST_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -690,7 +729,7 @@ fn archive_list_single_archive_repairs_directory_entry_groups_without_locator_hi
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_LIST_ROUTE,
         &mut contract,
         req,
         &surface,
@@ -731,7 +770,7 @@ fn archive_read_nested_member_path_is_not_unpack_destination() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        ARCHIVE_READ_ROUTE,
         &mut contract,
         req,
         &surface,

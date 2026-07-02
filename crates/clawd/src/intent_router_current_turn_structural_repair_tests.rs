@@ -5,6 +5,8 @@ use super::{
     TargetTaskPolicy, TurnType,
 };
 
+const CONFIG_PLAN_CHANGE_ROUTE: &str = "capability_ref=config.plan_change";
+
 #[test]
 fn observed_context_summary_followup_does_not_force_fresh_evidence() {
     let mut contract = IntentOutputContract::default();
@@ -392,7 +394,7 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
@@ -417,6 +419,37 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
 }
 
 #[test]
+fn structural_config_field_value_without_capability_ref_does_not_select_config_mutation() {
+    let request = "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string(),
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        "",
+        None,
+        None,
+    );
+
+    assert_ne!(
+        reason,
+        Some("config_mutation_structural_contract_repair; capability_ref=config.plan_change")
+    );
+    assert_ne!(contract.semantic_kind, OutputSemanticKind::ConfigMutation);
+}
+
+#[test]
 fn structural_config_field_value_repairs_direct_misroute_from_current_request() {
     let request = "只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
@@ -430,7 +463,7 @@ fn structural_config_field_value_repairs_direct_misroute_from_current_request() 
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
@@ -465,7 +498,7 @@ fn structural_config_field_value_repairs_filesystem_mutation_to_config_mutation_
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
@@ -503,7 +536,7 @@ fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_cont
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
@@ -539,7 +572,7 @@ fn structural_config_field_value_overrides_failed_step_misroute_to_config_mutati
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
@@ -578,7 +611,7 @@ fn config_mutation_contract_repairs_missing_locator_from_current_request() {
     };
 
     let reason = super::apply_current_turn_structural_contract_repair(
-        "",
+        CONFIG_PLAN_CHANGE_ROUTE,
         &mut contract,
         request,
         &surface,
