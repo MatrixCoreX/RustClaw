@@ -789,6 +789,7 @@ async fn plan_round_scalar_path_current_workspace_reaches_planner_without_pre_ll
         &policy,
         &loop_state,
         None,
+        None,
         Some(&route),
         None,
     )
@@ -859,6 +860,7 @@ async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
         prompt,
         &policy,
         &loop_state,
+        None,
         None,
         Some(&route),
         None,
@@ -934,6 +936,7 @@ async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path
         prompt,
         &policy,
         &loop_state,
+        None,
         None,
         Some(&route),
         Some(&route.output_contract.locator_hint),

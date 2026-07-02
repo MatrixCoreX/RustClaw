@@ -1,6 +1,6 @@
 use super::{
-    agent_loop_boundary_observations_block, agent_loop_default_context,
-    apply_post_route_refinements, build_agent_run_context_from_prepared_flow, PreparedAskFlow,
+    PreparedAskFlow, agent_loop_boundary_observations_block, agent_loop_default_context,
+    apply_post_route_refinements, build_agent_run_context_from_prepared_flow,
 };
 
 fn base_route() -> crate::RouteResult {
@@ -31,6 +31,11 @@ fn prepared_flow_with_context() -> PreparedAskFlow {
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
         turn_analysis: None,
+        boundary_envelope: Some(crate::intent_router::BoundaryEnvelope {
+            raw_user_request: "raw user request".to_string(),
+            explicit_locators: vec!["README.md".to_string()],
+            ..Default::default()
+        }),
         clarify_fallback_source: None,
         auto_locator_path: Some("/tmp/workspace/README.md".to_string()),
         resolved_prompt_for_execution: "resolved execution prompt".to_string(),
@@ -67,6 +72,12 @@ fn prepared_ask_flow_builds_agent_run_context_for_replay_boundary() {
     assert_eq!(
         ctx.cross_turn_recent_execution_context.as_deref(),
         Some("recent execution facts")
+    );
+    assert_eq!(
+        ctx.boundary_envelope
+            .as_ref()
+            .map(|envelope| envelope.compact_prompt_line()),
+        Some("- boundary_envelope raw_chars=16 schedule_intent=none attachment_refs=0 explicit_locators=1 active_task_reference=none session_binding=none language_hint=none safety_budget_hint=none".to_string())
     );
     assert_eq!(
         ctx.route_result
@@ -189,10 +200,12 @@ fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
     );
 
     assert!(!post_route.execution_route_result.needs_clarify);
-    assert!(post_route
-        .execution_route_result
-        .clarify_question
-        .is_empty());
+    assert!(
+        post_route
+            .execution_route_result
+            .clarify_question
+            .is_empty()
+    );
     assert_eq!(
         candidates.as_slice(),
         ["post_route_missing_path_scoped_locator"]

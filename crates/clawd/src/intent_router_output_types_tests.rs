@@ -71,4 +71,13 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
     );
     assert!(envelope.language_hint.is_none());
     assert!(envelope.safety_budget_hint.is_none());
+    let prompt_line = envelope.compact_prompt_line();
+    assert!(prompt_line.contains("raw_chars=27"));
+    assert!(prompt_line.contains("schedule_intent=create"));
+    assert!(prompt_line.contains("attachment_refs=1"));
+    assert!(prompt_line.contains("explicit_locators=1"));
+    assert!(prompt_line.contains("active_task_reference=reuse_active"));
+    assert!(prompt_line.contains("session_binding=resume_execute"));
+    assert!(!prompt_line.contains("check config/app.toml later"));
+    assert!(!prompt_line.contains("config/app.toml"));
 }

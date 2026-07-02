@@ -38,9 +38,9 @@ use boundary_contract_cleanup::clear_spurious_generated_file_delivery_attachment
 #[path = "intent_router_contract_repair_judge.rs"]
 mod contract_repair_judge;
 #[cfg(test)]
-use contract_repair_judge::apply_contract_repair_judge_output;
-#[cfg(test)]
 use contract_repair_judge::ContractRepairJudgeOut;
+#[cfg(test)]
+use contract_repair_judge::apply_contract_repair_judge_output;
 
 #[path = "intent_router_route_trace.rs"]
 mod route_trace;
@@ -53,7 +53,8 @@ pub(crate) use turn_analysis::{TargetTaskPolicy, TurnAnalysis, TurnType};
 #[path = "intent_router_output_types.rs"]
 mod output_types;
 pub(crate) use output_types::{
-    ClarifyQuestionPolicy, ContextResolution, ExecutionRecipePlanHint, IntentNormalizerOutput,
+    BoundaryEnvelope, ClarifyQuestionPolicy, ContextResolution, ExecutionRecipePlanHint,
+    IntentNormalizerOutput,
 };
 
 #[path = "intent_router_clarify.rs"]
@@ -77,11 +78,11 @@ use path_tokens::{
 #[path = "intent_router_schema_parse.rs"]
 mod schema_parse;
 use schema_parse::{
-    infer_missing_turn_type_from_policy, parse_execution_recipe_plan_hint, parse_output_contract,
-    parse_output_delivery_intent, parse_output_locator_kind, parse_output_response_shape,
-    parse_output_semantic_kind, parse_positive_usize_value, parse_resume_behavior,
-    parse_runtime_async_job_start_plan_hint, parse_schedule_kind, parse_target_task_policy,
-    parse_turn_type, IntentExecutionRecipeOut, IntentOutputContractOut,
+    IntentExecutionRecipeOut, IntentOutputContractOut, infer_missing_turn_type_from_policy,
+    parse_execution_recipe_plan_hint, parse_output_contract, parse_output_delivery_intent,
+    parse_output_locator_kind, parse_output_response_shape, parse_output_semantic_kind,
+    parse_positive_usize_value, parse_resume_behavior, parse_runtime_async_job_start_plan_hint,
+    parse_schedule_kind, parse_target_task_policy, parse_turn_type,
 };
 #[cfg(test)]
 use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};
@@ -338,7 +339,7 @@ use normalizer_answer_repair::apply_answer_candidate_and_contract_judge_repair;
 
 #[path = "intent_router_normalizer_model.rs"]
 mod normalizer_model;
-use normalizer_model::{run_intent_normalizer_model_step, NormalizerModelOutcome};
+use normalizer_model::{NormalizerModelOutcome, run_intent_normalizer_model_step};
 
 #[path = "intent_router_normalizer_final_gate.rs"]
 mod normalizer_final_gate;

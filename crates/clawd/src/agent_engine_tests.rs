@@ -356,9 +356,11 @@ fn loop_state_ignores_legacy_current_workspace_scope_semantic_marker() {
 
     seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
 
-    assert!(!loop_state
-        .output_vars
-        .contains_key("current_workspace_scalar_count_targets"));
+    assert!(
+        !loop_state
+            .output_vars
+            .contains_key("current_workspace_scalar_count_targets")
+    );
 }
 
 #[test]
@@ -613,8 +615,19 @@ fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
         },
     };
 
-    let block = build_turn_analysis_prompt_block(None, Some(&route));
+    let boundary_envelope = crate::intent_router::BoundaryEnvelope {
+        raw_user_request: "list private project notes".to_string(),
+        explicit_locators: vec!["notes.md".to_string()],
+        session_binding: Some("resume_execute".to_string()),
+        ..Default::default()
+    };
+    let block = build_turn_analysis_prompt_block(None, Some(&boundary_envelope), Some(&route));
 
+    assert!(block.contains("- boundary_envelope"));
+    assert!(block.contains("raw_chars=26"));
+    assert!(block.contains("explicit_locators=1"));
+    assert!(block.contains("session_binding=resume_execute"));
+    assert!(!block.contains("private project notes"));
     assert!(block.contains("- evidence_policy_context"));
     assert!(block.contains("- evidence_policy"));
     assert!(block.contains("planner_authority=agent_loop_registry"));

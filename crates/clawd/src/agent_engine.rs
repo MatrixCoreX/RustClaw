@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::{debug, info, warn};
@@ -77,13 +77,13 @@ pub(crate) use self::filesystem_lifecycle_contract::{
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{
-    action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
-    encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
+    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN, action_fingerprint_for_policy,
+    append_progress_hint, build_safe_skill_args_summary, encode_progress_i18n,
+    load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
     publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
-    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
-use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
+use crate::{AgentAction, AppState, AskReply, ClaimedTask, repo};
 
 pub(crate) fn answer_verifier_enforce_required_enabled_for_route(
     state: &AppState,
@@ -418,9 +418,13 @@ fn build_single_plan_prompt(
 
 fn build_turn_analysis_prompt_block(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
     route_result: Option<&crate::RouteResult>,
 ) -> String {
     let mut lines = Vec::new();
+    if let Some(envelope) = boundary_envelope {
+        lines.push(envelope.compact_prompt_line());
+    }
     if let Some(analysis) = turn_analysis {
         let turn_type = analysis
             .turn_type
@@ -1313,6 +1317,7 @@ pub(crate) struct AgentRunContext {
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(crate) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(crate) boundary_envelope: Option<crate::intent_router::BoundaryEnvelope>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
     pub(crate) auto_locator_path: Option<String>,

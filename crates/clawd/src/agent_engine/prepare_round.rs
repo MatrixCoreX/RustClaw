@@ -178,6 +178,7 @@ pub(super) async fn prepare_round_actions(
         policy,
         loop_state,
         agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
+        agent_run_context.and_then(|ctx| ctx.boundary_envelope.as_ref()),
         agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
         agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
     )

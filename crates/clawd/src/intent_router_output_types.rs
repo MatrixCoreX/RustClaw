@@ -56,6 +56,39 @@ pub(crate) struct BoundaryEnvelope {
     pub(crate) raw_user_request: String,
 }
 
+impl BoundaryEnvelope {
+    pub(crate) fn compact_prompt_line(&self) -> String {
+        let schedule_kind = self
+            .schedule_intent
+            .as_ref()
+            .map(|intent| non_empty_token(&intent.kind))
+            .unwrap_or("none");
+        format!(
+            "- boundary_envelope raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
+            self.raw_user_request.chars().count(),
+            schedule_kind,
+            self.attachment_refs.len(),
+            self.explicit_locators.len(),
+            self.active_task_reference
+                .as_deref()
+                .map(non_empty_token)
+                .unwrap_or("none"),
+            self.session_binding
+                .as_deref()
+                .map(non_empty_token)
+                .unwrap_or("none"),
+            self.language_hint
+                .as_deref()
+                .map(non_empty_token)
+                .unwrap_or("none"),
+            self.safety_budget_hint
+                .as_deref()
+                .map(non_empty_token)
+                .unwrap_or("none"),
+        )
+    }
+}
+
 impl IntentNormalizerOutput {
     pub(crate) fn boundary_envelope(&self) -> BoundaryEnvelope {
         BoundaryEnvelope {
@@ -74,6 +107,11 @@ impl IntentNormalizerOutput {
             raw_user_request: self.raw_user_request.clone(),
         }
     }
+}
+
+fn non_empty_token(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() { "none" } else { trimmed }
 }
 
 fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {

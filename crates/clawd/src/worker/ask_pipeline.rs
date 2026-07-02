@@ -47,8 +47,8 @@ mod unbound_context_guard;
 #[path = "ask_pipeline_workspace_locator_binding.rs"]
 mod workspace_locator_binding;
 use active_binding::{
-    active_observed_facts_have_bound_target, active_session_has_bound_target,
-    single_component_locator_hint, SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
+    SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST, active_observed_facts_have_bound_target,
+    active_session_has_bound_target, single_component_locator_hint,
 };
 pub(super) use agent_context::build_agent_run_context_from_prepared_flow;
 use background_locator_guard::{
@@ -149,6 +149,7 @@ pub(super) struct PreparedAskFlow {
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(super) boundary_envelope: Option<crate::intent_router::BoundaryEnvelope>,
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) auto_locator_path: Option<String>,
     pub(super) resolved_prompt_for_execution: String,
@@ -191,7 +192,9 @@ fn log_route_guard_record(
         route_result.gate_kind().as_str(),
         route_result.needs_clarify,
         route_result.output_contract.locator_kind.as_str(),
-        route_result.effective_output_contract_semantic_kind().as_str(),
+        route_result
+            .effective_output_contract_semantic_kind()
+            .as_str(),
         route_result.output_contract.response_shape.as_str(),
         route_result.output_contract.delivery_required,
         route_result.output_contract.requires_content_evidence,
@@ -1176,6 +1179,7 @@ pub(super) async fn prepare_ask_flow(
         execution_recipe_hint: prepared_routing.execution_recipe_hint,
         execution_recipe_plan_hint: prepared_routing.execution_recipe_plan_hint,
         turn_analysis: prepared_routing.turn_analysis,
+        boundary_envelope: prepared_routing.boundary_envelope,
         clarify_fallback_source: prepared_routing.clarify_fallback_source,
         auto_locator_path: loop_context.auto_locator_path,
         resolved_prompt_for_execution: loop_context.resolved_prompt_for_execution,
