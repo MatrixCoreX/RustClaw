@@ -926,7 +926,14 @@ fn route_capability_ref_allows_action(
     let Some(action) = ActionRef::from_skill_args(normalized_skill, args) else {
         return false;
     };
-    route_capability_ref_allows_action_ref(route, &action)
+    if route_capability_ref_allows_action_ref(route, &action) {
+        return true;
+    }
+    route_capability_policy_action_ref(normalized_skill, args)
+        .filter(|policy_action| policy_action.replacement_action_ref().is_some())
+        .is_some_and(|policy_action| {
+            route_registry_capability_ref_allows_action_ref(route, &policy_action.effective)
+        })
 }
 
 fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
@@ -935,25 +942,11 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
     }
     let action_name = action.action.as_deref().unwrap_or_default();
     match (action.skill.as_str(), action_name) {
-        ("config_basic", "validate")
-        | ("config_edit", "validate_config")
-        | ("system_basic", "validate_structured") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config"],
-                &["validate", "validate_config", "validate_after_change"],
-            )
-        }
         ("config_basic", "guard_rustclaw_config") | ("config_edit", "guard_config") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
                 &["config"],
-                &[
-                    "guard",
-                    "guard_config",
-                    "guard_after_change",
-                    "guard_rustclaw_config",
-                ],
+                &["guard", "risk"],
             )
         }
         ("config_guard", "") => crate::machine_capability_ref::route_has_capability_action(
@@ -961,288 +954,6 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
             &["config"],
             &["guard", "risk"],
         ),
-        ("config_basic", "read_field") | ("system_basic", "extract_field") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config", "config_basic", "system_basic"],
-                &["read_field", "extract_field"],
-            )
-        }
-        ("config_basic", "read_fields") | ("system_basic", "extract_fields") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config", "config_basic", "system_basic"],
-                &["read_fields", "extract_fields"],
-            )
-        }
-        ("config_basic", "list_keys") | ("system_basic", "structured_keys") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config", "config_basic", "system_basic"],
-                &["list_keys", "structured_keys"],
-            )
-        }
-        ("fs_basic", "stat_paths") | ("system_basic", "path_batch_facts") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
-                &["stat_paths", "stat_path", "path_batch_facts"],
-            )
-        }
-        ("fs_basic", "list_dir") | ("system_basic", "inventory_dir") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
-                &["list_dir", "list_entries", "inventory_dir"],
-            )
-        }
-        ("fs_basic", "count_entries") | ("system_basic", "count_inventory") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
-                &["count_entries", "count_inventory"],
-            )
-        }
-        ("fs_basic", "read_text_range") | ("system_basic", "read_range") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
-                &["read_text_range", "read_text", "read_file", "read_range"],
-            )
-        }
-        ("fs_basic", "find_entries") | ("system_basic", "find_path") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
-                &["find_entries", "find_files", "find_paths", "find_path"],
-            )
-        }
-        ("fs_basic", "grep_text") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic"],
-                &["grep_text", "search_text"],
-            )
-        }
-        ("fs_basic", "compare_paths") | ("system_basic", "compare_paths") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
-                &["compare_paths"],
-            )
-        }
-        ("fs_basic", "write_text") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic"],
-                &["write_text", "write_file"],
-            )
-        }
-        ("fs_basic", "append_text") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic"],
-                &["append_text", "append_file"],
-            )
-        }
-        ("fs_basic", "make_dir") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic"],
-                &["make_dir", "create_dir"],
-            )
-        }
-        ("fs_basic", "remove_path") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["filesystem", "fs", "fs_basic"],
-                &["remove_path", "delete_path"],
-            )
-        }
-        ("service_control", "status") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["service", "service_control"],
-                &["status"],
-            )
-        }
-        ("service_control", "verify") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["service", "service_control"],
-                &["verify"],
-            )
-        }
-        ("service_control", "logs") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["service", "service_control"],
-                &["logs"],
-            )
-        }
-        ("service_control", "start" | "stop" | "restart") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["service", "service_control"],
-                &[action_name],
-            )
-        }
-        ("docker_basic", "ps") => crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["docker", "docker_basic"],
-            &["list_containers", "ps"],
-        ),
-        ("docker_basic", "images") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["list_images", "images"],
-            )
-        }
-        ("docker_basic", "version") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["version"],
-            )
-        }
-        ("docker_basic", "inspect") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["inspect_container", "inspect"],
-            )
-        }
-        ("docker_basic", "logs") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["read_logs", "logs"],
-            )
-        }
-        ("docker_basic", "restart") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["restart", "restart_container"],
-            )
-        }
-        ("docker_basic", "start") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["start", "start_container"],
-            )
-        }
-        ("docker_basic", "stop") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["docker", "docker_basic"],
-                &["stop", "stop_container"],
-            )
-        }
-        ("system_basic", "info") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["system", "system_basic"],
-                &["info"],
-            )
-        }
-        ("system_basic", "runtime_status") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["system", "system_basic"],
-                &["runtime_status"],
-            )
-        }
-        ("system_basic", "tree_summary") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["system", "system_basic"],
-                &["tree_summary"],
-            )
-        }
-        ("process_basic", "ps") => crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["process", "process_basic"],
-            &["ps"],
-        ),
-        ("process_basic", "port_list") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["process", "process_basic"],
-                &["port_list"],
-            )
-        }
-        ("process_basic", "kill") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["process", "process_basic"],
-                &["kill"],
-            )
-        }
-        ("process_basic", "tail_log") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["process", "process_basic"],
-                &["tail_log"],
-            )
-        }
-        ("task_control", "list")
-        | ("task_control", "list_with_first_detail")
-        | ("task_control", "get")
-        | ("task_control", "cancel_all")
-        | ("task_control", "cancel_one")
-        | ("task_control", "resume")
-        | ("task_control", "pause") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["task_control"],
-                &[action_name],
-            )
-        }
-        ("config_edit", "plan_config_change") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config"],
-                &["plan_change", "plan_config_change"],
-            )
-        }
-        ("config_edit", "apply_config_change") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config"],
-                &["apply_change", "apply_config_change"],
-            )
-        }
-        ("archive_basic", "list") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["archive"],
-                &["list"],
-            )
-        }
-        ("archive_basic", "read") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["archive"],
-                &["read"],
-            )
-        }
-        ("archive_basic", "pack") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["archive"],
-                &["pack"],
-            )
-        }
-        ("archive_basic", "unpack") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["archive"],
-                &["unpack"],
-            )
-        }
         ("db_basic", "list_tables") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
