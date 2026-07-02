@@ -245,7 +245,6 @@ fn matching_active_bound_target(
 ) -> Option<String> {
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.wants_file_delivery
