@@ -532,7 +532,16 @@ prompt = sys.argv[2]
 expected = sys.argv[3] if len(sys.argv) > 3 else ""
 case_tags = sys.argv[4] if len(sys.argv) > 4 else ""
 prompt_l = prompt.lower()
-tagset = {part.strip().lower() for part in case_tags.split(",") if part.strip()}
+tagset = {part.strip().lower() for part in re.split(r"[,;]", case_tags) if part.strip()}
+for segment in case_tags.split(";"):
+    segment = segment.strip()
+    if not segment.lower().startswith("covers:"):
+        continue
+    tagset.update(
+        part.strip().lower()
+        for part in segment.split(":", 1)[1].split(",")
+        if part.strip()
+    )
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 journal = result.get("task_journal") or {}
@@ -681,7 +690,10 @@ clarify_allowed_tags = {
     "suite:ask",
     "suite:failure",
 }
-if final_status == "clarify" and not (tagset & clarify_allowed_tags):
+clarify_allowed = bool(tagset & clarify_allowed_tags) or bool(
+    re.search(r"(?:^|[,;:])clarify(?:$|[,;])", case_tags.lower())
+)
+if final_status == "clarify" and not clarify_allowed:
     print("unexpected_clarify_final_status")
     raise SystemExit(0)
 
