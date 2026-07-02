@@ -750,7 +750,7 @@ fn scalar_path_current_workspace_deterministic_plan_uses_workspace_contract() {
 }
 
 #[tokio::test]
-async fn plan_round_scalar_path_current_workspace_uses_deterministic_plan_before_llm() {
+async fn plan_round_scalar_path_current_workspace_reaches_planner_without_pre_llm_shortcut() {
     let root = TempDirGuard::new("scalar_current_workspace_plan_round");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
@@ -781,7 +781,7 @@ async fn plan_round_scalar_path_current_workspace_uses_deterministic_plan_before
     loop_state.round_no = 1;
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -793,27 +793,16 @@ async fn plan_round_scalar_path_current_workspace_uses_deterministic_plan_before
         None,
     )
     .await
-    .expect("plan round should use deterministic current workspace path plan");
+    .expect_err("scalar path should now reach planner instead of pre-LLM deterministic plan");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan.planner_notes.split_whitespace().any(|note| {
-        note == "fallback_reason_code=plan_deterministic_scalar_path_current_workspace"
-    }));
-    let actions = plan
-        .steps
-        .iter()
-        .filter_map(|step| step.to_agent_action())
-        .collect::<Vec<_>>();
-    assert!(actions.iter().all(|action| !matches!(
-        action,
-        AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
-    )));
-    assert!(matches!(
-        actions.first(),
-        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("stat_paths")
-    ));
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
+    );
+    assert!(
+        !err.contains("plan_deterministic_scalar_path_current_workspace"),
+        "old scalar path deterministic fallback leaked into planner error: {err}"
+    );
 }
 
 #[tokio::test]

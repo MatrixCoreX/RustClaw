@@ -41,6 +41,7 @@ pub(super) fn scalar_count_filter_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn path_metadata_compare_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -95,6 +96,7 @@ pub(super) fn resolve_directory_locator_for_dir_compare(
     Some(path.canonicalize().unwrap_or(path).display().to_string())
 }
 
+#[cfg(test)]
 pub(super) fn scalar_path_auto_locator_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -116,6 +118,7 @@ pub(super) fn scalar_path_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -198,6 +201,7 @@ pub(super) fn scalar_path_directory_locator_search_observation_plan(
     }])
 }
 
+#[cfg(test)]
 pub(super) fn scalar_path_directory_locator_search_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
