@@ -188,7 +188,7 @@ pub(super) fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
     let final_shape = journal
         .route_result
         .as_ref()
-        .and_then(crate::contract_matrix::trace_snapshot_for_route)
+        .and_then(crate::evidence_policy::trace_snapshot_for_route)
         .and_then(|snapshot| {
             snapshot
                 .get("final_answer_shape")
