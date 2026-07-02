@@ -68,6 +68,19 @@ fn ignores_python_version_numbers_as_path_locators() {
 }
 
 #[test]
+fn ignores_protocol_field_selector_paths_as_locators() {
+    assert!(extract_explicit_locator_for_fallback("text/error_text").is_none());
+    assert!(
+        extract_explicit_locator_for_fallback("RepairEnvelope/issue_codes checkpoint_id").is_none()
+    );
+    assert!(
+        !structured_locator_tokens("text/error_text RepairEnvelope/issue_codes")
+            .iter()
+            .any(|token| token.kind == StructuredLocatorTokenKind::Path)
+    );
+}
+
+#[test]
 fn extracts_filename_locator_from_mixed_delivery_text() {
     let out = extract_explicit_locator_for_fallback("把 README.md 发给我")
         .expect("filename locator should be extracted");

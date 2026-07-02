@@ -603,6 +603,9 @@ fn looks_like_explicit_path_or_url_token(token: &str) -> bool {
     if token.is_empty() {
         return false;
     }
+    if looks_like_protocol_field_selector_path(token) {
+        return false;
+    }
     token.starts_with('/')
         || token.starts_with("./")
         || token.starts_with("../")
@@ -611,6 +614,60 @@ fn looks_like_explicit_path_or_url_token(token: &str) -> bool {
         || token.starts_with("https://")
         || token.contains(":\\")
         || (token.contains('/') && !token.contains("://"))
+}
+
+fn looks_like_protocol_field_selector_path(token: &str) -> bool {
+    let trimmed = token.trim();
+    if !trimmed.contains('/') || trimmed.contains('\\') {
+        return false;
+    }
+    if trimmed.starts_with('/')
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+        || trimmed.starts_with("~/")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.contains("://")
+    {
+        return false;
+    }
+    let mut count = 0usize;
+    for segment in trimmed.split('/') {
+        let segment = trim_locator_token(segment);
+        if segment.is_empty() || !protocol_field_selector_segment(&segment) {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 2
+}
+
+fn protocol_field_selector_segment(segment: &str) -> bool {
+    let canonical = segment
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect::<String>();
+    matches!(
+        canonical.as_str(),
+        "args"
+            | "checkpointid"
+            | "context"
+            | "decision"
+            | "errorcode"
+            | "errortext"
+            | "extra"
+            | "issuecode"
+            | "issuecodes"
+            | "messagekey"
+            | "reasoncode"
+            | "repairenvelope"
+            | "repairsignal"
+            | "requestid"
+            | "status"
+            | "statuscode"
+            | "text"
+    )
 }
 
 fn extract_explicit_path_like_tokens(text: &str) -> Vec<String> {
