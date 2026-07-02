@@ -54,7 +54,7 @@ flowchart TD
     AS --> ASP[Progress machine reply<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
     QP -->|call_tool| T[Tool execution]
     QP -->|call_skill| U[Shared skill dispatch]
-    RS --> RSG[No normalizer / planner / resolver choice<br/>no PlanVerifier semantic selection]
+    RS --> RSG[No normalizer / planner / resolver choice<br/>no verifier semantic selection]
     RSG --> U
     T --> V[Observed result]
     U --> V
@@ -96,7 +96,7 @@ Quick facts for direct skill tasks:
 | --- | --- | --- |
 | Does it run the intent normalizer? | Yes, as structured hint and compatibility input. | No. The caller already supplied the target skill. |
 | Does it enter the planner / agent loop? | Yes by default for ordinary natural-language work; explicit schedule, safety, protocol, and already-observed completion paths may finalize without asking the planner to choose a capability. | No. It does not ask the planner to choose a skill or action. |
-| Does it use `CapabilityResolver` / `PlanVerifier` for semantic selection? | Yes, planner steps are resolved and verified before execution. | No semantic selection. It still uses dispatch/protocol validation for the explicit skill call. |
+| Does it use `CapabilityResolver` / `PlanVerifier` as semantic selectors? | No. The planner owns ordinary semantic choice; resolver/verifier resolve and validate planned steps before execution. | No. Direct skill tasks bypass semantic selection; the explicit skill call still uses dispatch/protocol validation. |
 | Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
 | Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
 
