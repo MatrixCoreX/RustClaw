@@ -195,7 +195,7 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.resolved_intent = format!(
         "archive.list archive.read database.list_tables archive={archive} member=notes.txt db_path={db_path}"
     );
