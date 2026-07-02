@@ -831,7 +831,7 @@ pub(crate) fn action_policy_for_output_contract(
     })
 }
 
-pub(crate) fn action_policy_for_route(
+pub(crate) fn capability_ref_action_policy_for_route(
     route: Option<&RouteResult>,
     normalized_skill: &str,
     args: &Value,
@@ -841,6 +841,15 @@ pub(crate) fn action_policy_for_route(
         return route_capability_ref_action_policy(route, normalized_skill, args);
     }
     None
+}
+
+#[cfg(test)]
+pub(crate) fn action_policy_for_route(
+    route: Option<&RouteResult>,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ContractActionPolicy> {
+    capability_ref_action_policy_for_route(route, normalized_skill, args)
 }
 
 fn route_capability_ref_action_policy(

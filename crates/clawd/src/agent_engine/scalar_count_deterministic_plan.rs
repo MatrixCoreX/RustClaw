@@ -154,7 +154,7 @@ pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
     let AgentAction::CallTool { tool, args } = &action else {
         return None;
     };
-    if crate::contract_matrix::action_policy_for_route(Some(route), tool, args)
+    if crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), tool, args)
         .is_some_and(|policy| !policy.is_allowed())
     {
         return None;

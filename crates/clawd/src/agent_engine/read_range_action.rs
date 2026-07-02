@@ -1414,7 +1414,7 @@ pub(super) fn add_prior_structured_text_field_read_for_scalar_compare(
         let Some((skill, args)) = planned_call_subject_and_args(&action) else {
             continue;
         };
-        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
+        if !crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
             .is_some_and(|policy| policy.is_allowed())
         {
             continue;
