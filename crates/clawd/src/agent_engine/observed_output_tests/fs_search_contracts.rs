@@ -890,10 +890,7 @@ fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
     let contract = observed_contract_json(Some(&agent_run_context));
     let parsed: serde_json::Value =
         serde_json::from_str(&contract).expect("observed contract json");
-    assert_eq!(
-        parsed.get("route_gate_kind").and_then(serde_json::Value::as_str),
-        Some("execute")
-    );
+    assert!(parsed.get("route_gate_kind").is_none());
     assert!(parsed.get("ask_mode").is_none());
     assert!(parsed.get("derived_route_label").is_none());
     assert!(contract.contains(r#""contract_marker":"content_excerpt_summary""#));
