@@ -998,6 +998,14 @@ pub(super) fn current_turn_requests_config_edit(
         .iter()
         .filter(|action| action_targets_config_edit(action))
         .collect::<Vec<_>>();
+    if route_has_config_change_contract(route)
+        && !config_actions.is_empty()
+        && config_actions
+            .iter()
+            .all(|action| config_edit_action_has_structured_config_contract(action))
+    {
+        return true;
+    }
     if route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment) {
         return !config_actions.is_empty()
             && config_actions
@@ -1016,6 +1024,52 @@ pub(super) fn current_turn_requests_config_edit(
         && config_actions
             .iter()
             .all(|action| config_edit_action_has_current_structural_anchor(action, request))
+}
+
+fn route_has_config_change_contract(route: &RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config"],
+            &[
+                "apply_change",
+                "apply_config_change",
+                "plan_change",
+                "plan_config_change",
+                "set_field",
+                "write_field",
+            ],
+        )
+}
+
+fn config_edit_action_has_structured_config_contract(action: &AgentAction) -> bool {
+    let (tool, args) = match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            (tool.as_str(), args)
+        }
+        _ => return false,
+    };
+    if !tool.eq_ignore_ascii_case("config_edit") {
+        return false;
+    }
+    let action_name = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    match action_name {
+        "plan_config_change"
+        | "apply_config_change"
+        | "apply_change"
+        | "write_field"
+        | "set_field" => {
+            json_trimmed_string_arg(args, &["field_path", "field"]).is_some()
+                && args.get("value").is_some_and(|value| !value.is_null())
+        }
+        "read_back" => json_trimmed_string_arg(args, &["field_path", "field"]).is_some(),
+        "guard_config" | "validate_config" | "validate" => true,
+        _ => false,
+    }
 }
 
 pub(super) fn config_edit_action_is_route_guard(action: &AgentAction, route: &RouteResult) -> bool {
