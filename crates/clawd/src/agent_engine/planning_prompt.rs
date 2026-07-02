@@ -536,7 +536,7 @@ pub(super) fn contract_scoped_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
     let route = route_result?;
-    if route.needs_clarify || route.output_contract_is_unclassified() {
+    if route.needs_clarify {
         return None;
     }
     let skills = crate::evidence_policy::capability_ref_action_refs_for_route(route, false)
