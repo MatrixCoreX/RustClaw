@@ -25,7 +25,7 @@ pub(crate) fn content_evidence_execution_finalize_style(
     {
         return None;
     }
-    if let Some(style) = contract_matrix_finalize_style(contract) {
+    if let Some(style) = evidence_policy_finalize_style(contract) {
         return Some(style);
     }
     if matches!(
@@ -38,7 +38,7 @@ pub(crate) fn content_evidence_execution_finalize_style(
     }
 }
 
-fn contract_matrix_finalize_style(contract: &IntentOutputContract) -> Option<ActFinalizeStyle> {
+fn evidence_policy_finalize_style(contract: &IntentOutputContract) -> Option<ActFinalizeStyle> {
     let shape = crate::contract_matrix::final_answer_shape_for_output_contract(contract)?;
     match shape.class() {
         crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
