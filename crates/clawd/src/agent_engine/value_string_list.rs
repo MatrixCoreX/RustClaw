@@ -1499,6 +1499,7 @@ pub(super) fn task_control_list_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn config_risk_preview_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1576,6 +1577,7 @@ fn task_control_available_for_plan(state: &AppState) -> bool {
     skill_available_for_plan(state, "task_control")
 }
 
+#[cfg(test)]
 fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains(skill)
@@ -1599,6 +1601,7 @@ fn route_requests_health_check(route: &RouteResult) -> bool {
         )
 }
 
+#[cfg(test)]
 fn route_requests_config_risk_preview(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
         || crate::machine_capability_ref::route_has_capability_action_name(

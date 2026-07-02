@@ -261,17 +261,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_contract_hint_preferred_action"
     );
     return_deterministic_plan!(
-        config_risk_preview_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            auto_locator_path,
-        ),
-        "plan_deterministic_config_risk_preview"
-    );
-    return_deterministic_plan!(
         runtime_status_scalar_deterministic_plan_result(
             state,
             goal,
