@@ -516,7 +516,10 @@ fn normalize_config_edit_value_aliases(skill: &str, args: &mut Value) -> bool {
     if obj.contains_key("value") {
         return false;
     }
-    let Some(value) = obj.get("new_value").cloned() else {
+    let Some(value) = ["new_value", "target_value"]
+        .into_iter()
+        .find_map(|alias| obj.remove(alias))
+    else {
         return false;
     };
     obj.insert("value".to_string(), value);

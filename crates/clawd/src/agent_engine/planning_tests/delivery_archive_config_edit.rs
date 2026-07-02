@@ -635,6 +635,9 @@ fn config_edit_action_ref_tool_call_rewrites_to_real_tool_and_value_arg() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason =
+        "capability_ref=config.plan_change field_path=skills.skill_switches.config_edit_nl_plan value=true"
+            .to_string();
     let actions = vec![AgentAction::CallTool {
         tool: "config_edit.plan_config_change".to_string(),
         args: json!({
@@ -649,7 +652,7 @@ fn config_edit_action_ref_tool_call_rewrites_to_real_tool_and_value_arg() {
         &test_state(),
         Some(&route),
         &LoopState::default(),
-        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        "configs/config.toml wrong.field = false",
         Some("configs/config.toml"),
         actions,
     );
@@ -675,6 +678,9 @@ fn config_mutation_read_plus_plan_collapses_to_single_config_edit_plan() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason =
+        "capability_ref=config.plan_change field_path=skills.skill_switches.config_edit_nl_plan value=true"
+            .to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "config_basic.read_field".to_string(),
@@ -698,7 +704,7 @@ fn config_mutation_read_plus_plan_collapses_to_single_config_edit_plan() {
         &test_state(),
         Some(&route),
         &LoopState::default(),
-        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        "configs/config.toml wrong.field = false",
         Some("configs/config.toml"),
         actions,
     );
@@ -794,7 +800,9 @@ fn config_change_preview_guard_plan_rewrites_to_config_edit_plan() {
 #[test]
 fn config_change_capability_ref_rewrites_preview_without_semantic_kind() {
     let mut route = base_route_result();
-    route.route_reason = "capability_ref=config.plan_change".to_string();
+    route.route_reason =
+        "capability_ref=config.plan_change field_path=skills.skill_switches.config_edit_nl_plan value=true"
+            .to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -816,7 +824,7 @@ fn config_change_capability_ref_rewrites_preview_without_semantic_kind() {
 
     let rewritten = rewrite_config_change_preview_to_config_edit_plan(
         Some(&route),
-        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        "configs/config.toml wrong.field = false",
         Some("configs/config.toml"),
         actions,
     );
@@ -833,7 +841,9 @@ fn config_change_capability_ref_rewrites_preview_without_semantic_kind() {
 #[test]
 fn config_plan_only_capability_ref_rewrites_without_semantic_kind() {
     let mut route = base_route_result();
-    route.route_reason = "capability_ref=config.plan_change".to_string();
+    route.route_reason =
+        "capability_ref=config.plan_change field_path=skills.skill_switches.config_edit_nl_plan value=true"
+            .to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -842,7 +852,7 @@ fn config_plan_only_capability_ref_rewrites_without_semantic_kind() {
     let rewritten = rewrite_config_mutation_plan_only_to_config_edit_plan(
         Some(&route),
         &LoopState::new(1),
-        "configs/config.toml skills.skill_switches.config_edit_nl_plan = true",
+        "configs/config.toml wrong.field = false",
         Some("configs/config.toml"),
         Vec::new(),
     );
@@ -864,6 +874,8 @@ fn config_mutation_recipe_readback_only_rewrites_to_closed_loop() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string();
+    route.route_reason =
+        "field_path=skills.skill_switches.config_edit_nl_smoke value=true".to_string();
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         crate::execution_recipe::ExecutionRecipeSpec {
@@ -896,7 +908,7 @@ fn config_mutation_recipe_readback_only_rewrites_to_closed_loop() {
     let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
         Some(&route),
         &loop_state,
-        "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true",
+        "run/nl_eval_tmp/config_edit_smoke/config.toml wrong.field = false",
         Some("run/nl_eval_tmp/config_edit_smoke/config.toml"),
         actions,
     );
@@ -952,7 +964,9 @@ fn config_mutation_recipe_readback_only_rewrites_to_closed_loop() {
 #[test]
 fn config_change_capability_ref_rewrites_to_closed_loop_without_semantic_kind() {
     let mut route = base_route_result();
-    route.route_reason = "capability_ref=config.apply_change".to_string();
+    route.route_reason =
+        "capability_ref=config.apply_change field_path=skills.skill_switches.config_edit_nl_smoke value=true"
+            .to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -982,7 +996,7 @@ fn config_change_capability_ref_rewrites_to_closed_loop_without_semantic_kind() 
     let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
         Some(&route),
         &loop_state,
-        "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true",
+        "run/nl_eval_tmp/config_edit_smoke/config.toml wrong.field = false",
         Some("run/nl_eval_tmp/config_edit_smoke/config.toml"),
         actions,
     );
@@ -1002,6 +1016,8 @@ fn config_mutation_planned_fs_write_rewrites_to_config_edit_closed_loop_without_
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "run/nl_eval_tmp/config_edit_smoke/config.toml".to_string();
+    route.route_reason =
+        "field_path=skills.skill_switches.config_edit_nl_smoke value=true".to_string();
     let loop_state = LoopState::new(2);
     let actions = vec![
         AgentAction::CallTool {
@@ -1031,7 +1047,7 @@ fn config_mutation_planned_fs_write_rewrites_to_config_edit_closed_loop_without_
     let rewritten = rewrite_config_mutation_to_config_edit_closed_loop(
         Some(&route),
         &loop_state,
-        "run/nl_eval_tmp/config_edit_smoke/config.toml skills.skill_switches.config_edit_nl_smoke = true",
+        "run/nl_eval_tmp/config_edit_smoke/config.toml wrong.field = false",
         Some("run/nl_eval_tmp/config_edit_smoke/config.toml"),
         actions,
     );
