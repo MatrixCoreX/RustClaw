@@ -1015,6 +1015,34 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 &["compare_paths"],
             )
         }
+        ("fs_basic", "write_text") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic"],
+                &["write_text", "write_file"],
+            )
+        }
+        ("fs_basic", "append_text") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic"],
+                &["append_text", "append_file"],
+            )
+        }
+        ("fs_basic", "make_dir") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic"],
+                &["make_dir", "create_dir"],
+            )
+        }
+        ("fs_basic", "remove_path") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["filesystem", "fs", "fs_basic"],
+                &["remove_path", "delete_path"],
+            )
+        }
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,

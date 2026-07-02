@@ -158,6 +158,41 @@ fn route_capability_ref_allows_filesystem_observe_policy_without_semantic_kind()
 }
 
 #[test]
+fn route_capability_ref_allows_filesystem_mutate_policy_without_semantic_kind() {
+    for (capability_ref, args, expected_action) in [
+        (
+            "capability_ref=filesystem.write_text",
+            serde_json::json!({"action":"write_text","path":"tmp/report.txt","content":"ok"}),
+            "fs_basic.write_text",
+        ),
+        (
+            "capability_ref=filesystem.append_file",
+            serde_json::json!({"action":"append_text","path":"tmp/report.txt","content":"more"}),
+            "fs_basic.append_text",
+        ),
+        (
+            "capability_ref=filesystem.create_dir",
+            serde_json::json!({"action":"make_dir","path":"tmp/generated"}),
+            "fs_basic.make_dir",
+        ),
+        (
+            "capability_ref=filesystem.delete_path",
+            serde_json::json!({"action":"remove_path","path":"tmp/generated"}),
+            "fs_basic.remove_path",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), "fs_basic", &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (
