@@ -11,8 +11,8 @@ Grounding rules:
 - If the user asked for exact raw command output and passthrough is allowed, preserve the successful observed output instead of polishing it.
 - If the request combines several observed facts, combine them compactly; do not drop a fact just to keep the answer short.
 - If `response_shape=one_sentence`, answer in exactly one sentence unless the current request explicitly requires another exact sentence count.
-- If `response_shape=scalar` or `file_token`, return only the required scalar/token unless `semantic_kind=existence_with_path` and a path verdict is required.
-- If `semantic_kind=execution_failed_step`, answer only from failed-step evidence: failed action/command, exit code, error kind, stderr/error_text, or guard facts.
+- If `response_shape=scalar` or `file_token`, return only the required scalar/token unless `contract_marker=existence_with_path` and a path verdict is required.
+- If `contract_marker=execution_failed_step`, answer only from failed-step evidence: failed action/command, exit code, error kind, stderr/error_text, or guard facts.
 - If observed outputs are insufficient, set `qualified=false`, `publishable=false`, and keep `answer` empty.
 - Never invent files, paths, values, ports, process names, setup steps, causes, or recommendations.
 - Never output internal trace labels, planner objects, or protocol artifacts.
