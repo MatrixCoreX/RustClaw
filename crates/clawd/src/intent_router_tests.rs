@@ -572,6 +572,14 @@ fn intent_normalizer_schema_drift() {
         .get("properties")
         .and_then(|v| v.as_object())
         .expect("schema must have `properties` object");
+    let required = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .expect("schema must have `required` array");
+    assert!(
+        !required.iter().any(|value| value.as_str() == Some("decision")),
+        "legacy normalizer `decision` must stay optional; ordinary semantics belong to the agent loop"
+    );
     for field in STRUCT_FIELDS {
         assert!(
             properties.contains_key(*field),
@@ -823,6 +831,32 @@ fn intent_normalizer_schema_drift() {
             token
         );
     }
+}
+
+#[test]
+fn intent_normalizer_schema_accepts_missing_legacy_decision() {
+    let raw = r#"{
+      "resolved_user_intent":"boundary-only request",
+      "needs_clarify":false,
+      "reason":"boundary_only",
+      "confidence":0.9,
+      "output_contract":{
+        "response_shape":"free",
+        "requires_content_evidence":false,
+        "delivery_required":false,
+        "locator_kind":"none",
+        "delivery_intent":"none",
+        "contract_marker":"none",
+        "locator_hint":""
+      }
+    }"#;
+    let validated = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        raw,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("normalizer schema should allow omitted legacy decision")
+    .value;
+    assert!(validated.decision.is_empty());
 }
 
 #[test]
