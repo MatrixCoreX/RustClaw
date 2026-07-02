@@ -132,4 +132,43 @@ pub(super) fn apply_post_route_refinements(
             crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
         );
     }
+    defer_locator_boundary_clarify_to_agent_loop(pre_loop_clarify_candidates, post_route);
+}
+
+fn defer_locator_boundary_clarify_to_agent_loop(
+    pre_loop_clarify_candidates: &mut Vec<&'static str>,
+    post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
+) {
+    let candidate = match (
+        post_route.gate_record.owner_layer,
+        post_route.gate_record.reason_code,
+    ) {
+        ("boundary_locator_gate", "post_route_missing_path_scoped_locator") => {
+            "post_route_missing_path_scoped_locator"
+        }
+        ("boundary_locator_gate", "post_route_fuzzy_locator_candidates") => {
+            "post_route_fuzzy_locator_candidates"
+        }
+        _ => return,
+    };
+
+    post_route.execution_route_result.needs_clarify = false;
+    post_route.execution_route_result.clarify_question.clear();
+    post_route
+        .execution_route_result
+        .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, candidate);
+    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
+        "agent_loop_boundary_defer",
+        match candidate {
+            "post_route_missing_path_scoped_locator" => {
+                "post_route_missing_path_scoped_locator_deferred_to_agent_loop"
+            }
+            "post_route_fuzzy_locator_candidates" => {
+                "post_route_fuzzy_locator_candidates_deferred_to_agent_loop"
+            }
+            _ => "post_route_locator_boundary_deferred_to_agent_loop",
+        },
+        crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
+    );
 }
