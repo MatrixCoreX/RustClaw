@@ -501,7 +501,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
     route.ask_mode = crate::AskMode::planner_execute_plain();
     route.needs_clarify = true;
     route.route_reason =
-        "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"
+        "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_locator"
             .to_string();
     let resolved_intent = route.resolved_intent.clone();
 

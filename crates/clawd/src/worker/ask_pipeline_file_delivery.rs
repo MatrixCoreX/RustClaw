@@ -49,6 +49,9 @@ pub(super) fn refine_unresolved_file_delivery_boundary_contract(
 ) -> bool {
     let has_missing_delivery_locator_signal = super::route_reason_has_marker(
         &post_route.execution_route_result,
+        "unresolved_file_delivery_requires_locator",
+    ) || super::route_reason_has_marker(
+        &post_route.execution_route_result,
         "unresolved_file_delivery_requires_clarify",
     ) || super::route_reason_has_marker(
         &post_route.execution_route_result,
