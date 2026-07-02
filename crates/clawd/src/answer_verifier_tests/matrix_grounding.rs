@@ -991,6 +991,36 @@ fn archive_unpack_summary_is_satisfied_by_observed_destination_path() {
 }
 
 #[test]
+fn archive_unpack_capability_ref_summary_is_grounded_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=archive.unpack".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-archive-unpack-capability-ref",
+        "ask",
+        "unpack archive",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "unpacked to /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route, &journal, "unpacked"
+    ));
+}
+
+#[test]
 fn structured_keys_answer_accepts_array_identity_values() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
