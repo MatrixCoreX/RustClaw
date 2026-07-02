@@ -78,6 +78,7 @@ mod directory_unique_entry;
 mod dry_run_contract_plan;
 #[path = "explicit_observed_paths.rs"]
 mod explicit_observed_paths;
+#[cfg(test)]
 #[path = "filesystem_mutation_plan.rs"]
 mod filesystem_mutation_plan;
 #[path = "inline_transform_contract.rs"]
@@ -132,6 +133,7 @@ use directory_entry_group_locator::*;
 use directory_unique_entry::*;
 use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
+#[cfg(test)]
 use filesystem_mutation_plan::*;
 use inline_transform_contract::*;
 #[cfg(test)]
@@ -348,16 +350,6 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_async_job_start"
-    );
-    return_deterministic_plan!(
-        filesystem_mutation_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_filesystem_mutation"
     );
     if allow_structural_deterministic_plans {
         return_deterministic_plan!(

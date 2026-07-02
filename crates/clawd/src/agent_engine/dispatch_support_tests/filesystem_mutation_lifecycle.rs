@@ -48,7 +48,7 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
 
     assert_eq!(
         value
-            .pointer("/semantic_kind")
+            .pointer("/contract_marker")
             .and_then(serde_json::Value::as_str),
         Some("filesystem_mutation_result")
     );
