@@ -169,6 +169,30 @@ fn eligibility_maps_legacy_classes_to_general_buckets() {
 }
 
 #[test]
+fn eligibility_uses_contract_not_legacy_route_trace() {
+    let mut listing = route_result(OutputResponseShape::Strict, OutputSemanticKind::FileNames);
+    listing.ask_mode = AskMode::direct_answer();
+
+    let eligibility = agent_loop_eligibility(&listing);
+
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskListing)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "exact_path_list"
+    );
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"agent_loop_entry"));
+    assert!(!eligibility
+        .boundary_requirements
+        .contains(&"planner_execute"));
+}
+
+#[test]
 fn unresolved_locator_marker_blocks_migration_class_even_when_gate_is_execute() {
     let mut route = route_result(
         OutputResponseShape::Scalar,
