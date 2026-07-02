@@ -820,8 +820,7 @@ fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
 
 #[test]
 fn unannotated_evidence_backed_deliverable_starts_primary_task() {
-    let mut route_result =
-        route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
@@ -853,7 +852,7 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task() {
 
 #[test]
 fn unannotated_structured_listing_replaces_prior_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::planner_execute_plain(), false);
+    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
     let mut journal = crate::task_journal::TaskJournal::new("list");
     journal
         .step_results
