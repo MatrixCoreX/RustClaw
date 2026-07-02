@@ -54,10 +54,9 @@ use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResul
 
 #[path = "planning_scalar_count_filter.rs"]
 mod scalar_count_filter;
-use scalar_count_filter::{
-    apply_scalar_count_filter_hint, scalar_count_filter_hint_for_route_or_turn,
-    scalar_count_filter_hint_from_route,
-};
+#[cfg(test)]
+use scalar_count_filter::scalar_count_filter_hint_for_route_or_turn;
+use scalar_count_filter::{apply_scalar_count_filter_hint, scalar_count_filter_hint_from_route};
 
 #[path = "action_route_locator_artifact.rs"]
 mod action_route_locator_artifact;
@@ -239,16 +238,6 @@ pub(super) async fn plan_round_actions(
             auto_locator_path,
         ),
         "plan_deterministic_active_task_append_current_locator"
-    );
-    return_deterministic_plan!(
-        scalar_count_filter_deterministic_plan_result(
-            goal,
-            route_result,
-            loop_state,
-            turn_analysis_for_prompt,
-            auto_locator_path,
-        ),
-        "plan_deterministic_scalar_count_filter"
     );
     return_deterministic_plan!(
         contract_hint_preferred_action_deterministic_plan_result(
