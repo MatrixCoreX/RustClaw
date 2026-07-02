@@ -754,11 +754,8 @@ pub(super) fn plain_rustclaw_main_config_validation_action_target(
 
 fn route_requests_config_validation(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &["validate", "validate_config", "validate_after_change"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
 }
 
 fn route_requests_config_risk_guard(route: &RouteResult) -> bool {

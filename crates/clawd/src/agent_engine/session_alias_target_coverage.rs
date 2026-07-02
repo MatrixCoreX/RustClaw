@@ -800,11 +800,8 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
 
 fn route_requests_config_validation(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &["validate"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
 }
 
 pub(super) fn content_presence_query_deterministic_plan_result(
