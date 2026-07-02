@@ -945,6 +945,27 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
             &["config"],
             &["guard", "risk"],
         ),
+        ("config_basic", "read_field") | ("system_basic", "extract_field") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config", "config_basic", "system_basic"],
+                &["read_field", "extract_field"],
+            )
+        }
+        ("config_basic", "read_fields") | ("system_basic", "extract_fields") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config", "config_basic", "system_basic"],
+                &["read_fields", "extract_fields"],
+            )
+        }
+        ("config_basic", "list_keys") | ("system_basic", "structured_keys") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["config", "config_basic", "system_basic"],
+                &["list_keys", "structured_keys"],
+            )
+        }
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
