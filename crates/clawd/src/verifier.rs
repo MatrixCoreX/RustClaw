@@ -1712,7 +1712,7 @@ pub(crate) fn verify_plan(
     let route_contract_missing = input
         .route_result
         .filter(|_| route_requires_contract(input.route_result))
-        .is_some_and(|route| crate::contract_matrix::final_answer_shape_for_route(route).is_none());
+        .is_some_and(|route| crate::evidence_policy::final_answer_shape_for_route(route).is_none());
     if route_contract_missing {
         let contract_marker = input
             .route_result
@@ -1722,7 +1722,7 @@ pub(crate) fn verify_plan(
             step_id: "route".to_string(),
             kind: VerifyIssueKind::ContractMissing,
             detail: format!(
-                "error_code=contract_matrix_entry_missing contract_marker={contract_marker}"
+                "error_code=evidence_policy_entry_missing contract_marker={contract_marker}"
             ),
             missing_fields: Vec::new(),
         });
@@ -1759,7 +1759,7 @@ pub(crate) fn verify_plan(
                     &normalized_skill,
                     &step.args,
                 );
-            if let Some(policy) = crate::contract_matrix::capability_ref_action_policy_for_route(
+            if let Some(policy) = crate::evidence_policy::capability_ref_action_policy_for_route(
                 input.route_result,
                 &normalized_skill,
                 &step.args,

@@ -39,6 +39,7 @@ mod contract_matrix;
 mod conversation_state;
 mod db_init;
 mod delivery_utils;
+mod evidence_policy;
 mod execution_adapters;
 mod execution_isolation;
 mod execution_recipe;
