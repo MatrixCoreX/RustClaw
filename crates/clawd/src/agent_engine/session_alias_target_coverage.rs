@@ -891,6 +891,7 @@ pub(super) fn content_presence_query_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn scalar_content_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1149,6 +1150,7 @@ pub(super) fn resolve_existing_metadata_locator_path(
     )
 }
 
+#[cfg(test)]
 pub(super) fn file_facts_auto_locator_target_path(
     workspace_root: &Path,
     route_result: Option<&RouteResult>,
@@ -1191,6 +1193,7 @@ pub(super) fn file_facts_auto_locator_target_path(
     None
 }
 
+#[cfg(test)]
 pub(super) fn file_facts_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
