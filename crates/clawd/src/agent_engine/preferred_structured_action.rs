@@ -198,6 +198,7 @@ fn preferred_docker_basic_action(
     "ps"
 }
 
+#[cfg(test)]
 pub(super) fn route_has_contract_hint_context(
     route: &RouteResult,
     original_user_text: &str,
@@ -211,6 +212,7 @@ pub(super) fn route_has_contract_hint_context(
         || route.has_route_reason_machine_marker("contract_hint_fast_path")
 }
 
+#[cfg(test)]
 pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -271,6 +273,7 @@ pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -336,6 +339,7 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
     None
 }
 
+#[cfg(test)]
 fn capability_ref_preferred_action_refs_for_route(
     route: &RouteResult,
 ) -> Vec<crate::contract_matrix::ActionRef> {
@@ -370,6 +374,7 @@ fn capability_ref_preferred_action_refs_for_route(
     Vec::new()
 }
 
+#[cfg(test)]
 fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args: &Value) -> bool {
     if crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
@@ -393,6 +398,7 @@ fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args
     )
 }
 
+#[cfg(test)]
 fn route_capability_allows_preferred_action(
     route: &RouteResult,
     skill: &str,
