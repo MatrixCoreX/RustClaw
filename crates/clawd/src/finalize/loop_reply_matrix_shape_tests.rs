@@ -228,6 +228,45 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
 }
 
 #[test]
+fn matrix_filesystem_find_entries_capability_ref_builds_path_list_without_semantic_kind() {
+    let state = test_state();
+    let task = claimed_task("task-fs-find-capability-ref-path-list");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"find_entries","results":["plan/a.md","plan/b.md","docs/c.md"]}"#,
+    ));
+    let mut delivery = vec!["I found a few matching markdown files.".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "find matching files",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(delivery, vec!["docs/c.md\nplan/a.md\nplan/b.md"]);
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-matrix-file-name-list-wrapped-names");
