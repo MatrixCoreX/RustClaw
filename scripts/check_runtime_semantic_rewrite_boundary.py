@@ -326,6 +326,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_observed_output_contract_marker_payload())
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
     findings.extend(scan_execution_recipe_registry_bridge_tokens())
+    findings.extend(scan_execution_recipe_contract_marker_outputs())
+    findings.extend(scan_schema_report_contract_marker_fields())
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
     findings.extend(scan_contract_matrix_trace_contract_marker())
     findings.extend(scan_task_journal_step_contract_marker())
@@ -1094,6 +1096,80 @@ def scan_execution_recipe_registry_bridge_tokens() -> list[Finding]:
                 "execution_recipe_registry_bridge_token",
             )
         )
+    return findings
+
+
+def scan_execution_recipe_contract_marker_outputs() -> list[Finding]:
+    path = SRC_ROOT / "intent_router_execution_recipe_contract.rs"
+    rel_path = rel(path)
+    text = path.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if '"contract_marker".to_string()' not in text or '.get("contract_marker")' not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "execution_recipe_contract_marker_missing",
+                "execution recipe contract repair should read/write contract_marker",
+            )
+        )
+    forbidden_tokens = [
+        '"semantic_kind".to_string()',
+        '.get("semantic_kind")',
+        "force_output_contract_semantic_kind",
+    ]
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for token in forbidden_tokens:
+            if token not in line:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "execution_recipe_contract_semantic_kind_field",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
+def scan_schema_report_contract_marker_fields() -> list[Finding]:
+    path = SRC_ROOT / "intent_router_schema_report.rs"
+    rel_path = rel(path)
+    text = path.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    required_tokens = [
+        '"contract_marker"',
+        '"output_contract_marker_normalized"',
+        '.get("contract_marker")',
+    ]
+    for token in required_tokens:
+        if token in text:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "schema_report_contract_marker_missing",
+                f"missing required schema report token: {token}",
+            )
+        )
+    forbidden_tokens = [
+        '.get("semantic_kind")',
+        '"output_contract_semantic_kind_normalized"',
+    ]
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for token in forbidden_tokens:
+            if token not in line:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "schema_report_semantic_kind_field",
+                    line.strip(),
+                )
+            )
     return findings
 
 

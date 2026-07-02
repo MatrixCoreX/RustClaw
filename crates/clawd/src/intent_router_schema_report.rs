@@ -208,17 +208,17 @@ pub(super) fn contract_repair_report_from_before_after(
         before_contract,
         after_contract,
         &[
-            "semantic_kind",
+            "contract_marker",
             "semantic",
             "kind",
             "answer_kind",
             "semantic_type",
         ],
-        "semantic_kind",
+        "contract_marker",
         normalize_output_semantic_kind_for_schema,
         "none",
     ) {
-        report.add("enum_alias", "output_contract_semantic_kind_normalized");
+        report.add("enum_alias", "output_contract_marker_normalized");
     }
     if output_contract_unknown_semantic_was_ignored(before_contract, after_contract) {
         report.add(
@@ -362,7 +362,7 @@ fn output_contract_unknown_semantic_was_ignored(
     let before_text = before_contract
         .and_then(|obj| {
             [
-                "semantic_kind",
+                "contract_marker",
                 "semantic",
                 "kind",
                 "answer_kind",
@@ -380,7 +380,7 @@ fn output_contract_unknown_semantic_was_ignored(
         return false;
     }
     after_contract
-        .and_then(|obj| obj.get("semantic_kind"))
+        .and_then(|obj| obj.get("contract_marker"))
         .and_then(scalar_json_value_text)
         .is_some_and(|text| text == OutputSemanticKind::None.as_str())
 }
@@ -411,7 +411,7 @@ fn output_contract_unknown_scalar_was_ignored(
         return false;
     };
     let after_semantic_is_none = after_contract
-        .get("semantic_kind")
+        .get("contract_marker")
         .and_then(scalar_json_value_text)
         .is_none_or(|text| text == OutputSemanticKind::None.as_str());
     let after_shape_is_free = after_contract
@@ -474,7 +474,7 @@ fn output_contract_has_executable_shape(contract: Option<&serde_json::Map<String
             .and_then(scalar_json_value_text)
             .is_some_and(|value| normalize_output_locator_kind_for_schema(&value) != "none")
         || contract
-            .get("semantic_kind")
+            .get("contract_marker")
             .and_then(scalar_json_value_text)
             .is_some_and(|value| {
                 !matches!(

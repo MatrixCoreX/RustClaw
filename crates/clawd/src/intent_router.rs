@@ -148,7 +148,7 @@ use execution_recipe_schema::{
 #[path = "intent_router_execution_recipe_contract.rs"]
 mod execution_recipe_contract;
 use execution_recipe_contract::{
-    force_output_contract_semantic_kind, mark_output_contract_requires_content_evidence,
+    force_output_contract_marker, mark_output_contract_requires_content_evidence,
     normalize_output_contract_for_command_payload,
     normalize_output_contract_for_package_detect_manager_capability,
     normalize_output_contract_for_service_status_recipe,

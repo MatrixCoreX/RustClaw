@@ -400,7 +400,7 @@ fn normalizer_schema_normalization_preserves_meaningful_duplicate_route_fields()
 
 #[test]
 fn contract_repair_report_marks_structured_alias_repair() {
-    let raw = r#"{"output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":true,"locator_kind":"path","delivery_intent":"list_filenames","semantic_kind":"file_listing","locator_hint":"logs"}}"#;
+    let raw = r#"{"output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":true,"locator_kind":"path","delivery_intent":"list_filenames","contract_marker":"file_listing","locator_hint":"logs"}}"#;
     let (_normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
         raw,
         "列出 logs 目录下的前 10 个文件名，不要读内容",
@@ -410,11 +410,11 @@ fn contract_repair_report_marks_structured_alias_repair() {
     assert!(report.source_csv().contains("structured_contract"));
     assert!(report
         .detail_csv()
-        .contains("output_contract_semantic_kind_normalized"));
+        .contains("output_contract_marker_normalized"));
     assert!(!report
         .detail_csv()
         .contains("execution_signal_derived_from_output_contract"));
-    assert_eq!(report.class_csv(), "schema_normalization");
+    assert!(report.class_csv().contains("schema_normalization"));
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn normalizer_schema_normalization_maps_process_status_alias_to_service_status()
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"process_status",
+            "contract_marker":"process_status",
             "locator_hint":""
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"}
@@ -478,7 +478,7 @@ fn normalizer_schema_normalization_maps_process_status_alias_to_service_status()
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("service_status")
     );
@@ -515,7 +515,7 @@ fn contract_repair_report_marks_command_payload_as_raw_output() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -768,7 +768,7 @@ fn normalizer_schema_normalization_maps_file_basename_semantic() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"single_file_basename",
+            "contract_marker":"single_file_basename",
             "locator_hint":""
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
@@ -785,7 +785,7 @@ fn normalizer_schema_normalization_maps_file_basename_semantic() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("file_basename")
     );

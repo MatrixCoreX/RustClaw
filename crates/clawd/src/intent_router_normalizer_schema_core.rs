@@ -8,7 +8,7 @@ use super::{
     execution_recipe_value_declares_structured_read_observation,
     execution_recipe_value_declares_structured_scalar_extraction,
     execution_recipe_value_locator_hint, execution_recipe_value_structured_locator_hint,
-    force_output_contract_semantic_kind, mark_output_contract_requires_content_evidence,
+    force_output_contract_marker, mark_output_contract_requires_content_evidence,
     normalize_output_contract_for_command_payload,
     normalize_output_contract_for_package_detect_manager_capability,
     normalize_output_contract_for_schema, normalize_output_contract_for_service_status_recipe,
@@ -617,7 +617,7 @@ pub(super) fn normalize_execution_recipe_for_schema(
     ) {
         mark_output_contract_requires_content_evidence(obj);
         normalize_output_contract_for_command_payload(obj, None);
-        force_output_contract_semantic_kind(obj, OutputSemanticKind::RawCommandOutput);
+        force_output_contract_marker(obj, OutputSemanticKind::RawCommandOutput);
         if let Some(kind) = scalar_runtime_status_kind_from_execution_recipe(execution_recipe)
             .or_else(|| scalar_runtime_status_kind_from_output_contract(obj.get("output_contract")))
         {
