@@ -261,7 +261,7 @@ fn agent_loop_boundary_observations_block(
     pre_loop_clarify_candidates: &[&'static str],
 ) -> Option<String> {
     let route = &post_route.execution_route_result;
-    let route_reason_codes = route_reason_machine_codes(route);
+    let route_reason_codes = boundary_observation_route_reason_codes(route);
     let session_alias_bindings = session_alias_binding_observations(session_snapshot);
     let active_bound_targets = active_bound_target_observations(session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
@@ -301,7 +301,6 @@ fn agent_loop_boundary_observations_block(
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",
         "schema_version": 1,
-        "route_gate_kind": route.gate_kind().as_str(),
         "needs_clarify": route.needs_clarify,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_required": route.output_contract.delivery_required,
@@ -541,6 +540,24 @@ fn route_reason_machine_codes(route_result: &crate::RouteResult) -> Vec<String> 
     codes.sort();
     codes.dedup();
     codes
+}
+
+fn boundary_observation_route_reason_codes(route_result: &crate::RouteResult) -> Vec<String> {
+    route_reason_machine_codes(route_result)
+        .into_iter()
+        .filter(|code| !is_legacy_route_trace_reason_code(code))
+        .collect()
+}
+
+fn is_legacy_route_trace_reason_code(code: &str) -> bool {
+    matches!(
+        code,
+        "executionless_finalize_trace_plain"
+            | "direct_answer_trace_inferred"
+            | "planner_execute_trace_inferred"
+            | "clarify_trace_inferred"
+            | "agent_loop_default_entry"
+    )
 }
 
 fn valid_route_reason_machine_code(token: &str) -> bool {

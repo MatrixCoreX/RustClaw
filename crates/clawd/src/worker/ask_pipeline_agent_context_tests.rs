@@ -172,6 +172,43 @@ fn boundary_observation_block_filters_natural_language_route_reason() {
     assert!(block.contains("/tmp/workspace/docs"));
     assert!(block.contains("active_observed_facts"));
     assert!(block.contains("/tmp/workspace/notes.md"));
+    assert!(!block.contains("route_gate_kind"));
     assert!(!block.contains("用户自然语言原因"));
     assert!(!block.contains("MixedCaseCode"));
+}
+
+#[test]
+fn boundary_observation_block_omits_legacy_route_trace_only_reason() {
+    let mut route = base_route();
+    route.route_reason = "executionless_finalize_trace_plain".to_string();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+    let state = crate::AppState::test_default_with_fixture_provider();
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        "answer from current runtime context",
+        "answer from current runtime context",
+        &[],
+    );
+
+    assert!(block.is_none());
 }
