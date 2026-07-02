@@ -976,7 +976,7 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
         ("fs_basic", "list_dir") | ("system_basic", "inventory_dir") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
                 &["list_dir", "list_entries", "inventory_dir"],
             )
         }
@@ -990,7 +990,7 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
         ("fs_basic", "read_text_range") | ("system_basic", "read_range") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
                 &["read_text_range", "read_text", "read_file", "read_range"],
             )
         }
@@ -1011,7 +1011,7 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
         ("fs_basic", "compare_paths") | ("system_basic", "compare_paths") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
-                &["filesystem", "fs", "fs_basic", "system_basic"],
+                &["filesystem", "fs", "fs_basic", "system", "system_basic"],
                 &["compare_paths"],
             )
         }
@@ -1123,6 +1123,27 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 route,
                 &["docker", "docker_basic"],
                 &["stop", "stop_container"],
+            )
+        }
+        ("system_basic", "info") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["system", "system_basic"],
+                &["info"],
+            )
+        }
+        ("system_basic", "runtime_status") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["system", "system_basic"],
+                &["runtime_status"],
+            )
+        }
+        ("system_basic", "tree_summary") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["system", "system_basic"],
+                &["tree_summary"],
             )
         }
         ("config_edit", "plan_config_change") => {

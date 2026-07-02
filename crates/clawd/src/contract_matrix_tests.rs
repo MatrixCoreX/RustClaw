@@ -268,6 +268,46 @@ fn route_capability_ref_allows_service_and_docker_policy_without_semantic_kind()
 }
 
 #[test]
+fn route_capability_ref_allows_system_policy_without_semantic_kind() {
+    for (capability_ref, args, expected_action) in [
+        (
+            "capability_ref=system.info",
+            serde_json::json!({"action":"info"}),
+            "system_basic.info",
+        ),
+        (
+            "capability_ref=system.runtime_status",
+            serde_json::json!({"action":"runtime_status","kind":"current_user"}),
+            "system_basic.runtime_status",
+        ),
+        (
+            "capability_ref=system.inventory_dir",
+            serde_json::json!({"action":"inventory_dir","path":"crates"}),
+            "fs_basic.list_dir",
+        ),
+        (
+            "capability_ref=system.tree_summary",
+            serde_json::json!({"action":"tree_summary","path":"crates","max_depth":2}),
+            "system_basic.tree_summary",
+        ),
+        (
+            "capability_ref=system.read_range",
+            serde_json::json!({"action":"read_range","path":"README.md","start_line":1,"end_line":5}),
+            "fs_basic.read_text_range",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), "system_basic", &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (
