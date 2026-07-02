@@ -482,7 +482,10 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
 fn operation_for_unclassified_route(route: &RouteResult) -> TaskOperation {
     if route.output_contract.delivery_required {
         TaskOperation::Read
-    } else if route.is_execute_gate() {
+    } else if route.output_contract.requires_content_evidence
+        || !matches!(route.output_contract.locator_kind, OutputLocatorKind::None)
+        || !route.output_contract.locator_hint.trim().is_empty()
+    {
         TaskOperation::Inspect
     } else {
         TaskOperation::Unknown

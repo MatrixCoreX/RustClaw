@@ -133,6 +133,29 @@ fn existence_contract_requires_structural_path_evidence() {
 }
 
 #[test]
+fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
+    let route = route_with_contract(
+        AskMode::direct_answer(),
+        IntentOutputContract {
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "README.md".to_string(),
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        },
+    );
+
+    let contract = TaskContract::from_route_result(&route);
+
+    assert_eq!(contract.intent_kind, TaskIntentKind::DirectAnswer);
+    assert_eq!(contract.operation, TaskOperation::Inspect);
+    assert_eq!(
+        contract.failure_policy,
+        TaskFailurePolicy::RetryWithAlternatives
+    );
+}
+
+#[test]
 fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
     for (marker, target, operation, evidence) in [
         (
