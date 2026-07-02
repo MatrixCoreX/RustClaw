@@ -1492,117 +1492,6 @@ pub(super) fn task_control_list_deterministic_plan_result(
     ))
 }
 
-pub(super) fn web_search_summary_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    _user_text: &str,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.has_tool_or_skill_output
-        || !route.output_contract.requires_content_evidence
-        || !route_requests_web_search_summary(route)
-        || !web_search_extract_available_for_plan(state)
-    {
-        return None;
-    }
-
-    let query = web_search_query_from_route(route)?;
-    if query.is_empty() {
-        return None;
-    }
-
-    let mut args = serde_json::json!({
-        "action": "search_extract",
-        "backend": "duckduckgo_html",
-        "query": query,
-    });
-    if let Some(top_k) = route.output_contract.self_extension.list_selector.limit {
-        if (1..=20).contains(&top_k) {
-            args["top_k"] = serde_json::json!(top_k);
-        }
-    }
-    let action = AgentAction::CallSkill {
-        skill: "web_search_extract".to_string(),
-        args,
-    };
-    if let AgentAction::CallSkill { skill, args } = &action {
-        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
-            .is_some_and(|policy| policy.is_allowed())
-        {
-            return None;
-        }
-    }
-
-    let actions = vec![
-        action,
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["step_1".to_string()],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ];
-    Some(build_plan_result(
-        goal,
-        "deterministic:web_search_summary_search_extract",
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-pub(super) fn browser_http_url_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    _user_text: &str,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.has_tool_or_skill_output
-        || !route.output_contract.requires_content_evidence
-        || !route_requests_browser_open_extract(route)
-        || !skill_available_for_plan(state, "browser_web")
-        || !skill_available_for_plan(state, "http_basic")
-        || !route_has_browser_open_extract_machine_ref(route)
-        || !route_has_http_get_machine_ref(route)
-    {
-        return None;
-    }
-    let url = service_status_url_locator(route)?;
-    let actions = vec![
-        AgentAction::CallTool {
-            tool: "browser_web".to_string(),
-            args: serde_json::json!({
-                "action": "open_extract",
-                "url": url.clone(),
-                "content_mode": "main_text",
-                "max_text_chars": 4000,
-            }),
-        },
-        AgentAction::CallTool {
-            tool: "http_basic".to_string(),
-            args: serde_json::json!({
-                "action": "get",
-                "url": url,
-            }),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ];
-    Some(build_plan_result(
-        goal,
-        "deterministic:browser_http_url_observation",
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
 pub(super) fn config_risk_preview_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1679,10 +1568,6 @@ fn task_control_available_for_plan(state: &AppState) -> bool {
     skill_available_for_plan(state, "task_control")
 }
 
-fn web_search_extract_available_for_plan(state: &AppState) -> bool {
-    skill_available_for_plan(state, "web_search_extract")
-}
-
 fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
     let enabled_skills = state.get_skills_list();
     enabled_skills.is_empty() || enabled_skills.contains(skill)
@@ -1717,65 +1602,6 @@ fn route_requests_config_risk_preview(route: &RouteResult) -> bool {
                 "plan_config_change",
             ],
         )
-}
-
-fn route_requests_web_search_summary(route: &RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["web", "browser"],
-        &["search", "results"],
-    )
-}
-
-fn route_requests_browser_open_extract(route: &RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "http"],
-        &["open", "get", "read", "extract"],
-    ) && !crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "web"],
-        &["search"],
-    )
-}
-
-fn route_has_browser_open_extract_machine_ref(route: &RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "browser_web"],
-        &["open", "extract"],
-    ) || route_mentions_any_machine_token(route, &["browser_web", "browser_web.open_extract"])
-}
-
-fn route_has_http_get_machine_ref(route: &RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["http", "http_basic"],
-        &["get", "read"],
-    ) || route_mentions_any_machine_token(route, &["http_basic", "http_basic.get"])
-}
-
-fn web_search_query_from_route(route: &RouteResult) -> Option<String> {
-    route
-        .output_contract
-        .locator_hint
-        .trim()
-        .strip_prefix("query=")
-        .and_then(nonempty_search_query)
-        .or_else(|| route_machine_value(route, &["query", "q"]))
-}
-
-fn nonempty_search_query(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty()
-        || value.len() > 200
-        || value.starts_with("http://")
-        || value.starts_with("https://")
-        || value.contains('\n')
-    {
-        return None;
-    }
-    Some(value.to_string())
 }
 
 fn route_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> bool {

@@ -336,26 +336,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_subagent_review_boundary_surface"
     );
     return_deterministic_plan!(
-        browser_http_url_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_browser_http_url"
-    );
-    return_deterministic_plan!(
-        web_search_summary_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_web_search_summary"
-    );
-    return_deterministic_plan!(
         task_control_list_deterministic_plan_result(state, goal, route_result, loop_state),
         "plan_deterministic_task_control_list"
     );
