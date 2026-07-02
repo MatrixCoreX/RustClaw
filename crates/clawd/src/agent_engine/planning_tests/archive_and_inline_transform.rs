@@ -696,7 +696,7 @@ fn lightweight_tool_spec_includes_route_task_contract() {
         .any(|part| part.starts_with("semantic_kind="))));
     assert!(!spec.contains("ask_mode="));
     assert!(!spec.contains("derived_route_label="));
-    assert!(spec.contains("intent_kind=planner_execute"));
+    assert!(!spec.contains("intent_kind="));
     assert!(spec.contains("target_object=directory"));
     assert!(spec.contains("operation=list"));
     assert!(spec.contains("required_evidence_fields=candidates"));
