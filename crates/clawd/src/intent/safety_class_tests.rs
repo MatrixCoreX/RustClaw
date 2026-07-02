@@ -37,7 +37,7 @@ fn chat_route_is_low_risk() {
 
 #[test]
 fn current_repo_code_change_is_medium_risk() {
-    let route = base_route(crate::AskMode::planner_execute_plain());
+    let route = base_route(crate::AskMode::direct_answer());
     let recipe = ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         profile: ExecutionRecipeProfile::CodeChange,
@@ -82,7 +82,7 @@ fn generated_file_delivery_route_is_high_risk() {
 
 #[test]
 fn generated_file_path_report_route_is_high_risk() {
-    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    let mut route = base_route(crate::AskMode::direct_answer());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.delivery_required = false;
