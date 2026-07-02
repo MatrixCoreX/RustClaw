@@ -120,10 +120,11 @@ fn planner_capability_hint_includes_structured_contract() {
         filesystem_write: Some(false),
         external_publish: Some(false),
         credential_access: Some(false),
+        final_answer_shape: Some("path_list".to_string()),
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false)"
+        "filesystem.list_entries(action=list_dir,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false,final_answer_shape=path_list)"
     );
 }
 

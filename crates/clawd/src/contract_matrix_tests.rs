@@ -405,6 +405,26 @@ fn route_capability_ref_uses_registry_metadata_for_exact_skill_actions_without_s
 }
 
 #[test]
+fn route_capability_ref_reads_final_answer_shape_from_registry_metadata() {
+    let route = route_with_machine_capability_ref("capability_ref=config.read_field");
+
+    assert_eq!(
+        route.output_contract.response_shape,
+        OutputResponseShape::Strict
+    );
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+
+    let trace = action_trace_for_route(&route, "config_basic.read_field")
+        .expect("route capability action trace");
+
+    assert_eq!(trace["contract_match"], "capability_ref");
+    assert_eq!(trace["final_answer_shape"], "scalar");
+}
+
+#[test]
 fn route_capability_ref_rejects_registry_action_mismatch_without_semantic_kind() {
     let route = route_with_machine_capability_ref("capability_ref=weather.current");
 

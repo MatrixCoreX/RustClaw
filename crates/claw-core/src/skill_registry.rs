@@ -161,6 +161,8 @@ pub struct PlannerCapabilityMapping {
     pub external_publish: Option<bool>,
     #[serde(default)]
     pub credential_access: Option<bool>,
+    #[serde(default)]
+    pub final_answer_shape: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -656,6 +658,8 @@ fn normalize_planner_capabilities(
             credential_access: mapping
                 .credential_access
                 .or_else(|| mapping.effect.map(|_| false)),
+            final_answer_shape: trim_optional_string(mapping.final_answer_shape.as_deref())
+                .map(|value| normalize_schema_token(&value)),
         });
     }
     out

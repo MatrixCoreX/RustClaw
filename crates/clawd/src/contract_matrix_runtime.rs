@@ -277,6 +277,11 @@ pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalA
 }
 
 fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<FinalAnswerShape> {
+    if let Some(shape) = registry_final_answer_shape_for_route_capability_ref(route, true)
+        .or_else(|| registry_final_answer_shape_for_route_capability_ref(route, false))
+    {
+        return Some(shape);
+    }
     if crate::machine_capability_ref::route_has_capability_action_name(
         route,
         &["archive"],
@@ -433,6 +438,33 @@ fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<Fi
         ],
     ) {
         return Some(FinalAnswerShape::ValidationVerdict);
+    }
+    None
+}
+
+fn registry_final_answer_shape_for_route_capability_ref(
+    route: &RouteResult,
+    preferred_only: bool,
+) -> Option<FinalAnswerShape> {
+    let route_refs = crate::machine_capability_ref::route_capability_ref_tokens(route)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if route_refs.is_empty() {
+        return None;
+    }
+    let registry = bundled_skills_registry()?;
+    for skill in registry.all_names() {
+        for mapping in registry.planner_capabilities(&skill) {
+            if !route_refs.contains(&mapping.name) || (preferred_only && !mapping.preferred) {
+                continue;
+            }
+            let Some(shape) = mapping.final_answer_shape.as_deref() else {
+                continue;
+            };
+            if let Some(shape) = FinalAnswerShape::parse(shape) {
+                return Some(shape);
+            }
+        }
     }
     None
 }

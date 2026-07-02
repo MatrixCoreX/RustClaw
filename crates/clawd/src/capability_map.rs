@@ -242,6 +242,9 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(credential_access) = mapping.credential_access {
         parts.push(format!("credential_access={credential_access}"));
     }
+    if let Some(final_answer_shape) = mapping.final_answer_shape.as_deref() {
+        parts.push(format!("final_answer_shape={final_answer_shape}"));
+    }
     if parts.is_empty() {
         mapping.name.clone()
     } else {
