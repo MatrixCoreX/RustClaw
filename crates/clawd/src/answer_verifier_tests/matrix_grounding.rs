@@ -290,6 +290,34 @@ fn git_repository_state_one_sentence_accepts_stable_state_fields() {
 }
 
 #[test]
+fn git_status_capability_ref_answer_is_structurally_grounded_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.route_reason = "capability_ref=git.status".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-git-status-capability-ref",
+        "ask",
+        "check dirty state",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "git_basic",
+            "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "git.branch=main git.worktree=dirty"
+    ));
+}
+
+#[test]
 fn git_repository_state_exact_one_sentence_accepts_stable_state_fields() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.exact_sentence_count = Some(1);
