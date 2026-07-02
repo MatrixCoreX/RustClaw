@@ -6,7 +6,7 @@ use crate::{
 use super::planning_route_markers::route_has_unresolved_clarify_or_locator_marker;
 
 const LOW_RISK_READ_BOUNDARY_REQUIREMENTS: &[&str] = &[
-    "planner_execute",
+    "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
     "no_clarify",
@@ -15,7 +15,7 @@ const LOW_RISK_READ_BOUNDARY_REQUIREMENTS: &[&str] = &[
 ];
 
 const LOW_RISK_CONTEXT_BOUNDARY_REQUIREMENTS: &[&str] = &[
-    "planner_execute",
+    "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
     "no_clarify",
@@ -24,7 +24,7 @@ const LOW_RISK_CONTEXT_BOUNDARY_REQUIREMENTS: &[&str] = &[
 ];
 
 const LOW_RISK_DIRECT_RESPONSE_BOUNDARY_REQUIREMENTS: &[&str] = &[
-    "planner_execute",
+    "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
     "no_clarify",
@@ -33,7 +33,7 @@ const LOW_RISK_DIRECT_RESPONSE_BOUNDARY_REQUIREMENTS: &[&str] = &[
 ];
 
 const LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS: &[&str] = &[
-    "planner_execute",
+    "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
     "no_clarify",
@@ -167,12 +167,6 @@ pub(crate) fn agent_decides_eligible_migration_class(route: &RouteResult) -> &'s
 
 pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibility {
     let contract = crate::TaskContract::from_route_result(route);
-    if !matches!(
-        contract.intent_kind,
-        crate::task_contract::TaskIntentKind::PlannerExecute
-    ) {
-        return AgentLoopEligibility::blocked("not_planner_execute");
-    }
     if route.risk_ceiling == RiskCeiling::High {
         return AgentLoopEligibility::blocked("risk_ceiling_high");
     }
