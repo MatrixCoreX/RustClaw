@@ -145,7 +145,6 @@ pub(super) fn clawcli_resume_surface_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !runtime_surface_skill_available_for_plan(state, "run_cmd")
         || !runtime_surface_mentions_any_machine_token(route, &["clawcli"])
         || !runtime_surface_mentions_any_machine_token(route, &["resume"])
