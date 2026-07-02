@@ -171,7 +171,7 @@ pub(super) fn contract_matrix_action_policy_error(
         return Some(err);
     }
     let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
-        crate::contract_matrix::capability_ref_action_policy_for_route(
+        crate::evidence_policy::capability_ref_action_policy_for_route(
             Some(route),
             normalized_skill,
             classification_args,
@@ -288,13 +288,13 @@ pub(super) fn contract_matrix_action_policy_error(
 fn runtime_async_job_start_allows_run_cmd_despite_contract(
     normalized_skill: &str,
     classification_args: &Value,
-    decision: crate::contract_matrix::ActionPolicyDecision,
+    decision: crate::evidence_policy::ActionPolicyDecision,
 ) -> bool {
     if !normalized_skill.eq_ignore_ascii_case("run_cmd")
         || !matches!(
             decision,
-            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
-                | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+                | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
         )
         || classification_args
             .get("async_start")
@@ -392,9 +392,9 @@ fn generated_media_path_run_cmd_policy_error(
             "reason_code": "media_artifact_requires_media_skill",
             "message_key": "clawd.contract.media_artifact_requires_media_skill",
             "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
-            "decision": crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed.as_str(),
+            "decision": crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed.as_str(),
             "policy_decision": crate::policy_decision::PolicyDecision::from_contract_action_policy(
-                crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+                crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
             ).as_token(),
             "action": "run_cmd",
             "original_action_ref": "run_cmd",
@@ -624,7 +624,7 @@ pub(super) fn capability_isolation_policy_error(
         Some(json!({
             "reason_code": "isolation_policy_violation",
             "failure_attribution": crate::contract_matrix::FailureAttribution::PermissionDenied.as_str(),
-            "decision": crate::contract_matrix::ActionPolicyDecision::RejectedForbidden.as_str(),
+            "decision": crate::evidence_policy::ActionPolicyDecision::RejectedForbidden.as_str(),
             "policy_decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
             "canonical_skill": canonical_skill,
             "action": action,
@@ -810,9 +810,9 @@ fn active_ops_recipe_allows_mutation_despite_contract(
     loop_state: &LoopState,
     normalized_skill: &str,
     args: &Value,
-    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+    policy_decision: crate::evidence_policy::ActionPolicyDecision,
 ) -> bool {
-    if policy_decision != crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed {
+    if policy_decision != crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed {
         return false;
     }
     let recipe = loop_state.execution_recipe;
@@ -843,14 +843,14 @@ pub(super) fn contract_matrix_arg_policy_error(
     exec_args: &Value,
 ) -> Option<String> {
     let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
-        crate::contract_matrix::arg_policy_decision_for_route(
+        crate::evidence_policy::arg_policy_decision_for_route(
             Some(route),
             normalized_skill,
             exec_args,
         )
     })?;
     if policy.is_allowed()
-        || policy.decision == crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
+        || policy.decision == crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
     {
         return None;
     }
