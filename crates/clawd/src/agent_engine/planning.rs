@@ -193,13 +193,8 @@ pub(super) async fn plan_round_actions(
         };
     }
 
-    let dry_run_contract_text = format!("{goal}\n{user_text}");
     return_deterministic_plan!(
-        structured_dry_run_response_deterministic_plan_result(
-            &dry_run_contract_text,
-            route_result,
-            loop_state
-        ),
+        structured_dry_run_response_deterministic_plan_result(goal, route_result, loop_state),
         "plan_deterministic_structured_dry_run_response"
     );
     return_deterministic_plan!(
