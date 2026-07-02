@@ -163,21 +163,8 @@ pub(crate) fn compact_prompt_line_for_output_contract(
     } else {
         required_evidence.join(",")
     };
-    let allowed_actions = normalized_tokens(matched.allowed_actions());
-    let allowed_actions = if allowed_actions.is_empty() {
-        "none".to_string()
-    } else {
-        allowed_actions.join(",")
-    };
-    let forbidden_actions = normalized_tokens(matched.forbidden_actions());
-    let forbidden_actions = if forbidden_actions.is_empty() {
-        "none".to_string()
-    } else {
-        forbidden_actions.join(",")
-    };
-
     Some(format!(
-        "- contract_matrix version={} hash={} match={} evidence_profile={} required_evidence={} final_answer_shape={} allowed_actions={} forbidden_actions={}",
+        "- evidence_policy source=legacy_contract_matrix version={} hash={} match={} planner_authority=agent_loop_registry evidence_profile={} required_evidence={} final_answer_shape={}",
         matrix.matrix_version,
         matrix.matrix_version_hash(),
         matched.match_name(),
@@ -187,8 +174,6 @@ pub(crate) fn compact_prompt_line_for_output_contract(
             .final_answer_shape_kind()
             .map(FinalAnswerShape::as_str)
             .unwrap_or_else(|| matched.final_answer_shape()),
-        allowed_actions,
-        forbidden_actions,
     ))
 }
 
@@ -609,6 +594,13 @@ pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<Action
     }
     let output_contract = route.effective_output_contract();
     preferred_action_refs_for_output_contract(&output_contract)
+}
+
+pub(crate) fn capability_ref_action_refs_for_route(
+    route: &RouteResult,
+    preferred_only: bool,
+) -> Vec<ActionRef> {
+    route_capability_ref_action_refs(route, preferred_only)
 }
 
 fn allowed_action_refs_for_output_contract(

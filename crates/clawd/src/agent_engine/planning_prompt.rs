@@ -539,7 +539,7 @@ pub(super) fn contract_scoped_planner_skill_scope(
     if route.needs_clarify || route.output_contract_is_unclassified() {
         return None;
     }
-    let skills = crate::contract_matrix::allowed_action_refs_for_route(route)
+    let skills = crate::contract_matrix::capability_ref_action_refs_for_route(route, false)
         .into_iter()
         .map(|action| action.skill)
         .filter(|skill| !skill.trim().is_empty())
@@ -562,7 +562,7 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
         return Some(scope);
     }
     let skills = skills_from_action_refs_capped(
-        crate::contract_matrix::preferred_action_refs_for_route(route),
+        crate::contract_matrix::capability_ref_action_refs_for_route(route, true),
         8,
     );
     if skills.is_empty() {
