@@ -1,6 +1,6 @@
 use super::test_support::{executable_filename_route, make_temp_root, test_state_with_root};
 use super::{
-    apply_ask_post_route, route_reason_has_marker,
+    build_loop_context_after_boundary_preflight, route_reason_has_marker,
     unbound_targeted_evidence_route_should_defer_to_agent_loop,
 };
 
@@ -86,7 +86,7 @@ fn current_workspace_scalar_count_structured_locator_exports_boundary_scope() {
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "count top-level workspace directories and return only the number",
@@ -156,7 +156,7 @@ fn current_workspace_scalar_count_marker_from_clarify_route_exports_boundary_sco
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "列出仓库顶层目录，但不要把 .git 算进去，只告诉我其它的有几个",
@@ -217,7 +217,7 @@ fn current_workspace_scalar_count_one_sentence_exports_boundary_scope() {
     route.output_contract.exact_sentence_count = Some(1);
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "count top-level workspace files and return one sentence",
@@ -286,7 +286,7 @@ fn clarify_current_workspace_scalar_count_with_resolved_root_exports_boundary_sc
     route.output_contract.exact_sentence_count = Some(1);
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "Count how many regular files are directly under the current directory, and reply with just the number plus one short explanation.",

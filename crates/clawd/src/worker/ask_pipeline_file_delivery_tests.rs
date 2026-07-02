@@ -1,4 +1,7 @@
-use super::super::{apply_ask_post_route, apply_post_route_refinements, route_reason_has_marker};
+use super::super::{
+    apply_post_route_refinements, build_loop_context_after_boundary_preflight,
+    route_reason_has_marker,
+};
 use super::{
     reject_direct_file_delivery_workspace_root_locator,
     unbound_existing_file_delivery_route_should_defer_to_agent_loop,
@@ -434,7 +437,7 @@ fn explicit_missing_filename_delivery_contract_defers_not_found_to_execution() {
         "definitely_missing_named_file_rustclaw_001.txt".to_string();
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
@@ -505,7 +508,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
             .to_string();
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
@@ -568,7 +571,7 @@ fn unresolved_file_delivery_without_current_request_locator_defers_to_loop_evide
             .to_string();
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "send it",
@@ -762,7 +765,7 @@ fn directory_file_delivery_without_structured_selection_defers_to_loop_evidence(
     route.output_contract.requires_content_evidence = true;
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "send device_local as a file",
@@ -945,7 +948,7 @@ fn directory_file_delivery_with_structured_file_selector_stays_executable() {
     };
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "send the selected file from device_local",
@@ -1060,7 +1063,7 @@ fn post_route_defers_active_read_file_delivery_target_to_loop_candidate() {
     route.output_contract.locator_hint.clear();
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "deliver that active file",

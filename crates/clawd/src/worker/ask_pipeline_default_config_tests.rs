@@ -1,4 +1,4 @@
-use super::super::{agent_loop_default_context, apply_ask_post_route};
+use super::super::{agent_loop_default_context, build_loop_context_after_boundary_preflight};
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -112,7 +112,7 @@ fn config_contract_default_main_config_survives_product_name_auto_locator() {
     );
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "检查 RustClaw 主配置有没有明显风险，不能泄露任何密钥值",
@@ -188,7 +188,7 @@ fn config_risk_default_main_config_replaces_workspace_identity_locator_hint() {
     route.output_contract.locator_hint = workspace_identity_hint;
     let resolved_intent = route.resolved_intent.clone();
 
-    let applied = apply_ask_post_route(
+    let applied = build_loop_context_after_boundary_preflight(
         &state,
         &task,
         "audit the workspace main configuration without exposing secret values",
