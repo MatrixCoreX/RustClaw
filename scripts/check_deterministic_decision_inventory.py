@@ -19,6 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
+PLANNING_ROOT = SRC_ROOT / "agent_engine"
+PLANNING_FILE = PLANNING_ROOT / "planning.rs"
 
 OWNER_CATEGORIES = {
     "contract_boundary",
@@ -244,6 +246,62 @@ def target_files() -> list[Path]:
     return sorted(files)
 
 
+def cfg_test_module_paths() -> set[str]:
+    if not PLANNING_FILE.is_file():
+        return set()
+    lines = PLANNING_FILE.read_text(encoding="utf-8").splitlines()
+    paths: set[str] = set()
+    cfg_test_pending = False
+    path_pending: str | None = None
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line == "#[cfg(test)]":
+            cfg_test_pending = True
+            path_pending = None
+            continue
+        if cfg_test_pending and line.startswith("#[path = "):
+            marker = line.split('"', 2)
+            if len(marker) >= 3:
+                path_pending = marker[1]
+            continue
+        if cfg_test_pending and path_pending and line.startswith("mod "):
+            paths.add(rel(PLANNING_ROOT / path_pending))
+        cfg_test_pending = False
+        path_pending = None
+    return paths
+
+
+def previous_nonempty_line(lines: list[str], index: int) -> str:
+    for previous in range(index - 1, -1, -1):
+        stripped = lines[previous].strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def validate_deterministic_plan_results_are_test_only() -> list[str]:
+    findings: list[str] = []
+    cfg_test_paths = cfg_test_module_paths()
+    for path in sorted(PLANNING_ROOT.rglob("*.rs")):
+        if not path.is_file() or is_test_path(path):
+            continue
+        rel_path = rel(path)
+        if rel_path in cfg_test_paths:
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line_no, line in enumerate(lines, start=1):
+            if "deterministic_plan_result(" not in line or "fn " not in line:
+                continue
+            if previous_nonempty_line(lines, line_no - 1) == "#[cfg(test)]":
+                continue
+            findings.append(
+                f"{rel_path}:{line_no}: production_deterministic_plan_result_function"
+            )
+    return findings
+
+
 def covering_entries(path: str) -> list[InventoryEntry]:
     return [entry for entry in INVENTORY if matches_any(path, entry.patterns)]
 
@@ -382,6 +440,11 @@ def run_self_test() -> int:
         "crates/clawd/src/agent_engine/observed_output.rs"
     )
     assert not any("semantic_rewrite" in entry.categories for entry in observed_entries)
+    assert (
+        "crates/clawd/src/agent_engine/runtime_surface_plan.rs"
+        in cfg_test_module_paths()
+    )
+    assert not validate_deterministic_plan_results_are_test_only()
     print("SELF_TEST_OK")
     return 0
 
@@ -397,6 +460,7 @@ def main(argv: list[str]) -> int:
         validate_inventory_shape()
         + validate_branch_inventory()
         + validate_target_coverage()
+        + validate_deterministic_plan_results_are_test_only()
     )
     if args.summary:
         print_summary()
