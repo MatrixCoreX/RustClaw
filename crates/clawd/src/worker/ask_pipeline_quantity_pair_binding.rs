@@ -36,10 +36,6 @@ pub(super) fn current_request_quantity_pair_evidence(
     if !quantity_comparison_marker && prompt_surface_contains_archive_locator_pair(prompt) {
         return None;
     }
-    if !quantity_comparison_marker && !route_result.needs_clarify && !route_result.is_execute_gate()
-    {
-        return None;
-    }
     if recent_scalar_comparison_marker {
         workspace_path_pair_from_current_request(state, prompt)
             .filter(|(left, right)| {
