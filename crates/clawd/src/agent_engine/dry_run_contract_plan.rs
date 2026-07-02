@@ -114,7 +114,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &actions,
         ));
     }
-    if observed_output_projection_dry_run_tokens_present(&route_tokens) {
+    if observed_output_projection_dry_run_tokens_present(&route_only_tokens) {
         return Some(build_plan_result(
             goal,
             "deterministic:observed_output_projection_dry_run_contract",
@@ -289,14 +289,27 @@ fn task_control_cancel_dry_run_tokens_present(text: &str) -> bool {
 
 fn observed_output_projection_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    normalized.contains("observed-output")
-        && normalized.contains("scalar")
-        && normalized.contains("list")
-        && normalized.contains("path")
-        && (normalized.contains("json field") || normalized.contains("json_field"))
-        && normalized.contains("status")
-        && normalized.contains("artifact_refs")
-        && has_dry_run_machine_token(&normalized)
+    if !has_dry_run_machine_token(&normalized) {
+        return false;
+    }
+    let has_projection_contract = contains_machine_kv_or_json_pair(
+        &normalized,
+        "projection_contract",
+        "observed_output_projection",
+    );
+    let has_observed_source =
+        contains_machine_kv_or_json_pair(&normalized, "source", "observed_machine_output");
+    let has_projection_families = [
+        "scalar",
+        "list",
+        "path",
+        "json_field",
+        "status",
+        "artifact_refs",
+    ]
+    .into_iter()
+    .all(|family| normalized.contains(family));
+    has_projection_contract && has_observed_source && has_projection_families
 }
 
 fn finalizer_language_policy_dry_run_tokens_present(text: &str) -> bool {

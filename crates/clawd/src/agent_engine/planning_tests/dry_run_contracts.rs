@@ -236,12 +236,26 @@ fn local_process_cancel_dry_run_prefers_local_process_adapter_contract() {
 #[test]
 fn observed_output_projection_dry_run_prefers_projection_contract() {
     let mut route = base_route_result();
-    route.route_reason =
-        "dry_run observed-output scalar list path json field status artifact_refs".to_string();
+    route.resolved_intent = serde_json::json!({
+        "dry_run": true,
+        "projection_contract": "observed_output_projection",
+        "projection_policy": {
+            "source": "observed_machine_output"
+        },
+        "families": [
+            "scalar",
+            "list",
+            "path",
+            "json_field",
+            "status",
+            "artifact_refs"
+        ]
+    })
+    .to_string();
     let loop_state = LoopState::new(1);
 
     let plan = structured_dry_run_response_deterministic_plan_result(
-        "Dry run only: return observed-output scalar list path JSON field status artifact_refs",
+        "Dry run only: observed-output projection envelope",
         Some(&route),
         &loop_state,
     )
@@ -263,6 +277,25 @@ fn observed_output_projection_dry_run_prefers_projection_contract() {
     assert!(families
         .iter()
         .any(|item| item.as_str() == Some("artifact_refs")));
+}
+
+#[test]
+fn observed_output_projection_dry_run_ignores_bare_projection_words() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "dry_run observed-output scalar list path json field status artifact_refs".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "Dry run only: return observed-output scalar list path JSON field status artifact_refs",
+        Some(&route),
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "bare observed-output projection words should not preempt planner authority"
+    );
 }
 
 #[test]
