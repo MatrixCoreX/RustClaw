@@ -263,6 +263,13 @@ fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<Fi
     ) {
         return Some(FinalAnswerShape::SchemaVersion);
     }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["filesystem", "fs", "fs_basic"],
+        &["find_entries"],
+    ) {
+        return Some(FinalAnswerShape::PathList);
+    }
     None
 }
 

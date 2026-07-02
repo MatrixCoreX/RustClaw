@@ -60,6 +60,11 @@ fn strict_list_selector_limit(route: &RouteResult) -> Option<usize> {
 pub(super) fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::FilePaths)
         || route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["filesystem", "fs", "fs_basic"],
+            &["find_entries"],
+        )
 }
 
 fn route_contract_marker_is(route: &RouteResult, semantic_kind: crate::OutputSemanticKind) -> bool {
@@ -899,12 +904,29 @@ pub(super) fn observed_table_cells(
         let Some(output) = step.output_excerpt.as_deref() else {
             continue;
         };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
-            continue;
-        };
-        collect_observed_table_cells_from_value(&value, &mut cells);
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
+            collect_observed_table_cells_from_value(&value, &mut cells);
+        } else {
+            collect_observed_table_cells_from_text_lines(output, &mut cells);
+        }
     }
     cells
+}
+
+pub(super) fn collect_observed_table_cells_from_text_lines(
+    output: &str,
+    cells: &mut BTreeSet<String>,
+) {
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let normalized = normalize_strict_list_item(line);
+        if !normalized.is_empty() {
+            cells.insert(normalized);
+        }
+    }
 }
 
 pub(super) fn collect_observed_table_cells_from_value(

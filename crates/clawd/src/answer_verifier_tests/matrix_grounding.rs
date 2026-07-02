@@ -785,6 +785,39 @@ fn matrix_file_path_list_shape_allows_grounded_filtered_subset() {
 }
 
 #[test]
+fn filesystem_find_entries_capability_ref_path_list_is_grounded_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-fs-path-capability-ref", "ask", "find");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "action": "find_entries",
+                "results": ["plan/a.md", "plan/b.md", "docs/c.md"]
+            })
+            .to_string(),
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "plan/b.md"
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "plan/missing.md"
+    ));
+}
+
+#[test]
 fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
     let mut list_route = route_with_mode(crate::AskMode::planner_execute_plain());
     list_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -874,7 +907,8 @@ fn matrix_table_shape_uses_observed_evidence_map_cells() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=database.list_tables".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-table-evidence",
         "ask",
@@ -910,7 +944,8 @@ fn matrix_table_shape_uses_run_cmd_results_as_table_cells() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=database.list_tables".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-table-run-cmd",
         "ask",
