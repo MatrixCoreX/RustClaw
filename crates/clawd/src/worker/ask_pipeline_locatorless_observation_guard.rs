@@ -99,7 +99,10 @@ pub(super) fn locatorless_observation_route_should_force_clarify(
     if command_observation_route_has_runtime_evidence(state, prompt, route_result) {
         return false;
     }
-    true
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput) {
+        return true;
+    }
+    false
 }
 
 fn capability_route_can_plan_without_locator(route_result: &crate::RouteResult) -> bool {

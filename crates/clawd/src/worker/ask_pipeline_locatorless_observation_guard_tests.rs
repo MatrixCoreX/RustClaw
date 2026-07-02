@@ -82,8 +82,8 @@ fn executable_filename_route() -> crate::RouteResult {
 }
 
 #[test]
-fn locatorless_observation_requires_clarify_without_session_anchor() {
-    let state = test_state_with_root(make_temp_root("locatorless_requires_clarify"));
+fn locatorless_observation_defers_to_agent_loop_without_session_anchor() {
+    let state = test_state_with_root(make_temp_root("locatorless_defers_to_loop"));
     let mut route = executable_filename_route();
     route.resolved_intent = "Read the first 3 lines of the referenced file.".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
@@ -96,7 +96,7 @@ fn locatorless_observation_requires_clarify_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_force_clarify(
         &state,
         "read the first 3 lines of that file",
         &route,
@@ -194,7 +194,7 @@ fn locatorless_registry_capability_ref_can_plan_without_guard_whitelist_growth()
 }
 
 #[test]
-fn locatorless_registry_capability_ref_must_come_from_route_reason() {
+fn locatorless_registry_capability_ref_absent_from_route_reason_still_defers_to_loop() {
     let state = test_state_with_root(make_temp_root("locatorless_capability_ref_resolved_only"));
     let mut route = executable_filename_route();
     route.resolved_intent =
@@ -213,7 +213,7 @@ fn locatorless_registry_capability_ref_must_come_from_route_reason() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_force_clarify(
         &state,
         "generate a short media preview",
         &route,
@@ -334,7 +334,7 @@ fn locatorless_weather_query_can_execute_without_session_anchor() {
 }
 
 #[test]
-fn locatorless_weather_query_without_capability_ref_requires_clarify() {
+fn locatorless_weather_query_without_capability_ref_defers_to_agent_loop() {
     let state = test_state_with_root(make_temp_root("locatorless_weather_no_capability"));
     let mut route = executable_filename_route();
     route.resolved_intent = "Query current weather for Beijing.".to_string();
@@ -349,7 +349,7 @@ fn locatorless_weather_query_without_capability_ref_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_force_clarify(
         &state,
         "check Beijing weather",
         &route,
@@ -359,7 +359,7 @@ fn locatorless_weather_query_without_capability_ref_requires_clarify() {
 }
 
 #[test]
-fn ordinary_semantic_kind_without_capability_ref_requires_clarify() {
+fn ordinary_semantic_kind_without_capability_ref_defers_to_agent_loop() {
     let state = test_state_with_root(make_temp_root(
         "locatorless_ordinary_semantic_no_capability",
     ));
@@ -386,7 +386,7 @@ fn ordinary_semantic_kind_without_capability_ref_requires_clarify() {
         };
 
         assert!(
-            locatorless_observation_route_should_force_clarify(
+            !locatorless_observation_route_should_force_clarify(
                 &state,
                 "run ordinary semantic route without explicit locator",
                 &route,
@@ -400,7 +400,7 @@ fn ordinary_semantic_kind_without_capability_ref_requires_clarify() {
 }
 
 #[test]
-fn locatorless_capability_ref_requires_valid_machine_token_shape() {
+fn invalid_locatorless_capability_ref_token_defers_to_agent_loop() {
     let state = test_state_with_root(make_temp_root("locatorless_capability_token_shape"));
     let mut route = executable_filename_route();
     route.resolved_intent =
@@ -417,7 +417,7 @@ fn locatorless_capability_ref_requires_valid_machine_token_shape() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_force_clarify(
         &state,
         "check Beijing weather",
         &route,
