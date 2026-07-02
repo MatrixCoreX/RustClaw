@@ -335,7 +335,7 @@ fn scalar_status_active_task_update_without_runtime_status_patch_has_no_runtime_
 }
 
 #[test]
-fn locatorless_service_status_without_capability_ref_requires_clarify() {
+fn locatorless_service_status_without_capability_ref_defers_to_agent_loop() {
     let state = test_state_with_root(make_temp_root("locatorless_service_status"));
     let mut route = executable_filename_route();
     route.resolved_intent =
@@ -351,7 +351,7 @@ fn locatorless_service_status_without_capability_ref_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_force_clarify(
         &state,
         "check whether telegramd is currently running",
         &route,
