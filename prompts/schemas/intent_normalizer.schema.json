@@ -82,7 +82,7 @@
     },
     "decision": {
       "type": "string",
-      "description": "Initial machine hint for the legacy first-layer boundary. Planner-loop decision envelopes are the semantic authority when agent-loop routing is enabled.",
+      "description": "Legacy compatibility slot. The normalizer should emit an empty string; runtime derives any trace value from machine boundary fields. Planner-loop decision envelopes are the semantic authority.",
       "enum": [
         "clarify",
         "direct_answer",
