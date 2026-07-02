@@ -458,9 +458,7 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<AnswerVerifierOut> {
     let task_contract = TaskContract::from_route_result(route_result);
-    if task_contract.intent_kind.as_str() != "planner_execute"
-        || task_contract.required_evidence_fields.is_empty()
-    {
+    if task_contract.required_evidence_fields.is_empty() {
         return None;
     }
     let coverage = crate::task_journal::evidence_coverage_for_route(route_result, journal);

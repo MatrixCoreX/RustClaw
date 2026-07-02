@@ -141,9 +141,6 @@ pub(crate) fn should_verify_answer(
     }
     let task_contract = TaskContract::from_route_result(route_result);
     let pure_chat_agent_loop = pure_chat_agent_loop_submode_should_verify(route_result, journal);
-    if task_contract.intent_kind.as_str() != "planner_execute" {
-        return false;
-    }
     if pure_chat_agent_loop {
         return true;
     }
