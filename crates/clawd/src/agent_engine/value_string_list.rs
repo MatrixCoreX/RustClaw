@@ -836,6 +836,7 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -898,6 +899,7 @@ pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn structured_scalar_field_auto_locator_action(
     state: &AppState,
     route: &RouteResult,
@@ -918,6 +920,7 @@ fn structured_scalar_field_auto_locator_action(
     None
 }
 
+#[cfg(test)]
 fn structured_scalar_field_auto_locator_target_paths(
     state: &AppState,
     route: &RouteResult,
@@ -955,6 +958,7 @@ fn structured_scalar_field_auto_locator_target_paths(
     resolved
 }
 
+#[cfg(test)]
 fn push_structured_scalar_path_candidate(out: &mut Vec<String>, candidate: Option<&str>) {
     let Some(candidate) = candidate.map(str::trim).filter(|value| !value.is_empty()) else {
         return;

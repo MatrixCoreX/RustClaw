@@ -332,56 +332,6 @@ pub(super) async fn plan_round_actions(
         ),
         "plan_deterministic_async_job_start"
     );
-    if allow_structural_deterministic_plans {
-        return_deterministic_plan!(
-            scalar_content_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_scalar_content_auto_locator"
-        );
-        return_deterministic_plan!(
-            structured_scalar_field_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_structured_scalar_field_auto_locator"
-        );
-        return_deterministic_plan!(
-            file_facts_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_file_facts_auto_locator"
-        );
-        return_deterministic_plan!(
-            content_excerpt_explicit_file_targets_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_content_excerpt_explicit_file_targets"
-        );
-    }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
             state,

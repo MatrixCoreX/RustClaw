@@ -692,6 +692,7 @@ pub(super) fn ensure_explicit_multi_file_targets_have_content_reads(
     observations
 }
 
+#[cfg(test)]
 pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -837,6 +838,7 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn explicit_content_read_supported_target(path: &str) -> bool {
     Path::new(path)
         .extension()
