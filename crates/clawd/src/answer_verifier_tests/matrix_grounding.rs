@@ -605,6 +605,35 @@ fn service_status_port_answer_uses_complete_successful_socket_observation() {
 }
 
 #[test]
+fn service_status_capability_ref_port_answer_is_grounded_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=service.status".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-service-ports-capability-ref",
+        "ask",
+        "inspect listening ports",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_ports",
+            "process_basic",
+            "port.count=2\nport[0].number=22\nport[0].local=0.0.0.0:22\nport[1].number=80\nport[1].local=0.0.0.0:80",
+        ));
+    let candidate = "\
+| Port | Bind |
+| --- | --- |
+| 22 | 0.0.0.0:22 |
+| 80 | 0.0.0.0:80 |";
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, candidate
+    ));
+}
+
+#[test]
 fn service_status_port_answer_rejects_unobserved_candidate_port() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
