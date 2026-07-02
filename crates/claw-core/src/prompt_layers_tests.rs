@@ -22,12 +22,47 @@ fn write_file(root: &Path, rel_path: &str, text: &str) {
 }
 
 #[test]
-fn prompt_vendor_normalization_groups_openai_compatible_models() {
+fn prompt_vendor_normalization_preserves_model_behavior_patches() {
     assert_eq!(normalize_prompt_vendor_name("openai"), "openai");
-    assert_eq!(normalize_prompt_vendor_name("mimo"), "openai");
-    assert_eq!(normalize_prompt_vendor_name("xiaomi"), "openai");
+    assert_eq!(normalize_prompt_vendor_name("mimo"), "mimo");
+    assert_eq!(normalize_prompt_vendor_name("xiaomi"), "mimo");
     assert_eq!(normalize_prompt_vendor_name("custom"), "openai");
     assert_eq!(normalize_prompt_vendor_name("minimax"), "minimax");
+}
+
+#[test]
+fn test_layered_prompt_uses_mimo_specific_patch() {
+    let root = temp_workspace("mimo_vendor_patch");
+    write_file(
+        &root,
+        "prompts/layers/manifest.toml",
+        r#"
+[[prompts]]
+logical_path = "prompts/test_prompt.md"
+base = ["prompts/layers/base/test.md"]
+overlay = ["prompts/layers/overlays/test.md"]
+vendor_patch = "routing/common.md"
+"#,
+    );
+    write_file(&root, "prompts/layers/base/test.md", "base");
+    write_file(&root, "prompts/layers/overlays/test.md", "overlay");
+    write_file(
+        &root,
+        "prompts/layers/vendor_patches/openai/routing/common.md",
+        "openai patch",
+    );
+    write_file(
+        &root,
+        "prompts/layers/vendor_patches/mimo/routing/common.md",
+        "mimo patch",
+    );
+
+    let rendered = load_prompt_template_for_vendor(&root, "mimo", "prompts/test_prompt.md", "").0;
+
+    assert_eq!(rendered, "base\n\noverlay\n\nmimo patch");
+    assert!(!rendered.contains("openai patch"));
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
