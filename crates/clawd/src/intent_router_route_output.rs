@@ -328,7 +328,11 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         &decision.output_contract,
         vec![fallback_reason_prefix.to_string()],
     );
+    let attachment_processing_required = turn_analysis
+        .as_ref()
+        .is_some_and(|analysis| analysis.attachment_processing_required);
     IntentNormalizerOutput {
+        raw_user_request: user_request.trim().to_string(),
         resolved_user_intent,
         resume_behavior: ResumeBehavior::None,
         schedule_kind: decision.schedule_kind,
@@ -346,6 +350,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         route_trace_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,
+        attachment_processing_required,
         fallback_source,
         route_trace_record: trace_record,
     }
