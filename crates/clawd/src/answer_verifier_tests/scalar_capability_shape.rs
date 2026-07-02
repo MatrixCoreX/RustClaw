@@ -107,3 +107,43 @@ fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
         "server.port: 8080"
     ));
 }
+
+#[test]
+fn system_extract_field_capability_ref_verifies_scalar_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.resolved_intent = "capability_ref=system_basic.extract_field".to_string();
+    route.route_reason = "capability_ref=system_basic.extract_field".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-system-extract-field-capability",
+        "ask",
+        "capability_ref=system_basic.extract_field",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "system_basic",
+            json!({
+                "action": "extract_field",
+                "path": "Cargo.toml",
+                "field_path": "package.version",
+                "exists": true,
+                "value": "0.1.8",
+                "field_value": "0.1.8"
+            })
+            .to_string(),
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, "0.1.8"
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "package.version: 0.1.8"
+    ));
+}
