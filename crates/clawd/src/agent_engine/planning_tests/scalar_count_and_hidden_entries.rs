@@ -1158,7 +1158,7 @@ fn normalize_prefers_registry_repair_over_legacy_docker_rewrite() {
 }
 
 #[test]
-fn normalize_prefers_registry_repair_over_legacy_archive_unpack_rewrite() {
+fn archive_unpack_semantic_kind_without_capability_ref_stays_non_actionable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
@@ -1189,7 +1189,7 @@ fn normalize_prefers_registry_repair_over_legacy_archive_unpack_rewrite() {
     ));
     assert_eq!(
         plan_repair_reason(&state, Some(&route), &loop_state, Some(&normalized)),
-        "preferred_skill_required_for_semantic_route"
+        "non_actionable_plan_for_current_route"
     );
 }
 

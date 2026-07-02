@@ -70,6 +70,7 @@ fn file_token_respond_survives_even_when_delivery_contract_is_missing() {
 #[test]
 fn archive_unpack_route_rewrites_run_cmd_unzip_to_archive_basic() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.unpack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -107,6 +108,7 @@ fn archive_unpack_route_rewrites_run_cmd_unzip_to_archive_basic() {
 #[test]
 fn archive_unpack_route_rewrites_archive_read_plan_to_unpack() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.unpack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -178,6 +180,7 @@ fn content_excerpt_archive_member_read_is_not_rewritten_to_unpack() {
 fn archive_unpack_contract_plans_direct_unpack_without_model_plan() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.unpack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -247,6 +250,7 @@ fn archive_unpack_capability_ref_plans_direct_unpack_without_semantic_kind() {
 fn archive_pack_contract_plans_direct_pack_without_model_plan() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -328,6 +332,7 @@ fn filesystem_mutation_archive_target_plans_archive_pack_from_locator_tokens() {
     let mut state = test_state_with_enabled_skills(&["archive_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -391,6 +396,7 @@ fn archive_unpack_preserves_explicit_literal_run_cmd() {
 #[test]
 fn archive_pack_route_rewrites_probe_only_plan_to_archive_basic() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -452,6 +458,7 @@ fn archive_pack_route_rewrites_probe_only_plan_to_archive_basic() {
 #[test]
 fn archive_pack_route_rewrites_archive_list_plan_to_pack() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -503,6 +510,7 @@ fn archive_pack_route_rewrites_archive_list_plan_to_pack() {
 #[test]
 fn archive_pack_route_preserves_post_pack_list_and_cleanup_plan() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;

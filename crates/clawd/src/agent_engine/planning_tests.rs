@@ -478,6 +478,8 @@ fn actions_as_json(actions: &[AgentAction]) -> serde_json::Value {
 // Test bodies live in functionally named submodules to keep this helper file maintainable.
 #[path = "planning_tests/archive_and_inline_transform.rs"]
 mod archive_and_inline_transform;
+#[path = "planning_tests/archive_pack_unpack_capability.rs"]
+mod archive_pack_unpack_capability;
 #[path = "planning_tests/bounded_log_slice_registry.rs"]
 mod bounded_log_slice_registry;
 #[path = "planning_tests/capability_read_sqlite_existence.rs"]
