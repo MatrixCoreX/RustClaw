@@ -164,7 +164,7 @@ pub(crate) fn compact_prompt_line_for_output_contract(
         required_evidence.join(",")
     };
     Some(format!(
-        "- evidence_policy source=legacy_contract_matrix version={} hash={} match={} planner_authority=agent_loop_registry evidence_profile={} required_evidence={} final_answer_shape={}",
+        "- evidence_policy source=bundled_evidence_policy version={} hash={} match={} planner_authority=agent_loop_registry evidence_profile={} required_evidence={} final_answer_shape={}",
         matrix.matrix_version,
         matrix.matrix_version_hash(),
         matched.match_name(),
@@ -413,8 +413,8 @@ fn trace_snapshot_for_output_contract_with_route_reason(
         .or_else(|| matched.final_answer_shape_kind());
     let observation_extractors = matched.observation_extractors();
     Some(json!({
-        "contract_matrix_version": matrix.matrix_version,
-        "contract_matrix_hash": matrix.matrix_version_hash(),
+        "evidence_policy_version": matrix.matrix_version,
+        "evidence_policy_hash": matrix.matrix_version_hash(),
         "schema_version": matrix.schema_version,
         "trace_policy": matrix.trace_policy.to_trace_json(),
         "contract_marker": output_contract.semantic_kind.as_str(),

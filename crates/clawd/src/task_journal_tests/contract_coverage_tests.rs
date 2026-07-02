@@ -1405,7 +1405,7 @@ fn trace_json_includes_task_level_contract_matrix_snapshot() {
         Some("name_list")
     );
     assert!(snapshot
-        .get("contract_matrix_hash")
+        .get("evidence_policy_hash")
         .and_then(Value::as_str)
         .is_some_and(|hash| !hash.is_empty()));
     let runtime_snapshot = trace
