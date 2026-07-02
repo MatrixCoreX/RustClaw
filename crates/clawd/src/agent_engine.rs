@@ -714,6 +714,14 @@ fn seed_loop_state_from_agent_context(
                 .insert("active_bound_targets".to_string(), encoded);
         }
     }
+    let file_delivery_target_candidates = file_delivery_target_candidates_for_loop_seed(ctx);
+    if !file_delivery_target_candidates.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&file_delivery_target_candidates) {
+            loop_state
+                .output_vars
+                .insert("file_delivery_target_candidates".to_string(), encoded);
+        }
+    }
     let active_listing_bound_targets = active_listing_bound_targets_for_loop_seed(ctx);
     if !active_listing_bound_targets.is_empty() {
         if let Ok(encoded) = serde_json::to_string(&active_listing_bound_targets) {
@@ -1007,6 +1015,22 @@ fn active_bound_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
     targets
 }
 
+fn file_delivery_target_candidates_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
+    let mut targets = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        targets.extend(file_delivery_target_candidates_from_boundary_observation_blocks(summary));
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
 fn active_listing_bound_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
     let mut targets = Vec::new();
     for summary in [
@@ -1158,6 +1182,34 @@ fn active_bound_targets_from_boundary_observation_blocks(summary: &str) -> Vec<S
                 );
             }
         }
+    }
+    out
+}
+
+fn file_delivery_target_candidates_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(targets) = value
+            .get("file_delivery_target_candidates")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        out.extend(
+            targets
+                .iter()
+                .filter_map(|target_value| target_value.get("target"))
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+        );
     }
     out
 }

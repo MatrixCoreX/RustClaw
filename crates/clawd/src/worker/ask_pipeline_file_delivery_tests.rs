@@ -988,7 +988,7 @@ fn directory_file_delivery_with_structured_file_selector_stays_executable() {
 }
 
 #[test]
-fn post_route_rebinds_clarified_file_delivery_to_active_read_target_after_guards() {
+fn post_route_defers_active_read_file_delivery_target_to_loop_candidate() {
     let root = make_temp_root("post_route_delivery_active_read");
     let readme = root.join("README.md");
     std::fs::write(&readme, "# Fixture\n").expect("readme fixture");
@@ -1086,11 +1086,24 @@ fn post_route_rebinds_clarified_file_delivery_to_active_read_target_after_guards
             .delivery_required
     );
     assert_eq!(
-        applied.execution_route_result.output_contract.locator_hint,
-        target
+        applied.execution_route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
     );
-    assert_eq!(applied.auto_locator_path.as_deref(), Some(target.as_str()));
+    assert!(applied
+        .execution_route_result
+        .output_contract
+        .locator_hint
+        .is_empty());
+    assert_eq!(applied.auto_locator_path.as_deref(), None);
     assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "unresolved_file_delivery_deferred_to_agent_loop"
+    ));
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("file_delivery_target_candidates"));
+    assert!(applied.prompt_with_memory_for_execution.contains(&target));
+    assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "structural_file_delivery_bound_to_recent_read_target"
     ));
