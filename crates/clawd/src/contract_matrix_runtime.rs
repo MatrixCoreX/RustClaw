@@ -575,6 +575,7 @@ fn contract_trace_action_key_for_contract(
     Some(action.as_key())
 }
 
+#[cfg(test)]
 fn preferred_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
@@ -590,6 +591,7 @@ fn preferred_action_refs_for_output_contract(
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
     let preferred_capability_refs = route_capability_ref_action_refs(route, true);
     if !preferred_capability_refs.is_empty() {
@@ -610,6 +612,7 @@ pub(crate) fn capability_ref_action_refs_for_route(
     route_capability_ref_action_refs(route, preferred_only)
 }
 
+#[cfg(test)]
 fn allowed_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
@@ -625,6 +628,7 @@ fn allowed_action_refs_for_output_contract(
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(crate) fn allowed_action_refs_for_route(route: &RouteResult) -> Vec<ActionRef> {
     let capability_refs = route_capability_ref_action_refs(route, false);
     if !capability_refs.is_empty() || route_has_capability_refs(route) {

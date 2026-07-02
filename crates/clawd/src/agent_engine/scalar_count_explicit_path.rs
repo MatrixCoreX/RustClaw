@@ -275,7 +275,7 @@ pub(super) fn locator_path_matches_hint(path: &str, hint: &str) -> bool {
 }
 
 pub(super) fn route_requests_hidden_entries_count(route: &RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck
+    route.output_contract_marker_is(crate::OutputSemanticKind::HiddenEntriesCheck)
 }
 
 pub(super) fn replace_hidden_entries_count_plan_with_inventory_dir(
@@ -304,8 +304,10 @@ pub(super) fn replace_hidden_entries_count_plan_with_inventory_dir(
 }
 
 pub(super) fn route_requests_service_status(route: &RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
-        || (route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || (route
+            .effective_output_contract_semantic_kind()
+            .is_content_excerpt_summary()
             && route.output_contract.requires_content_evidence
             && !route.output_contract.delivery_required
             && route.output_contract.locator_kind == crate::OutputLocatorKind::None)
@@ -550,7 +552,7 @@ pub(super) fn strip_service_status_discussion_actions(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         || !actions.iter().any(is_service_control_status_action)
         || !actions.iter().any(is_discussion_followup_action)
     {
@@ -575,7 +577,7 @@ pub(super) fn structured_keys_locator_path(
     if route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::StructuredKeys
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys)
     {
         return None;
     }
@@ -614,7 +616,7 @@ pub(super) fn replace_structured_keys_read_plan(
         return actions;
     }
     let strict_structured_keys_contract = route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::StructuredKeys
+        route.output_contract_marker_is(crate::OutputSemanticKind::StructuredKeys)
             && route.output_contract.response_shape == crate::OutputResponseShape::Strict
     });
     if !strict_structured_keys_contract
@@ -946,7 +948,7 @@ pub(super) fn route_allows_single_document_parse_synthesis(route: &RouteResult) 
 }
 
 pub(super) fn route_contract_allows_doc_parse(route: &RouteResult) -> bool {
-    crate::contract_matrix::allowed_action_refs_for_output_contract(&route.output_contract)
+    crate::contract_matrix::capability_ref_action_refs_for_route(route, false)
         .iter()
         .any(|action_ref| {
             action_ref.skill == "doc_parse"
@@ -974,10 +976,7 @@ pub(super) fn prefer_doc_parse_for_single_document_synthesis(
     let Some(route) = route_result else {
         return actions;
     };
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ContentExcerptSummary
-    ) {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary) {
         return actions;
     }
     if !route_allows_single_document_parse_synthesis(route) {
@@ -1079,8 +1078,7 @@ pub(super) fn existence_path_summary_target_path(
     let route = route_result?;
     if route.needs_clarify
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::ExistenceWithPathSummary
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPathSummary)
     {
         return None;
     }
@@ -1107,8 +1105,7 @@ pub(super) fn ensure_existence_path_summary_has_bounded_content(
     let should_handle = route_result.is_some_and(|route| {
         !route.needs_clarify
             && !route.output_contract.delivery_required
-            && route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::ExistenceWithPathSummary
+            && route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPathSummary)
     });
     if !should_handle {
         return actions;

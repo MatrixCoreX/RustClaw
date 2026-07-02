@@ -535,7 +535,7 @@ Bound target: {log_path}"#
 }
 
 #[test]
-fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
+fn doc_parse_capability_ref_rewrites_bounded_read_to_doc_parse() {
     let root = TempDirGuard::new("generic_doc_parse_synthesis");
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
@@ -551,6 +551,7 @@ fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=document.parse".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -690,7 +691,7 @@ fn excerpt_kind_mixed_field_and_read_plan_preserves_config_field_reads() {
 }
 
 #[test]
-fn content_excerpt_with_summary_rewrites_bounded_read_to_doc_parse() {
+fn content_excerpt_with_doc_parse_capability_ref_rewrites_bounded_read() {
     let root = TempDirGuard::new("content_excerpt_with_summary_doc_parse");
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
@@ -706,6 +707,7 @@ fn content_excerpt_with_summary_rewrites_bounded_read_to_doc_parse() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = readme_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=document.parse".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -1066,7 +1068,7 @@ fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_p
 }
 
 #[test]
-fn content_excerpt_single_doc_file_without_slice_uses_doc_parse_plan() {
+fn content_excerpt_single_doc_file_with_doc_parse_capability_uses_doc_parse_plan() {
     let root = TempDirGuard::new("content_excerpt_summary_single_doc_file_no_slice");
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nLocal agent runtime.\n").expect("write readme");
@@ -1082,6 +1084,7 @@ fn content_excerpt_single_doc_file_without_slice_uses_doc_parse_plan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = readme_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=document.parse".to_string();
 
     let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
         &state,

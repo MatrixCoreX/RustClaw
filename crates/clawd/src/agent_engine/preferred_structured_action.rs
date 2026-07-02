@@ -301,12 +301,7 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
         if let Some(preferred) = contract_hint_preferred_action_ref(original_user_text) {
             vec![preferred]
         } else {
-            let capability_actions = capability_ref_preferred_action_refs_for_route(route);
-            if capability_actions.is_empty() {
-                crate::contract_matrix::preferred_action_refs_for_route(route)
-            } else {
-                capability_actions
-            }
+            capability_ref_preferred_action_refs_for_route(route)
         };
     for preferred in preferred_actions {
         let Some(action) = preferred_structured_action_for_contract_hint(
@@ -431,6 +426,13 @@ fn route_capability_allows_preferred_action(
                 &["validate"],
             )
         }
+        ("doc_parse", Some("parse_doc")) => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["document"],
+                &["parse"],
+            )
+        }
         _ => false,
     }
 }
@@ -541,7 +543,8 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     let Some(route) = route_result else {
         return actions;
     };
-    let preferred_actions = crate::contract_matrix::preferred_action_refs_for_route(route);
+    let preferred_actions =
+        crate::contract_matrix::capability_ref_action_refs_for_route(route, true);
     if preferred_actions.is_empty() {
         return actions;
     }
