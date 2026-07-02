@@ -162,7 +162,7 @@ pub(super) struct PreparedAskFlow {
     pub(super) should_route_schedule_direct: bool,
 }
 
-struct AppliedAskPostRoute {
+struct BuiltLoopContext {
     execution_route_result: crate::RouteResult,
     auto_locator_path: Option<String>,
     #[cfg(test)]
@@ -739,7 +739,7 @@ fn current_top_level_plan_markdown_path(state: &crate::AppState) -> Option<Strin
         .map(|(_, name)| format!("plan/{name}"))
 }
 
-fn apply_ask_post_route(
+fn build_loop_context_after_boundary_preflight(
     state: &AppState,
     task: &crate::ClaimedTask,
     prompt: &str,
@@ -749,7 +749,7 @@ fn apply_ask_post_route(
     mut route_result: crate::RouteResult,
     mut resolved_prompt_for_execution: String,
     mut prompt_with_memory_for_execution: String,
-) -> AppliedAskPostRoute {
+) -> BuiltLoopContext {
     let session_snapshot = crate::conversation_state::load_active_session_snapshot(state, task);
     let has_authoritative_deictic_anchor =
         session_has_authoritative_deictic_anchor(prompt, &route_result, &session_snapshot);
@@ -1054,7 +1054,7 @@ fn apply_ask_post_route(
         &mut resolved_prompt_for_execution,
         &mut prompt_with_memory_for_execution,
     );
-    AppliedAskPostRoute {
+    BuiltLoopContext {
         execution_route_result: post_route.execution_route_result,
         auto_locator_path: post_route.auto_locator_path,
         #[cfg(test)]
@@ -1152,7 +1152,7 @@ pub(super) async fn prepare_ask_flow(
         prepared_routing.turn_analysis.as_ref(),
     )
     .await?;
-    let applied_post_route = apply_ask_post_route(
+    let loop_context = build_loop_context_after_boundary_preflight(
         state,
         task,
         prompt,
@@ -1164,26 +1164,26 @@ pub(super) async fn prepare_ask_flow(
         prepared_execution.prompt_with_memory_for_execution,
     );
     let has_schedule_intent =
-        applied_post_route.execution_route_result.schedule_kind != crate::ScheduleKind::None;
-    let final_ask_mode = applied_post_route.execution_route_result.ask_mode.clone();
+        loop_context.execution_route_result.schedule_kind != crate::ScheduleKind::None;
+    let final_ask_mode = loop_context.execution_route_result.ask_mode.clone();
     let should_route_schedule_direct = has_schedule_intent
         && !final_ask_mode.resume_execution()
         && !final_ask_mode.is_resume_discussion();
     Ok(PreparedAskFlow {
         context_bundle_summary: prepared_execution.context_bundle.summary(),
         memory_trace: prepared_execution.context_bundle.memory_trace(),
-        route_result: applied_post_route.execution_route_result,
+        route_result: loop_context.execution_route_result,
         execution_recipe_hint: prepared_routing.execution_recipe_hint,
         execution_recipe_plan_hint: prepared_routing.execution_recipe_plan_hint,
         turn_analysis: prepared_routing.turn_analysis,
         clarify_fallback_source: prepared_routing.clarify_fallback_source,
-        auto_locator_path: applied_post_route.auto_locator_path,
-        resolved_prompt_for_execution: applied_post_route.resolved_prompt_for_execution,
-        prompt_with_memory_for_execution: applied_post_route.prompt_with_memory_for_execution,
+        auto_locator_path: loop_context.auto_locator_path,
+        resolved_prompt_for_execution: loop_context.resolved_prompt_for_execution,
+        prompt_with_memory_for_execution: loop_context.prompt_with_memory_for_execution,
         recent_execution_context: prepared_execution.recent_execution_context,
-        session_alias_bindings: applied_post_route.session_alias_bindings,
+        session_alias_bindings: loop_context.session_alias_bindings,
         ask_mode: final_ask_mode,
-        fuzzy_locator_suggestions: applied_post_route.fuzzy_locator_suggestions,
+        fuzzy_locator_suggestions: loop_context.fuzzy_locator_suggestions,
         should_route_schedule_direct,
     })
 }
