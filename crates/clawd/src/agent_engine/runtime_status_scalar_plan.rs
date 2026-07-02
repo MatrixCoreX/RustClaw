@@ -75,6 +75,7 @@ pub(super) fn runtime_status_scalar_info_fallback_plan_result(
     None
 }
 
+#[cfg(test)]
 pub(super) fn first_port_filter_token(text: &str) -> Option<String> {
     text.split_whitespace()
         .find_map(port_filter_from_structural_token)
@@ -88,6 +89,7 @@ pub(super) fn process_status_contract_filter_token(route: &RouteResult) -> Optio
     Some(hint.to_string())
 }
 
+#[cfg(test)]
 pub(super) fn port_filter_from_structural_token(token: &str) -> Option<String> {
     let trimmed = token.trim_matches(|ch: char| {
         matches!(

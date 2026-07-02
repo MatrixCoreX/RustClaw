@@ -23,7 +23,7 @@ fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
     };
     let value: Value = serde_json::from_str(&content).expect("structured response json");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("task_control_cancel_dry_run")
     );
     assert_eq!(

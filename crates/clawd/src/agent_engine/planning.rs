@@ -336,20 +336,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_subagent_review_boundary_surface"
     );
     return_deterministic_plan!(
-        task_control_list_deterministic_plan_result(state, goal, route_result, loop_state),
-        "plan_deterministic_task_control_list"
-    );
-    return_deterministic_plan!(
-        task_control_get_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_task_control_get"
-    );
-    return_deterministic_plan!(
         async_job_start_deterministic_plan_result(
             state,
             goal,
@@ -358,16 +344,6 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_async_job_start"
-    );
-    return_deterministic_plan!(
-        service_status_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_service_status"
     );
     return_deterministic_plan!(
         filesystem_mutation_deterministic_plan_result(
