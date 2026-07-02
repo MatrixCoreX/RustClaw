@@ -1123,7 +1123,7 @@ fn normalize_prefers_registry_sqlite_rewrite_over_text_read_fallback() {
 }
 
 #[test]
-fn normalize_prefers_registry_repair_over_legacy_docker_rewrite() {
+fn normalize_prefers_registry_repair_from_docker_capability_ref() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
@@ -1132,6 +1132,7 @@ fn normalize_prefers_registry_repair_over_legacy_docker_rewrite() {
         OutputResponseShape::OneSentence,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::DockerPs;
+    route.resolved_intent = "capability_ref=docker.list_containers".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "docker ps"}),
@@ -1153,6 +1154,35 @@ fn normalize_prefers_registry_repair_over_legacy_docker_rewrite() {
     ));
     assert_eq!(
         plan_repair_reason(&state, Some(&route), &loop_state, Some(&normalized)),
+        "preferred_skill_required_for_semantic_route"
+    );
+}
+
+#[test]
+fn legacy_docker_semantic_kind_without_capability_ref_does_not_select_registry_skill() {
+    let state = test_state_with_registry();
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DockerPs;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({"command": "docker ps"}),
+    }];
+
+    assert!(!super::super::registry_preferred_skill_matches_route(
+        &state, &route
+    ));
+    assert!(
+        !super::super::actions_use_ad_hoc_command_without_route_preferred_skill(
+            &state, &route, &actions
+        )
+    );
+    assert_ne!(
+        plan_repair_reason(&state, Some(&route), &loop_state, None),
         "preferred_skill_required_for_semantic_route"
     );
 }
