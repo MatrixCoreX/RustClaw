@@ -311,7 +311,7 @@ fn requested_machine_kv_summary_from_task_final_answer(
     observed_texts.sort();
     observed_texts.dedup();
     let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
-    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus) {
+    if route_requests_service_status_machine_kv_summary(route_result) {
         let service_control_texts =
             observed_machine_text_fragments_from_journal_skill(journal, "service_control");
         if !service_control_texts.is_empty() {
@@ -329,6 +329,14 @@ fn requested_machine_kv_summary_from_task_final_answer(
         request_surfaces.iter().map(String::as_str),
         &observed_texts,
     )
+}
+
+fn route_requests_service_status_machine_kv_summary(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::machine_capability_ref::route_has_capability_namespace(
+            route,
+            &["service", "service_control"],
+        )
 }
 
 fn observed_machine_text_fragments_from_journal_skill(
@@ -535,6 +543,67 @@ mod tests {
 
         let summary = requested_machine_kv_summary_from_task_final_answer(
             "Return target, status, manager_type.",
+            &route,
+            &journal,
+            "",
+            &[],
+        )
+        .expect("machine summary");
+
+        assert_eq!(summary, "target=clawd status=ok manager_type=rustclaw");
+    }
+
+    #[test]
+    fn service_capability_ref_machine_kv_prefers_single_service_control_source_without_semantic_kind(
+    ) {
+        let mut route = service_status_route();
+        route.route_reason = "capability_ref=service.status".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        let requested_fields = ["target", "status", "manager_type"].join(" ");
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-service-kv-capability-source",
+            "ask",
+            &requested_fields,
+        );
+        journal.record_route_result(&route);
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "process_basic",
+                json!({
+                    "extra": {
+                        "action": "ps",
+                        "filter": "clawd",
+                        "match_count": 0,
+                        "running": false,
+                        "status": "not_running"
+                    }
+                })
+                .to_string(),
+            ));
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_2",
+                "service_control",
+                json!({
+                    "extra": {
+                        "status": "ok",
+                        "target": "clawd",
+                        "service_name": "clawd",
+                        "manager_type": "rustclaw",
+                        "requested_action": "status",
+                        "executed_actions": ["status"],
+                        "post_state": "clawd=running",
+                        "verified": true
+                    }
+                })
+                .to_string(),
+            ));
+
+        let summary = requested_machine_kv_summary_from_task_final_answer(
+            &requested_fields,
             &route,
             &journal,
             "",
