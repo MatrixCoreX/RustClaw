@@ -171,51 +171,75 @@ impl TaskContract {
             missing_parameters,
         }
     }
+}
 
-    pub(crate) fn compact_prompt_line(&self) -> String {
-        self.compact_prompt_line_with_label("task_contract")
-    }
+pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &RouteResult) -> String {
+    let missing_parameters = missing_parameters_for_route(route);
+    let required_evidence_fields = required_evidence_fields_for_route(route);
+    let evidence_required = route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !required_evidence_fields.is_empty();
+    compact_prompt_line_with_fields(
+        "evidence_policy_context",
+        &targets_for_route(route),
+        target_object_for_route(route),
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        operation_for_route(route),
+        evidence_required,
+        &required_evidence_fields,
+        delivery_shape_for_route(route),
+        &missing_parameters,
+        failure_policy_for_route(route, evidence_required, &missing_parameters),
+    )
+}
 
-    pub(crate) fn evidence_policy_context_prompt_line(&self) -> String {
-        self.compact_prompt_line_with_label("evidence_policy_context")
-    }
-
-    fn compact_prompt_line_with_label(&self, label: &str) -> String {
-        let required_evidence = if self.required_evidence_fields.is_empty() {
-            "none".to_string()
-        } else {
-            self.required_evidence_fields.join(",")
-        };
-        let missing_parameters = if self.missing_parameters.is_empty() {
-            "none".to_string()
-        } else {
-            self.missing_parameters.join(",")
-        };
-        let targets = if self.targets.is_empty() {
-            "none".to_string()
-        } else {
-            let values = self
-                .targets
-                .iter()
-                .map(TargetContract::compact_json)
-                .collect::<Vec<_>>();
-            serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
-        };
-        format!(
-            "- {label} targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
-            targets,
-            self.target_object.as_str(),
-            self.structured_field_selector
-                .as_deref()
-                .unwrap_or("none"),
-            self.operation.as_str(),
-            self.evidence_required,
-            required_evidence,
-            self.delivery_shape.as_str(),
-            missing_parameters,
-            self.failure_policy.as_str(),
-        )
-    }
+fn compact_prompt_line_with_fields(
+    label: &str,
+    targets: &[TargetContract],
+    target_object: TaskTargetObject,
+    structured_field_selector: Option<&str>,
+    operation: TaskOperation,
+    evidence_required: bool,
+    required_evidence_fields: &[String],
+    delivery_shape: TaskDeliveryShape,
+    missing_parameters: &[String],
+    failure_policy: TaskFailurePolicy,
+) -> String {
+    let required_evidence = if required_evidence_fields.is_empty() {
+        "none".to_string()
+    } else {
+        required_evidence_fields.join(",")
+    };
+    let missing_parameters = if missing_parameters.is_empty() {
+        "none".to_string()
+    } else {
+        missing_parameters.join(",")
+    };
+    let targets = if targets.is_empty() {
+        "none".to_string()
+    } else {
+        let values = targets
+            .iter()
+            .map(TargetContract::compact_json)
+            .collect::<Vec<_>>();
+        serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
+    };
+    format!(
+        "- {label} targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
+        targets,
+        target_object.as_str(),
+        structured_field_selector.unwrap_or("none"),
+        operation.as_str(),
+        evidence_required,
+        required_evidence,
+        delivery_shape.as_str(),
+        missing_parameters,
+        failure_policy.as_str(),
+    )
 }
 
 fn targets_for_route(route: &RouteResult) -> Vec<TargetContract> {
@@ -338,7 +362,7 @@ fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObj
     })
 }
 
-fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
+pub(crate) fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
     if let Some(target) = target_object_for_capability_ref(route) {
         return target;
     }
@@ -418,7 +442,7 @@ fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
     })
 }
 
-fn operation_for_route(route: &RouteResult) -> TaskOperation {
+pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
     if let Some(operation) = operation_for_capability_ref(route) {
         return operation;
     }

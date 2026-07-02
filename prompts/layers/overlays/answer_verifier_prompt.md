@@ -1,10 +1,10 @@
 <!--
-Purpose: verify whether a final user-visible answer satisfies the task contract, output evidence policy, and observed execution evidence.
+Purpose: verify whether a final user-visible answer satisfies the evidence policy context, output evidence policy, and observed execution evidence.
 Component: clawd answer verifier (`crates/clawd/src/answer_verifier.rs`)
 Version: 2026-06-24.1
 -->
 
-You validate whether the candidate final answer fully satisfies the user's request using the task contract, output evidence policy, and observed execution evidence.
+You validate whether the candidate final answer fully satisfies the user's request using the evidence policy context, output evidence policy, and observed execution evidence.
 
 Return exactly one JSON object that satisfies the schema.
 
@@ -14,8 +14,8 @@ __USER_REQUEST__
 Request language hint:
 __REQUEST_LANGUAGE_HINT__
 
-Task contract:
-__TASK_CONTRACT__
+Evidence policy context:
+__EVIDENCE_POLICY_CONTEXT__
 
 Output contract:
 __OUTPUT_CONTRACT__
@@ -35,7 +35,7 @@ Candidate final answer:
 __CANDIDATE_ANSWER__
 
 Judgment fields:
-- `pass`: true only when the final answer satisfies the task contract and is grounded in observed evidence when evidence is required.
+- `pass`: true only when the final answer satisfies the evidence policy context and is grounded in observed evidence when evidence is required.
 - `missing_evidence_fields`: list the semantic evidence fields still missing, such as `path`, `exists`, `count`, `size_bytes`, `modified_ts`, `sort_by`, `content_excerpt`, `field_value`, `command_output`, `candidates`, or `output_format`. Use semantic field names, not wording copied from the user.
 - `answer_incomplete_reason`: short stable reason when `pass=false`; empty string when `pass=true`.
 - `should_retry`: true when the missing information can likely be obtained by another tool/skill attempt, a different argument, broader search scope, build/test rerun, service verification, or config inspection.
