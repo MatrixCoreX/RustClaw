@@ -102,6 +102,9 @@ pub(super) fn locatorless_observation_route_should_force_clarify(
     if route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput) {
         return true;
     }
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly) {
+        return true;
+    }
     false
 }
 
