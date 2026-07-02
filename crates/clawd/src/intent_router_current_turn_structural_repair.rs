@@ -640,7 +640,12 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && output_contract.semantic_kind_is_unclassified()
         && req_surface.inline_json_shape.is_none()
-        && !finalizer_language_policy_dry_run_contract_context(route_reason)
+        && !finalizer_language_policy_dry_run_locatorless_contract_context(
+            route_reason,
+            req,
+            req_surface,
+            workspace_root,
+        )
         && planner_locator_surface_should_require_evidence(req_surface, answer_candidate)
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
         && !req_surface.is_structural_locator_only_reply()
@@ -902,6 +907,47 @@ fn finalizer_language_policy_dry_run_contract_context(route_reason: &str) -> boo
         && ["structured_evidence", "evidence"]
             .iter()
             .any(|token| machine_context_has_token(route_reason, token))
+}
+
+fn finalizer_language_policy_dry_run_locatorless_contract_context(
+    route_reason: &str,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> bool {
+    if finalizer_language_policy_dry_run_contract_context(route_reason) {
+        return true;
+    }
+    finalizer_language_policy_dry_run_contract_context(req)
+        && !request_surface_has_concrete_file_locator(req, req_surface, workspace_root)
+}
+
+fn request_surface_has_concrete_file_locator(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> bool {
+    if req_surface
+        .filename_candidates_excluding_field_selectors()
+        .iter()
+        .any(|candidate| Path::new(candidate).extension().is_some())
+    {
+        return true;
+    }
+    let Some(locator) =
+        crate::intent::locator_extractor::extract_explicit_locator_for_fallback(req)
+    else {
+        return false;
+    };
+    let hint = locator.locator_hint.trim();
+    if hint.is_empty() {
+        return false;
+    }
+    hint.starts_with("http://")
+        || hint.starts_with("https://")
+        || Path::new(hint).is_absolute()
+        || Path::new(hint).extension().is_some()
+        || workspace_root.join(hint).exists()
 }
 
 pub(super) fn contract_uses_locatorless_system_observation(route_reason: &str) -> bool {
