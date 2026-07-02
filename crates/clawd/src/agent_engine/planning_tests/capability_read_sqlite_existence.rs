@@ -373,20 +373,32 @@ fn plain_text_read_range_keeps_default_bounds() {
 }
 
 #[test]
-fn contract_scoped_planner_skill_scope_uses_allowed_action_skills() {
+fn semantic_matrix_no_longer_scopes_planner_skills() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
-    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("contract scope");
-
-    assert_eq!(scope.len(), 1);
-    assert!(scope.contains("fs_basic"));
+    assert!(contract_scoped_planner_skill_scope(Some(&route)).is_none());
 }
 
 #[test]
-fn lightweight_contract_scope_caps_broad_command_summary_to_preferred_skills() {
+fn capability_ref_scopes_planner_skills_from_registry() {
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
+    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("capability scope");
+
+    assert_eq!(scope.len(), 1);
+    assert!(scope.contains("db_basic"));
+}
+
+#[test]
+fn lightweight_contract_scope_without_capability_refs_leaves_skills_open() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
@@ -394,15 +406,7 @@ fn lightweight_contract_scope_caps_broad_command_summary_to_preferred_skills() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
     assert!(contract_scoped_planner_skill_scope(Some(&route)).is_none());
-
-    let scope =
-        contract_scoped_lightweight_planner_skill_scope(Some(&route)).expect("lightweight scope");
-    assert!(scope.len() <= 8);
-    assert!(scope.contains("run_cmd"));
-    assert!(scope.contains("process_basic"));
-    assert!(scope.contains("system_basic"));
-    assert!(!scope.contains("kb"));
-    assert!(!scope.contains("archive_basic"));
+    assert!(contract_scoped_lightweight_planner_skill_scope(Some(&route)).is_none());
 }
 
 #[test]
