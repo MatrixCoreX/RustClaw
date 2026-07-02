@@ -4,7 +4,7 @@ use super::*;
 fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
     let mut route = base_route_result();
     route.route_reason =
-        "capability_ref=task_control field=task_id field=state field=can_cancel dry_run"
+        "capability_ref=task_control.cancel_one field=task_id field=state field=can_cancel dry_run"
             .to_string();
     route.resolved_intent =
         "task_control task_id state can_cancel cancel_requested would_mutate=false".to_string();
@@ -32,6 +32,23 @@ fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
             .and_then(Value::as_bool),
         Some(false)
     );
+}
+
+#[test]
+fn generic_task_control_capability_ref_does_not_trigger_cancel_dry_run_contract() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "capability_ref=task_control field=task_id field=state field=can_cancel dry_run"
+            .to_string();
+    route.resolved_intent =
+        "task_control task_id state can_cancel cancel_requested would_mutate=false".to_string();
+
+    assert!(structured_dry_run_response_deterministic_plan_result(
+        "dry-run task cancel contract",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .is_none());
 }
 
 #[test]

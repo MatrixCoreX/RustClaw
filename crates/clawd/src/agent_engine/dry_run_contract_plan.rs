@@ -273,16 +273,13 @@ fn answer_verifier_contract_dry_run_tokens_present(text: &str) -> bool {
 
 fn task_control_cancel_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    let has_explicit_cancel_action = normalized.contains("task_control.cancel")
+    let has_explicit_cancel_action = normalized.contains("capability_ref=task_control.cancel_one")
+        || normalized.contains("capability_ref=task_control.cancel_all")
+        || normalized.contains("task_control.cancel_one")
+        || normalized.contains("task_control.cancel_all")
         || normalized.contains("cancel_all")
         || normalized.contains("cancel_one");
-    let has_task_control_cancel_contract = normalized.contains("task_control")
-        && normalized.contains("task_id")
-        && normalized.contains("state")
-        && normalized.contains("can_cancel")
-        && (normalized.contains("cancel") || normalized.contains("cancel_requested"));
-    (has_explicit_cancel_action || has_task_control_cancel_contract)
-        && has_dry_run_machine_token(&normalized)
+    has_explicit_cancel_action && has_dry_run_machine_token(&normalized)
 }
 
 fn observed_output_projection_dry_run_tokens_present(text: &str) -> bool {
