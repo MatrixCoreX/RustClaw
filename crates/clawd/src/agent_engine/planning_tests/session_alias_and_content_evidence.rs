@@ -604,8 +604,20 @@ fn plain_act_path_action_rejects_readonly_file_plan_before_execution() {
     );
 }
 
-#[test]
-fn active_task_append_current_locator_uses_append_text_plan() {
+#[tokio::test]
+async fn active_task_append_current_locator_reaches_planner_path() {
+    let state = test_state();
+    let task = ClaimedTask {
+        task_id: "active-task-append-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": "append beta to the active file" }).to_string(),
+    };
     let loop_state = LoopState::new(1);
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
@@ -624,27 +636,29 @@ fn active_task_append_current_locator_uses_append_text_plan() {
             "required_content_literals": ["beta"]
         })),
     };
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = active_task_append_current_locator_deterministic_plan_result(
-        "append to active file",
-        Some(&route),
+    let err = super::super::plan_round_actions(
+        &state,
+        &task,
+        "append beta to the active file",
+        "append beta to the active file",
+        &policy,
         &loop_state,
         Some(&analysis),
+        Some(&route),
         Some("/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt"),
     )
-    .expect("expected deterministic append plan");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("append_text")
+    .await
+    .expect_err("active-task append should reach planner instead of pre-LLM append plan");
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
     );
-    assert_eq!(
-        plan.steps[0].args.get("content").and_then(Value::as_str),
-        Some("beta\n")
+    assert!(
+        !err.contains("plan_deterministic_active_task_append_current_locator"),
+        "old append deterministic fallback leaked into planner error: {err}"
     );
-    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
 }
 
 #[test]
