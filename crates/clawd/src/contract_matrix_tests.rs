@@ -193,6 +193,81 @@ fn route_capability_ref_allows_filesystem_mutate_policy_without_semantic_kind() 
 }
 
 #[test]
+fn route_capability_ref_allows_service_and_docker_policy_without_semantic_kind() {
+    for (capability_ref, skill, args, expected_action) in [
+        (
+            "capability_ref=service.status",
+            "service_control",
+            serde_json::json!({"action":"status","target":"clawd"}),
+            "service_control.status",
+        ),
+        (
+            "capability_ref=service.verify",
+            "service_control",
+            serde_json::json!({"action":"verify","target":"clawd"}),
+            "service_control.verify",
+        ),
+        (
+            "capability_ref=service.logs",
+            "service_control",
+            serde_json::json!({"action":"logs","target":"clawd","lines":80}),
+            "service_control.logs",
+        ),
+        (
+            "capability_ref=service.restart",
+            "service_control",
+            serde_json::json!({"action":"restart","target":"clawd"}),
+            "service_control.restart",
+        ),
+        (
+            "capability_ref=docker.list_containers",
+            "docker_basic",
+            serde_json::json!({"action":"ps","limit":5}),
+            "docker_basic.ps",
+        ),
+        (
+            "capability_ref=docker.list_images",
+            "docker_basic",
+            serde_json::json!({"action":"images","limit":5}),
+            "docker_basic.images",
+        ),
+        (
+            "capability_ref=docker.version",
+            "docker_basic",
+            serde_json::json!({"action":"version"}),
+            "docker_basic.version",
+        ),
+        (
+            "capability_ref=docker.inspect_container",
+            "docker_basic",
+            serde_json::json!({"action":"inspect","container":"rustclaw"}),
+            "docker_basic.inspect",
+        ),
+        (
+            "capability_ref=docker.read_logs",
+            "docker_basic",
+            serde_json::json!({"action":"logs","container":"rustclaw","tail":100}),
+            "docker_basic.logs",
+        ),
+        (
+            "capability_ref=docker.restart_container",
+            "docker_basic",
+            serde_json::json!({"action":"restart","container":"rustclaw"}),
+            "docker_basic.restart",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (
