@@ -425,19 +425,23 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
-    if route_has_docker_capability_marker(route)
-        && (observed_canonical.contains("command_output")
-            || observed_canonical.contains("content_excerpt")
-            || observed_fields.contains("text_excerpt"))
-    {
-        if route_has_docker_lifecycle_capability_marker(route) {
+    let docker_route_shape =
+        route_has_docker_answer_shape(route) || route_has_unshaped_docker_compat_marker(route);
+    let observed_textual_runtime_output = observed_canonical.contains("command_output")
+        || observed_canonical.contains("content_excerpt")
+        || observed_fields.contains("text_excerpt");
+    if docker_route_shape && observed_textual_runtime_output {
+        if route_has_docker_field_value_answer_shape(route)
+            || route_has_unshaped_docker_field_value_compat_marker(route)
+        {
             observed_canonical.insert("field_value".to_string());
-        } else if route_has_docker_list_capability_marker(route) {
+        } else if route_has_docker_candidate_answer_shape(route) {
             observed_canonical.insert("candidates".to_string());
         }
     }
     if (route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || route_has_service_status_capability_marker(route))
+        || route_has_service_status_answer_shape(route)
+        || route_has_unshaped_service_status_compat_marker(route))
         && (observed_canonical.contains("status")
             || observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
@@ -475,35 +479,66 @@ pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, pre
         .any(|field| field.starts_with(prefix))
 }
 
-fn route_has_docker_capability_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
+fn route_final_answer_shape(
+    route: &crate::RouteResult,
+) -> Option<crate::contract_matrix::FinalAnswerShape> {
+    crate::contract_matrix::final_answer_shape_for_route(route)
 }
 
-fn route_has_docker_lifecycle_capability_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["docker"],
-        &["inspect", "restart", "start", "stop", "version"],
+fn route_has_docker_answer_shape(route: &crate::RouteResult) -> bool {
+    route_has_docker_field_value_answer_shape(route)
+        || route_has_docker_candidate_answer_shape(route)
+}
+
+fn route_has_docker_field_value_answer_shape(route: &crate::RouteResult) -> bool {
+    matches!(
+        route_final_answer_shape(route),
+        Some(crate::contract_matrix::FinalAnswerShape::LifecycleResult)
     )
 }
 
-fn route_has_docker_list_capability_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["docker"],
-        &["image", "images", "list", "log", "logs", "read"],
+fn route_has_docker_candidate_answer_shape(route: &crate::RouteResult) -> bool {
+    matches!(
+        route_final_answer_shape(route),
+        Some(
+            crate::contract_matrix::FinalAnswerShape::ContainerList
+                | crate::contract_matrix::FinalAnswerShape::ImageList
+                | crate::contract_matrix::FinalAnswerShape::LogExcerptOrSummary
+        )
     )
 }
 
-fn route_has_service_status_capability_marker(route: &crate::RouteResult) -> bool {
+fn route_has_unshaped_docker_compat_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["docker"],
+        &["inspect", "version"],
+    )
+}
+
+fn route_has_unshaped_docker_field_value_compat_marker(route: &crate::RouteResult) -> bool {
+    route_has_unshaped_docker_compat_marker(route)
+}
+
+fn route_has_service_status_answer_shape(route: &crate::RouteResult) -> bool {
+    matches!(
+        route_final_answer_shape(route),
+        Some(
+            crate::contract_matrix::FinalAnswerShape::LifecycleResult
+                | crate::contract_matrix::FinalAnswerShape::StatusWithSource
+        )
+    )
+}
+
+fn route_has_unshaped_service_status_compat_marker(route: &crate::RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action(
         route,
         &["service", "service_control"],
-        &["logs", "restart", "start", "status", "stop", "verify"],
+        &["logs", "verify"],
     ) || crate::machine_capability_ref::route_has_capability_action(
         route,
         &["system", "system_basic"],
-        &["health_check", "runtime_status"],
+        &["runtime_status"],
     )
 }
 
