@@ -10,7 +10,7 @@ fn constructed_missing_stat_path_plan_rewrites_to_exact_find_entries() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -107,7 +107,7 @@ fn file_paths_missing_stat_path_rewrites_to_selector_find_entries() {
     state.skill_rt.workspace_root = root.path.clone();
     let missing = plan_dir.join("definitely_missing_20260511.md");
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -258,7 +258,7 @@ fn split_dir_and_basename_stat_paths_rewrites_to_auto_locator_file() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );

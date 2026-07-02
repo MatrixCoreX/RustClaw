@@ -1131,7 +1131,7 @@ fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
     state.skill_rt.locator_scan_max_files = 5000;
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );

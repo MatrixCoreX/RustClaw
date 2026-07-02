@@ -173,7 +173,6 @@ pub(super) fn rewrite_split_dir_basename_stat_paths_to_auto_locator_file(
         return actions;
     };
     if route.needs_clarify
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || !matches!(
@@ -387,7 +386,6 @@ pub(super) enum PlannedCallKind {
 
 pub(super) fn route_allows_constructed_stat_path_search_repair(route: &RouteResult) -> bool {
     !route.needs_clarify
-        && route.is_execute_gate()
         && !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
 }
@@ -1080,7 +1078,6 @@ pub(super) fn replace_directory_compare_search_plan(
         return actions;
     };
     if route.needs_clarify
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
