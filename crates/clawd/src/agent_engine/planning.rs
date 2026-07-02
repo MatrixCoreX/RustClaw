@@ -266,29 +266,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_config_risk_preview"
     );
     return_deterministic_plan!(
-        package_docker_readonly_probe_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-        ),
-        "plan_deterministic_package_docker_readonly_probe"
-    );
-    return_deterministic_plan!(
-        package_manager_detect_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            auto_locator_path,
-        ),
-        "plan_deterministic_package_manager_detect"
-    );
-    return_deterministic_plan!(
-        package_manager_dry_run_deterministic_plan_result(state, goal, route_result, loop_state),
-        "plan_deterministic_package_manager_dry_run"
-    );
-    return_deterministic_plan!(
         runtime_status_scalar_deterministic_plan_result(
             state,
             goal,
