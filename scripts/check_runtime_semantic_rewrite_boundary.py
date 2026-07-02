@@ -51,6 +51,7 @@ TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
+PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
 READ_RANGE_ACTION_FILE = SRC_ROOT / "agent_engine/read_range_action.rs"
 SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
     SRC_ROOT / "agent_engine/single_target_structured_field_rewrite.rs"
@@ -292,6 +293,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_migration_class_registry_bridge_fallback())
     findings.extend(scan_ask_prepare_registry_bridge_marker_preservation())
     findings.extend(scan_current_workspace_scope_boundary_marker())
+    findings.extend(scan_lightweight_tool_spec_contract_marker())
     findings.extend(scan_task_journal_evidence_registry_bridge_markers())
     findings.extend(scan_observation_repair_registry_bridge_markers())
     findings.extend(scan_contract_hint_registry_bridge_semantic_markers())
@@ -705,6 +707,43 @@ def scan_current_workspace_scope_boundary_marker() -> list[Finding]:
                 1,
                 "current_workspace_scope_semantic_kind_emission",
                 f"forbidden boundary token: {token}",
+            )
+        )
+    return findings
+
+
+def scan_lightweight_tool_spec_contract_marker() -> list[Finding]:
+    rel_path = rel(PLANNING_PROMPT_FILE)
+    text = PLANNING_PROMPT_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("pub(super) fn build_lightweight_tool_spec(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "lightweight_tool_spec_missing",
+                "missing build_lightweight_tool_spec",
+            )
+        ]
+    fn_end = text.find("\nconst LIGHTWEIGHT_SKILL_PLAYBOOK_MAX_CHARS", fn_start)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if "contract_marker={}" not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "lightweight_tool_spec_contract_marker_missing",
+                "lightweight tool spec should expose contract_marker, not legacy semantic_kind",
+            )
+        )
+    if "semantic_kind={}" in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "lightweight_tool_spec_semantic_kind_emission",
+                "lightweight tool spec must not expose legacy semantic_kind",
             )
         )
     return findings
