@@ -138,7 +138,7 @@ impl TargetContract {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskContract {
+pub(crate) struct EvidencePolicyContract {
     pub(crate) targets: Vec<TargetContract>,
     pub(crate) target_object: TaskTargetObject,
     pub(crate) structured_field_selector: Option<String>,
@@ -151,7 +151,7 @@ pub(crate) struct TaskContract {
 }
 
 #[cfg(test)]
-impl TaskContract {
+impl EvidencePolicyContract {
     pub(crate) fn from_route_result(route: &RouteResult) -> Self {
         let missing_parameters = missing_parameters_for_route(route);
         let evidence_required = evidence_required_for_route(route);
