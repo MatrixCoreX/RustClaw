@@ -20,7 +20,7 @@ use super::{
     successful_content_observation_should_precede_status_summary,
 };
 
-fn matrix_final_answer_shape_class(
+fn evidence_policy_final_answer_shape_class(
     route: &crate::RouteResult,
 ) -> Option<crate::contract_matrix::FinalAnswerShapeClass> {
     if route_requests_docker_text_list_projection(route) {
@@ -29,8 +29,11 @@ fn matrix_final_answer_shape_class(
     crate::contract_matrix::final_answer_shape_for_route(route).map(|shape| shape.class())
 }
 
-pub(super) fn route_requires_matrix_deterministic_final_answer(route: &crate::RouteResult) -> bool {
-    matrix_final_answer_shape_class(route).is_some_and(|class| !class.allows_model_language())
+pub(super) fn route_requires_evidence_policy_deterministic_final_answer(
+    route: &crate::RouteResult,
+) -> bool {
+    evidence_policy_final_answer_shape_class(route)
+        .is_some_and(|class| !class.allows_model_language())
 }
 
 pub(super) fn agent_context_allows_observed_output_language_fallback(
@@ -38,7 +41,7 @@ pub(super) fn agent_context_allows_observed_output_language_fallback(
 ) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .is_none_or(|route| !route_requires_matrix_deterministic_final_answer(route))
+        .is_none_or(|route| !route_requires_evidence_policy_deterministic_final_answer(route))
 }
 
 pub(super) fn should_try_observed_output_language_fallback(
@@ -57,8 +60,8 @@ pub(super) fn should_try_observed_output_language_fallback(
 }
 
 #[cfg(test)]
-pub(super) fn route_has_contract_matrix_final_shape(route: &crate::RouteResult) -> bool {
-    matrix_final_answer_shape_class(route).is_some()
+pub(super) fn route_has_evidence_policy_final_shape(route: &crate::RouteResult) -> bool {
+    evidence_policy_final_answer_shape_class(route).is_some()
 }
 
 pub(super) fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
@@ -70,7 +73,7 @@ pub(super) fn route_requires_observed_semantic_projection(route: &crate::RouteRe
     )
 }
 
-pub(super) fn matrix_candidate_satisfies_final_shape(
+pub(super) fn evidence_policy_candidate_satisfies_final_shape(
     task: &ClaimedTask,
     user_text: &str,
     loop_state: &LoopState,
@@ -102,7 +105,7 @@ pub(super) fn matrix_candidate_satisfies_final_shape(
     crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
 }
 
-pub(super) fn synthetic_task_for_matrix_shape_check(task_id: &str) -> ClaimedTask {
+pub(super) fn synthetic_task_for_evidence_policy_shape_check(task_id: &str) -> ClaimedTask {
     ClaimedTask {
         task_id: task_id.to_string(),
         user_id: 0,
@@ -116,7 +119,7 @@ pub(super) fn synthetic_task_for_matrix_shape_check(task_id: &str) -> ClaimedTas
     }
 }
 
-pub(super) fn current_synthesis_satisfies_matrix_shape(
+pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     task_id: &str,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -124,7 +127,7 @@ pub(super) fn current_synthesis_satisfies_matrix_shape(
     route: &crate::RouteResult,
     delivery_messages: &[String],
 ) -> bool {
-    if !route_requires_matrix_deterministic_final_answer(route) {
+    if !route_requires_evidence_policy_deterministic_final_answer(route) {
         return true;
     }
     let Some(message) = delivery_messages.last() else {
@@ -139,8 +142,8 @@ pub(super) fn current_synthesis_satisfies_matrix_shape(
     if file_name_list_prefers_observed_projection(route, loop_state) {
         return false;
     }
-    let task = synthetic_task_for_matrix_shape_check(task_id);
-    matrix_candidate_satisfies_final_shape(
+    let task = synthetic_task_for_evidence_policy_shape_check(task_id);
+    evidence_policy_candidate_satisfies_final_shape(
         &task,
         &route.resolved_intent,
         loop_state,
@@ -1305,7 +1308,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route_requires_matrix_deterministic_final_answer(route) {
+    if !route_requires_evidence_policy_deterministic_final_answer(route) {
         return false;
     }
     if let Some((candidate, summary)) =
@@ -1333,7 +1336,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         );
         return true;
     }
-    let Some(shape_class) = matrix_final_answer_shape_class(route) else {
+    let Some(shape_class) = evidence_policy_final_answer_shape_class(route) else {
         return false;
     };
     let current_answer = final_answer_text_from_delivery(delivery_messages);
@@ -1341,7 +1344,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         && !directory_entry_groups_prefers_observed_groups(route, loop_state)
         && !archive_member_list_prefers_observed_projection(route)
         && !file_name_list_prefers_observed_projection(route, loop_state)
-        && matrix_candidate_satisfies_final_shape(
+        && evidence_policy_candidate_satisfies_final_shape(
             task,
             user_text,
             loop_state,
@@ -1374,7 +1377,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     };
     if !archive_member_list_prefers_observed_projection(route)
         && !file_name_list_prefers_observed_projection(route, loop_state)
-        && !matrix_candidate_satisfies_final_shape(
+        && !evidence_policy_candidate_satisfies_final_shape(
             task,
             user_text,
             loop_state,
@@ -1428,10 +1431,10 @@ pub(crate) fn deterministic_matrix_observed_shape_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if !route_requires_matrix_deterministic_final_answer(route) {
+    if !route_requires_evidence_policy_deterministic_final_answer(route) {
         return None;
     }
-    let shape_class = matrix_final_answer_shape_class(route)?;
+    let shape_class = evidence_policy_final_answer_shape_class(route)?;
     let (candidate, summary) = matrix_observed_answer_candidate_for_shape(
         state,
         loop_state,

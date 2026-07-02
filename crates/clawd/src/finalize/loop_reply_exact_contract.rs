@@ -4,24 +4,24 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::AppState;
 
 use super::{
-    current_synthesis_satisfies_matrix_shape, delivery_is_raw_read_observation,
+    current_synthesis_satisfies_evidence_policy_shape, delivery_is_raw_read_observation,
     delivery_is_single_line_text, delivery_matches_latest_publishable_synthesis,
     delivery_message_is_json_object, deterministic_matrix_observed_shape_answer,
     direct_created_archive_path_from_observed_archive_pack,
     direct_quantity_comparison_from_compare_paths, direct_raw_command_output_projection,
     direct_scalar_observed_answer, direct_structured_observed_answer,
     directory_entry_groups_prefers_observed_groups,
+    evidence_policy_candidate_satisfies_final_shape,
     latest_grounded_synthesis_for_mixed_listing_contract,
     latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, latest_successful_observation_body,
     log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, matrix_candidate_satisfies_final_shape,
-    matrix_grouped_name_list_observed_answer, output_contract_requests_exact_delivery,
-    planned_delivery_is_publishable_model_language_answer,
+    looks_like_structured_machine_output, matrix_grouped_name_list_observed_answer,
+    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
     raw_command_output_needs_structural_projection, route_allows_model_language_final_answer,
     route_expects_synthesis_over_raw_observation, route_requires_file_token,
     route_requires_observed_semantic_projection, scalar_answer_from_json,
-    synthetic_task_for_matrix_shape_check,
+    synthetic_task_for_evidence_policy_shape_check,
 };
 
 pub(super) fn prefer_observed_answer_for_exact_contract(
@@ -340,7 +340,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
         && !command_output_summary_allows_exact_observed_output(route)
         && !route_requires_observed_semantic_projection(route)
-        && current_synthesis_satisfies_matrix_shape(
+        && current_synthesis_satisfies_evidence_policy_shape(
             task_id,
             loop_state,
             agent_run_context,
@@ -412,7 +412,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         {
             let current = delivery_messages.last().map(|message| message.trim());
             if current != Some(synthesis) {
-                let synthetic_task = synthetic_task_for_matrix_shape_check(task_id);
+                let synthetic_task = synthetic_task_for_evidence_policy_shape_check(task_id);
                 let summary = crate::task_journal::TaskJournalFinalizerSummary {
                     stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
                     disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
@@ -424,7 +424,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
                     used_evidence_ids_count: loop_state.executed_step_results.len(),
                     ..Default::default()
                 };
-                if matrix_candidate_satisfies_final_shape(
+                if evidence_policy_candidate_satisfies_final_shape(
                     &synthetic_task,
                     &route.resolved_intent,
                     loop_state,
@@ -460,7 +460,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
             }
         }
     }
-    let synthetic_task = synthetic_task_for_matrix_shape_check(task_id);
+    let synthetic_task = synthetic_task_for_evidence_policy_shape_check(task_id);
     let prefer_exact_observed_command_output =
         command_output_summary_allows_exact_observed_output(route);
     let observed_candidate = if prefer_exact_observed_command_output {

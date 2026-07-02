@@ -8,8 +8,8 @@ use super::{
     first_markdown_heading_from_read_output, last_respond_matches_single_line_observation,
     looks_like_raw_command_snapshot, markdown_heading_from_line, message_is_non_answer_separator,
     output_contract_requests_exact_delivery,
-    route_allows_observed_markdown_heading_scalar_delivery, route_has_contract_matrix_final_shape,
-    route_requires_matrix_deterministic_final_answer, single_publishable_delivery_message,
+    route_allows_observed_markdown_heading_scalar_delivery, route_has_evidence_policy_final_shape,
+    route_requires_evidence_policy_deterministic_final_answer, single_publishable_delivery_message,
 };
 use super::{
     looks_like_structured_machine_output, step_output_is_read_range,
@@ -395,7 +395,7 @@ pub(super) fn delivery_contract_suppresses_execution_summary(
     {
         return true;
     }
-    if route_has_contract_matrix_final_shape(route) {
+    if route_has_evidence_policy_final_shape(route) {
         return true;
     }
     if route_requires_content_excerpt_evidence(route) && has_publishable_answer {
@@ -720,7 +720,7 @@ fn delivery_matches_grounded_content_answer(
     ) {
         return false;
     }
-    if route_requires_matrix_deterministic_final_answer(route) {
+    if route_requires_evidence_policy_deterministic_final_answer(route) {
         return false;
     }
     if latest_publishable_synthesis_step_matches(loop_state) {
