@@ -80,6 +80,11 @@ fn route_contract_marker_is_archive_unpack(route: &RouteResult) -> bool {
 
 fn route_contract_marker_is_git_repository_state(route: &RouteResult) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["git", "git_basic"],
+            &["status"],
+        )
 }
 
 fn route_contract_marker_is_hidden_entries_check(route: &RouteResult) -> bool {
