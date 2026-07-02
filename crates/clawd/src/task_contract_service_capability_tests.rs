@@ -35,7 +35,7 @@ fn service_capability_refs_keep_service_target_without_semantic_kind() {
     ] {
         let route = route_with_capability_ref(capability_ref);
 
-        let contract = TaskContract::from_route_result(&route);
+        let contract = EvidencePolicyContract::from_route_result(&route);
 
         assert_eq!(contract.target_object, TaskTargetObject::Service);
         assert_eq!(contract.operation, TaskOperation::Inspect);

@@ -1124,7 +1124,7 @@ pub(super) fn structured_or_text_multi_file_targets(
     }
     // Deprecated compatibility fallback: keep this limited to structural filename
     // tokens and document-like extensions. Semantic target selection should come
-    // from TaskContract/route output, not language-specific phrases.
+    // from evidence-policy/route output, not language-specific phrases.
     explicit_document_file_targets(user_text)
 }
 

@@ -34,7 +34,7 @@ fn file_path_search_contract_is_list_with_candidate_evidence() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.target_object, TaskTargetObject::Directory);
     assert_eq!(contract.operation, TaskOperation::List);
@@ -58,7 +58,7 @@ fn missing_locator_contract_prefers_clarify_policy() {
     );
     route.needs_clarify = true;
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.missing_parameters, vec!["locator"]);
     assert_eq!(contract.target_object, TaskTargetObject::Path);
@@ -66,7 +66,7 @@ fn missing_locator_contract_prefers_clarify_policy() {
 }
 
 #[test]
-fn task_contract_includes_structured_workspace_target() {
+fn evidence_policy_contract_includes_structured_workspace_target() {
     let route = route_with_contract(
         AskMode::planner_execute_plain(),
         IntentOutputContract {
@@ -77,7 +77,7 @@ fn task_contract_includes_structured_workspace_target() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.targets.len(), 1);
     assert_eq!(contract.targets[0].role, TaskTargetRole::Primary);
@@ -98,7 +98,7 @@ fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.operation, TaskOperation::Summarize);
     assert_eq!(contract.required_evidence_fields, vec!["candidates"]);
@@ -119,7 +119,7 @@ fn existence_contract_requires_structural_path_evidence() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.targets.len(), 1);
     assert_eq!(contract.targets[0].kind, TaskTargetObject::Path);
@@ -143,7 +143,7 @@ fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.operation, TaskOperation::Inspect);
     assert_eq!(contract.target_object, TaskTargetObject::Path);
@@ -166,7 +166,7 @@ fn task_contract_failure_policy_does_not_depend_on_execute_gate_trace() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.operation, TaskOperation::Unknown);
     assert!(!contract.evidence_required);
@@ -220,7 +220,7 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
         );
         route.resolved_intent = marker.to_string();
 
-        let contract = TaskContract::from_route_result(&route);
+        let contract = EvidencePolicyContract::from_route_result(&route);
 
         assert_eq!(contract.target_object, target, "{marker}");
         assert_eq!(contract.operation, operation, "{marker}");
@@ -259,7 +259,7 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
             },
         );
 
-        let contract = TaskContract::from_route_result(&route);
+        let contract = EvidencePolicyContract::from_route_result(&route);
 
         assert_eq!(contract.target_object, TaskTargetObject::Unknown);
         assert_eq!(contract.operation, TaskOperation::Inspect);
@@ -281,7 +281,7 @@ fn task_contract_splits_structured_multi_target_locator() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.targets.len(), 2);
     assert_eq!(contract.targets[0].locator, "README.md");
@@ -308,7 +308,7 @@ fn task_contract_splits_comma_multi_target_locator() {
         },
     );
 
-    let contract = TaskContract::from_route_result(&route);
+    let contract = EvidencePolicyContract::from_route_result(&route);
 
     assert_eq!(contract.targets.len(), 3);
     assert_eq!(contract.targets[0].locator, "README.md");
