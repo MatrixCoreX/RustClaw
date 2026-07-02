@@ -1,4 +1,4 @@
-use super::locatorless_observation_route_should_force_clarify;
+use super::locatorless_observation_route_should_defer_to_agent_loop;
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -96,7 +96,7 @@ fn locatorless_observation_defers_to_agent_loop_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "read the first 3 lines of that file",
         &route,
@@ -125,7 +125,7 @@ fn locatorless_kb_metadata_capability_can_plan_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "list kb namespaces",
         &route,
@@ -154,7 +154,7 @@ fn locatorless_kb_search_capability_can_plan_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "search kb namespace",
         &route,
@@ -184,7 +184,7 @@ fn locatorless_registry_capability_ref_can_plan_without_guard_whitelist_growth()
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "generate a short media preview",
         &route,
@@ -213,7 +213,7 @@ fn locatorless_registry_capability_ref_absent_from_route_reason_still_defers_to_
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "generate a short media preview",
         &route,
@@ -246,7 +246,7 @@ fn locatorless_git_capability_plans_without_enum_promotion() {
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::None
     );
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state, "git", &route, None, &snapshot,
     ));
 }
@@ -269,7 +269,7 @@ fn locatorless_rss_news_fetch_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "fetch latest rss news",
         &route,
@@ -297,7 +297,7 @@ fn locatorless_web_search_summary_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "search rust async tutorial",
         &route,
@@ -324,7 +324,7 @@ fn locatorless_weather_query_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check Beijing weather",
         &route,
@@ -349,7 +349,7 @@ fn locatorless_weather_query_without_capability_ref_defers_to_agent_loop() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check Beijing weather",
         &route,
@@ -386,7 +386,7 @@ fn ordinary_semantic_kind_without_capability_ref_defers_to_agent_loop() {
         };
 
         assert!(
-            !locatorless_observation_route_should_force_clarify(
+            !locatorless_observation_route_should_defer_to_agent_loop(
                 &state,
                 "run ordinary semantic route without explicit locator",
                 &route,
@@ -417,7 +417,7 @@ fn invalid_locatorless_capability_ref_token_defers_to_agent_loop() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check Beijing weather",
         &route,
@@ -444,7 +444,7 @@ fn locatorless_market_quote_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "check 600519 quote",
         &route,
@@ -471,7 +471,7 @@ fn locatorless_image_understanding_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "describe the attached image",
         &route,
@@ -499,7 +499,7 @@ fn locatorless_publishing_preview_can_execute_without_session_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "draft a channel post preview without publishing",
         &route,
@@ -524,7 +524,7 @@ fn locatorless_scalar_raw_runtime_observation_without_machine_signal_requires_cl
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "runtime scalar status query",
         &route,
@@ -550,7 +550,7 @@ fn locatorless_scalar_runtime_observation_with_machine_marker_can_plan() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "runtime scalar status query",
         &route,
@@ -576,7 +576,7 @@ fn locatorless_inline_structured_payload_does_not_require_external_locator() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         r#"统计这个 JSON 数组中对象数量，只输出数字：[{"x":1},{"x":2}]"#,
         &route,
@@ -601,7 +601,7 @@ fn locatorless_raw_command_output_still_allows_execution() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "execute pwd, then explain what the path means in one sentence",
         &route,
@@ -626,7 +626,7 @@ fn locatorless_explicit_command_uses_policy_evidence_without_semantic_enum() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "execute pwd, then explain what the path means in one sentence",
         &route,
@@ -654,7 +654,7 @@ fn locatorless_raw_command_sequence_output_still_allows_execution() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "请依次执行 pwd 和 whoami，直接输出两个命令结果，每个结果一行，不要总结",
         &route,
@@ -678,7 +678,7 @@ fn locatorless_raw_command_without_explicit_command_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "list directory contents",
         &route,
@@ -705,7 +705,7 @@ fn locatorless_observation_allows_active_structured_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!locatorless_observation_route_should_force_clarify(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "再看前 3 行",
         &route,
@@ -733,7 +733,7 @@ fn locatorless_raw_command_transform_requires_structured_input_despite_unstructu
         active_observed_facts: None,
     };
 
-    assert!(locatorless_observation_route_should_force_clarify(
+    assert!(locatorless_observation_route_should_defer_to_agent_loop(
         &state, prompt, &route, None, &snapshot,
     ));
 }

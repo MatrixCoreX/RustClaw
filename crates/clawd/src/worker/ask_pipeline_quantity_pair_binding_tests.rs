@@ -1,4 +1,4 @@
-use super::super::background_only_locator_route_should_force_clarify;
+use super::super::background_only_locator_route_should_defer_to_agent_loop;
 use super::current_request_quantity_pair_evidence;
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -121,7 +121,7 @@ fn quantity_compare_exports_two_workspace_directories_from_current_request() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!background_only_locator_route_should_force_clarify(
+    assert!(!background_only_locator_route_should_defer_to_agent_loop(
         &state,
         prompt,
         &route.resolved_intent,

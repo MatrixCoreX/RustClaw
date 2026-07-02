@@ -49,7 +49,7 @@ fn command_payload_observation_marker_present(route_result: &crate::RouteResult)
     )
 }
 
-pub(super) fn locatorless_observation_route_should_force_clarify(
+pub(super) fn locatorless_observation_route_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     route_result: &crate::RouteResult,

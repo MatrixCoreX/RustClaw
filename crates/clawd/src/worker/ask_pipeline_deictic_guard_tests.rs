@@ -1,6 +1,6 @@
 use super::{
-    deictic_bare_locator_should_force_clarify, deictic_memory_only_route_should_force_clarify,
-    deictic_missing_locator_reason_code,
+    deictic_bare_locator_should_defer_to_agent_loop,
+    deictic_memory_only_route_should_defer_to_agent_loop, deictic_missing_locator_reason_code,
 };
 
 fn executable_filename_route() -> crate::RouteResult {
@@ -86,7 +86,7 @@ fn deictic_bare_locator_forces_clarify_before_auto_locator() {
     let analysis = turn_analysis_with_state_patch(
         serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
     );
-    assert!(deictic_bare_locator_should_force_clarify(
+    assert!(deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -102,7 +102,7 @@ fn deictic_directory_scope_with_target_filename_forces_clarify() {
     let analysis = turn_analysis_with_state_patch(
         serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
     );
-    assert!(deictic_bare_locator_should_force_clarify(
+    assert!(deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -118,7 +118,7 @@ fn deictic_synthesized_relative_path_forces_clarify() {
     let analysis = turn_analysis_with_state_patch(
         serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
     );
-    assert!(deictic_bare_locator_should_force_clarify(
+    assert!(deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -147,7 +147,7 @@ fn deictic_forced_clarify_uses_machine_reason_code() {
 #[test]
 fn deictic_file_locator_with_filename_hint_still_allows_auto_locator() {
     let route = executable_filename_route();
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         None,
         &empty_session_snapshot(),
@@ -157,7 +157,7 @@ fn deictic_file_locator_with_filename_hint_still_allows_auto_locator() {
 #[test]
 fn deictic_explicit_path_still_allows_auto_locator() {
     let route = executable_filename_route();
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         None,
         &empty_session_snapshot(),
@@ -171,7 +171,7 @@ fn deictic_context_bound_path_still_allows_execution() {
     route.output_contract.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
             .to_string();
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         None,
         &empty_session_snapshot(),
@@ -187,7 +187,7 @@ fn deictic_result_reference_with_two_named_files_allows_execution() {
     let analysis = turn_analysis_with_state_patch(
         serde_json::json!({"deictic_reference":{"target":"comparison_result"}}),
     );
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -205,7 +205,7 @@ fn deictic_result_reference_after_command_allows_execution() {
         serde_json::json!({"deictic_reference":{"target":"current_action_result"}}),
     );
 
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -218,7 +218,7 @@ fn deictic_target_before_followup_still_forces_clarify() {
     let analysis = turn_analysis_with_state_patch(
         serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
     );
-    assert!(deictic_bare_locator_should_force_clarify(
+    assert!(deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -235,7 +235,7 @@ fn deictic_directory_reference_after_named_folder_allows_execution() {
         serde_json::json!({"deictic_reference":{"target":"current_turn_locator"}}),
     );
 
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &empty_session_snapshot(),
@@ -245,7 +245,7 @@ fn deictic_directory_reference_after_named_folder_allows_execution() {
 #[test]
 fn direct_bare_locator_still_allows_auto_locator() {
     let route = executable_filename_route();
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         None,
         &empty_session_snapshot(),
@@ -265,7 +265,7 @@ fn deictic_memory_only_execute_route_requires_clarify_without_session_anchor() {
     };
 
     let analysis = unresolved_deictic_analysis();
-    assert!(deictic_memory_only_route_should_force_clarify(
+    assert!(deictic_memory_only_route_should_defer_to_agent_loop(
         "看看那个目录下面都有什么",
         &route,
         Some(&analysis),
@@ -286,13 +286,13 @@ fn deictic_guards_allow_locator_bound_to_active_ordered_entry() {
     let analysis = unresolved_deictic_analysis();
     let snapshot = snapshot_with_logs_ordered_entries();
 
-    assert!(!deictic_memory_only_route_should_force_clarify(
+    assert!(!deictic_memory_only_route_should_defer_to_agent_loop(
         "send selected entry",
         &route,
         Some(&analysis),
         &snapshot,
     ));
-    assert!(!deictic_bare_locator_should_force_clarify(
+    assert!(!deictic_bare_locator_should_defer_to_agent_loop(
         &route,
         Some(&analysis),
         &snapshot,
@@ -315,7 +315,7 @@ fn deictic_memory_only_command_output_reference_does_not_force_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!deictic_memory_only_route_should_force_clarify(
+    assert!(!deictic_memory_only_route_should_defer_to_agent_loop(
         "执行 pwd，然后用一句话解释这个路径代表什么",
         &route,
         None,
@@ -341,7 +341,7 @@ fn deictic_memory_only_guard_allows_current_session_alias_binding() {
         active_observed_facts: None,
     };
 
-    assert!(!deictic_memory_only_route_should_force_clarify(
+    assert!(!deictic_memory_only_route_should_defer_to_agent_loop(
         "看看那个目录下面都有什么",
         &route,
         None,
@@ -367,7 +367,7 @@ fn deictic_memory_only_guard_rejects_session_alias_target_resolved_by_normalizer
         active_observed_facts: None,
     };
 
-    assert!(deictic_memory_only_route_should_force_clarify(
+    assert!(deictic_memory_only_route_should_defer_to_agent_loop(
         "把那个文件开头读 10 行",
         &route,
         Some(&turn_analysis_with_state_patch(serde_json::json!({
@@ -399,7 +399,7 @@ fn deictic_memory_only_guard_rejects_stale_observed_target_without_route_match()
     };
 
     let analysis = unresolved_deictic_analysis();
-    assert!(deictic_memory_only_route_should_force_clarify(
+    assert!(deictic_memory_only_route_should_defer_to_agent_loop(
         "看一下那个 sqlite 的 schema version 是多少",
         &route,
         Some(&analysis),
@@ -428,7 +428,7 @@ fn deictic_memory_only_guard_allows_active_clarify_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(!deictic_memory_only_route_should_force_clarify(
+    assert!(!deictic_memory_only_route_should_defer_to_agent_loop(
         "把那个文件发给我",
         &route,
         None,

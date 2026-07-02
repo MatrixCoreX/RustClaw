@@ -42,7 +42,7 @@ fn strip_embedded_answer_candidate_lines(text: &str) -> String {
         .join("\n")
 }
 
-pub(super) fn background_only_locator_route_should_force_clarify(
+pub(super) fn background_only_locator_route_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     resolved_prompt: &str,

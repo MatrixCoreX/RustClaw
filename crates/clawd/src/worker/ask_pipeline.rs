@@ -52,13 +52,13 @@ use active_binding::{
 };
 pub(super) use agent_context::build_agent_run_context_from_prepared_flow;
 use background_locator_guard::{
-    background_only_locator_route_should_force_clarify, recent_execution_result_segments,
+    background_only_locator_route_should_defer_to_agent_loop, recent_execution_result_segments,
     text_mentions_locator_identity,
 };
 use bare_topic_guard::{
     bare_topic_clarify_question_should_drop_context_target,
-    bare_topic_memory_expansion_route_should_force_clarify,
-    bare_topic_model_supplied_locator_route_should_force_clarify, is_bare_topic_only_prompt,
+    bare_topic_memory_expansion_route_should_defer_to_agent_loop,
+    bare_topic_model_supplied_locator_route_should_defer_to_agent_loop, is_bare_topic_only_prompt,
     route_introduces_unmentioned_distinctive_context_target,
     route_introduces_unmentioned_distinctive_context_target_except_workspace_root,
 };
@@ -74,7 +74,8 @@ use default_config::{
     defer_config_contract_default_main_config_after_locator_policy,
 };
 use deictic_guard::{
-    deictic_bare_locator_should_force_clarify, route_locator_hint_matches_active_ordered_entry,
+    deictic_bare_locator_should_defer_to_agent_loop,
+    route_locator_hint_matches_active_ordered_entry,
     state_patch_allows_deictic_locator_guard_bypass, state_patch_requires_deictic_locator_clarify,
 };
 pub(super) use execution_context::execution_user_request;
@@ -99,8 +100,9 @@ use locator_resolution::{
 use locatorless_observation_guard::{
     command_observation_marker_present, command_observation_route_has_runtime_evidence,
     current_request_has_self_contained_structured_payload,
-    locatorless_observation_route_should_force_clarify, raw_command_output_has_explicit_command,
-    raw_command_request_has_structural_input_locator, route_can_execute_without_locator,
+    locatorless_observation_route_should_defer_to_agent_loop,
+    raw_command_output_has_explicit_command, raw_command_request_has_structural_input_locator,
+    route_can_execute_without_locator,
 };
 use post_route_binding::{
     auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop,
@@ -120,21 +122,21 @@ use structured_anchor_guard::{
     session_has_authoritative_deictic_anchor, structured_anchor_route_requires_evidence_repair,
 };
 use unbound_context_guard::{
-    deictic_memory_only_route_should_force_clarify,
+    deictic_memory_only_route_should_defer_to_agent_loop,
     execute_route_without_input_locator_should_plan,
     runtime_status_query_route_can_plan_without_locator,
     task_control_route_can_plan_without_locator,
-    unbound_model_context_target_route_should_force_clarify,
-    unbound_targeted_evidence_route_should_force_clarify,
+    unbound_model_context_target_route_should_defer_to_agent_loop,
+    unbound_targeted_evidence_route_should_defer_to_agent_loop,
 };
 use workspace_locator_binding::{
     current_request_has_concrete_locator_surface,
     current_request_has_structural_locator_surface_for_route,
     current_request_resolves_workspace_child_locator,
-    implicit_workspace_file_locator_route_should_force_clarify,
-    inferred_missing_workspace_locator_hint_should_force_clarify,
+    implicit_workspace_file_locator_route_should_defer_to_agent_loop,
+    inferred_missing_workspace_locator_hint_should_defer_to_agent_loop,
     locator_hint_full_file_name_token_present_in_prompt,
-    model_completed_workspace_file_locator_hint_should_force_clarify,
+    model_completed_workspace_file_locator_hint_should_defer_to_agent_loop,
     path_scoped_locator_guard_can_defer_to_prompt_targets,
     recent_artifacts_judgment_can_use_recent_execution_context,
     structured_field_route_has_current_locator_surface, workspace_root_name_token_present,
@@ -730,7 +732,7 @@ fn apply_ask_post_route(
         &mut pre_loop_clarify_candidates,
         &mut route_result,
     );
-    if bare_topic_memory_expansion_route_should_force_clarify(
+    if bare_topic_memory_expansion_route_should_defer_to_agent_loop(
         prompt,
         &route_result,
         turn_analysis,
@@ -800,7 +802,11 @@ fn apply_ask_post_route(
             &route_result,
         );
     }
-    if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis, &session_snapshot) {
+    if deictic_bare_locator_should_defer_to_agent_loop(
+        &route_result,
+        turn_analysis,
+        &session_snapshot,
+    ) {
         let before_gate_kind = route_result.gate_kind();
         defer_locator_binding_to_agent_loop(&mut route_result);
         push_pre_loop_clarify_candidate(&mut pre_loop_clarify_candidates, "deictic_bare_locator");

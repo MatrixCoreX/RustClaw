@@ -1,8 +1,8 @@
 use super::super::deictic_guard::deictic_missing_locator_reason_code;
 use super::{
     task_control_route_can_plan_without_locator,
-    unbound_model_context_target_route_should_force_clarify,
-    unbound_targeted_evidence_route_should_force_clarify,
+    unbound_model_context_target_route_should_defer_to_agent_loop,
+    unbound_targeted_evidence_route_should_defer_to_agent_loop,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -102,7 +102,7 @@ fn unbound_current_workspace_count_requires_clarify_without_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
+    assert!(unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count the requested target's direct children and output only the number",
         &route,
         &snapshot,
@@ -129,7 +129,7 @@ fn current_workspace_count_semantic_enum_alone_does_not_force_preloop_clarify() 
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count the current workspace entries and output only the number",
         &route,
         &snapshot,
@@ -156,7 +156,7 @@ fn locatorless_content_evidence_with_active_bound_target_reaches_agent_loop() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "summarize current result",
         &route,
         &snapshot,
@@ -185,7 +185,7 @@ fn bound_current_workspace_count_does_not_trigger_unbound_fallback_guard() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count direct children in the current workspace and output only the number",
         &route,
         &snapshot,
@@ -214,7 +214,7 @@ fn current_workspace_scope_marker_allows_root_hint_scalar_count() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count direct workspace children and output only the number",
         &route,
         &snapshot,
@@ -238,7 +238,7 @@ fn bound_current_workspace_content_summary_does_not_trigger_unbound_fallback_gua
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "summarize the bound current workspace using evidence",
         &route,
         &snapshot,
@@ -263,7 +263,7 @@ fn current_workspace_locator_kind_does_not_force_unbound_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "report current workspace status fields",
         &route,
         &snapshot,
@@ -287,7 +287,7 @@ fn unmarked_resolved_only_workspace_hint_still_forces_unbound_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
+    assert!(unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "summarize current workspace evidence",
         &route,
         &snapshot,
@@ -310,7 +310,7 @@ fn current_workspace_hidden_entries_check_does_not_trigger_unbound_fallback_guar
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "check hidden entries in the current workspace and list examples",
         &route,
         &snapshot,
@@ -333,7 +333,7 @@ fn current_workspace_scalar_equality_check_does_not_trigger_unbound_fallback_gua
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "check whether the current git branch equals main",
         &route,
         &snapshot,
@@ -356,7 +356,7 @@ fn unbound_scalar_count_without_locator_requires_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
+    assert!(unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count direct children and output only the number",
         &route,
         &snapshot,
@@ -380,7 +380,7 @@ fn unbound_current_workspace_file_summary_requires_clarify_without_anchor() {
         active_observed_facts: None,
     };
 
-    assert!(unbound_targeted_evidence_route_should_force_clarify(
+    assert!(unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "read the beginning of the requested documentation and summarize it in one sentence",
         &route,
         &snapshot,
@@ -424,7 +424,7 @@ fn runtime_surface_clawcli_resume_is_not_promoted_by_worker_post_route() {
         active_clarify_state: None,
         active_observed_facts: None,
     };
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "clawcli resume resume_task_id",
         &route,
         &snapshot,
@@ -467,7 +467,7 @@ fn unbound_current_workspace_project_summary_still_allows_execution() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "summarize the current workspace structure in one sentence",
         &route,
         &snapshot,
@@ -490,7 +490,7 @@ fn unbound_current_workspace_directory_purpose_summary_still_allows_execution() 
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "summarize the purpose of top-level config files in the current workspace",
         &route,
         &snapshot,
@@ -516,14 +516,16 @@ fn unbound_current_workspace_file_paths_search_still_allows_execution() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "find 5 representative toml files in the current repository and output paths",
-        &route,
-        None,
-        &snapshot,
-    ));
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "find 5 representative toml files in the current repository and output paths",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "find 5 representative toml files in the current repository and output paths",
         &route,
         &snapshot,
@@ -548,14 +550,16 @@ fn current_workspace_file_paths_search_ignores_cjk_count_phrase_as_locator_targe
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
-        &route,
-        None,
-        &snapshot,
-    ));
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
         &route,
         &snapshot,
@@ -580,7 +584,7 @@ fn unbound_current_workspace_semantic_none_allows_self_scoped_observation() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "Which package manager is detected for this workspace?",
         &route,
         &snapshot,
@@ -608,13 +612,15 @@ fn unbound_model_context_allows_current_workspace_generic_observation() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "preview the current workspace categories",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "preview the current workspace categories",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -639,13 +645,15 @@ fn unbound_model_context_allows_current_workspace_directory_purpose_summary() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "list matching workspace entries and explain their purpose",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "list matching workspace entries and explain their purpose",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -669,13 +677,15 @@ fn unbound_model_context_target_requires_clarify_before_planner_guess() {
         active_observed_facts: None,
     };
 
-    assert!(unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "extract name from that package file",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "extract name from that package file",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -698,13 +708,15 @@ fn unbound_model_context_allows_kb_namespace_capability_without_locator() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "list current knowledge-base namespaces",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "list current knowledge-base namespaces",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -727,7 +739,7 @@ fn unbound_targeted_evidence_allows_kb_namespace_capability_without_locator() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "list current knowledge-base namespaces",
         &route,
         &snapshot,
@@ -754,7 +766,7 @@ fn unbound_targeted_evidence_allows_kb_search_capability_without_locator() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "search kb namespace",
         &route,
         &snapshot,
@@ -780,7 +792,7 @@ fn capability_ref_scalar_count_semantic_enum_does_not_force_unbound_clarify() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_targeted_evidence_route_should_force_clarify(
+    assert!(!unbound_targeted_evidence_route_should_defer_to_agent_loop(
         "count knowledge-base namespaces",
         &route,
         &snapshot,
@@ -809,13 +821,15 @@ fn task_control_machine_route_executes_without_locator() {
     };
 
     assert!(task_control_route_can_plan_without_locator(&route));
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "inspect task lifecycle fields",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "inspect task lifecycle fields",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -852,13 +866,15 @@ fn unbound_model_context_target_allows_inline_csv_transform_payload() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "这个 CSV 按 score 降序输出 markdown 表格：name,score\\nli,3\\nwang,8\\nzhao,5",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "这个 CSV 按 score 降序输出 markdown 表格：name,score\\nli,3\\nwang,8\\nzhao,5",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -881,13 +897,15 @@ fn unbound_model_context_target_allows_configured_raw_command_without_locator() 
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "Run pwd and output only the raw result.",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "Run pwd and output only the raw result.",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -909,13 +927,15 @@ fn unbound_model_context_target_ignores_reason_only_example_targets() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "Which package manager is detected for this workspace?",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "Which package manager is detected for this workspace?",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -938,13 +958,15 @@ fn unbound_model_context_target_allows_current_turn_locator() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "README.md",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "README.md",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -969,13 +991,15 @@ fn unbound_model_context_target_allows_current_workspace_listing_scope() {
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "把当前仓库顶层目录和文件列出来，简单分组就行",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "把当前仓库顶层目录和文件列出来，简单分组就行",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -1000,13 +1024,15 @@ fn unbound_model_context_target_allows_current_workspace_file_path_inventory_sco
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -1033,13 +1059,15 @@ fn unbound_model_context_target_allows_current_workspace_recent_artifact_judgmen
         active_observed_facts: None,
     };
 
-    assert!(!unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "find toml files in this repo and briefly mention a few representative ones",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        !unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "find toml files in this repo and briefly mention a few representative ones",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }
 
 #[test]
@@ -1064,11 +1092,13 @@ fn unbound_model_context_target_still_rejects_other_unmentioned_workspace_path()
         active_observed_facts: None,
     };
 
-    assert!(unbound_model_context_target_route_should_force_clarify(
-        &state,
-        "把当前仓库顶层目录和文件列出来，简单分组就行",
-        &route,
-        None,
-        &snapshot,
-    ));
+    assert!(
+        unbound_model_context_target_route_should_defer_to_agent_loop(
+            &state,
+            "把当前仓库顶层目录和文件列出来，简单分组就行",
+            &route,
+            None,
+            &snapshot,
+        )
+    );
 }

@@ -19,7 +19,7 @@ pub(super) fn execute_route_without_input_locator_should_plan(
         )
 }
 
-pub(super) fn deictic_memory_only_route_should_force_clarify(
+pub(super) fn deictic_memory_only_route_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -59,7 +59,7 @@ pub(super) fn deictic_memory_only_route_should_force_clarify(
         )
 }
 
-pub(super) fn unbound_model_context_target_route_should_force_clarify(
+pub(super) fn unbound_model_context_target_route_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
@@ -256,19 +256,21 @@ fn current_workspace_route_can_skip_unbound_context_guard(
         && !is_bare_topic_only_prompt(prompt)
 }
 
-pub(super) fn unbound_targeted_evidence_route_should_force_clarify(
+pub(super) fn unbound_targeted_evidence_route_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     recent_execution_context: &str,
 ) -> bool {
-    if current_workspace_target_binding_should_force_clarify(prompt, route_result, session_snapshot)
-        || current_workspace_unmentioned_locator_hint_should_force_clarify(
-            prompt,
-            route_result,
-            session_snapshot,
-        )
-    {
+    if current_workspace_target_binding_should_defer_to_agent_loop(
+        prompt,
+        route_result,
+        session_snapshot,
+    ) || current_workspace_unmentioned_locator_hint_should_defer_to_agent_loop(
+        prompt,
+        route_result,
+        session_snapshot,
+    ) {
         return true;
     }
     if current_request_has_concrete_locator_surface(prompt)
@@ -305,15 +307,18 @@ pub(super) fn unbound_targeted_evidence_route_should_force_clarify(
         )
 }
 
-fn current_workspace_unmentioned_locator_hint_should_force_clarify(
+fn current_workspace_unmentioned_locator_hint_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
-    if current_workspace_untrusted_deictic_locator_hint_should_force_clarify(prompt, route_result) {
+    if current_workspace_untrusted_deictic_locator_hint_should_defer_to_agent_loop(
+        prompt,
+        route_result,
+    ) {
         return true;
     }
-    if current_workspace_locator_hint_in_resolved_intent_only_should_force_clarify(
+    if current_workspace_locator_hint_in_resolved_intent_only_should_defer_to_agent_loop(
         prompt,
         route_result,
     ) {
@@ -339,7 +344,7 @@ fn current_workspace_unmentioned_locator_hint_should_force_clarify(
         )
 }
 
-fn current_workspace_target_binding_should_force_clarify(
+fn current_workspace_target_binding_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
@@ -380,7 +385,7 @@ fn current_workspace_scope_marker_allows_scalar_count_root_hint(
         )
 }
 
-fn current_workspace_untrusted_deictic_locator_hint_should_force_clarify(
+fn current_workspace_untrusted_deictic_locator_hint_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
 ) -> bool {
@@ -396,7 +401,7 @@ fn current_workspace_untrusted_deictic_locator_hint_should_force_clarify(
         && !route_can_execute_without_locator(route_result)
 }
 
-fn current_workspace_locator_hint_in_resolved_intent_only_should_force_clarify(
+fn current_workspace_locator_hint_in_resolved_intent_only_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
 ) -> bool {
