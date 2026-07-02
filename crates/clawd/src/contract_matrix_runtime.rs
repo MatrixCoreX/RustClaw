@@ -937,51 +937,7 @@ fn route_capability_ref_allows_action(
 }
 
 fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
-    if route_registry_capability_ref_allows_action_ref(route, action) {
-        return true;
-    }
-    let action_name = action.action.as_deref().unwrap_or_default();
-    match (action.skill.as_str(), action_name) {
-        ("config_basic", "guard_rustclaw_config") | ("config_edit", "guard_config") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["config"],
-                &["guard", "risk"],
-            )
-        }
-        ("config_guard", "") => crate::machine_capability_ref::route_has_capability_action(
-            route,
-            &["config"],
-            &["guard", "risk"],
-        ),
-        ("db_basic", "list_tables") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["database", "db", "sqlite"],
-                &["list_tables", "list"],
-            )
-        }
-        ("db_basic", "schema_version") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["database", "db", "sqlite"],
-                &["schema_version"],
-            )
-        }
-        ("db_basic", "sqlite_query") => {
-            crate::machine_capability_ref::route_has_capability_action_name(
-                route,
-                &["database", "db", "sqlite"],
-                &["query", "sqlite_query"],
-            )
-        }
-        ("git_basic", "status") => crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["git"],
-            &["status", "repository_state"],
-        ),
-        _ => false,
-    }
+    route_registry_capability_ref_allows_action_ref(route, action)
 }
 
 fn route_registry_capability_ref_allows_action_ref(
