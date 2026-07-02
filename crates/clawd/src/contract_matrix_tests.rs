@@ -214,6 +214,24 @@ fn system_runtime_status_capability_ref_supplies_scalar_shape_only_for_scalar_co
 }
 
 #[test]
+fn config_read_field_capability_ref_supplies_scalar_shape_only_for_single_scalar_contract() {
+    let mut route = route_with_machine_capability_ref("capability_ref=config.read_field");
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+
+    route.route_reason = "capability_ref=config.read_fields".to_string();
+    route.resolved_intent = "capability_ref=config.read_fields".to_string();
+    assert_ne!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+}
+
+#[test]
 fn route_capability_ref_arg_policy_does_not_require_semantic_bridge() {
     let route = route_with_machine_capability_ref("capability_ref=config.validate");
 

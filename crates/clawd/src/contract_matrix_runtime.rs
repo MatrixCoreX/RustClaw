@@ -279,6 +279,15 @@ fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<Fi
     {
         return Some(FinalAnswerShape::Scalar);
     }
+    if route.effective_output_contract().response_shape == OutputResponseShape::Scalar
+        && crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["config", "config_basic"],
+            &["read_field"],
+        )
+    {
+        return Some(FinalAnswerShape::Scalar);
+    }
     if crate::machine_capability_ref::route_has_capability_action_name(
         route,
         &["filesystem", "fs", "fs_basic"],

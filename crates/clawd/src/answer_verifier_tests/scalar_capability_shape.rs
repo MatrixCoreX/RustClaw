@@ -67,3 +67,43 @@ fn system_runtime_status_capability_ref_verifies_scalar_without_semantic_kind() 
         "current_user: guagua"
     ));
 }
+
+#[test]
+fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.resolved_intent = "capability_ref=config.read_field".to_string();
+    route.route_reason = "capability_ref=config.read_field".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-config-read-field-capability",
+        "ask",
+        "capability_ref=config.read_field",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "config_basic",
+            json!({
+                "action": "read_field",
+                "path": "configs/config.toml",
+                "field_path": "server.port",
+                "exists": true,
+                "value": 8080,
+                "field_value": 8080
+            })
+            .to_string(),
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, "8080"
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "server.port: 8080"
+    ));
+}
