@@ -800,7 +800,7 @@ fn schedule_compile_only_response(
 ) -> String {
     json!({
         "schema_version": 1,
-        "semantic_kind": "schedule_intent_preview",
+        "contract_marker": "schedule_intent_preview",
         "status": "ok",
         "mode": schedule_intent_mode(intent),
         "kind": kind,

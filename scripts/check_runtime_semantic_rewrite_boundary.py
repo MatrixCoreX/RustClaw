@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
+AGENT_ENGINE_FILE = SRC_ROOT / "agent_engine.rs"
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
@@ -53,6 +54,7 @@ CONTRACT_MATRIX_FILE = SRC_ROOT / "contract_matrix.rs"
 CONTRACT_MATRIX_RUNTIME_FILE = SRC_ROOT / "contract_matrix_runtime.rs"
 TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
+SCHEDULE_SERVICE_FILE = SRC_ROOT / "schedule_service.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
 LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
@@ -321,6 +323,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
     findings.extend(scan_contract_matrix_trace_contract_marker())
     findings.extend(scan_task_journal_step_contract_marker())
+    findings.extend(scan_schedule_preview_contract_marker())
+    findings.extend(scan_current_workspace_scope_legacy_semantic_marker_removed())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
@@ -1177,6 +1181,70 @@ def scan_task_journal_step_contract_marker() -> list[Finding]:
             )
         )
     return findings
+
+
+def scan_schedule_preview_contract_marker() -> list[Finding]:
+    rel_path = rel(SCHEDULE_SERVICE_FILE)
+    text = SCHEDULE_SERVICE_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn schedule_compile_only_response(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "schedule_compile_only_response_missing",
+                "missing schedule_compile_only_response",
+            )
+        ]
+    fn_end = text.find("\npub(crate) async fn try_handle_schedule_request", fn_start)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker": "schedule_intent_preview"' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "schedule_preview_contract_marker_missing",
+                "schedule preview response should expose contract_marker",
+            )
+        )
+    if '"semantic_kind": "schedule_intent_preview"' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "schedule_preview_semantic_kind_field",
+                "schedule preview response must not expose legacy semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_current_workspace_scope_legacy_semantic_marker_removed() -> list[Finding]:
+    rel_path = rel(AGENT_ENGINE_FILE)
+    text = AGENT_ENGINE_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn current_workspace_scope_marks_scalar_count(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "current_workspace_scope_marker_reader_missing",
+                "missing current_workspace_scope_marks_scalar_count",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    if '".chain(["semantic_kind"])' in body or '"semantic_kind"' in body:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "current_workspace_scope_legacy_semantic_marker",
+                "current workspace scope marker reader must not accept legacy semantic_kind",
+            )
+        ]
+    return []
 
 
 def scan_task_context_builder_registry_bridge_budget() -> list[Finding]:
