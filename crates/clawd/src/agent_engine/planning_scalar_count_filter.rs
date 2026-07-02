@@ -9,6 +9,7 @@ pub(super) struct ScalarCountFilterHint {
     extensions: Vec<String>,
 }
 
+#[cfg(test)]
 pub(super) fn scalar_count_filter_hint_from_turn_analysis(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Option<ScalarCountFilterHint> {
@@ -39,6 +40,7 @@ pub(super) fn scalar_count_filter_hint_from_turn_analysis(
     })
 }
 
+#[cfg(test)]
 fn scalar_count_filter_extensions_from_value(raw: Option<&Value>) -> Vec<String> {
     let mut out = Vec::new();
     match raw {
@@ -55,6 +57,7 @@ fn scalar_count_filter_extensions_from_value(raw: Option<&Value>) -> Vec<String>
     out
 }
 
+#[cfg(test)]
 fn push_scalar_count_filter_extension(out: &mut Vec<String>, value: &str) {
     let Some(value) = normalize_extension_filter_text(value) else {
         return;
@@ -64,6 +67,7 @@ fn push_scalar_count_filter_extension(out: &mut Vec<String>, value: &str) {
     }
 }
 
+#[cfg(test)]
 fn parse_scalar_count_filter_target_kind(raw: &str) -> Option<ScalarCountInventoryKind> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "any" => Some(ScalarCountInventoryKind::Any),
@@ -93,6 +97,7 @@ pub(super) fn scalar_count_filter_hint_from_route(
     })
 }
 
+#[cfg(test)]
 pub(super) fn scalar_count_filter_hint_for_route_or_turn(
     route: &RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,

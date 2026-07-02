@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn scalar_count_filter_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
