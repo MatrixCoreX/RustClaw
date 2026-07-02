@@ -896,7 +896,7 @@ fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
     );
     assert!(parsed.get("ask_mode").is_none());
     assert!(parsed.get("derived_route_label").is_none());
-    assert!(contract.contains(r#""semantic_kind":"content_excerpt_summary""#));
+    assert!(contract.contains(r#""contract_marker":"content_excerpt_summary""#));
     assert!(contract.contains(r#""locator_hint":"README.md""#));
 }
 

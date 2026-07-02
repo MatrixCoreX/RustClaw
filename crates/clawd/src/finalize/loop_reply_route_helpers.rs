@@ -47,8 +47,8 @@ pub(super) fn route_structured_clarify_context(
                 route.output_contract.response_shape.as_str()
             ),
             format!(
-                "semantic_kind: {}",
-                route.output_contract.semantic_kind.as_str()
+                "contract_marker: {}",
+                route.effective_output_contract_semantic_kind().as_str()
             ),
             format!(
                 "requires_content_evidence: {}",

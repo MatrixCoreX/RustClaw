@@ -80,7 +80,7 @@ fn visible_answer_machine_payload_detection_is_structural() {
         r#"{"message_key":"clawd.msg.config_edit.guard","candidates":["tools.allow_sudo=true"]}"#
     ));
     assert!(visible_answer_is_machine_payload(
-        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+        r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
     ));
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
@@ -329,7 +329,7 @@ fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     let contract = serde_json::json!({
         "schema_version": 1,
-        "semantic_kind": "async_job_poll_contract_dry_run",
+        "contract_marker": "async_job_poll_contract_dry_run",
         "adapter_result": {"type": "pending_async_job"},
         "async_timeout_policy": {"effective_deadline_ts": "min(deadline_ts,max_runtime_deadline_ts)"}
     })

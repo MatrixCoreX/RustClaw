@@ -31,6 +31,7 @@ INTENT_ROUTER_EXECUTION_CONTRACT_FILE = SRC_ROOT / "intent_router_execution_cont
 INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE = (
     SRC_ROOT / "intent_router_runtime_status_recipe.rs"
 )
+INTENT_ROUTER_PROMPT_RENDER_FILE = SRC_ROOT / "intent_router_prompt_render.rs"
 INTENT_ROUTER_BINDING_REPAIR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_answer_candidate_binding.rs",
     SRC_ROOT / "intent_router_active_task_repair.rs",
@@ -104,9 +105,17 @@ ROUTE_RESULT_RAW_SEMANTIC_CLEAR = re.compile(
 )
 LEGACY_JSON_SEMANTIC_FIELD_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r'"semantic_kind"\s*:'),
+    re.compile(r'\\"semantic_kind\\"\s*:'),
     re.compile(r'\.get\("semantic_kind"\)'),
     re.compile(r'contains_key\("semantic_kind"\)'),
+    re.compile(r'\.pointer\("/semantic_kind"\)'),
     re.compile(r'"semantic_kind"\.to_string\(\)'),
+)
+LEGACY_RUNTIME_SEMANTIC_OUTPUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("legacy_semantic_kv_output", re.compile(r'"(?:contract_)?semantic_kind[=:]')),
+    ("legacy_semantic_colon_output", re.compile(r'"semantic_kind:\s')),
+    ("legacy_semantic_prompt_instruction", re.compile(r"\bSet\s+semantic_kind\b")),
+    ("legacy_expected_semantic_fact", re.compile(r"expected_semantic_kind:")),
 )
 
 ALLOWED_PRODUCTION_FILES: set[str] = set()
@@ -119,6 +128,7 @@ BOUNDARY_PROMPT_SCHEMA_NO_LEGACY_SEMANTIC_KIND_FILES: tuple[Path, ...] = (
     INTENT_NORMALIZER_PROMPT,
     INTENT_NORMALIZER_SCHEMA,
     CONTRACT_REPAIR_JUDGE_SCHEMA,
+    INTENT_ROUTER_PROMPT_RENDER_FILE,
     PROMPT_LAYERS_ROOT / "vendor_patches/minimax/routing/common.md",
 )
 SKILL_REGISTRY_METADATA_FILES: tuple[Path, ...] = (
@@ -312,6 +322,7 @@ def scan_repo() -> list[Finding]:
         findings.extend(scan_text(rel_path, text))
         findings.extend(scan_route_result_raw_semantic_access(rel_path, text))
         findings.extend(scan_legacy_json_semantic_fields(rel_path, text))
+        findings.extend(scan_legacy_runtime_semantic_outputs(rel_path, text))
     findings.extend(scan_normalizer_route_result_boundary())
     findings.extend(scan_journal_output_contract_ref_boundary())
     findings.extend(scan_static_capability_compat_boundary())
@@ -406,6 +417,16 @@ def scan_legacy_json_semantic_fields(rel_path: str, text: str) -> list[Finding]:
                     line.strip(),
                 )
             )
+    return findings
+
+
+def scan_legacy_runtime_semantic_outputs(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for kind, pattern in LEGACY_RUNTIME_SEMANTIC_OUTPUT_PATTERNS:
+            if not pattern.search(line):
+                continue
+            findings.append(Finding(rel_path, line_no, kind, line.strip()))
     return findings
 
 
@@ -2146,6 +2167,31 @@ def run_self_test() -> int:
         "route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;\n",
     )
     assert not allowed_clear
+    blocked_legacy_json_pointer = scan_legacy_json_semantic_fields(
+        "crates/clawd/src/finalize/loop_reply_contract_enforce.rs",
+        '.pointer("/semantic_kind")\n',
+    )
+    assert (
+        blocked_legacy_json_pointer
+        and blocked_legacy_json_pointer[0].kind == "legacy_json_semantic_kind_field"
+    )
+    blocked_legacy_kv_output = scan_legacy_runtime_semantic_outputs(
+        "crates/clawd/src/finalize/loop_reply_execution_status.rs",
+        'lines.push(format!("semantic_kind={}", marker));\n',
+    )
+    assert (
+        blocked_legacy_kv_output
+        and blocked_legacy_kv_output[0].kind == "legacy_semantic_kv_output"
+    )
+    blocked_legacy_prompt_instruction = scan_legacy_runtime_semantic_outputs(
+        "crates/clawd/src/intent_router_prompt_render.rs",
+        '"Set semantic_kind=\\"none\\" in normalizer output."\n',
+    )
+    assert (
+        blocked_legacy_prompt_instruction
+        and blocked_legacy_prompt_instruction[0].kind
+        == "legacy_semantic_prompt_instruction"
+    )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()
     assert not scan_static_capability_compat_boundary()

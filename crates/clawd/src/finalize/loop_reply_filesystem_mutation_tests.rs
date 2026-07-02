@@ -17,7 +17,7 @@ async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis_for_s
     };
     let synthesis = serde_json::json!({
         "schema_version": 1,
-        "semantic_kind": "filesystem_mutation_result",
+        "contract_marker": "filesystem_mutation_result",
         "status": "ok",
         "observed_action_count": 5,
         "observed_actions": [
@@ -103,7 +103,7 @@ async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis_for_s
     let payload = serde_json::from_str::<serde_json::Value>(&reply.text).expect("json answer");
     assert_eq!(
         payload
-            .pointer("/semantic_kind")
+            .pointer("/contract_marker")
             .and_then(serde_json::Value::as_str),
         Some("filesystem_mutation_result")
     );
@@ -134,7 +134,7 @@ async fn finalize_loop_reply_uses_status_line_for_visible_filesystem_mutation_su
     };
     let synthesis = serde_json::json!({
         "schema_version": 1,
-        "semantic_kind": "filesystem_mutation_result",
+        "contract_marker": "filesystem_mutation_result",
         "capability": "kb",
         "status": "ok",
         "effective_status": "ok",

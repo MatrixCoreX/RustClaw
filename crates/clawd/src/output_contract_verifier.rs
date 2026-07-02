@@ -338,7 +338,7 @@ pub(crate) fn verify_output_contract(
         return OutputContractVerdict::reject("candidate_empty", "candidate is empty");
     }
 
-    // 默认契约（response_shape=Free + semantic_kind=None）不强制任何形状，直接 Pass。
+    // 默认契约（response_shape=Free + contract_marker=None）不强制任何形状，直接 Pass。
     if matches!(contract.response_shape, OutputResponseShape::Free)
         && contract.semantic_kind_is_unclassified()
     {

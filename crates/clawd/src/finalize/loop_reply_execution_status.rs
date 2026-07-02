@@ -206,17 +206,18 @@ pub(super) fn deterministic_missing_observed_target_answer(
         return None;
     }
     let path = missing_file_path_from_loop(loop_state, agent_run_context)?;
-    let semantic_kind = agent_run_context
+    let contract_marker = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.semantic_kind);
-    let scalar_count = semantic_kind == Some(crate::OutputSemanticKind::ScalarCount);
+        .map(crate::RouteResult::effective_output_contract_semantic_kind);
+    let scalar_count = contract_marker == Some(crate::OutputSemanticKind::ScalarCount);
     let concise_existence = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
-                && !route.output_contract.delivery_required
+            let contract = route.effective_output_contract();
+            route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
+                && !contract.delivery_required
                 && matches!(
-                    route.output_contract.response_shape,
+                    contract.response_shape,
                     crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
                 )
         });
@@ -227,8 +228,8 @@ pub(super) fn deterministic_missing_observed_target_answer(
         format!("path=`{path}`"),
         "kind=missing".to_string(),
     ];
-    if let Some(semantic_kind) = semantic_kind {
-        lines.push(format!("semantic_kind={}", semantic_kind.as_str()));
+    if let Some(contract_marker) = contract_marker {
+        lines.push(format!("contract_marker={}", contract_marker.as_str()));
     }
     if scalar_count {
         lines.push("count_available=false".to_string());
@@ -245,7 +246,7 @@ fn route_requests_execution_failed_step_answer(
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+            route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
         })
 }
 

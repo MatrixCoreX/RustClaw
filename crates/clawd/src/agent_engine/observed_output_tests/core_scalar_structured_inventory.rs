@@ -316,7 +316,7 @@ fn execution_failed_step_guard_prefers_failed_machine_fields_over_success_stdout
     let guard = execution_failed_step_guard_entry(&loop_state, ctx.route_result.as_ref()).unwrap();
 
     assert!(route_disallows_direct_observation_passthrough(&route));
-    assert!(guard.contains("contract_semantic_kind=execution_failed_step"));
+    assert!(guard.contains("contract_marker=execution_failed_step"));
     assert!(guard.contains("successful_step_outputs_are_not_final_answer=true"));
     assert!(guard.contains("success_step.1.output_is_not_answer=RC_RENDER_KO_OK"));
     assert!(guard.contains("failed_step.1.step_id=step_2"));
