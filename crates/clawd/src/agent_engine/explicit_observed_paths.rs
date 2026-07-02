@@ -707,7 +707,6 @@ pub(super) fn content_excerpt_explicit_file_targets_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || loop_state.round_no > 1
