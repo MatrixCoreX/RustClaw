@@ -10,7 +10,7 @@ fn normalizer_schema_normalization_coerces_hidden_files_check_synonym() {
           "decision":"planner_execute",
           "output_contract": {
             "response_shape": "object",
-            "semantic_kind": "hidden_files_check"
+            "contract_marker": "hidden_files_check"
           }
         }"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
@@ -27,7 +27,7 @@ fn normalizer_schema_normalization_coerces_hidden_files_check_synonym() {
         .and_then(|value| value.as_object())
         .expect("output contract");
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("hidden_entries_check")
     );
     assert_eq!(
@@ -104,7 +104,7 @@ fn normalizer_schema_normalization_preserves_list_selector_when_neighbor_field_i
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"file_names",
+            "contract_marker":"file_names",
             "locator_hint":"logs",
             "scalar_count_filter":0,
             "list_selector":{"target_kind":"file","limit":3,"sort_by":"size_desc","include_metadata":true,"include_hidden":false},
@@ -172,7 +172,7 @@ fn normalizer_schema_preserves_name_desc_list_selector() {
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"directory_entry_groups",
+            "contract_marker":"directory_entry_groups",
             "locator_hint":"scripts",
             "scalar_count_filter":0,
             "list_selector":{"target_kind":"any","limit":5,"sort_by":"name_desc","include_metadata":false,"include_hidden":false},
@@ -230,7 +230,7 @@ fn normalizer_schema_normalization_drops_null_list_selector_sort_by() {
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"content_excerpt_with_summary",
+            "contract_marker":"content_excerpt_with_summary",
             "locator_hint":"scripts/nl_tests/fixtures/device_local/docs",
             "scalar_count_filter":null,
             "list_selector":{
@@ -371,7 +371,7 @@ fn normalizer_schema_normalization_recovers_detection_payload_as_planner_execute
           "reason":"repo existence check",
           "confidence":0.95,
           "decision":"planner_execute",
-          "output_contract":{"response_shape":"strict","semantic_kind":"existence_with_path","requires_content_evidence":true}
+          "output_contract":{"response_shape":"strict","contract_marker":"existence_with_path","requires_content_evidence":true}
         }"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
         raw,

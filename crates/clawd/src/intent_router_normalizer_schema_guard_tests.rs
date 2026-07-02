@@ -18,7 +18,7 @@ fn normalizer_schema_normalization_recovers_minimax_file_list_search_payload() {
           "reason":"directory listing",
           "confidence":0.7,
           "decision":"direct_answer",
-          "output_contract":{"response_shape":"list","semantic_kind":"file_list"},
+          "output_contract":{"response_shape":"list","contract_marker":"file_list"},
           "execution_recipe":"list_md_files_excluding_readme",
           "turn_type":"file_query",
           "target_task_policy":null,
@@ -302,7 +302,7 @@ fn parse_output_contract_preserves_list_selector_contract() {
 
 #[test]
 fn normalizer_schema_normalization_coerces_string_bool_contract_fields() {
-    let raw = r#"{"resolved_user_intent":"列出 document 目录文件名","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"strict","requires_content_evidence":"true","delivery_required":"filename_list","locator_kind":"path","delivery_intent":"返回 document 目录下的文件名列表","semantic_kind":"filename_list","locator_hint":"document"}}"#;
+    let raw = r#"{"resolved_user_intent":"列出 document 目录文件名","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"strict","requires_content_evidence":"true","delivery_required":"filename_list","locator_kind":"path","delivery_intent":"返回 document 目录下的文件名列表","contract_marker":"filename_list","locator_hint":"document"}}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
         raw,
         "列出 document 目录下有哪些文件，只输出文件名列表",
@@ -660,7 +660,7 @@ fn normalizer_schema_normalization_maps_health_check_tool_recipe_to_service_stat
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":"/home/guagua/rustclaw"
           },
           "execution_recipe":{
@@ -818,7 +818,7 @@ fn normalizer_schema_normalization_clears_empty_path_locator_for_command_payload
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":"",
             "self_extension":{"mode":"none","trigger":"none","execute_now":false}
           },
@@ -1049,7 +1049,7 @@ fn normalizer_schema_normalization_maps_directory_entry_names_to_entry_groups() 
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"directory_entry_names",
+            "contract_marker":"directory_entry_names",
             "locator_hint":"docs"
           }
         }"#;
@@ -1059,7 +1059,7 @@ fn normalizer_schema_normalization_maps_directory_entry_names_to_entry_groups() 
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("directory_entry_groups")
     );
@@ -1080,7 +1080,7 @@ fn normalizer_schema_normalization_does_not_repair_file_listing_from_recipe_text
           "reason":"用户明确请求列出 document 目录下的文件，目标清晰，属于简单文件列表操作",
           "confidence":0.98,
           "decision":"direct_answer",
-          "output_contract":{"response_shape":"scalar","semantic_kind":"scalar_path_only","requires_content_evidence":false},
+          "output_contract":{"response_shape":"scalar","contract_marker":"scalar_path_only","requires_content_evidence":false},
           "execution_recipe":"LIST_FILES",
           "turn_type":"act"
         }"#;
@@ -1097,7 +1097,7 @@ fn normalizer_schema_normalization_does_not_repair_file_listing_from_recipe_text
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("scalar_path_only")
     );
@@ -1116,7 +1116,7 @@ fn normalizer_schema_normalization_does_not_repair_file_listing_from_recipe_text
 
 #[test]
 fn normalizer_schema_normalization_repairs_exact_format_scalar_comparison_contract() {
-    let raw = r#"{"resolved_user_intent":"读取 UI/package.json 的 name 字段和 crates/clawd/Cargo.toml 的 package.name 字段，对比后单行输出：{UI名}, {Cargo名}, {一样|不一样}","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"一行字符串，格式为：{UI_name}, {Cargo_name}, {一样|不一样}","requires_content_evidence":false,"delivery_required":true,"locator_kind":"none","delivery_intent":"直接返回对比结果","semantic_kind":"key_value_comparison","locator_hint":""}}"#;
+    let raw = r#"{"resolved_user_intent":"读取 UI/package.json 的 name 字段和 crates/clawd/Cargo.toml 的 package.name 字段，对比后单行输出：{UI名}, {Cargo名}, {一样|不一样}","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"一行字符串，格式为：{UI_name}, {Cargo_name}, {一样|不一样}","requires_content_evidence":false,"delivery_required":true,"locator_kind":"none","delivery_intent":"直接返回对比结果","contract_marker":"key_value_comparison","locator_hint":""}}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
         raw,
         "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name，最后只用一行输出：前者、后者、一样或不一样",
@@ -1130,7 +1130,7 @@ fn normalizer_schema_normalization_repairs_exact_format_scalar_comparison_contra
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("recent_scalar_equality_check")
     );
@@ -1160,7 +1160,7 @@ fn normalizer_schema_normalization_repairs_exact_format_scalar_comparison_contra
         Some(false)
     );
 
-    let raw = r#"{"resolved_user_intent":"compare two names","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"single line string","requires_content_evidence":false,"delivery_required":true,"locator_kind":"file","delivery_intent":"comparison result line","semantic_kind":"comparison","locator_hint":"UI/package.json crates/clawd/Cargo.toml"}}"#;
+    let raw = r#"{"resolved_user_intent":"compare two names","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"single line string","requires_content_evidence":false,"delivery_required":true,"locator_kind":"file","delivery_intent":"comparison result line","contract_marker":"comparison","locator_hint":"UI/package.json crates/clawd/Cargo.toml"}}"#;
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "compare two fields in one line");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
@@ -1187,7 +1187,7 @@ fn normalizer_schema_normalization_coerces_non_object_self_extension_contract() 
             "delivery_required": "deliverable content",
             "locator_kind": "none",
             "delivery_intent": "provide answer",
-            "semantic_kind": "entertainment",
+            "contract_marker": "entertainment",
             "locator_hint": "no locator is needed",
             "self_extension": "not requested"
           }
@@ -1215,7 +1215,7 @@ fn normalizer_schema_normalization_coerces_non_object_self_extension_contract() 
     );
     assert_eq!(
         contract
-            .get("semantic_kind")
+            .get("contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -1249,7 +1249,7 @@ fn normalizer_schema_normalization_coerces_model_contract_synonyms() {
           "decision":"planner_execute",
           "output_contract": {
             "response_shape": "inline",
-            "semantic_kind": "existence_boolean_with_path",
+            "contract_marker": "existence_boolean_with_path",
             "locator_kind": "repository",
             "delivery_intent": "list_directory",
             "extra_model_field": "ignored"
@@ -1281,7 +1281,7 @@ fn normalizer_schema_normalization_coerces_model_contract_synonyms() {
         Some("strict")
     );
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("existence_with_path")
     );
     assert_eq!(
@@ -1304,7 +1304,7 @@ fn normalizer_schema_normalization_repairs_current_workspace_path_alias_contract
           "decision":"planner_execute",
           "output_contract":{
             "response_shape":"plain_text",
-            "semantic_kind":"filesystem_locator",
+            "contract_marker":"filesystem_locator",
             "locator_kind":"directory_path",
             "locator_hint":"current_working_directory",
             "delivery_intent":"show",
@@ -1327,7 +1327,7 @@ fn normalizer_schema_normalization_repairs_current_workspace_path_alias_contract
         Some("scalar")
     );
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("scalar_path_only")
     );
     assert_eq!(
@@ -1357,7 +1357,7 @@ fn normalizer_schema_normalization_coerces_null_locator_hint() {
           "decision":"direct_answer",
           "output_contract": {
             "response_shape": "scalar",
-            "semantic_kind": "none",
+            "contract_marker": "none",
             "requires_content_evidence": false,
             "delivery_required": false,
             "locator_hint": null,
@@ -1494,7 +1494,7 @@ fn normalizer_schema_normalization_drops_none_schedule_intent_object_with_string
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"file_names",
+            "contract_marker":"file_names",
             "locator_hint":"logs",
             "self_extension":{"mode":"none","trigger":"none","execute_now":false}
           },
@@ -1517,7 +1517,7 @@ fn normalizer_schema_normalization_drops_none_schedule_intent_object_with_string
     assert_eq!(
         value
             .get("output_contract")
-            .and_then(|value| value.get("semantic_kind"))
+            .and_then(|value| value.get("contract_marker"))
             .and_then(|value| value.as_str()),
         Some("file_names")
     );
@@ -1554,7 +1554,7 @@ fn normalizer_schema_normalization_preserves_create_schedule_intent_task_text() 
           "reason":"schedule fields are complete",
           "confidence":0.95,
           "decision":"planner_execute",
-          "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","semantic_kind":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
+          "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","contract_marker":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"},
           "turn_type":"task_request",
           "target_task_policy":"standalone",
@@ -1858,7 +1858,7 @@ fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() 
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":"",
             "self_extension":{"mode":"none","trigger":"none","execute_now":false}
           },

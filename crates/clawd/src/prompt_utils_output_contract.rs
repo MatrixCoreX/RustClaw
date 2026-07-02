@@ -235,18 +235,11 @@ pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
         "locator_kind",
         "delivery_intent",
         "contract_marker",
-        "semantic_kind",
         "locator_hint",
         "self_extension",
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
-    if !map.contains_key("contract_marker") {
-        if let Some(value) = map.get("semantic_kind").cloned() {
-            map.insert("contract_marker".to_string(), value);
-            normalized = true;
-        }
-    }
     let defaults = default_output_contract();
     let default_obj = defaults
         .as_object()
@@ -295,10 +288,7 @@ pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
         }
     }
     let mut semantic_token_requests_scalar_shape = false;
-    let marker_value = map
-        .get("contract_marker")
-        .cloned()
-        .or_else(|| map.get("semantic_kind").cloned());
+    let marker_value = map.get("contract_marker").cloned();
     if let Some(Value::String(raw)) = marker_value {
         semantic_token_requests_scalar_shape =
             output_contract_semantic_token_requests_scalar_shape(&raw);
@@ -315,12 +305,6 @@ pub(super) fn canonicalize_output_contract(value: Value) -> (Value, bool) {
                 Value::String(canonical.to_string()),
             );
             normalized = true;
-        }
-        if map.contains_key("semantic_kind") {
-            map.insert(
-                "semantic_kind".to_string(),
-                Value::String(canonical.to_string()),
-            );
         }
     }
     if semantic_token_requests_scalar_shape

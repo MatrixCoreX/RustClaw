@@ -165,7 +165,7 @@ fn validate_against_schema_normalizes_contract_repair_confidence_label() {
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "semantic_kind": "content_excerpt_summary",
+            "contract_marker": "content_excerpt_summary",
             "locator_hint": "/home/guagua/rustclaw/configs/config.toml",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
         },
@@ -187,7 +187,7 @@ fn validate_against_schema_normalizes_contract_repair_confidence_label() {
     assert_eq!(
         validated
             .value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("content_excerpt_summary")
     );
@@ -276,7 +276,7 @@ fn validate_against_schema_drops_execution_recipe_stray_fields() {
             "delivery_required":false,
             "locator_kind":"filename",
             "delivery_intent":"none",
-            "semantic_kind":"none"
+            "contract_marker":"none"
         },
         "needs_clarify":false,
         "reason":"r",
@@ -318,7 +318,7 @@ fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
             "delivery_required": false,
             "locator_kind": "file",
             "delivery_intent": "none",
-            "semantic_kind": "path_list",
+            "contract_marker": "path_list",
             "locator_hint": "README",
             "unused": "drop me",
             "self_extension": {
@@ -355,7 +355,7 @@ fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
     assert_eq!(
         validated
             .value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(Value::as_str),
         Some("file_paths")
     );
@@ -388,7 +388,7 @@ fn validate_against_schema_infers_missing_contract_repair_apply_for_executable_r
             "delivery_required": false,
             "locator_kind": "current_workspace",
             "delivery_intent": "none",
-            "semantic_kind": "directory_purpose_summary",
+            "contract_marker": "directory_purpose_summary",
             "locator_hint": "",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
         },
@@ -409,7 +409,7 @@ fn validate_against_schema_infers_missing_contract_repair_apply_for_executable_r
     assert_eq!(
         validated
             .value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(Value::as_str),
         Some("directory_purpose_summary")
     );
@@ -430,7 +430,7 @@ fn validate_against_schema_infers_missing_contract_repair_apply_false_for_conser
             "delivery_required": false,
             "locator_kind": "none",
             "delivery_intent": "none",
-            "semantic_kind": "none",
+            "contract_marker": "none",
             "locator_hint": "",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
         },
@@ -464,7 +464,7 @@ fn validate_against_schema_repairs_execution_recipe_locator_hint() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"none"
+            "contract_marker":"none"
         },
         "execution_recipe":{
             "kind":"none",
@@ -504,7 +504,7 @@ fn validate_against_schema_repairs_execution_recipe_self_extension() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"existence_with_path",
+            "contract_marker":"existence_with_path",
             "locator_hint":"rustclaw.service"
         },
         "execution_recipe":{
@@ -545,7 +545,7 @@ fn validate_against_schema_repairs_execution_recipe_reason() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":"logs"
         },
         "execution_recipe":{
@@ -586,7 +586,7 @@ fn validate_against_schema_repairs_execution_recipe_qualifier() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"service_status"
+            "contract_marker":"service_status"
         },
         "execution_recipe":{
             "kind":"none",
@@ -626,7 +626,7 @@ fn validate_against_schema_repairs_malformed_execution_recipe_boundary_field() {
             "delivery_required":false,
             "locator_kind":"current_workspace",
             "delivery_intent":"none",
-            "semantic_kind":"scalar_path_only"
+            "contract_marker":"scalar_path_only"
         },
         "execution_recipe":{
             "kind":"none",
@@ -742,7 +742,7 @@ fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
     // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
     // 且废弃字段错误地嵌入 `execution_recipe`。repair 后应能解析并保留
     // envelope 顶层字段。
-    let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
+    let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","contract_marker":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
     // 直接 from_str 必失败：少最后一个 `}`。
     assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)
