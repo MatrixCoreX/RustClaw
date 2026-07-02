@@ -269,6 +269,7 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StructuredRespondTerminalIntent {
     terminal_intent: String,
+    content: Option<String>,
     clarify_reason_code: Option<String>,
     missing_slot: Option<String>,
     message_key: Option<String>,
@@ -310,6 +311,7 @@ fn structured_respond_terminal_intent_from_object(
     }
     Some(StructuredRespondTerminalIntent {
         terminal_intent,
+        content: string_field(value, &["content"]).map(str::to_string),
         clarify_reason_code: string_field(value, &["clarify_reason_code"]).map(str::to_string),
         missing_slot: string_field(value, &["missing_slot"]).map(str::to_string),
         message_key: string_field(value, &["message_key"]).map(str::to_string),
@@ -363,6 +365,15 @@ fn apply_structured_respond_clarify_to_loop_state(
         "agent_loop.terminal_intent".to_string(),
         "clarify".to_string(),
     );
+    if let Some(content) = intent
+        .content
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        loop_state.delivery_messages.push(content.to_string());
+        loop_state.last_user_visible_respond = Some(content.to_string());
+    }
     for (key, value) in [
         (
             "agent_loop.clarify_reason_code",
