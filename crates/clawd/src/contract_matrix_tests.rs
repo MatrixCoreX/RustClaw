@@ -423,6 +423,51 @@ fn route_capability_ref_rejects_registry_action_mismatch_without_semantic_kind()
 }
 
 #[test]
+fn route_capability_ref_uses_registry_machine_aliases_without_fallback_match() {
+    for (capability_ref, skill, args, expected_action) in [
+        (
+            "capability_ref=config.guard",
+            "config_guard",
+            serde_json::json!({}),
+            "config_edit.guard_config",
+        ),
+        (
+            "capability_ref=config.risk",
+            "config_guard",
+            serde_json::json!({}),
+            "config_edit.guard_config",
+        ),
+        (
+            "capability_ref=db.list",
+            "db_basic",
+            serde_json::json!({"action":"list_tables","db_path":"data/app.db"}),
+            "db_basic.list_tables",
+        ),
+        (
+            "capability_ref=sqlite.query",
+            "db_basic",
+            serde_json::json!({"action":"sqlite_query","db_path":"data/app.db","sql":"select 1"}),
+            "db_basic.sqlite_query",
+        ),
+        (
+            "capability_ref=git.repository_state",
+            "git_basic",
+            serde_json::json!({"action":"status","repo":"."}),
+            "git_basic.status",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (

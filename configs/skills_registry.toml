@@ -274,6 +274,8 @@ planner_capabilities = [
   { name = "config.validate_after_change", action = "validate_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.guard_after_change", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.guard_config", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "config.guard", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "config.risk", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.read_back", action = "read_back", effect = "observe", required = ["field_path"], optional = ["path", "format"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "config.restart_if_requested", action = "restart_if_requested", effect = "external", optional = ["restart", "reason"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
@@ -388,6 +390,7 @@ required_bins = ["git"]
 planner_capabilities = [
   { name = "git_basic", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.status", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.repository_state", action = "status", effect = "observe", optional = ["path", "repo"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.branch", action = "branch", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.remote", action = "remote", effect = "observe", optional = ["path", "repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -409,15 +412,22 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["module_install", "install_modules"]
+description = "Install or dry-run preview language ecosystem modules through structured module fields; use dry_run=true for preview-only requests."
 timeout_seconds = 30
 prompt_file = "prompts/skills/install_module.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["python3", "npm", "cargo", "go"]
 platform_notes = ["Language ecosystem installers are action-dependent; use package_manager for OS packages."]
-planner_capabilities = [
-  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+semantic_tags = ["module_install", "dependency_install", "dry_run"]
+confirmation_exempt_when = [
+  { action = "install", dry_run = true },
 ]
+planner_capabilities = [
+  { name = "module.install", action = "install", effect = "mutate", required = ["module|modules"], optional = ["ecosystem", "version", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["install"] }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, ecosystem = { type = "string", enum = ["python", "pip", "node", "npm", "rust", "cargo", "go", "golang"] }, version = { type = "string" }, dry_run = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "process_basic"
@@ -461,7 +471,7 @@ supported_os = ["linux", "macos"]
 required_bins = ["sh", "id"]
 optional_bins = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew", "sudo"]
 platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package managers before Homebrew fallback."]
-semantic_tags = ["package_manager_detection"]
+semantic_tags = ["package.detect_manager"]
 confirmation_exempt_when = [
   { action = "install", dry_run = true },
   { action = "smart_install", dry_run = true },
@@ -469,11 +479,11 @@ confirmation_exempt_when = [
 preferred_over_run_cmd = true
 planner_capabilities = [
   { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
-  { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
-  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "package.smart_install_preview", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
+  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "smart_install", "uninstall"] }, package = { type = "string" }, packages = { type = "array", items = { type = "string" } }, module = { type = "string" }, modules = { type = "array", items = { type = "string" } }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -537,8 +547,19 @@ confirmation_exempt_when = [
 ]
 planner_capabilities = [
   { name = "database.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.sqlite_query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.sqlite_query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "database.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "database.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.list_tables", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.list", action = "list_tables", effect = "observe", optional = ["db_path", "path", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "database.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "db.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "sqlite.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], optional = ["db_path", "path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }
@@ -552,7 +573,7 @@ planner_kind = "tool"
 group = "ops"
 aliases = ["docker", "docker_ops"]
 description = "Inspect Docker containers/images/version and perform targeted container lifecycle actions through structured Docker actions."
-semantic_tags = ["docker_ps", "docker_images", "docker_version", "docker_logs", "docker_container_lifecycle"]
+semantic_tags = ["docker.list_containers", "docker.list_images", "docker.version", "docker.read_logs", "docker.lifecycle"]
 preferred_over_run_cmd = true
 validation_actions = ["ps", "images", "version", "inspect"]
 timeout_seconds = 30
@@ -598,7 +619,7 @@ planner_kind = "skill"
 group = "news/web"
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
 description = "Fetch configured RSS/Atom category feeds or explicit feed URLs and return normalized latest news items."
-semantic_tags = ["rss_news_fetch", "latest_news", "feed_fetch", "external_news"]
+semantic_tags = ["rss.fetch_entries", "rss.latest", "rss.feed_fetch", "external_news"]
 capabilities = ["net"]
 risk_level = "low"
 auto_invocable = true
@@ -624,7 +645,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
 output_kind = "image"
 description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
-semantic_tags = ["image_understanding", "image_description", "image_extract", "image_compare", "screenshot_summary"]
+semantic_tags = ["image.describe", "image.extract", "image.compare", "screenshot.summary"]
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
 # 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
@@ -875,7 +896,7 @@ planner_capabilities = [
   { name = "service.stop", action = "stop", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "service.restart", action = "restart", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, lines = { type = "integer" } } }
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, manager_type = { type = "string" }, lines = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -932,7 +953,7 @@ timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
 output_kind = "text"
 description = "Query crypto market quotes, prices, book tickers, candles, indicators, on-chain facts, and private exchange order/account workflows."
-semantic_tags = ["market_quote", "market_quote_scalar", "crypto_quote", "crypto_price", "asset_quote"]
+semantic_tags = ["crypto.quote", "crypto.price", "asset.quote"]
 capabilities = ["net"]
 risk_level = "low"
 auto_invocable = true
@@ -956,7 +977,7 @@ timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
 description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
-semantic_tags = ["market_quote", "market_quote_scalar", "stock_quote", "a_share_quote", "asset_quote"]
+semantic_tags = ["stock.quote", "a_share.quote", "asset.quote"]
 capabilities = ["net", "llm"]
 risk_level = "low"
 auto_invocable = true
@@ -973,20 +994,20 @@ enabled = true
 kind = "runner"
 planner_kind = "skill"
 group = "news/web"
-aliases = ["weather_query", "weather_forecast", "current_weather"]
+aliases = ["weather"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
 output_kind = "text"
 description = "Query current weather or daily forecasts for a concrete city/place or coordinates through Open-Meteo."
-semantic_tags = ["weather_query", "current_weather", "weather_forecast", "external_weather"]
+semantic_tags = ["weather.current", "weather.forecast", "external_weather"]
 capabilities = ["net"]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
 planner_capabilities = [
-  { name = "weather.current", action = "query", effect = "observe", required = ["city|location|place|q|latitude+longitude"], optional = ["days", "forecast_days", "locale", "lang"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "weather.current", action = "query", effect = "observe", required = ["city|location|place|q|latitude+longitude"], optional = ["days", "forecast_days", "locale", "lang", "display_location", "requested_location", "original_location"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["query"] }, city = { type = "string" }, location = { type = "string" }, place = { type = "string" }, q = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" }, days = { type = "integer" }, forecast_days = { type = "integer" }, locale = { type = "string" }, lang = { type = "string" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["query"] }, city = { type = "string" }, location = { type = "string" }, place = { type = "string" }, q = { type = "string" }, display_location = { type = "string" }, requested_location = { type = "string" }, original_location = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" }, days = { type = "integer" }, forecast_days = { type = "integer" }, locale = { type = "string" }, lang = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -1094,7 +1115,7 @@ timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
 output_kind = "text"
 description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
-semantic_tags = ["web_search_summary", "search_results", "external_web_search", "url_discovery"]
+semantic_tags = ["web.search_results", "search_results", "external_web_search", "url_discovery"]
 capabilities = ["net"]
 risk_level = "low"
 auto_invocable = true
@@ -1128,7 +1149,7 @@ planner_capabilities = [
   { name = "kb.ingest", action = "ingest", effect = "mutate", required = ["namespace", "paths|path"], optional = ["chunk_size", "chunk_overlap", "overwrite", "file_types", "max_file_size"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
   { name = "kb.search", action = "search", effect = "observe", required = ["namespace", "query"], optional = ["top_k"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "kb.list_namespaces", action = "list_namespaces", effect = "observe", optional = [], risk_level = "low", idempotent = true, dedup_scope = "action", execution_mode = "sync_short" },
-  { name = "kb.stats", action = "stats", effect = "observe", required = ["namespace"], optional = [], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "kb.stats", action = "stats", effect = "observe", required = [], optional = ["namespace"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["ingest", "search", "list_namespaces", "stats"] }, namespace = { type = "string" }, paths = { type = "array", items = { type = "string" } }, path = { type = "string" }, query = { type = "string" }, top_k = { type = "integer" }, chunk_size = { type = "integer" }, chunk_overlap = { type = "integer" }, overwrite = { type = "boolean" }, file_types = { type = "array", items = { type = "string" } }, max_file_size = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
@@ -1144,7 +1165,7 @@ timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
 description = "Open and extract explicit web pages through a headless browser, including page title, readable text, content excerpts, citations, and capture artifacts."
-semantic_tags = ["web_page_summary", "web_content_extract", "browser_page_extract", "url_content_summary"]
+semantic_tags = ["browser.open_extract", "web_content_extract", "browser_page_extract", "url_content_summary"]
 capabilities = ["net", "fs.write"]
 risk_level = "low"
 auto_invocable = true
@@ -1171,7 +1192,7 @@ timeout_seconds = 180
 prompt_file = "prompts/skills/photo_organize.md"
 output_kind = "text"
 description = "Front-door routing contract: photo organization without source_dir is executable, not a clarification. Call photo_organize with action=organize and mode=plan so the skill can discover external drive / USB candidates and preview a unique candidate or return observed candidates."
-semantic_tags = ["photo_organization", "exif_classification", "external_drive_discovery", "source_dir_optional_discovery"]
+semantic_tags = ["photo.organize", "exif_classification", "external_drive_discovery", "source_dir_optional_discovery"]
 memory_policy = { profile = "skill_scoped", include = ["preferences", "relevant_facts", "knowledge_docs"], exclude = ["long_term_summary", "recent_related_events", "assistant_results", "similar_triggers", "unfinished_goals", "recent_snippets"], max_chars = 900, reason = "photo_organize_structured_args_stable_memory_only" }
 risk_level = "high"
 auto_invocable = false
@@ -1191,6 +1212,8 @@ planner_capabilities = [
   { name = "photo.prepare_source_candidates", action = "prepare", effect = "observe", risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "photo.apply_organization", action = "organize", effect = "mutate", required = ["source_dir"], optional = ["mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll" },
 ]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["prepare", "preview", "plan", "dry_run", "organize"] }, source_dir = { type = "string" }, mode = { type = "string" }, organize_mode = { type = "string" }, group_by = { type = "string" }, capture_year = { type = "integer" }, capture_month = { type = "integer" }, capture_date = { type = "string" }, selected_brands = { type = "array", items = { type = "string" } }, selected_models = { type = "array", items = { type = "string" } }, selected_lenses = { type = "array", items = { type = "string" } }, include_subdirs = { type = "boolean" }, preview_limit = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "extension_manager"
