@@ -956,7 +956,7 @@ pub(super) fn route_has_capability_ref_machine_signal(route_result: &crate::Rout
     route_machine_tokens(route_result).any(|token| {
         token
             .strip_prefix("capability_ref=")
-            .is_some_and(valid_capability_ref_token)
+            .is_some_and(crate::machine_capability_ref::is_valid_capability_ref_value)
     })
 }
 
@@ -974,7 +974,8 @@ pub(super) fn route_reason_has_capability_ref_prefix(
         .map(str::trim)
         .filter_map(|token| token.strip_prefix("capability_ref="))
         .any(|capability_ref| {
-            valid_capability_ref_token(capability_ref) && capability_ref.starts_with(prefix)
+            crate::machine_capability_ref::is_valid_capability_ref_value(capability_ref)
+                && capability_ref.starts_with(prefix)
         })
 }
 
@@ -983,15 +984,6 @@ fn route_machine_tokens(route_result: &crate::RouteResult) -> impl Iterator<Item
         .route_reason
         .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')'))
         .map(str::trim)
-}
-
-fn valid_capability_ref_token(token: &str) -> bool {
-    let token = token.trim();
-    !token.is_empty()
-        && token.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
-        })
-        && token.bytes().any(|byte| byte == b'.')
 }
 
 fn route_reason_part_has_marker(part: &str, marker: &str) -> bool {

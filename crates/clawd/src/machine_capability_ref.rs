@@ -15,6 +15,11 @@ impl<'a> CapabilityRef<'a> {
 
     fn parse(token: &'a str) -> Option<Self> {
         let capability = token.trim().strip_prefix("capability_ref=")?;
+        Self::parse_value(capability)
+    }
+
+    fn parse_value(capability: &'a str) -> Option<Self> {
+        let capability = capability.trim();
         let (namespace, action) = capability.split_once('.')?;
         if namespace.is_empty()
             || action.is_empty()
@@ -44,6 +49,10 @@ impl<'a> CapabilityRef<'a> {
     fn action_matches(self, actions: &[&str]) -> bool {
         actions.iter().any(|action| self.action == action.trim())
     }
+}
+
+pub(crate) fn is_valid_capability_ref_value(token: &str) -> bool {
+    CapabilityRef::parse_value(token).is_some()
 }
 
 pub(crate) fn route_has_capability_namespace(
