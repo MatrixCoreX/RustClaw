@@ -52,6 +52,7 @@ TASK_CONTEXT_BUILDER_FILE = SRC_ROOT / "task_context_builder.rs"
 TASK_CONTRACT_FILE = SRC_ROOT / "task_contract.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
+LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
 PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
 READ_RANGE_ACTION_FILE = SRC_ROOT / "agent_engine/read_range_action.rs"
 SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
@@ -303,6 +304,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_pre_route_repair_marker_allowlists())
     findings.extend(scan_answer_verifier_registry_bridge_markers())
     findings.extend(scan_answer_verifier_output_contract_prompt_marker())
+    findings.extend(scan_loop_control_output_contract_marker_key())
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
     findings.extend(scan_execution_recipe_registry_bridge_tokens())
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
@@ -841,6 +843,31 @@ def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
                 1,
                 "answer_verifier_semantic_kind_emission",
                 "answer verifier output contract prompt must not expose legacy semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_loop_control_output_contract_marker_key() -> list[Finding]:
+    rel_path = rel(LOOP_CONTROL_FILE)
+    text = LOOP_CONTROL_FILE.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if '"agent_loop.effective_output_contract_marker"' not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "loop_control_contract_marker_key_missing",
+                "loop output vars should expose effective_output_contract_marker",
+            )
+        )
+    if '"agent_loop.effective_output_contract_semantic_kind"' in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "loop_control_semantic_kind_key",
+                "loop output vars must not expose legacy effective_output_contract_semantic_kind key",
             )
         )
     return findings
