@@ -3,12 +3,25 @@ use super::*;
 #[test]
 fn answer_verifier_contract_dry_run_returns_machine_contract_fields() {
     let mut route = base_route_result();
-    route.route_reason =
-        "dry_run required_evidence missing_evidence_fields contract_boundary".to_string();
+    route.resolved_intent = serde_json::json!({
+        "dry_run": true,
+        "verifier_contract": "answer_verifier_required_evidence",
+        "required_evidence": [
+            "required_evidence",
+            "missing_evidence_fields",
+            "contract_boundary"
+        ],
+        "missing_evidence_fields": [],
+        "contract_boundary": {
+            "owner_layer": "answer_verifier",
+            "runtime_scope": "agent_loop"
+        }
+    })
+    .to_string();
     let loop_state = LoopState::new(1);
 
     let plan = structured_dry_run_response_deterministic_plan_result(
-        "Dry run only: required_evidence missing_evidence_fields contract_boundary",
+        "Dry run only: answer verifier contract envelope",
         Some(&route),
         &loop_state,
     )
@@ -26,6 +39,25 @@ fn answer_verifier_contract_dry_run_returns_machine_contract_fields() {
     assert!(value.get("required_evidence").is_some());
     assert!(value.get("missing_evidence_fields").is_some());
     assert!(value.get("contract_boundary").is_some());
+}
+
+#[test]
+fn answer_verifier_contract_dry_run_ignores_bare_evidence_words() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "dry_run required_evidence missing_evidence_fields contract_boundary".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "Dry run only: required_evidence missing_evidence_fields contract_boundary",
+        Some(&route),
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "bare verifier evidence words should not preempt planner authority"
+    );
 }
 
 #[test]

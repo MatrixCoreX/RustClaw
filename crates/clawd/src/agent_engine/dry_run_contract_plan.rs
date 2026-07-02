@@ -24,7 +24,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
     if loop_state.has_tool_or_skill_output || loop_state.round_no > 1 {
         return None;
     }
-    if answer_verifier_contract_dry_run_tokens_present(&route_tokens) {
+    if answer_verifier_contract_dry_run_tokens_present(&route_only_tokens) {
         return Some(build_plan_result(
             goal,
             "deterministic:answer_verifier_contract_dry_run",
@@ -270,10 +270,26 @@ fn finalizer_language_policy_dry_run_plan(goal: &str) -> PlanResult {
 
 fn answer_verifier_contract_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    normalized.contains("required_evidence")
-        && normalized.contains("missing_evidence_fields")
-        && normalized.contains("contract_boundary")
-        && has_dry_run_machine_token(&normalized)
+    if !has_dry_run_machine_token(&normalized) {
+        return false;
+    }
+    let has_verifier_contract = contains_machine_kv_or_json_pair(
+        &normalized,
+        "verifier_contract",
+        "answer_verifier_required_evidence",
+    );
+    let has_boundary_owner =
+        contains_machine_kv_or_json_pair(&normalized, "owner_layer", "answer_verifier");
+    let has_runtime_scope =
+        contains_machine_kv_or_json_pair(&normalized, "runtime_scope", "agent_loop");
+    let has_contract_fields = [
+        "required_evidence",
+        "missing_evidence_fields",
+        "contract_boundary",
+    ]
+    .into_iter()
+    .all(|field| normalized.contains(field));
+    has_verifier_contract && has_boundary_owner && has_runtime_scope && has_contract_fields
 }
 
 fn task_control_cancel_dry_run_tokens_present(text: &str) -> bool {
