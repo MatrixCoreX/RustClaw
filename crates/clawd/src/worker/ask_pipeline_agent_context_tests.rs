@@ -154,6 +154,7 @@ fn boundary_observation_block_filters_natural_language_route_reason() {
         &state,
         &post_route,
         &session_snapshot,
+        None,
         "inspect /tmp/workspace/README.md",
         "resolved capability_ref=kb.list_namespaces",
         &[],
@@ -205,10 +206,59 @@ fn boundary_observation_block_omits_legacy_route_trace_only_reason() {
             active_clarify_state: None,
             active_observed_facts: None,
         },
+        None,
         "answer from current runtime context",
         "answer from current runtime context",
         &[],
     );
 
     assert!(block.is_none());
+}
+
+#[test]
+fn boundary_observation_block_exports_runtime_session_state_for_status_query() {
+    let route = base_route();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "runtime_status_query": {"kind": "current_user_boundary", "scope": "session"}
+        })),
+        attachment_processing_required: false,
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        Some(&turn_analysis),
+        "answer from current runtime context",
+        "answer from current runtime context",
+        &[],
+    )
+    .expect("runtime status query should export boundary state");
+
+    assert!(block.contains("\"runtime_session_state\""));
+    assert!(block.contains("\"active_task_present\":false"));
+    assert!(block.contains("\"pending_user_boundary_present\":false"));
 }

@@ -1863,9 +1863,18 @@ pub(super) fn runtime_status_query_kind(
         .filter(|analysis| analysis.turn_type == Some(crate::intent_router::TurnType::StatusQuery))
         .and_then(|analysis| analysis.state_patch.as_ref())
         .and_then(|patch| patch.get("runtime_status_query"))
-        .and_then(Value::as_object)
-        .and_then(|query| query.get("kind"))
-        .and_then(Value::as_str)
+        .and_then(runtime_status_query_kind_value)
+}
+
+fn runtime_status_query_kind_value(value: &Value) -> Option<&str> {
+    value
+        .as_str()
+        .or_else(|| {
+            value
+                .as_object()
+                .and_then(|query| query.get("kind"))
+                .and_then(Value::as_str)
+        })
         .map(str::trim)
         .filter(|kind| !kind.is_empty())
 }

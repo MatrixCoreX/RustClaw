@@ -636,6 +636,10 @@ fn intent_normalizer_schema_drift() {
             token
         );
     }
+    assert_eq!(
+        super::parse_turn_type("runtime_status_query"),
+        Some(TurnType::StatusQuery)
+    );
 
     for token in enum_strings(&schema, &["properties", "target_task_policy"]) {
         if token.is_empty() {

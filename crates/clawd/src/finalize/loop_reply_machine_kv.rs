@@ -148,7 +148,7 @@ fn requested_machine_kv_request_surfaces(
         .as_ref()
         .and_then(|analysis| analysis.state_patch.as_ref())
     {
-        crate::machine_kv_projection::collect_machine_kv_surfaces_from_json(
+        crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
             state_patch,
             &mut surfaces,
         );

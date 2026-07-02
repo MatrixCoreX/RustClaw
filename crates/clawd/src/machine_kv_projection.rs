@@ -82,22 +82,78 @@ pub(crate) fn requested_machine_kv_summary_from_observation_inputs<'a>(
         .find_map(|input| requested_machine_kv_summary_from_observations(input, observed_texts))
 }
 
-pub(crate) fn collect_machine_kv_surfaces_from_json(
+pub(crate) fn collect_requested_machine_kv_surfaces_from_state_patch(
     value: &serde_json::Value,
     surfaces: &mut Vec<String>,
 ) {
     match value {
-        serde_json::Value::String(text) => {
-            push_unique_machine_kv_surface(surfaces, text);
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                let key = normalize_state_patch_key(key);
+                if matches!(key.as_str(), "required_field" | "required_machine_field") {
+                    collect_required_surface_value(child, surfaces);
+                } else if key == "required_machine_fields" {
+                    collect_required_machine_fields_surface(child, surfaces);
+                } else {
+                    collect_requested_machine_kv_surfaces_from_state_patch(child, surfaces);
+                }
+            }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                collect_machine_kv_surfaces_from_json(item, surfaces);
+                collect_requested_machine_kv_surfaces_from_state_patch(item, surfaces);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_state_patch_key(key: &str) -> String {
+    key.trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn collect_required_surface_value(value: &serde_json::Value, surfaces: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => push_unique_machine_kv_surface(surfaces, text),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_required_surface_value(item, surfaces);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_required_machine_fields_surface(value: &serde_json::Value, surfaces: &mut Vec<String>) {
+    let mut fields = Vec::new();
+    collect_required_machine_field_tokens(value, &mut fields);
+    fields.sort();
+    fields.dedup();
+    if !fields.is_empty() {
+        push_unique_machine_kv_surface(surfaces, &fields.join(" "));
+    }
+}
+
+fn collect_required_machine_field_tokens(value: &serde_json::Value, fields: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            let token = text.trim();
+            if !token.is_empty() {
+                fields.push(token.to_string());
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_required_machine_field_tokens(item, fields);
             }
         }
         serde_json::Value::Object(object) => {
             for child in object.values() {
-                collect_machine_kv_surfaces_from_json(child, surfaces);
+                collect_required_machine_field_tokens(child, fields);
             }
         }
         serde_json::Value::Number(_) | serde_json::Value::Bool(_) | serde_json::Value::Null => {}
