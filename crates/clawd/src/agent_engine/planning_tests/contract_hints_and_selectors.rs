@@ -831,9 +831,20 @@ fn service_status_url_request_ignores_user_text_without_machine_capability() {
     );
 }
 
-#[test]
-fn http_download_artifact_contract_uses_http_basic_download_plan() {
+#[tokio::test]
+async fn http_download_artifact_contract_reaches_planner_path() {
     let state = test_state_with_enabled_skills(&["http_basic"]);
+    let task = ClaimedTask {
+        task_id: "http-download-artifact-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": "download https://example.com to document/http/download/nl-codex-parity-example.body" }).to_string(),
+    };
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -843,27 +854,28 @@ fn http_download_artifact_contract_uses_http_basic_download_plan() {
         "document/http/download/nl-codex-parity-example.body".to_string();
     route.resolved_intent = "capability_ref=http_basic.get url=https://example.com".to_string();
     let loop_state = LoopState::new(1);
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = http_download_artifact_deterministic_plan_result(
+    let err = super::super::plan_round_actions(
         &state,
-        "download URL artifact",
-        Some(&route),
+        &task,
+        &route.resolved_intent,
+        "download https://example.com to document/http/download/nl-codex-parity-example.body",
+        &policy,
         &loop_state,
-        "download artifact",
+        None,
+        Some(&route),
+        None,
     )
-    .expect("URL plus output path contract should use http_basic download");
-
-    assert_eq!(plan.steps.len(), 3);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "http_basic", "get");
-    assert_eq!(
-        args.get("url").and_then(Value::as_str),
-        Some("https://example.com")
+    .await
+    .expect_err("http download artifact should reach planner instead of pre-LLM http_basic plan");
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
     );
-    assert_eq!(args.get("download").and_then(Value::as_bool), Some(true));
-    assert_eq!(
-        args.get("output_path").and_then(Value::as_str),
-        Some("document/http/download/nl-codex-parity-example.body")
+    assert!(
+        !err.contains("plan_deterministic_http_download_artifact"),
+        "old http download deterministic fallback leaked into planner error: {err}"
     );
 }
 

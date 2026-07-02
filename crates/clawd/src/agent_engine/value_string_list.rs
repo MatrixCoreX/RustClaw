@@ -1328,6 +1328,7 @@ fn service_status_process_filter(route: &RouteResult) -> Option<String> {
     })
 }
 
+#[cfg(test)]
 fn route_machine_value(route: &RouteResult, keys: &[&str]) -> Option<String> {
     [route.route_reason.as_str(), route.resolved_intent.as_str()]
         .into_iter()
@@ -1337,6 +1338,7 @@ fn route_machine_value(route: &RouteResult, keys: &[&str]) -> Option<String> {
         })
 }
 
+#[cfg(test)]
 fn route_machine_value_from_text(text: &str, key: &str) -> Option<String> {
     let prefix = format!("{}=", key.trim());
     text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
@@ -1625,6 +1627,7 @@ fn route_requests_config_risk_preview(route: &RouteResult) -> bool {
         )
 }
 
+#[cfg(test)]
 fn route_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> bool {
     tokens
         .into_iter()
@@ -1687,6 +1690,7 @@ fn is_uuid_like_token(token: &str) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn service_status_url_locator(route: &RouteResult) -> Option<String> {
     if !crate::machine_capability_ref::route_has_capability_action_name(
         route,
@@ -1701,6 +1705,7 @@ pub(super) fn service_status_url_locator(route: &RouteResult) -> Option<String> 
         .and_then(|value| service_status_http_url(value.as_str()))
 }
 
+#[cfg(test)]
 fn service_status_http_url(value: &str) -> Option<String> {
     let value = value
         .trim()

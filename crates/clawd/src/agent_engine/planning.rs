@@ -243,16 +243,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_runtime_status_scalar_info_fallback"
     );
     return_deterministic_plan!(
-        http_download_artifact_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_http_download_artifact"
-    );
-    return_deterministic_plan!(
         hook_permission_surface_deterministic_plan_result(
             state,
             goal,
