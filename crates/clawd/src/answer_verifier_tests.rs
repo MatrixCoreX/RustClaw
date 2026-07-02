@@ -622,6 +622,59 @@ fn pure_chat_agent_loop_submode_skips_answer_verifier_after_terminal_respond_ste
 }
 
 #[test]
+fn planner_plain_terminal_answer_only_skips_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason = "executionless_finalize_trace_plain".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.wants_file_delivery = false;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-terminal-answer",
+        "ask",
+        "explain a runtime contract",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            "candidate response",
+        ));
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
+}
+
+#[test]
+fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason = "execution_with_observed_tool".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.wants_file_delivery = false;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-tool-answer", "ask", "summarize result");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"path":"README.md","exists":true}"#,
+        ));
+
+    assert!(should_verify_answer(&route, &journal, "README.md exists"));
+}
+
+#[test]
 fn pure_chat_agent_loop_backend_identity_marker_still_uses_answer_verifier() {
     let mut route = backend_identity_guard_route();
     route.output_contract.requires_content_evidence = false;
