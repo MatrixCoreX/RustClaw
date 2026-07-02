@@ -724,7 +724,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     fields.into_iter().map(str::to_string).collect()
 }
 
-fn missing_parameters_for_route(route: &RouteResult) -> Vec<String> {
+pub(crate) fn missing_parameters_for_route(route: &RouteResult) -> Vec<String> {
     if !route.needs_clarify {
         return Vec::new();
     }
