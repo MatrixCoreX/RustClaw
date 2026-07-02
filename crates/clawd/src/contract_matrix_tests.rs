@@ -2144,7 +2144,7 @@ fn bundled_contract_matrix_renders_prompt_line() {
     .expect("contract prompt line");
 
     assert!(line.contains("evidence_policy"));
-    assert!(line.contains("source=legacy_contract_matrix"));
+    assert!(line.contains("source=bundled_evidence_policy"));
     assert!(line.contains("planner_authority=agent_loop_registry"));
     assert!(line.contains("match=file_names"));
     assert!(line.contains("required_evidence=candidates"));
