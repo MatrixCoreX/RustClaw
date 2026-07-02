@@ -480,17 +480,12 @@ pub(super) fn classify_assistant_context_reply_kind(
     if final_status.eq_ignore_ascii_case("clarify") {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
-    let route_gate_kind = summary
-        .and_then(|value| value.get("route_result"))
-        .and_then(|value| value.get("route_gate_kind"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     let needs_clarify = summary
         .and_then(|value| value.get("route_result"))
         .and_then(|value| value.get("needs_clarify"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if route_gate_kind.eq_ignore_ascii_case("clarify") || needs_clarify {
+    if needs_clarify {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
     AssistantContextReplyKind::Normal

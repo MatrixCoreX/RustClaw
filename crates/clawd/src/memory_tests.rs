@@ -122,7 +122,6 @@ fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
             "summary": {
                 "final_status": "clarify",
                 "route_result": {
-                    "route_gate_kind": "clarify",
                     "needs_clarify": true
                 }
             }
@@ -140,6 +139,28 @@ fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
         AssistantContextReplyKind::ClarifyPlaceholder
     );
     assert_eq!(clarify_assistant_placeholder(), "[clarification_requested]");
+}
+
+#[test]
+fn legacy_route_gate_alone_does_not_make_recent_reply_clarify_placeholder() {
+    let parsed = json!({
+        "text": "legacy trace only",
+        "task_journal": {
+            "summary": {
+                "final_status": "success",
+                "route_result": {
+                    "route_gate_kind": "clarify",
+                    "needs_clarify": false
+                }
+            }
+        }
+    });
+    let never_fallback = |_: &str| false;
+
+    assert_eq!(
+        classify_assistant_context_reply_kind(Some(&parsed), "legacy trace only", never_fallback),
+        AssistantContextReplyKind::Normal
+    );
 }
 
 #[test]
