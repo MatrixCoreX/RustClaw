@@ -1193,12 +1193,8 @@ pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
         _ => return None,
     };
-    if !crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    if !crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
     {
         return None;
     }

@@ -436,8 +436,8 @@ pub(super) fn rewrite_raw_runtime_status_to_run_cmd(
                 "cwd": state.skill_rt.workspace_root.display().to_string(),
             });
             run_args[super::super::CLAWD_LITERAL_COMMAND_ARG] = Value::Bool(true);
-            if !crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            if !crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
                 "run_cmd",
                 &run_args,
             )

@@ -535,7 +535,7 @@ pub(super) fn route_expects_synthesis_over_raw_observation(route: &crate::RouteR
     if route.output_contract.requires_content_evidence
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
         && route.output_contract.response_shape == crate::OutputResponseShape::Free
-        && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        && crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
             .is_some_and(|shape| shape.allows_model_language())
     {
         return true;

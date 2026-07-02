@@ -66,7 +66,7 @@ pub(super) fn route_allows_model_language_terminal_respond(route: Option<&RouteR
     {
         return false;
     }
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    crate::evidence_policy::final_answer_shape_for_route(route)
         .is_some_and(|shape| shape.allows_model_language())
 }
 

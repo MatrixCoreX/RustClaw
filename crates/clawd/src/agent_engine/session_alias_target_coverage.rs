@@ -803,8 +803,8 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
 #[cfg(test)]
 fn route_requests_config_validation(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::contract_matrix::final_answer_shape_for_route(route)
-            == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
 }
 
 #[cfg(test)]

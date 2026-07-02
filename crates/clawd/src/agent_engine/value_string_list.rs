@@ -663,12 +663,8 @@ pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
     let AgentAction::CallSkill { skill, args } = &probe else {
         return None;
     };
-    if crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| !policy.is_allowed())
+    if crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| !policy.is_allowed())
     {
         return None;
     }
@@ -816,8 +812,8 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
             _ => None,
         })
         .any(|(skill, args)| {
-            !crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            !crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
                 skill,
                 args,
             )
@@ -867,12 +863,8 @@ pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
     let Some((skill, args)) = planned_call_subject_and_args(&action) else {
         return None;
     };
-    if !crate::contract_matrix::action_policy_for_output_contract(
-        Some(&route.output_contract),
-        skill,
-        args,
-    )
-    .is_some_and(|policy| policy.is_allowed())
+    if !crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+        .is_some_and(|policy| policy.is_allowed())
     {
         return None;
     }
@@ -1059,12 +1051,8 @@ pub(super) fn service_status_system_basic_info_plan(
         args: serde_json::json!({"action":"info"}),
     };
     if let AgentAction::CallTool { tool: skill, args } = &action {
-        if crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return Some(build_plan_result(
                 goal,
@@ -1104,8 +1092,8 @@ pub(super) fn service_status_deterministic_plan_result(
             }),
         };
         if let AgentAction::CallSkill { skill, args } = &action {
-            if crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            if crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
                 skill,
                 args,
             )
@@ -1136,8 +1124,8 @@ pub(super) fn service_status_deterministic_plan_result(
                 args: serde_json::json!({"action": "get", "task_id": task_id}),
             };
             if let AgentAction::CallSkill { skill, args } = &action {
-                if crate::contract_matrix::action_policy_for_output_contract(
-                    Some(&route.output_contract),
+                if crate::evidence_policy::capability_ref_action_policy_for_route(
+                    Some(route),
                     skill,
                     args,
                 )
@@ -1159,8 +1147,8 @@ pub(super) fn service_status_deterministic_plan_result(
             args: serde_json::json!({"action": "list"}),
         };
         if let AgentAction::CallSkill { skill, args } = &action {
-            if crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            if crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
                 skill,
                 args,
             )
@@ -1222,8 +1210,8 @@ pub(super) fn service_status_deterministic_plan_result(
             args: serde_json::json!({}),
         };
         if let AgentAction::CallSkill { skill, args } = &action {
-            if crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
+            if crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
                 skill,
                 args,
             )
@@ -1442,12 +1430,8 @@ pub(super) fn task_control_get_deterministic_plan_result(
         args: serde_json::json!({"action": "get", "task_id": task_id}),
     };
     if let AgentAction::CallSkill { skill, args } = &action {
-        if crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return Some(build_plan_result(
                 goal,
@@ -1485,12 +1469,8 @@ pub(super) fn task_control_list_deterministic_plan_result(
         args: serde_json::json!({"action": action_name}),
     };
     if let AgentAction::CallSkill { skill, args } = &action {
-        if !crate::contract_matrix::action_policy_for_output_contract(
-            Some(&route.output_contract),
-            skill,
-            args,
-        )
-        .is_some_and(|policy| policy.is_allowed())
+        if !crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
         {
             return None;
         }
