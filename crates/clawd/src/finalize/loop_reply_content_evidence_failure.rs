@@ -9,6 +9,10 @@ use super::{
     route_requires_content_evidence, route_resolved_intent, truncate_with_ellipsis,
 };
 
+#[cfg(test)]
+#[path = "loop_reply_content_evidence_failure_tests.rs"]
+mod tests;
+
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
     crate::skills::error_looks_like_os_permission_denied(error)
 }
@@ -27,12 +31,28 @@ enum ServiceStatusFailureObservation {
     Failed,
 }
 
+impl ServiceStatusFailureObservation {
+    fn status_code(self) -> &'static str {
+        match self {
+            Self::UnitNotFound => "service_unit_not_found",
+            Self::Inactive => "service_inactive",
+            Self::Failed => "service_failed",
+        }
+    }
+}
+
 fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool {
-    matches!(
-        agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
-            .map(|route| route.effective_output_contract_semantic_kind()),
-        Some(crate::OutputSemanticKind::ServiceStatus)
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    route.effective_output_contract_semantic_kind() == crate::OutputSemanticKind::ServiceStatus
+        || route_has_service_status_capability_ref(route)
+}
+
+fn route_has_service_status_capability_ref(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_namespace(
+        route,
+        &["service", "service_control"],
     )
 }
 
@@ -80,6 +100,12 @@ fn service_status_failure_answer(
     }
     let observation = service_status_observation_from_error(error)?;
     let target = service_status_target_label(error, agent_run_context);
+    if agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(route_has_service_status_capability_ref)
+    {
+        return Some(service_status_failure_envelope(error, &target, observation));
+    }
     let prefer_english =
         prefer_english_for_agent_contextual_user_text(state, user_text, agent_run_context);
     Some(match (prefer_english, observation) {
@@ -101,6 +127,39 @@ fn service_status_failure_answer(
         (false, ServiceStatusFailureObservation::Failed) => {
             format!("`{target}` 现在不是 active：systemd 显示它处于 failed 状态。")
         }
+    })
+}
+
+fn service_status_failure_envelope(
+    error: &str,
+    target: &str,
+    observation: ServiceStatusFailureObservation,
+) -> String {
+    let structured = crate::skills::parse_structured_skill_error(error);
+    let mut envelope = serde_json::json!({
+        "message_key": "service.status.failure",
+        "status_code": observation.status_code(),
+        "error_kind": structured
+            .as_ref()
+            .map(|value| value.error_kind.as_str())
+            .unwrap_or(observation.status_code()),
+        "target": target,
+        "source": "service_control"
+    });
+    if let Some(manager_type) = structured
+        .as_ref()
+        .and_then(|value| value.manager_type.as_deref())
+    {
+        envelope["manager_type"] = serde_json::Value::String(manager_type.to_string());
+    }
+    if let Some(service_name) = structured
+        .as_ref()
+        .and_then(|value| value.service_name.as_deref())
+    {
+        envelope["service_name"] = serde_json::Value::String(service_name.to_string());
+    }
+    serde_json::to_string(&envelope).unwrap_or_else(|_| {
+        "message_key=service.status.failure status_code=service_status_failure".to_string()
     })
 }
 
