@@ -527,19 +527,18 @@ fn normalize_config_edit_value_aliases(skill: &str, args: &mut Value) -> bool {
 }
 
 fn route_has_config_change_contract(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &[
-                "apply_change",
-                "apply_config_change",
-                "plan_change",
-                "plan_config_change",
-                "set_field",
-                "write_field",
-            ],
-        )
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["config"],
+        &[
+            "apply_change",
+            "apply_config_change",
+            "plan_change",
+            "plan_config_change",
+            "set_field",
+            "write_field",
+        ],
+    )
 }
 
 fn route_has_config_validation_contract(route: &RouteResult) -> bool {

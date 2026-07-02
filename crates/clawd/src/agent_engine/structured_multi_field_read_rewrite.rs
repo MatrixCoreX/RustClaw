@@ -1027,19 +1027,18 @@ pub(super) fn current_turn_requests_config_edit(
 }
 
 fn route_has_config_change_contract(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &[
-                "apply_change",
-                "apply_config_change",
-                "plan_change",
-                "plan_config_change",
-                "set_field",
-                "write_field",
-            ],
-        )
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["config"],
+        &[
+            "apply_change",
+            "apply_config_change",
+            "plan_change",
+            "plan_config_change",
+            "set_field",
+            "write_field",
+        ],
+    )
 }
 
 fn config_edit_action_has_structured_config_contract(action: &AgentAction) -> bool {
