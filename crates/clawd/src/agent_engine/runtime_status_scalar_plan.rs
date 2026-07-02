@@ -10,7 +10,6 @@ pub(super) fn runtime_status_scalar_deterministic_plan_result(
     let route = route_result?;
     let kind = runtime_status_query_kind(turn_analysis)?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || !(route.output_contract_is_unclassified()
