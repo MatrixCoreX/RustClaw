@@ -53,15 +53,15 @@ const OUTPUT_CONTRACT_ROUTE_MARKERS: &[&str] = &[
 
 #[path = "answer_verifier_delivery_raw.rs"]
 mod answer_verifier_delivery_raw;
-#[path = "answer_verifier_matrix.rs"]
-mod answer_verifier_matrix;
+#[path = "answer_verifier_evidence_policy.rs"]
+mod answer_verifier_evidence_policy;
 #[path = "answer_verifier_runtime.rs"]
 mod answer_verifier_runtime;
 #[path = "answer_verifier_scalar.rs"]
 mod answer_verifier_scalar;
 
 use answer_verifier_delivery_raw::*;
-use answer_verifier_matrix::*;
+use answer_verifier_evidence_policy::*;
 #[cfg(test)]
 pub(crate) use answer_verifier_runtime::local_compound_listing_answer_verifier_gap;
 use answer_verifier_runtime::*;
@@ -293,35 +293,35 @@ pub(crate) fn structurally_satisfies_answer_contract(
     }
     if let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route_result) {
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
-            return matrix_scalar_answer_is_grounded_in_successful_observation(
+            return evidence_policy_scalar_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::StrictList {
-            return matrix_strict_list_answer_is_grounded_in_successful_observation(
+            return evidence_policy_strict_list_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Table {
-            return matrix_table_answer_is_grounded_in_successful_observation(
+            return evidence_policy_table_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::SinglePath {
-            return matrix_single_path_answer_is_grounded_in_successful_observation(
+            return evidence_policy_single_path_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact {
-            return matrix_delivery_artifact_answer_is_grounded_in_successful_observation(
+            return evidence_policy_delivery_artifact_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,

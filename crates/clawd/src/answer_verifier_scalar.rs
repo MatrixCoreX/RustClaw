@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn matrix_scalar_answer_is_grounded_in_successful_observation(
+pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observation(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
