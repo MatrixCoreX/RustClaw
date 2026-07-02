@@ -941,7 +941,7 @@ fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() 
 #[test]
 fn recent_scalar_equality_pair_paths_uses_compare_paths_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );

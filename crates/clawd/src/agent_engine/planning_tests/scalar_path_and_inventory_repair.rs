@@ -714,7 +714,7 @@ fn scalar_path_current_workspace_deterministic_plan_uses_workspace_contract() {
     state.skill_rt.workspace_root = root.path.clone();
     let workspace_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Scalar,
     );
