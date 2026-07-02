@@ -1186,7 +1186,7 @@ fn scalar_path_only_contract_stays_for_real_path_only_request() {
 #[test]
 fn scalar_path_only_output_without_input_locator_can_execute() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.resolved_intent = "执行 which bash，只输出 bash 的路径".to_string();
     route.route_reason = "scalar_path_only".to_string();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -1204,7 +1204,7 @@ fn scalar_path_only_output_without_input_locator_can_execute() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::direct_answer()
     );
 }
 
