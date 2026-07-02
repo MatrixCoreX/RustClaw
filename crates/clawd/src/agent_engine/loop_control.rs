@@ -431,7 +431,6 @@ fn record_agent_loop_decision_envelope_output_vars(
         "validation_reason_code",
         "capability_ref",
         "semantic_authority",
-        "initial_gate_ref",
         "answer_shape",
         "risk_level",
     ] {

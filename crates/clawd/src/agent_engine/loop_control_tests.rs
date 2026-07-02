@@ -3,8 +3,8 @@ use super::{
     apply_structured_respond_clarify_to_loop_state, evaluate_round_outcome,
     initial_execution_recipe_spec, machine_status_visible_output_format_gap,
     mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
-    selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
-    structured_respond_terminal_intent_from_plan,
+    record_agent_loop_decision_envelope_output_vars, selected_contract_structured_evidence_gap,
+    should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
@@ -165,6 +165,35 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
             .map(String::as_str),
         Some("clawd.clarify.locator_required")
     );
+}
+
+#[test]
+fn decision_envelope_output_vars_do_not_expose_initial_gate_ref_as_field() {
+    let route = route_result(OutputResponseShape::OneSentence);
+    let plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","content":"ok"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({"content": "ok"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let mut loop_state = LoopState::new(2);
+
+    record_agent_loop_decision_envelope_output_vars(&mut loop_state, Some(&route), &plan);
+
+    assert!(loop_state
+        .output_vars
+        .contains_key("agent_loop.decision_envelope"));
+    assert!(!loop_state
+        .output_vars
+        .contains_key("agent_loop.initial_gate_ref"));
+    assert!(!loop_state
+        .output_vars
+        .contains_key("agent_loop.decision_envelope.initial_gate_ref"));
 }
 
 #[test]
