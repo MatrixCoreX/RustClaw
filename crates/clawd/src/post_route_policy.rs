@@ -9,8 +9,8 @@ mod boundary_locator;
 pub(crate) use boundary_contract::content_evidence_execution_finalize_style;
 
 use boundary_contract::{
-    should_clear_scalar_count_for_non_scalar_contract,
-    should_clear_scalar_path_only_without_locator_binding,
+    should_clear_scalar_count_marker_for_non_scalar_contract,
+    should_clear_scalar_path_marker_without_locator_binding,
     should_force_content_evidence_for_path_bound_chat_wrapped_execution,
 };
 use boundary_delivery::{
@@ -184,15 +184,15 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
     }
 
-    let cleared_scalar_count_semantic =
-        should_clear_scalar_count_for_non_scalar_contract(&execution_route_result);
-    if cleared_scalar_count_semantic {
+    let cleared_scalar_count_marker =
+        should_clear_scalar_count_marker_for_non_scalar_contract(&execution_route_result);
+    if cleared_scalar_count_marker {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
         remove_route_reason_machine_marker(&mut execution_route_result, "scalar_count");
     }
-    let cleared_scalar_path_only_semantic =
-        should_clear_scalar_path_only_without_locator_binding(&execution_route_result);
-    if cleared_scalar_path_only_semantic {
+    let cleared_scalar_path_only_marker =
+        should_clear_scalar_path_marker_without_locator_binding(&execution_route_result);
+    if cleared_scalar_path_only_marker {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
         remove_route_reason_machine_marker(&mut execution_route_result, "scalar_path_only");
     }
@@ -317,8 +317,8 @@ pub(crate) fn apply_post_route_policy(
             PostRoutePolicyOutcome::Clarify,
         )
     } else if forced_content_evidence
-        || cleared_scalar_count_semantic
-        || cleared_scalar_path_only_semantic
+        || cleared_scalar_count_marker
+        || cleared_scalar_path_only_marker
     {
         PostRouteGateRecord::with_owner(
             "boundary_contract_gate",

@@ -76,7 +76,7 @@ pub(super) fn should_force_content_evidence_for_path_bound_chat_wrapped_executio
     }
 }
 
-pub(super) fn should_clear_scalar_count_for_non_scalar_contract(
+pub(super) fn should_clear_scalar_count_marker_for_non_scalar_contract(
     route_result: &RouteResult,
 ) -> bool {
     route_reason_has_marker(route_result, "scalar_count")
@@ -91,7 +91,7 @@ fn scalar_count_contract_allows_count_shape(contract: &IntentOutputContract) -> 
         && contract.exact_sentence_count == Some(1))
 }
 
-pub(super) fn should_clear_scalar_path_only_without_locator_binding(
+pub(super) fn should_clear_scalar_path_marker_without_locator_binding(
     route_result: &RouteResult,
 ) -> bool {
     if !route_reason_has_marker(route_result, "scalar_path_only")
