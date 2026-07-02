@@ -98,7 +98,7 @@ fn normalizer_schema_normalization_extracts_fenced_json() {
   "output_contract": {
     "response_shape": "scalar",
     "requires_content_evidence": true,
-    "semantic_kind": "hidden_files_example",
+    "contract_marker": "hidden_files_example",
     "locator_kind": "current_workspace"
   }
 }
@@ -145,7 +145,7 @@ fn normalizer_schema_normalization_preserves_act_when_shape_is_descriptive() {
           "decision":"planner_execute",
           "output_contract": {
             "response_shape": "list_of_strings",
-            "semantic_kind": "file_names"
+            "contract_marker": "file_names"
           },
           "action": {"tool":"list_directory","path":"logs","limit":10}
         }"#;

@@ -335,6 +335,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_current_workspace_scope_legacy_semantic_marker_removed())
     findings.extend(scan_runtime_status_recipe_contract_marker())
     findings.extend(scan_prompt_utils_contract_repair_judge_marker_only())
+    findings.extend(scan_prompt_utils_output_contract_marker_only())
+    findings.extend(scan_intent_router_output_contract_schema_marker_only())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
@@ -1390,6 +1392,80 @@ def scan_prompt_utils_contract_repair_judge_marker_only() -> list[Finding]:
                 "contract repair judge must not fall back to legacy output_contract.semantic_kind",
             )
         )
+    return findings
+
+
+def scan_prompt_utils_output_contract_marker_only() -> list[Finding]:
+    rel_path = rel(PROMPT_UTILS_OUTPUT_CONTRACT_FILE)
+    text = PROMPT_UTILS_OUTPUT_CONTRACT_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("pub(super) fn canonicalize_output_contract(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "prompt_utils_output_contract_canonicalizer_missing",
+                "missing canonicalize_output_contract",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker"' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "prompt_utils_output_contract_marker_missing",
+                "output contract canonicalizer should preserve contract_marker",
+            )
+        )
+    for line_no, line in enumerate(body.splitlines(), start=1):
+        if '"semantic_kind"' not in line:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                line_no,
+                "prompt_utils_output_contract_semantic_kind_field",
+                line.strip(),
+            )
+        )
+    return findings
+
+
+def scan_intent_router_output_contract_schema_marker_only() -> list[Finding]:
+    path = SRC_ROOT / "intent_router_output_contract_schema.rs"
+    rel_path = rel(path)
+    text = path.read_text(encoding="utf-8")
+    findings: list[Finding] = []
+    if '"contract_marker"' not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "intent_router_output_contract_schema_marker_missing",
+                "normalizer output contract schema should read/write contract_marker",
+            )
+        )
+    forbidden_tokens = [
+        '"semantic_kind"',
+        '"semantic_kind".to_string()',
+        '.get("semantic_kind")',
+        'contains_key("semantic_kind")',
+    ]
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for token in forbidden_tokens:
+            if token not in line:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "intent_router_output_contract_schema_semantic_kind_field",
+                    line.strip(),
+                )
+            )
     return findings
 
 

@@ -45,7 +45,7 @@ fn normalizer_schema_normalization_derives_missing_decision_from_output_contract
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"file_names",
+            "contract_marker":"file_names",
             "locator_hint":"document"
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
@@ -97,13 +97,13 @@ fn normalizer_schema_normalization_derives_clarify_from_needs_clarify_signal() {
 
 #[test]
 fn normalizer_schema_normalization_preserves_filesystem_mutation_result_contract() {
-    let raw = r#"{"resolved_user_intent":"create the target directory and report the result","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":true,"delivery_required":false,"locator_kind":"path","delivery_intent":"none","semantic_kind":"filesystem_mutation_result","locator_hint":"document/nl_skill_tmp"}}"#;
+    let raw = r#"{"resolved_user_intent":"create the target directory and report the result","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":true,"delivery_required":false,"locator_kind":"path","delivery_intent":"none","contract_marker":"filesystem_mutation_result","locator_hint":"document/nl_skill_tmp"}}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("filesystem_mutation_result")
     );
@@ -163,7 +163,7 @@ fn normalizer_schema_normalization_demotes_capability_owned_weather_semantic_kin
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"weather_query",
+            "contract_marker":"weather_query",
             "locator_hint":""
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
@@ -173,7 +173,7 @@ fn normalizer_schema_normalization_demotes_capability_owned_weather_semantic_kin
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -197,7 +197,7 @@ fn normalizer_schema_normalization_demotes_registry_bridge_without_capability_re
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"weather_query",
+            "contract_marker":"weather_query",
             "locator_hint":""
           },
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
@@ -207,7 +207,7 @@ fn normalizer_schema_normalization_demotes_registry_bridge_without_capability_re
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
@@ -244,7 +244,7 @@ fn normalizer_schema_normalization_accepts_percent_confidence() {
 
 #[test]
 fn normalizer_schema_normalization_recovers_stray_quote_after_bool() {
-    let raw = r#"{"resolved_user_intent":"检查仓库中是否存在 rustclaw.service","needs_clarify":false,"clarify_question":"","reason":"repo inspection","confidence":0.95,"decision":"planner_execute","should_refresh_long_term_memory":false","agent_display_name_hint":"","output_contract":{"response_shape":"strict","requires_content_evidence":true,"delivery_required":false,"locator_kind":"current_workspace","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"rustclaw.service","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}}"#;
+    let raw = r#"{"resolved_user_intent":"检查仓库中是否存在 rustclaw.service","needs_clarify":false,"clarify_question":"","reason":"repo inspection","confidence":0.95,"decision":"planner_execute","should_refresh_long_term_memory":false","agent_display_name_hint":"","output_contract":{"response_shape":"strict","requires_content_evidence":true,"delivery_required":false,"locator_kind":"current_workspace","delivery_intent":"none","contract_marker":"existence_with_path","locator_hint":"rustclaw.service","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}}"#;
     assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
         raw,
@@ -257,7 +257,7 @@ fn normalizer_schema_normalization_recovers_stray_quote_after_bool() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("existence_with_path")
     );
@@ -271,7 +271,7 @@ fn normalizer_schema_normalization_recovers_stray_quote_after_bool() {
 
 #[test]
 fn normalizer_schema_normalization_recovers_minimax_output_contract_only_payload() {
-    let raw = r#"{"output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":true,"locator_kind":"path","delivery_intent":"list_filenames","semantic_kind":"file_listing","locator_hint":"logs"}}"#;
+    let raw = r#"{"output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":true,"locator_kind":"path","delivery_intent":"list_filenames","contract_marker":"file_listing","locator_hint":"logs"}}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(
         raw,
         "列出 logs 目录下的前 10 个文件名，不要读内容",
@@ -287,7 +287,7 @@ fn normalizer_schema_normalization_recovers_minimax_output_contract_only_payload
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("file_names")
     );
@@ -313,7 +313,7 @@ fn normalizer_schema_normalization_rewrites_free_directory_groups_to_purpose_sum
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "semantic_kind": "directory_entry_groups",
+            "contract_marker": "directory_entry_groups",
             "locator_hint": "document/"
           }
         }"#;
@@ -331,7 +331,7 @@ fn normalizer_schema_normalization_rewrites_free_directory_groups_to_purpose_sum
         Some("free")
     );
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("directory_purpose_summary")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
@@ -357,7 +357,7 @@ fn normalizer_schema_normalization_preserves_meaningful_duplicate_route_fields()
             "delivery_required":false,
             "locator_kind":"path",
             "delivery_intent":"none",
-            "semantic_kind":"file_names",
+            "contract_marker":"file_names",
             "locator_hint":"document",
             "self_extension":{"mode":"none","trigger":"none","execute_now":false}
           },
@@ -382,7 +382,7 @@ fn normalizer_schema_normalization_preserves_meaningful_duplicate_route_fields()
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("file_names")
     );
@@ -426,7 +426,7 @@ fn contract_repair_report_marks_execution_signal_derived_from_output_contract() 
             "delivery_required": false,
             "locator_kind": "none",
             "delivery_intent": "none",
-            "semantic_kind": "none",
+            "contract_marker": "none",
             "locator_hint": ""
         }
     });
@@ -437,7 +437,7 @@ fn contract_repair_report_marks_execution_signal_derived_from_output_contract() 
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "semantic_kind": "file_names",
+            "contract_marker": "file_names",
             "locator_hint": "logs"
         }
     });
@@ -539,7 +539,7 @@ fn scalar_runtime_tool_recipe_repairs_to_raw_command_contract() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -558,7 +558,7 @@ fn scalar_runtime_tool_recipe_repairs_to_raw_command_contract() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -586,7 +586,7 @@ fn scalar_runtime_tool_recipe_name_alias_preserves_status_query_patch() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -604,7 +604,7 @@ fn scalar_runtime_tool_recipe_name_alias_preserves_status_query_patch() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -632,7 +632,7 @@ fn scalar_runtime_tool_recipe_kernel_alias_preserves_status_query_patch() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -650,7 +650,7 @@ fn scalar_runtime_tool_recipe_kernel_alias_preserves_status_query_patch() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -678,7 +678,7 @@ fn scalar_runtime_tool_recipe_hostname_alias_preserves_status_query_patch() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -696,7 +696,7 @@ fn scalar_runtime_tool_recipe_hostname_alias_preserves_status_query_patch() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -724,7 +724,7 @@ fn scalar_run_cmd_args_recipe_preserves_status_query_patch() {
             "delivery_required":false,
             "locator_kind":"none",
             "delivery_intent":"none",
-            "semantic_kind":"none",
+            "contract_marker":"none",
             "locator_hint":""
           },
           "execution_recipe":{
@@ -741,7 +741,7 @@ fn scalar_run_cmd_args_recipe_preserves_status_query_patch() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );

@@ -74,7 +74,7 @@ fn normalizer_schema_normalization_promotes_schedule_type_token_without_decision
           "reason":"schedule type token was emitted in the operation field",
           "confidence":0.91,
           "decision":"direct_answer",
-          "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","semantic_kind":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
+          "output_contract":{"response_shape":"one_sentence","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none","delivery_intent":"none","contract_marker":"none","locator_hint":"","self_extension":{"mode":"none","trigger":"none","execute_now":false}},
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
           "turn_type":"task_request",
           "target_task_policy":"standalone",
@@ -503,7 +503,7 @@ fn normalizer_schema_normalization_ignores_response_recipe_as_execution_signal()
           "reason":"用户明确要求用一句中文回复确认其正在进行 RustClaw 真实客户端连续会话测试",
           "confidence":0.98,
           "decision":"direct_answer",
-          "output_contract":{"response_shape":"text","semantic_kind":"confirmation"},
+          "output_contract":{"response_shape":"text","contract_marker":"confirmation"},
           "execution_recipe":"respond_with_simple_chinese_confirmation",
           "turn_type":"greeting",
           "target_task_policy":null,
@@ -528,7 +528,7 @@ fn normalizer_schema_normalization_ignores_response_recipe_as_execution_signal()
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
