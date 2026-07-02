@@ -1299,6 +1299,9 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     delivery_messages: &mut Vec<String>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
+    if loop_state.pending_user_input_required {
+        return false;
+    }
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
