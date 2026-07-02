@@ -283,6 +283,41 @@ fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<Fi
     }
     if crate::machine_capability_ref::route_has_capability_action_name(
         route,
+        &["docker", "docker_basic"],
+        &["list_containers", "ps"],
+    ) {
+        return Some(FinalAnswerShape::ContainerList);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["docker", "docker_basic"],
+        &["images", "list_images"],
+    ) {
+        return Some(FinalAnswerShape::ImageList);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["docker", "docker_basic"],
+        &["logs", "read_logs"],
+    ) {
+        return Some(FinalAnswerShape::LogExcerptOrSummary);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["docker", "docker_basic"],
+        &[
+            "restart",
+            "restart_container",
+            "start",
+            "start_container",
+            "stop",
+            "stop_container",
+        ],
+    ) {
+        return Some(FinalAnswerShape::LifecycleResult);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
         &["filesystem", "fs", "fs_basic"],
         &["count_entries"],
     ) {
