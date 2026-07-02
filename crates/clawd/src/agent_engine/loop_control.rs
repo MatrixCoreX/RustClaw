@@ -892,7 +892,7 @@ async fn run_agent_round(
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
         loop_state.output_contract = Some(output_contract.clone());
         loop_state.output_vars.insert(
-            "agent_loop.effective_output_contract_semantic_kind".to_string(),
+            "agent_loop.effective_output_contract_marker".to_string(),
             output_contract.semantic_kind.as_str().to_string(),
         );
     }
