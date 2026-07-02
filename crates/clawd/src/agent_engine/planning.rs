@@ -98,6 +98,7 @@ mod preferred_structured_action;
 mod read_range_action;
 #[path = "runtime_status_scalar_plan.rs"]
 mod runtime_status_scalar_plan;
+#[cfg(test)]
 #[path = "runtime_surface_plan.rs"]
 mod runtime_surface_plan;
 #[path = "scalar_compare_observation.rs"]
@@ -147,6 +148,7 @@ use media_artifact_plan::*;
 use preferred_structured_action::*;
 use read_range_action::*;
 use runtime_status_scalar_plan::*;
+#[cfg(test)]
 use runtime_surface_plan::*;
 use scalar_compare_observation::*;
 use scalar_count_deterministic_plan::*;
@@ -220,46 +222,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_explicit_command_run_cmd"
         );
     }
-    return_deterministic_plan!(
-        hook_permission_surface_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_hook_permission_surface"
-    );
-    return_deterministic_plan!(
-        clawcli_resume_surface_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_clawcli_resume_surface"
-    );
-    return_deterministic_plan!(
-        subagent_bounded_batch_surface_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_subagent_bounded_batch_surface"
-    );
-    return_deterministic_plan!(
-        subagent_review_boundary_surface_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_subagent_review_boundary_surface"
-    );
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
             state,
