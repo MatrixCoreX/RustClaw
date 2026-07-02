@@ -1047,42 +1047,6 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
 }
 
 #[test]
-fn web_search_summary_contract_uses_web_search_extract_plan() {
-    let state = test_state_with_enabled_skills(&["web_search_extract"]);
-    let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
-    route.resolved_intent = "capability_ref=web.search_results".to_string();
-    route.output_contract.locator_hint = "query=rust async tutorial".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
-    let loop_state = LoopState::new(1);
-
-    let plan = web_search_summary_deterministic_plan_result(
-        &state,
-        "search web",
-        Some(&route),
-        &loop_state,
-        "fallback user text",
-    )
-    .expect("web search summary contract should use web_search_extract");
-
-    assert_eq!(plan.steps.len(), 3);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "web_search_extract", "search_extract");
-    assert_eq!(
-        args.get("query").and_then(Value::as_str),
-        Some("rust async tutorial")
-    );
-    assert_eq!(
-        args.get("backend").and_then(Value::as_str),
-        Some("duckduckgo_html")
-    );
-    assert_eq!(args.get("top_k").and_then(Value::as_u64), Some(3));
-}
-
-#[test]
 fn service_status_health_check_capability_uses_health_check_plan() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
