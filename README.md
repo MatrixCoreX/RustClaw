@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Missing required information is handled through boundary/finalizer clarification paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Ordinary missing-slot decisions stay loop-owned; boundary finalization is limited to explicit schedule, safety, protocol, or already-observed completion paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
 
 ### Request And Agent Loop Flow
 
@@ -39,9 +39,9 @@ flowchart TD
     G --> H[Ask context bundle<br/>memory + attachments + recent execution]
     H --> I[Boundary guards<br/>locator + contract + safety + budget + boundary hints]
     I -->|agent-loop authority| J[Agent-loop semantic authority]
-    I -->|schedule / clarify / machine fast path / boundary completion| K[Boundary-owned finalize path]
+    I -->|schedule / safety / explicit protocol completion| K[Boundary-owned finalize path]
     J --> L{Loop round}
-    L -->|explicit observation / boundary contract| M[Runtime-built boundary plan]
+    L -->|existing observation / explicit protocol| M[Runtime protocol projection]
     L -->|general work| N[Planner LLM<br/>call_capability preferred]
     M --> O[CapabilityResolver]
     N --> O
@@ -95,7 +95,7 @@ Quick facts for direct skill tasks:
 | Question | `kind=ask` | `kind=run_skill` |
 | --- | --- | --- |
 | Does it run the intent normalizer? | Yes, as structured hint and compatibility input. | No. The caller already supplied the target skill. |
-| Does it enter the planner / agent loop? | Yes by default for ordinary natural-language work; boundary-owned clarifications, schedules, and machine fact fast paths may finalize without a planner round. | No. It does not ask the planner to choose a skill or action. |
+| Does it enter the planner / agent loop? | Yes by default for ordinary natural-language work; explicit schedule, safety, protocol, and already-observed completion paths may finalize without asking the planner to choose a capability. | No. It does not ask the planner to choose a skill or action. |
 | Does it use `CapabilityResolver` / `PlanVerifier` for semantic selection? | Yes, planner steps are resolved and verified before execution. | No semantic selection. It still uses dispatch/protocol validation for the explicit skill call. |
 | Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
 | Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
@@ -125,10 +125,10 @@ flowchart TD
     D --> E[Ask context bundle]
     E --> F[Boundary guards<br/>machine fields only]
     F -->|agent-loop authority| G[Agent-loop context]
-    F -->|schedule / clarify / machine fast path| H[Boundary finalization path]
+    F -->|schedule / safety / explicit protocol completion| H[Boundary finalization path]
     G --> I{Round source}
-    I -->|explicit protocol / boundary contract| J[Runtime boundary plan]
-    I -->|runtime async command contract| JA[Async job boundary plan<br/>start / poll / cancel]
+    I -->|existing observation / explicit protocol| J[Runtime protocol projection]
+    I -->|runtime async command contract| JA[Async job protocol projection<br/>start / poll / cancel]
     I -->|needs reasoning| K[LLM: planner round]
     K --> L[Plan JSON steps]
     J --> M[CapabilityResolver]
@@ -171,7 +171,7 @@ flowchart TD
 ```
 
 - `Normalizer prompt`: lets an LLM read the user turn and emit schema-backed fields. Runtime consumes those fields as hints and contracts rather than matching user phrases.
-- `Planner prompt`: is built for loop rounds that need model reasoning. Only explicit protocol or boundary contracts, such as dry-run projections, runtime status surfaces, async job polling, and safety/status completion, may use runtime-built plans without an extra planner call; ordinary semantic capability choice remains planner-owned.
+- `Planner prompt`: is built for loop rounds that need model reasoning. Only explicit protocol or state projections, such as async job polling and safety/status completion, may complete without asking the planner to choose a capability; ordinary semantic capability choice remains planner-owned.
 - `call_capability`: is the preferred planner action because it keeps skill/tool choice behind registry metadata and resolver policy.
 - `Generated INTERFACE prompts`: come from `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`; new skills should improve these contracts instead of adding `clawd` main-flow branches.
 - `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
@@ -183,7 +183,7 @@ flowchart TD
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
 - `RepairEnvelope`: verifier, executor, permission, provider, and checkpoint recovery paths expose structured repair context to the next loop round; user-visible fallback prose should come from i18n, finalizer, UI, or the model, not runtime templates.
-- `Boundary finalization`: remains for schedule, clarify, machine fact fast paths, and explicit safety/status completion. It is not an ordinary semantic router, and it should not reintroduce route-authority rollback switches.
+- `Boundary finalization`: remains for explicit schedule, safety, protocol, status, and already-observed completion paths. It is not an ordinary semantic router, and it should not reintroduce route-authority rollback switches.
 
 ### Permission Plane And Command Policy
 
