@@ -308,6 +308,69 @@ fn route_capability_ref_allows_system_policy_without_semantic_kind() {
 }
 
 #[test]
+fn route_capability_ref_allows_process_and_task_control_policy_without_semantic_kind() {
+    for (capability_ref, skill, args, expected_action) in [
+        (
+            "capability_ref=process.ps",
+            "process_basic",
+            serde_json::json!({"action":"ps","limit":5}),
+            "process_basic.ps",
+        ),
+        (
+            "capability_ref=process.port_list",
+            "process_basic",
+            serde_json::json!({"action":"port_list","port":8080}),
+            "process_basic.port_list",
+        ),
+        (
+            "capability_ref=process.kill",
+            "process_basic",
+            serde_json::json!({"action":"kill","pid":12345,"signal":"TERM"}),
+            "process_basic.kill",
+        ),
+        (
+            "capability_ref=process.tail_log",
+            "process_basic",
+            serde_json::json!({"action":"tail_log","path":"logs/claw.log","n":20}),
+            "process_basic.tail_log",
+        ),
+        (
+            "capability_ref=task_control.list",
+            "task_control",
+            serde_json::json!({"action":"list","limit":10}),
+            "task_control.list",
+        ),
+        (
+            "capability_ref=task_control.get",
+            "task_control",
+            serde_json::json!({"action":"get","task_id":"task-1"}),
+            "task_control.get",
+        ),
+        (
+            "capability_ref=task_control.cancel_one",
+            "task_control",
+            serde_json::json!({"action":"cancel_one","index":1,"confirm":true}),
+            "task_control.cancel_one",
+        ),
+        (
+            "capability_ref=task_control.resume",
+            "task_control",
+            serde_json::json!({"action":"resume","task_id":"task-1","dry_run":true}),
+            "task_control.resume",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+    }
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (
