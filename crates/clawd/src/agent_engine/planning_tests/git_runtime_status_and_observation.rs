@@ -104,7 +104,7 @@ fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
 fn git_repository_state_remote_request_plans_git_remote_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -152,7 +152,7 @@ fn git_repository_state_contract_without_machine_token_defers_to_planner() {
 fn git_repository_state_status_capability_ref_plans_git_status_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -222,7 +222,7 @@ fn recent_scalar_current_workspace_plans_git_branch_without_nl_matching() {
     let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Strict,
     );
