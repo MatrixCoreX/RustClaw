@@ -142,7 +142,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             }],
         ));
     }
-    if local_process_cancel_dry_run_tokens_present(&route_tokens) {
+    if local_process_cancel_dry_run_tokens_present(&route_only_tokens) {
         return Some(build_plan_result(
             goal,
             "deterministic:local_process_cancel_dry_run_contract",
@@ -350,10 +350,10 @@ fn finalizer_language_policy_dry_run_tokens_present(text: &str) -> bool {
 
 fn local_process_cancel_dry_run_tokens_present(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    normalized.contains("local_process_poll")
+    contains_machine_kv_or_json_pair(&normalized, "adapter_kind", "local_process_poll")
         && normalized.contains("cancel_ref")
         && normalized.contains("terminal_projection")
-        && (normalized.contains("status=cancelled") || normalized.contains("status\":\"cancelled"))
+        && contains_machine_kv_or_json_pair(&normalized, "status", "cancelled")
         && has_dry_run_machine_token(&normalized)
 }
 

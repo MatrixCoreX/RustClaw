@@ -266,6 +266,25 @@ fn local_process_cancel_dry_run_prefers_local_process_adapter_contract() {
 }
 
 #[test]
+fn local_process_cancel_dry_run_ignores_bare_adapter_words() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "dry_run local_process_poll cancel_ref terminal_projection cancelled".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = structured_dry_run_response_deterministic_plan_result(
+        "dry_run local_process_poll cancel_ref terminal_projection cancelled",
+        Some(&route),
+        &loop_state,
+    );
+
+    assert!(
+        plan.is_none(),
+        "bare local-process adapter words should not preempt planner authority"
+    );
+}
+
+#[test]
 fn observed_output_projection_dry_run_prefers_projection_contract() {
     let mut route = base_route_result();
     route.resolved_intent = serde_json::json!({
