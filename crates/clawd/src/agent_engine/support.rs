@@ -256,11 +256,17 @@ impl AgentLoopGuardPolicy {
         let Some(route) = route_result else {
             return LoopBudgetProfile::General;
         };
-        let contract = crate::TaskContract::from_route_result(route);
+        let operation = crate::task_contract::operation_for_route(route);
+        let target_object = crate::task_contract::target_object_for_route(route);
+        let required_evidence_fields =
+            crate::task_contract::required_evidence_fields_for_route(route);
+        let evidence_required = route.output_contract.requires_content_evidence
+            || route.output_contract.delivery_required
+            || !required_evidence_fields.is_empty();
         if route.output_contract.delivery_required
             || route.wants_file_delivery
             || matches!(
-                contract.operation,
+                operation,
                 crate::task_contract::TaskOperation::Write
                     | crate::task_contract::TaskOperation::Modify
             )
@@ -268,18 +274,16 @@ impl AgentLoopGuardPolicy {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
         if matches!(
-            contract.target_object,
+            target_object,
             crate::task_contract::TaskTargetObject::Directory
-        ) && matches!(
-            contract.operation,
-            crate::task_contract::TaskOperation::Summarize
-        ) {
+        ) && matches!(operation, crate::task_contract::TaskOperation::Summarize)
+        {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
-        if contract.required_evidence_fields.len() >= 2
-            || (contract.evidence_required
+        if required_evidence_fields.len() >= 2
+            || (evidence_required
                 && matches!(
-                    contract.operation,
+                    operation,
                     crate::task_contract::TaskOperation::Summarize
                         | crate::task_contract::TaskOperation::Validate
                         | crate::task_contract::TaskOperation::Run

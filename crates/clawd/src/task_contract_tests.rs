@@ -83,7 +83,7 @@ fn task_contract_includes_structured_workspace_target() {
     assert_eq!(contract.targets[0].role, TaskTargetRole::Primary);
     assert_eq!(contract.targets[0].kind, TaskTargetObject::Directory);
     assert_eq!(contract.targets[0].locator, ".");
-    assert!(contract.compact_prompt_line().contains("\"locator\":\".\""));
+    assert!(evidence_policy_context_prompt_line_for_route(&route).contains("\"locator\":\".\""));
 }
 
 #[test]
@@ -102,8 +102,7 @@ fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
 
     assert_eq!(contract.operation, TaskOperation::Summarize);
     assert_eq!(contract.required_evidence_fields, vec!["candidates"]);
-    assert!(!contract
-        .compact_prompt_line()
+    assert!(!evidence_policy_context_prompt_line_for_route(&route)
         .contains("required_evidence_fields=content_excerpt"));
 }
 
@@ -291,9 +290,9 @@ fn task_contract_splits_structured_multi_target_locator() {
         contract.required_evidence_fields,
         vec!["exists", "field_value", "kind", "size_bytes"]
     );
-    assert!(contract
-        .compact_prompt_line()
-        .contains("\"locator\":\"AGENTS.md\""));
+    assert!(
+        evidence_policy_context_prompt_line_for_route(&route).contains("\"locator\":\"AGENTS.md\"")
+    );
 }
 
 #[test]
