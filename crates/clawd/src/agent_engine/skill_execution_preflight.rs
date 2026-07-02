@@ -256,7 +256,7 @@ pub(super) fn contract_matrix_action_policy_error(
         None,
         Some(json!({
             "reason_code": "contract_action_rejected",
-            "failure_attribution": crate::contract_matrix::FailureAttribution::ContractGap.as_str(),
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ContractGap.as_str(),
             "decision": policy.decision.as_str(),
             "action": policy.action_key,
             "original_action_ref": policy.original_action_ref,
@@ -338,7 +338,7 @@ fn run_cmd_async_start_policy_error(
         None,
         Some(json!({
             "reason_code": "async_start_requires_bounded_poll_and_expiry",
-            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
             "action": "run_cmd",
             "required_fields": ["poll_after_seconds", "expires_in_seconds"],
@@ -391,7 +391,7 @@ fn generated_media_path_run_cmd_policy_error(
         Some(json!({
             "reason_code": "media_artifact_requires_media_skill",
             "message_key": "clawd.contract.media_artifact_requires_media_skill",
-            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed.as_str(),
             "policy_decision": crate::policy_decision::PolicyDecision::from_contract_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
@@ -623,7 +623,7 @@ pub(super) fn capability_isolation_policy_error(
         None,
         Some(json!({
             "reason_code": "isolation_policy_violation",
-            "failure_attribution": crate::contract_matrix::FailureAttribution::PermissionDenied.as_str(),
+            "failure_attribution": crate::evidence_policy::FailureAttribution::PermissionDenied.as_str(),
             "decision": crate::evidence_policy::ActionPolicyDecision::RejectedForbidden.as_str(),
             "policy_decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
             "canonical_skill": canonical_skill,
@@ -871,7 +871,7 @@ pub(super) fn contract_matrix_arg_policy_error(
         None,
         Some(json!({
             "reason_code": "contract_arg_rejected",
-            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": policy.decision.as_str(),
             "policy_decision": crate::policy_decision::PolicyDecision::from_contract_arg_policy(
                 policy.decision
