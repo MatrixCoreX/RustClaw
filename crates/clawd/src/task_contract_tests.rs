@@ -155,6 +155,27 @@ fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
 }
 
 #[test]
+fn task_contract_failure_policy_does_not_depend_on_execute_gate_trace() {
+    let route = route_with_contract(
+        AskMode::planner_execute_plain(),
+        IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: false,
+            locator_kind: OutputLocatorKind::None,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        },
+    );
+
+    let contract = TaskContract::from_route_result(&route);
+
+    assert_eq!(contract.operation, TaskOperation::Unknown);
+    assert!(!contract.evidence_required);
+    assert!(contract.missing_parameters.is_empty());
+    assert_eq!(contract.failure_policy, TaskFailurePolicy::NoRetry);
+}
+
+#[test]
 fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
     for (marker, target, operation, evidence) in [
         (

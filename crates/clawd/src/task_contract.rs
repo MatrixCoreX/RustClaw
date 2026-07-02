@@ -744,7 +744,7 @@ fn failure_policy_for_route(
 ) -> TaskFailurePolicy {
     if route.needs_clarify || !missing_parameters.is_empty() {
         TaskFailurePolicy::Clarify
-    } else if route.is_execute_gate() || evidence_required {
+    } else if evidence_required {
         TaskFailurePolicy::RetryWithAlternatives
     } else {
         TaskFailurePolicy::NoRetry
