@@ -1043,6 +1043,88 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
                 &["remove_path", "delete_path"],
             )
         }
+        ("service_control", "status") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["service", "service_control"],
+                &["status"],
+            )
+        }
+        ("service_control", "verify") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["service", "service_control"],
+                &["verify"],
+            )
+        }
+        ("service_control", "logs") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["service", "service_control"],
+                &["logs"],
+            )
+        }
+        ("service_control", "start" | "stop" | "restart") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["service", "service_control"],
+                &[action_name],
+            )
+        }
+        ("docker_basic", "ps") => crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["docker", "docker_basic"],
+            &["list_containers", "ps"],
+        ),
+        ("docker_basic", "images") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["list_images", "images"],
+            )
+        }
+        ("docker_basic", "version") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["version"],
+            )
+        }
+        ("docker_basic", "inspect") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["inspect_container", "inspect"],
+            )
+        }
+        ("docker_basic", "logs") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["read_logs", "logs"],
+            )
+        }
+        ("docker_basic", "restart") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["restart", "restart_container"],
+            )
+        }
+        ("docker_basic", "start") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["start", "start_container"],
+            )
+        }
+        ("docker_basic", "stop") => {
+            crate::machine_capability_ref::route_has_capability_action_name(
+                route,
+                &["docker", "docker_basic"],
+                &["stop", "stop_container"],
+            )
+        }
         ("config_edit", "plan_config_change") => {
             crate::machine_capability_ref::route_has_capability_action_name(
                 route,
