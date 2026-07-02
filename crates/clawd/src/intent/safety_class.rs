@@ -24,7 +24,7 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if route_result.needs_clarify || !route_result.is_execute_gate() {
+    if route_result.needs_clarify {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::Low,
             reason: "non_mutating_route",
@@ -100,8 +100,8 @@ pub(crate) fn classify_route_risk_ceiling(
     }
 
     SafetyClassDecision {
-        risk_ceiling: RiskCeiling::Unknown,
-        reason: "insufficient_signal",
+        risk_ceiling: RiskCeiling::Low,
+        reason: "non_mutating_route",
     }
 }
 
