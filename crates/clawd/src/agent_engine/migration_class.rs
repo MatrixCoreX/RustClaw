@@ -164,9 +164,9 @@ pub(crate) fn agent_decides_eligible_migration_class(route: &RouteResult) -> &'s
 }
 
 pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibility {
-    let evidence_required = crate::task_contract::evidence_required_for_route(route);
-    let missing_parameters = crate::task_contract::missing_parameters_for_route(route);
-    let operation = crate::task_contract::operation_for_route(route);
+    let evidence_required = crate::evidence_policy::evidence_required_for_route(route);
+    let missing_parameters = crate::evidence_policy::missing_parameters_for_route(route);
+    let operation = crate::evidence_policy::operation_for_route(route);
     if route.risk_ceiling == RiskCeiling::High {
         return AgentLoopEligibility::blocked("risk_ceiling_high");
     }
@@ -204,7 +204,8 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
     }
     if matches!(
         operation,
-        crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
+        crate::evidence_policy::EvidenceOperation::Write
+            | crate::evidence_policy::EvidenceOperation::Modify
     ) {
         return AgentLoopEligibility::blocked("side_effect_operation");
     }
@@ -344,14 +345,15 @@ fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
 
 fn route_is_low_risk_single_file_delivery(
     route: &RouteResult,
-    operation: crate::task_contract::TaskOperation,
+    operation: crate::evidence_policy::EvidenceOperation,
 ) -> bool {
     if !(route.wants_file_delivery || route.output_contract.delivery_required) {
         return false;
     }
     if matches!(
         operation,
-        crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
+        crate::evidence_policy::EvidenceOperation::Write
+            | crate::evidence_policy::EvidenceOperation::Modify
     ) {
         return false;
     }

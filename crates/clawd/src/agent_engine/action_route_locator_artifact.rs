@@ -840,7 +840,8 @@ pub(super) fn path_matches_workspace_scope_hint(path: &str, scope_hint: &str) ->
 }
 
 pub(super) fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
-    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence_fields =
+        crate::evidence_policy::required_evidence_fields_for_route(route);
     !route.needs_clarify
         && !route.output_contract.delivery_required
         && route.output_contract_marker_is_any(&[
@@ -861,7 +862,7 @@ pub(super) fn route_requests_path_metadata_compare(route: &RouteResult) -> bool 
 }
 
 fn route_has_multiple_locator_targets(route: &RouteResult) -> bool {
-    crate::task_contract::target_locators_for_route(route)
+    crate::evidence_policy::target_locators_for_route(route)
         .into_iter()
         .filter(|value| !value.trim().is_empty())
         .take(2)
@@ -1096,7 +1097,7 @@ pub(super) fn actions_satisfy_single_path_metadata_facts(
 ) -> bool {
     if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         || route.output_contract.delivery_required
-        || crate::task_contract::target_locators_for_route(route).len() > 1
+        || crate::evidence_policy::target_locators_for_route(route).len() > 1
     {
         return false;
     }

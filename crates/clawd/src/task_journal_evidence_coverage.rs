@@ -40,7 +40,7 @@ pub(crate) fn evidence_coverage_for_route(
     route: &crate::RouteResult,
     journal: &TaskJournal,
 ) -> TaskJournalEvidenceCoverage {
-    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence = crate::evidence_policy::required_evidence_fields_for_route(route);
     let (observed_fields, mut observed_canonical, observed_extractors, observed_evidence_sources) =
         observed_evidence_field_sets(journal);
     augment_route_canonical_evidence(
@@ -585,7 +585,7 @@ pub(super) fn step_can_supply_contract_evidence(
                     && route.is_some_and(|route| {
                         route.output_contract_marker_is(
                             crate::OutputSemanticKind::ExecutionFailedStep,
-                        ) || crate::task_contract::required_evidence_fields_for_output_contract(
+                        ) || crate::evidence_policy::required_evidence_fields_for_output_contract(
                             &route.effective_output_contract(),
                         )
                         .iter()

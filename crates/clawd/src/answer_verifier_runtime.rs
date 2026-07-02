@@ -458,7 +458,7 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<AnswerVerifierOut> {
     let required_evidence_fields =
-        crate::task_contract::required_evidence_fields_for_route(route_result);
+        crate::evidence_policy::required_evidence_fields_for_route(route_result);
     if required_evidence_fields.is_empty() {
         return None;
     }
@@ -1194,7 +1194,7 @@ pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde
 }
 
 pub(super) fn evidence_policy_context_prompt_block(route_result: &RouteResult) -> String {
-    crate::task_contract::evidence_policy_context_prompt_line_for_route(route_result)
+    crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route_result)
 }
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {

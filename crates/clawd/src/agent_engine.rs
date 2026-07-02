@@ -448,7 +448,7 @@ fn build_turn_analysis_prompt_block(
         lines.push(format!("- state_patch={state_patch}"));
     }
     if let Some(route) = route_result {
-        lines.push(crate::task_contract::evidence_policy_context_prompt_line_for_route(route));
+        lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
         if let Some(contract_matrix_line) =
             crate::evidence_policy::compact_prompt_line_for_route(route)
         {

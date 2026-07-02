@@ -107,7 +107,7 @@ fn route_has_single_existing_locator_hint(
     state: &AppState,
     route_result: &crate::RouteResult,
 ) -> bool {
-    let locators = crate::task_contract::target_locators_for_route(route_result);
+    let locators = crate::evidence_policy::target_locators_for_route(route_result);
     if locators.len() > 1 {
         return false;
     }
