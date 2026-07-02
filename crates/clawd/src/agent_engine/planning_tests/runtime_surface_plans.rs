@@ -67,6 +67,7 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
 fn clawcli_resume_surface_reports_resume_task_id_field_token() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.route_reason = "surface=clawcli subcommand=resume".to_string();
