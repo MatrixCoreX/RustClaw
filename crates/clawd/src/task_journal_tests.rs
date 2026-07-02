@@ -310,461 +310,6 @@ fn summary_json_preserves_task_lifecycle_checkpoint_machine_fields() {
 }
 
 #[test]
-fn agent_decides_shadow_attribution_is_machine_readable() {
-    let mut route = route_for_semantic(crate::OutputSemanticKind::FileNames);
-    route.output_contract.requires_content_evidence = true;
-    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
-        &route,
-        "fast_read",
-        Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
-    );
-    let mut journal = TaskJournal::for_task("task-agent-decides", "ask", "prompt");
-    journal.record_rollout_attribution(attribution);
-    let summary = journal.to_summary_json();
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/switch_name")
-            .and_then(Value::as_str),
-        Some("semantic_route_authority")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/route_gate_kind")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/initial_gate_ref")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/initial_hint_ref")
-            .and_then(Value::as_str),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/old_first_layer_decision")
-            .and_then(Value::as_str),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/agent_decision")
-            .and_then(Value::as_str),
-        Some("not_evaluated")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/owner_layer")
-            .and_then(Value::as_str),
-        Some("agent_loop_shadow")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/risk_level")
-            .and_then(Value::as_str),
-        Some("Unknown")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/output_contract_ref")
-            .and_then(Value::as_str),
-        Some(
-            "semantic:file_names|shape:free|locator:current_workspace|delivery:none|content_evidence:true"
-        )
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/required_evidence")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/agent_required_evidence")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(0)
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/budget_profile")
-            .and_then(Value::as_str),
-        Some("fast_read")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/owner_layer")
-            .and_then(Value::as_str),
-        Some("boundary_layer")
-    );
-}
-
-#[test]
-fn dispatch_boundary_attribution_records_owner_and_rollback_tokens() {
-    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
-    let attribution = TaskJournalRolloutAttribution::dispatch_boundary_attribution(
-        &route,
-        "clarify_boundary_shortcut",
-        "legacy_pre_agent_locator_clarify",
-        "boundary_clarify_gate",
-        "ask_pipeline_boundary_clarify_shortcut",
-        "semantic_route_authority:legacy_pre_agent",
-    );
-    let mut journal = TaskJournal::for_task("task-dispatch-boundary", "ask", "prompt");
-    journal.record_rollout_attribution(attribution);
-    let summary = journal.to_summary_json();
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/switch_name")
-            .and_then(Value::as_str),
-        Some("semantic_route_authority")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/event")
-            .and_then(Value::as_str),
-        Some("clarify_boundary_shortcut")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/outcome")
-            .and_then(Value::as_str),
-        Some("observed")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/route_gate_kind")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/initial_gate_ref")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/initial_hint_ref")
-            .and_then(Value::as_str),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/old_first_layer_decision")
-            .and_then(Value::as_str),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/old_owner")
-            .and_then(Value::as_str),
-        Some("legacy_pre_agent_locator_clarify")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/new_owner")
-            .and_then(Value::as_str),
-        Some("boundary_clarify_gate")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/chosen_path")
-            .and_then(Value::as_str),
-        Some("ask_pipeline_boundary_clarify_shortcut")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/rollback_token")
-            .and_then(Value::as_str),
-        Some("semantic_route_authority:legacy_pre_agent")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/decision_source")
-            .and_then(Value::as_str),
-        Some("compat_trace")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/semantic_control_state")
-            .and_then(Value::as_str),
-        Some("none")
-    );
-}
-
-#[test]
-fn agent_decides_first_action_attribution_is_machine_readable() {
-    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
-    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
-        &route,
-        "fast_read",
-        &[crate::AgentAction::CallCapability {
-            capability: "fs.read_text_range".to_string(),
-            args: json!({"path": "README.md"}),
-        }],
-        Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
-    );
-    let mut journal = TaskJournal::for_task("task-agent-decides-action", "ask", "prompt");
-    journal.record_rollout_attribution(attribution);
-    let summary = journal.to_summary_json();
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/event")
-            .and_then(Value::as_str),
-        Some("agent_decides_shadow_first_action")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/route_gate_kind")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/agent_decision")
-            .and_then(Value::as_str),
-        Some("call_capability")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_delta")
-            .and_then(Value::as_str),
-        Some("same_gate")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/capability_delta")
-            .and_then(Value::as_str),
-        Some("agent_capability_ref")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision")
-            .and_then(Value::as_str),
-        Some("call_capability")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/capability_ref")
-            .and_then(Value::as_str),
-        Some("fs.read_text_range")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/missing_slots")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(0)
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/output_contract_ref")
-            .and_then(Value::as_str),
-        Some(
-            "semantic:file_names|shape:free|locator:current_workspace|delivery:none|content_evidence:false"
-        )
-    );
-    assert_eq!(
-        summary.pointer("/rollout_attribution/0/agent_required_evidence"),
-        summary.pointer("/rollout_attribution/0/old_required_evidence")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/boundary_context/owner_layer")
-            .and_then(Value::as_str),
-        Some("boundary_layer")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/schema_version")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/source")
-            .and_then(Value::as_str),
-        Some("planner_first_action_shadow")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/initial_hint_ref")
-            .and_then(Value::as_str),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/initial_gate_ref")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/semantic_authority")
-            .and_then(Value::as_str),
-        Some("planner_loop_shadow")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/fallback_gate_policy")
-            .and_then(Value::as_str),
-        Some("fallback_safety_check_only")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/decision")
-            .and_then(Value::as_str),
-        Some("call_capability")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/terminal_intent")
-            .and_then(Value::as_str),
-        Some("continue")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
-            .and_then(Value::as_str),
-        Some("act")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_control_act_first_action")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_first_action_call_capability")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
-            .and_then(Value::as_str),
-        Some("valid")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_decision_shadow_valid")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/capability_ref")
-            .and_then(Value::as_str),
-        Some("fs.read_text_range")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/language_rendering_policy")
-            .and_then(Value::as_str),
-        Some("defer_until_observation")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/evidence_needed")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/answer_shape")
-            .and_then(Value::as_str),
-        Some("name_list")
-    );
-}
-
-#[test]
-fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.set_clarify_gate();
-    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
-        &route,
-        "fast_read",
-        &[crate::AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        }],
-        None,
-    );
-    let mut journal = TaskJournal::for_task("task-agent-decides-clarify", "ask", "prompt");
-    journal.record_rollout_attribution(attribution);
-    let summary = journal.to_summary_json();
-
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/decision")
-            .and_then(Value::as_str),
-        Some("clarify")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/terminal_intent")
-            .and_then(Value::as_str),
-        Some("clarify")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
-            .and_then(Value::as_str),
-        Some("recover")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_control_recover_invalid_clarify")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_first_action_clarify")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/clarify_reason_code")
-            .and_then(Value::as_str),
-        Some("clarify_missing_structured_slots")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
-            .and_then(Value::as_str),
-        Some("shadow_invalid")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
-            .and_then(Value::as_str),
-        Some("clarify_missing_structured_slots")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/language_rendering_policy")
-            .and_then(Value::as_str),
-        Some("finalizer_llm_i18n")
-    );
-}
-
-#[test]
 fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
     let route = route_for_semantic(crate::OutputSemanticKind::None);
     let plan = crate::PlanResult {
@@ -929,54 +474,6 @@ fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
 }
 
 #[test]
-fn agent_loop_decision_envelope_flags_respond_without_required_evidence() {
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
-    route.output_contract.requires_content_evidence = true;
-    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
-        &route,
-        "grounded_summary",
-        &[crate::AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        }],
-        None,
-    );
-    let mut journal = TaskJournal::for_task("task-agent-decides-respond", "ask", "prompt");
-    journal.record_rollout_attribution(attribution);
-    let summary = journal.to_summary_json();
-
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/decision")
-            .and_then(Value::as_str),
-        Some("respond")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
-            .and_then(Value::as_str),
-        Some("shadow_invalid")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
-            .and_then(Value::as_str),
-        Some("respond_requires_evidence_observation")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_intent")
-            .and_then(Value::as_str),
-        Some("recover")
-    );
-    assert_eq!(
-        summary
-            .pointer("/rollout_attribution/0/decision_envelope/control_reason_code")
-            .and_then(Value::as_str),
-        Some("agent_loop_control_recover_missing_evidence")
-    );
-}
-
-#[test]
 fn agent_loop_decision_envelope_schema_drift() {
     const SCHEMA_RAW: &str =
         include_str!("../../../prompts/schemas/agent_loop_decision_envelope.schema.json");
@@ -997,10 +494,7 @@ fn agent_loop_decision_envelope_schema_drift() {
     let fields = [
         "schema_version",
         "source",
-        "initial_hint_ref",
-        "initial_gate_ref",
         "semantic_authority",
-        "fallback_gate_policy",
         "decision",
         "terminal_intent",
         "control_intent",
@@ -1108,14 +602,22 @@ fn agent_loop_decision_envelope_schema_drift() {
     assert!(semantic_authorities
         .iter()
         .any(|value| value.as_str() == Some("planner_loop_shadow")));
-    let fallback_policies = properties
-        .get("fallback_gate_policy")
-        .and_then(|value| value.get("enum"))
-        .and_then(Value::as_array)
-        .expect("fallback gate policy enum");
-    assert!(fallback_policies
-        .iter()
-        .any(|value| value.as_str() == Some("fallback_safety_check_only")));
+    for legacy_field in [
+        "initial_hint_ref",
+        "initial_gate_ref",
+        "fallback_gate_policy",
+    ] {
+        assert!(
+            !properties.contains_key(legacy_field),
+            "schema should not expose legacy field `{legacy_field}`"
+        );
+        assert!(
+            !required
+                .iter()
+                .any(|value| value.as_str() == Some(legacy_field)),
+            "schema required should not expose legacy field `{legacy_field}`"
+        );
+    }
 }
 
 #[test]
@@ -1214,13 +716,14 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
     };
     let mut journal = TaskJournal::for_task("task-round-source", "ask", "inspect");
     journal.record_route_result(&route);
-    journal.record_rollout_attribution(
-        TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
-            &route,
-            "fast_read",
-            Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
-        ),
-    );
+    journal.record_rollout_attribution(TaskJournalRolloutAttribution {
+        switch_name: "agent_loop_round_context".to_string(),
+        event: "round_context_recorded".to_string(),
+        outcome: "observed".to_string(),
+        budget_profile: Some("fast_read".to_string()),
+        boundary_context: Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
+        ..Default::default()
+    });
     journal.record_final_stop_signal("max_tool_calls");
     journal.rounds.push(TaskJournalRoundTrace {
         round_no: 1,

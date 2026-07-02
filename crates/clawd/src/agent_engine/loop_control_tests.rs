@@ -188,6 +188,16 @@ fn decision_envelope_output_vars_do_not_expose_initial_gate_ref_as_field() {
     assert!(loop_state
         .output_vars
         .contains_key("agent_loop.decision_envelope"));
+    let envelope: serde_json::Value = serde_json::from_str(
+        loop_state
+            .output_vars
+            .get("agent_loop.decision_envelope")
+            .expect("decision envelope"),
+    )
+    .expect("decision envelope json");
+    assert!(envelope.get("initial_gate_ref").is_none());
+    assert!(envelope.get("initial_hint_ref").is_none());
+    assert!(envelope.get("fallback_gate_policy").is_none());
     assert!(!loop_state
         .output_vars
         .contains_key("agent_loop.initial_gate_ref"));

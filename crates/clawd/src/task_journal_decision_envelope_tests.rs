@@ -67,12 +67,15 @@ fn trace_json_includes_round_decision_envelope() {
             .and_then(Value::as_str),
         Some("planner_round_action")
     );
-    assert_eq!(
-        trace
-            .pointer("/rounds/0/decision_envelope/initial_gate_ref")
-            .and_then(Value::as_str),
-        Some("execute")
-    );
+    assert!(trace
+        .pointer("/rounds/0/decision_envelope/initial_gate_ref")
+        .is_none());
+    assert!(trace
+        .pointer("/rounds/0/decision_envelope/initial_hint_ref")
+        .is_none());
+    assert!(trace
+        .pointer("/rounds/0/decision_envelope/fallback_gate_policy")
+        .is_none());
     assert_eq!(
         trace
             .pointer("/rounds/0/decision_envelope/semantic_authority")
@@ -122,6 +125,17 @@ fn trace_json_includes_round_decision_envelope() {
             .and_then(Value::as_str),
         Some("free")
     );
+}
+
+#[test]
+fn output_contract_ref_for_route_uses_effective_contract_marker() {
+    let mut route = route_for_round_envelope();
+    route.route_reason = "contract:workspace_project_summary".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+
+    let output_contract_ref = super::decision_envelope::output_contract_ref_for_route(&route);
+
+    assert!(output_contract_ref.contains("semantic:workspace_project_summary"));
 }
 
 #[test]

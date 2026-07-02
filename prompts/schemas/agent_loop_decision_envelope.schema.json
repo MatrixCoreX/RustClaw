@@ -8,10 +8,7 @@
   "required": [
     "schema_version",
     "source",
-    "initial_hint_ref",
-    "initial_gate_ref",
     "semantic_authority",
-    "fallback_gate_policy",
     "decision",
     "terminal_intent",
     "control_intent",
@@ -41,24 +38,10 @@
       "type": "string",
       "enum": ["planner_first_action_shadow", "planner_round_action"]
     },
-    "initial_hint_ref": {
-      "type": "string",
-      "description": "Legacy machine ref for the pre-agent first-layer hint. This is retained for trace compatibility, not semantic authority."
-    },
-    "initial_gate_ref": {
-      "type": "string",
-      "enum": ["chat", "clarify", "execute"],
-      "description": "Gate-kind machine ref derived from AskMode. Planner-loop decisions use this as the comparable pre-agent gate signal."
-    },
     "semantic_authority": {
       "type": "string",
       "enum": ["planner_loop_shadow", "planner_loop_runtime"],
       "description": "Layer that owns the semantic decision envelope."
-    },
-    "fallback_gate_policy": {
-      "type": "string",
-      "enum": ["fallback_safety_check_only"],
-      "description": "Pre-agent direct-answer gate policy after planner-loop migration."
     },
     "decision": {
       "type": "string",
