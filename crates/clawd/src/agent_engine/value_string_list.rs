@@ -1031,6 +1031,7 @@ pub(super) fn structured_field_leaf_query(field_path: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 pub(super) fn service_status_requests_system_basic_identity(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action_name(
         route,
@@ -1039,6 +1040,7 @@ pub(super) fn service_status_requests_system_basic_identity(route: &RouteResult)
     )
 }
 
+#[cfg(test)]
 pub(super) fn service_status_system_basic_info_plan(
     goal: &str,
     route: &RouteResult,
@@ -1066,6 +1068,7 @@ pub(super) fn service_status_system_basic_info_plan(
     None
 }
 
+#[cfg(test)]
 pub(super) fn service_status_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1284,6 +1287,7 @@ pub(super) fn service_status_deterministic_plan_result(
     None
 }
 
+#[cfg(test)]
 fn service_status_process_port_filter(route: &RouteResult) -> Option<String> {
     if !crate::machine_capability_ref::route_has_capability_action_name(
         route,
@@ -1300,6 +1304,7 @@ fn service_status_process_port_filter(route: &RouteResult) -> Option<String> {
         .and_then(|value| first_port_filter_token(&value))
 }
 
+#[cfg(test)]
 fn service_status_process_filter(route: &RouteResult) -> Option<String> {
     if !crate::machine_capability_ref::route_has_capability_action_name(
         route,
@@ -1402,6 +1407,7 @@ fn loop_state_async_start_command(loop_state: &LoopState) -> Option<String> {
     .then(|| command.to_string())
 }
 
+#[cfg(test)]
 pub(super) fn task_control_get_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1441,6 +1447,7 @@ pub(super) fn task_control_get_deterministic_plan_result(
     None
 }
 
+#[cfg(test)]
 pub(super) fn task_control_list_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1564,6 +1571,7 @@ pub(super) fn config_risk_preview_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn task_control_available_for_plan(state: &AppState) -> bool {
     skill_available_for_plan(state, "task_control")
 }
@@ -1573,6 +1581,7 @@ fn skill_available_for_plan(state: &AppState, skill: &str) -> bool {
     enabled_skills.is_empty() || enabled_skills.contains(skill)
 }
 
+#[cfg(test)]
 fn route_requests_health_check(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action(route, &["system"], &["health"])
         || crate::machine_capability_ref::route_has_capability_action_name(
@@ -1610,10 +1619,12 @@ fn route_mentions_any_machine_token(route: &RouteResult, tokens: &[&str]) -> boo
         .any(|token| route_mentions_machine_token(route, token))
 }
 
+#[cfg(test)]
 fn route_mentions_task_control_list(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action(route, &["task_control"], &["list"])
 }
 
+#[cfg(test)]
 fn route_mentions_task_control_get(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action(route, &["task_control"], &["get"])
 }
@@ -1634,6 +1645,7 @@ fn route_mentions_machine_token(route: &RouteResult, token: &str) -> bool {
         .any(|text| text.to_ascii_lowercase().contains(&token))
 }
 
+#[cfg(test)]
 fn task_control_get_task_id(route: &RouteResult) -> Option<String> {
     if !route_mentions_task_control_get(route) {
         return None;
@@ -1644,6 +1656,7 @@ fn task_control_get_task_id(route: &RouteResult) -> Option<String> {
         .or_else(|| first_uuid_like_token(route.output_contract.locator_hint.as_str()))
 }
 
+#[cfg(test)]
 fn first_uuid_like_token(text: &str) -> Option<String> {
     text.split(|ch: char| !(ch.is_ascii_hexdigit() || ch == '-'))
         .map(str::trim)
@@ -1651,6 +1664,7 @@ fn first_uuid_like_token(text: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 fn is_uuid_like_token(token: &str) -> bool {
     if token.len() != 36 {
         return false;
