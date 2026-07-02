@@ -804,6 +804,7 @@ fn route_requests_config_validation(route: &RouteResult) -> bool {
             == Some(crate::contract_matrix::FinalAnswerShape::ValidationVerdict)
 }
 
+#[cfg(test)]
 pub(super) fn content_presence_query_deterministic_plan_result(
     state: &AppState,
     goal: &str,
