@@ -173,6 +173,14 @@ impl TaskContract {
     }
 
     pub(crate) fn compact_prompt_line(&self) -> String {
+        self.compact_prompt_line_with_label("task_contract")
+    }
+
+    pub(crate) fn evidence_policy_context_prompt_line(&self) -> String {
+        self.compact_prompt_line_with_label("evidence_policy_context")
+    }
+
+    fn compact_prompt_line_with_label(&self, label: &str) -> String {
         let required_evidence = if self.required_evidence_fields.is_empty() {
             "none".to_string()
         } else {
@@ -194,7 +202,7 @@ impl TaskContract {
             serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
         };
         format!(
-            "- task_contract targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
+            "- {label} targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
             targets,
             self.target_object.as_str(),
             self.structured_field_selector

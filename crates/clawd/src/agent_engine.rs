@@ -448,7 +448,9 @@ fn build_turn_analysis_prompt_block(
         lines.push(format!("- state_patch={state_patch}"));
     }
     if let Some(route) = route_result {
-        lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
+        lines.push(
+            crate::TaskContract::from_route_result(route).evidence_policy_context_prompt_line(),
+        );
         if let Some(contract_matrix_line) =
             crate::contract_matrix::compact_prompt_line_for_route(route)
         {

@@ -584,7 +584,7 @@ fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
 
     let block = build_turn_analysis_prompt_block(None, Some(&route));
 
-    assert!(block.contains("- task_contract"));
+    assert!(block.contains("- evidence_policy_context"));
     assert!(block.contains("- evidence_policy"));
     assert!(block.contains("planner_authority=agent_loop_registry"));
     assert!(block.contains("required_evidence=candidates"));
