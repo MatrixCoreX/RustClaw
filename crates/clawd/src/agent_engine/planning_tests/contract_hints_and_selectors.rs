@@ -43,6 +43,7 @@ fn contract_hint_preferred_config_guard_uses_runtime_equivalent_action() {
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
+    route.route_reason = "capability_ref=config.guard_after_change".to_string();
     let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=config_guard\n[/CONTRACT_TEST_HINT]";
 
     let plan = contract_hint_preferred_action_deterministic_plan_result(

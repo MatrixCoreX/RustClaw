@@ -209,17 +209,16 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
 }
 
 fn route_requests_config_guard(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["config"],
-            &[
-                "guard",
-                "guard_config",
-                "guard_after_change",
-                "guard_rustclaw_config",
-            ],
-        )
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["config"],
+        &[
+            "guard",
+            "guard_config",
+            "guard_after_change",
+            "guard_rustclaw_config",
+        ],
+    )
 }
 
 pub(super) fn observation_only_plan_can_finalize_from_direct_output(
