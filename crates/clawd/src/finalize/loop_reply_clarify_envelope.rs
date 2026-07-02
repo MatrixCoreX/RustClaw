@@ -73,7 +73,7 @@ pub(super) fn attach_route_clarify_machine_envelope(
         },
         "output_contract": {
             "response_shape": route.output_contract.response_shape.as_str(),
-            "semantic_kind": route.output_contract.semantic_kind.as_str(),
+            "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
             "locator_kind": route.output_contract.locator_kind.as_str(),
             "requires_content_evidence": route.output_contract.requires_content_evidence,
             "delivery_required": route.output_contract.delivery_required

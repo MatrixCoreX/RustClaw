@@ -342,7 +342,7 @@ pub(super) fn filesystem_mutation_lifecycle_structured_answer(
     Some(
         serde_json::json!({
             "schema_version": 1,
-            "semantic_kind": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
+            "contract_marker": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
             "status": "ok",
             "observed_actions": actions,
             "observed_action_count": observed.len(),
@@ -453,7 +453,7 @@ pub(super) fn kb_filesystem_mutation_structured_answer(
     Some(
         serde_json::json!({
             "schema_version": 1,
-            "semantic_kind": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
+            "contract_marker": crate::OutputSemanticKind::FilesystemMutationResult.as_str(),
             "capability": "kb",
             "status": "ok",
             "effective_status": if effective_statuses.iter().any(|status| status != "ok") { "needs_attention" } else { "ok" },

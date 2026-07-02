@@ -115,7 +115,7 @@ fn structured_contract_json_should_remain_full(text: &str) -> bool {
     let Ok(Value::Object(object)) = serde_json::from_str::<Value>(text.trim()) else {
         return false;
     };
-    object.contains_key("semantic_kind")
+    object.contains_key("contract_marker")
         && (object.contains_key("async_timeout_policy")
             || object.contains_key("adapter_result")
             || object.contains_key("pending_async_job_contract")

@@ -315,7 +315,7 @@ fn visible_answer_is_machine_payload(text: &str) -> bool {
                 || object.contains_key("reason_code")
                 || object.contains_key("candidates")
                 || object.contains_key("risks")
-                || object.contains_key("semantic_kind")
+                || object.contains_key("contract_marker")
                 || object
                     .get("output_format")
                     .and_then(serde_json::Value::as_str)
