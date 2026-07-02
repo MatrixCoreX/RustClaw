@@ -4,6 +4,7 @@ use super::*;
 fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
     let state = test_state_with_enabled_skills(&["config_basic"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
