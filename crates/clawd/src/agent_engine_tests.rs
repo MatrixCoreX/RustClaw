@@ -24,7 +24,6 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
         runtime_action: None,
         runtime_default_args: None,
         runtime_rewrite_arg_keys: Vec::new(),
-        runtime_rewrite_semantic_kinds: Vec::new(),
         risk_level: None,
         auto_invocable: None,
         requires_confirmation: None,

@@ -297,12 +297,11 @@ fn registry_manifest_exposes_planner_metadata() {
 	once_per_task = true
 	dedup_scope = "action"
 	idempotent = false
-	runtime_skill = "system_basic"
-	runtime_action = "Inventory-Dir"
-	runtime_default_args = { names_only = true }
-	runtime_rewrite_arg_keys = ["Include_Hidden", "include-hidden", ""]
-	runtime_rewrite_semantic_kinds = ["File_Names", "file-names", ""]
-	supported_os = ["Linux", "macOS", ""]
+		runtime_skill = "system_basic"
+		runtime_action = "Inventory-Dir"
+		runtime_default_args = { names_only = true }
+		runtime_rewrite_arg_keys = ["Include_Hidden", "include-hidden", ""]
+		supported_os = ["Linux", "macOS", ""]
 	required_bins = ["sqlite3", "SQLite3"]
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
@@ -349,10 +348,6 @@ fn registry_manifest_exposes_planner_metadata() {
     assert_eq!(
         manifest.runtime_rewrite_arg_keys,
         vec!["include_hidden".to_string()]
-    );
-    assert_eq!(
-        manifest.runtime_rewrite_semantic_kinds,
-        vec!["file_names".to_string()]
     );
     assert_eq!(
         manifest.supported_os,

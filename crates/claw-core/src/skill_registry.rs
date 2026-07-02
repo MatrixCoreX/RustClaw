@@ -369,7 +369,6 @@ pub struct SkillManifest {
     pub runtime_action: Option<String>,
     pub runtime_default_args: Option<JsonValue>,
     pub runtime_rewrite_arg_keys: Vec<String>,
-    pub runtime_rewrite_semantic_kinds: Vec<String>,
     pub risk_level: Option<SkillRiskLevel>,
     pub auto_invocable: Option<bool>,
     pub requires_confirmation: Option<bool>,
@@ -444,8 +443,6 @@ pub struct SkillRegistryEntry {
     pub runtime_default_args: Option<TomlValue>,
     #[serde(default)]
     pub runtime_rewrite_arg_keys: Vec<String>,
-    #[serde(default)]
-    pub runtime_rewrite_semantic_kinds: Vec<String>,
     #[serde(default)]
     pub risk_level: Option<SkillRiskLevel>,
     #[serde(default)]
@@ -1004,8 +1001,6 @@ impl SkillsRegistry {
                 .map(|value| normalize_schema_token(&value));
             entry.runtime_rewrite_arg_keys =
                 normalize_schema_tokens(&entry.runtime_rewrite_arg_keys);
-            entry.runtime_rewrite_semantic_kinds =
-                normalize_schema_tokens(&entry.runtime_rewrite_semantic_kinds);
             entry.confirmation_exempt_when =
                 normalize_confirmation_exempt_when(&entry.confirmation_exempt_when);
             entry.supported_os = normalize_metadata_tokens(&entry.supported_os);
@@ -1243,7 +1238,6 @@ impl SkillsRegistry {
                 .as_ref()
                 .and_then(toml_value_to_json),
             runtime_rewrite_arg_keys: entry.runtime_rewrite_arg_keys.clone(),
-            runtime_rewrite_semantic_kinds: entry.runtime_rewrite_semantic_kinds.clone(),
             risk_level: entry.risk_level,
             auto_invocable: entry.auto_invocable,
             requires_confirmation: entry.requires_confirmation,
