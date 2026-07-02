@@ -503,7 +503,7 @@ fn verifier_issue_forbidden_repeat_fingerprint(
         .find(|step| step.step_id == issue.step_id)?;
     let action_ref =
         plan_step_action_ref(step, route).or_else(|| plan_step_fallback_action_ref(step))?;
-    let args_fingerprint = crate::contract_matrix::fnv1a_hex(&format!(
+    let args_fingerprint = crate::evidence_policy::fnv1a_hex(&format!(
         "{}\n{}",
         action_ref.trim(),
         canonical_json_for_fingerprint(&step.args)
@@ -1021,10 +1021,10 @@ fn step_contract_trace_json(
     requested: Option<&RequestedPlanCapability>,
 ) -> Option<Value> {
     let route = route?;
-    let contract = crate::contract_matrix::trace_snapshot_for_route(route)?;
+    let contract = crate::evidence_policy::trace_snapshot_for_route(route)?;
     let requested_action_ref = requested.and_then(|value| value.action_ref.as_deref());
     let action_policy = requested_action_ref
-        .and_then(|action_ref| crate::contract_matrix::action_trace_for_route(route, action_ref));
+        .and_then(|action_ref| crate::evidence_policy::action_trace_for_route(route, action_ref));
     Some(json!({
         "contract_match": contract.get("contract_match").and_then(Value::as_str),
         "contract_marker": contract.get("contract_marker").and_then(Value::as_str),
@@ -1214,13 +1214,13 @@ pub(crate) struct TaskJournal {
 
 pub(crate) fn stop_signal_failure_attribution(
     stop_signal: &str,
-) -> Option<crate::contract_matrix::FailureAttribution> {
+) -> Option<crate::evidence_policy::FailureAttribution> {
     match stop_signal.trim() {
         "recipe_repair_budget_exhausted" | "answer_verifier_retry_exhausted" => {
-            Some(crate::contract_matrix::FailureAttribution::BudgetExhausted)
+            Some(crate::evidence_policy::FailureAttribution::BudgetExhausted)
         }
         "prompt_budget_error" => {
-            Some(crate::contract_matrix::FailureAttribution::PromptBudgetError)
+            Some(crate::evidence_policy::FailureAttribution::PromptBudgetError)
         }
         _ => None,
     }
@@ -1600,11 +1600,11 @@ impl TaskJournal {
             "evidence_policy": self
                 .route_result
                 .as_ref()
-                .and_then(crate::contract_matrix::trace_snapshot_for_route),
+                .and_then(crate::evidence_policy::trace_snapshot_for_route),
             "runtime_contract_snapshot": self
                 .route_result
                 .as_ref()
-                .and_then(crate::contract_matrix::runtime_contract_snapshot_for_route),
+                .and_then(crate::evidence_policy::runtime_contract_snapshot_for_route),
             "evidence_coverage": self
                 .route_result
                 .as_ref()

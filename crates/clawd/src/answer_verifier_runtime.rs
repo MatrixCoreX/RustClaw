@@ -1213,7 +1213,7 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
 }
 
 fn verifier_evidence_policy_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
-    let mut trace = crate::contract_matrix::trace_snapshot_for_route(route_result)?;
+    let mut trace = crate::evidence_policy::trace_snapshot_for_route(route_result)?;
     if let Some(obj) = trace.as_object_mut() {
         obj.remove("trace_policy");
         obj.remove("observation_extractors");

@@ -632,7 +632,7 @@ fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
 pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
-    crate::contract_matrix::required_evidence_for_output_contract(output_contract)
+    crate::evidence_policy::required_evidence_for_output_contract(output_contract)
         .unwrap_or_else(|| fallback_required_evidence_fields_for_output_contract(output_contract))
 }
 
