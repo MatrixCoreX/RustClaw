@@ -10,7 +10,7 @@ Routing authority:
 - Do not choose a skill, tool, or capability family from natural-language wording in this normalizer.
 - Do not invent `capability_ref=<...>` from a user phrase.
 - For ordinary registry-owned capabilities, set `output_contract.contract_marker="none"` and let the planner/resolver select the capability.
-- `decision` is optional and only a compatibility trace derived from machine fields. Omit it, or emit `""`; it is not routing authority.
+- Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. It is not routing authority.
 
 Boundary fields this layer may extract:
 - Explicit locators: path, filename, URL, current-workspace scope, delivery target, attachment/media presence.

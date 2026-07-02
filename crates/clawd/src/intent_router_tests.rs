@@ -558,7 +558,6 @@ fn intent_normalizer_schema_drift() {
         "clarify_question",
         "reason",
         "confidence",
-        "decision",
         "schedule_intent",
         "output_contract",
         "execution_recipe",
@@ -587,6 +586,10 @@ fn intent_normalizer_schema_drift() {
             field
         );
     }
+    assert!(
+        !properties.contains_key("decision"),
+        "intent_normalizer schema must not expose legacy decision"
+    );
 
     // §3.5c-小切口 步骤 3：枚举值 → parse_* 函数必须落到非默认 variant
     // （除非是显式的「无 / 未知」语义占位）。
@@ -656,18 +659,6 @@ fn intent_normalizer_schema_drift() {
         assert!(
             parsed.is_some(),
             "target_task_policy token `{}` not recognized by parse_target_task_policy",
-            token
-        );
-    }
-
-    // decision: initial legacy-boundary machine hint; planner-loop envelopes own ordinary semantics.
-    for token in enum_strings(&schema, &["properties", "decision"]) {
-        if token.is_empty() {
-            continue;
-        }
-        assert!(
-            super::parse_first_layer_decision_text(&token).is_some(),
-            "decision token `{}` not recognized by parse_first_layer_decision_text",
             token
         );
     }

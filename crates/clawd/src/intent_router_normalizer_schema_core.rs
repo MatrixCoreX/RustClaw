@@ -34,7 +34,6 @@ pub(super) fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: 
     normalize_intent_normalizer_scalar_types_for_schema(&mut obj);
     normalize_execution_recipe_for_schema(&mut obj, req);
     normalize_output_contract_for_schema(&mut obj);
-    sync_compat_decision_trace_for_schema(&mut obj);
     serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| raw.to_string())
 }
 
@@ -134,6 +133,7 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj: &mut serde_json::Map<String, Value>,
 ) {
     obj.remove("mode");
+    obj.remove("decision");
     obj.entry("resume_behavior".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
     normalize_string_field_with_default(obj, "resume_behavior", "none");
@@ -162,10 +162,6 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
         .or_insert_with(|| Value::String(String::new()));
     obj.entry("confidence".to_string())
         .or_insert_with(|| Value::from(0.8));
-    obj.insert(
-        "decision".to_string(),
-        Value::String(crate::FirstLayerDecision::DirectAnswer.as_str().to_string()),
-    );
     obj.entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
     obj.entry("execution_recipe".to_string())
@@ -188,95 +184,6 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "attachment_processing_required", false);
-}
-
-pub(super) fn sync_compat_decision_trace_for_schema(obj: &mut serde_json::Map<String, Value>) {
-    let decision = compat_decision_trace_from_machine_fields(obj);
-    obj.insert(
-        "decision".to_string(),
-        Value::String(decision.as_str().to_string()),
-    );
-}
-
-fn compat_decision_trace_from_machine_fields(
-    obj: &serde_json::Map<String, Value>,
-) -> crate::FirstLayerDecision {
-    if obj
-        .get("needs_clarify")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return crate::FirstLayerDecision::Clarify;
-    }
-    if normalizer_object_declares_tool_action_payload(obj)
-        || schema_machine_token_field_is_not_none(obj, "schedule_kind")
-        || obj
-            .get("wants_file_delivery")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || output_contract_has_execution_signal(obj.get("output_contract"))
-        || normalized_execution_recipe_has_execution_signal(obj.get("execution_recipe"))
-    {
-        return crate::FirstLayerDecision::PlannerExecute;
-    }
-    crate::FirstLayerDecision::DirectAnswer
-}
-
-fn output_contract_has_execution_signal(value: Option<&Value>) -> bool {
-    let Some(contract) = value.and_then(Value::as_object) else {
-        return false;
-    };
-    contract
-        .get("requires_content_evidence")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || contract
-            .get("delivery_required")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || schema_machine_token_field_is_not_none(contract, "locator_kind")
-        || contract
-            .get("locator_hint")
-            .and_then(scalar_json_value_text)
-            .is_some_and(|value| !value.trim().is_empty())
-        || schema_machine_token_field_is_not_none(contract, "delivery_intent")
-        || contract
-            .get("response_shape")
-            .and_then(scalar_json_value_text)
-            .is_some_and(|value| normalize_schema_token(&value) == "file_token")
-        || self_extension_has_execution_signal(contract.get("self_extension"))
-}
-
-fn self_extension_has_execution_signal(value: Option<&Value>) -> bool {
-    let Some(contract) = value.and_then(Value::as_object) else {
-        return false;
-    };
-    schema_machine_token_field_is_not_none(contract, "mode")
-        || schema_machine_token_field_is_not_none(contract, "trigger")
-        || contract
-            .get("execute_now")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-}
-
-fn normalized_execution_recipe_has_execution_signal(value: Option<&Value>) -> bool {
-    let Some(recipe) = value.and_then(Value::as_object) else {
-        return false;
-    };
-    let Some(kind) = recipe.get("kind").and_then(scalar_json_value_text) else {
-        return false;
-    };
-    !matches!(
-        crate::execution_recipe::parse_execution_recipe_kind_text(&kind),
-        crate::execution_recipe::ExecutionRecipeKind::None
-    )
-}
-
-fn schema_machine_token_field_is_not_none(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
-    obj.get(key)
-        .and_then(scalar_json_value_text)
-        .map(|value| normalize_schema_token(&value))
-        .is_some_and(|token| !token.is_empty() && token != "none")
 }
 
 fn normalize_schedule_kind_for_schema(obj: &mut serde_json::Map<String, Value>) {

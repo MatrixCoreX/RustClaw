@@ -211,21 +211,6 @@ pub(super) fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static s
     }
 }
 
-#[cfg(test)]
-pub(super) fn canonical_first_layer_decision_token(raw: &str) -> Option<FirstLayerDecision> {
-    match normalize_schema_token(raw).as_str() {
-        "clarify" => Some(FirstLayerDecision::Clarify),
-        "direct_answer" => Some(FirstLayerDecision::DirectAnswer),
-        "planner_execute" => Some(FirstLayerDecision::PlannerExecute),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-pub(super) fn parse_first_layer_decision_text(raw: &str) -> Option<FirstLayerDecision> {
-    canonical_first_layer_decision_token(raw)
-}
-
 pub(super) fn route_label_from_first_layer_decision(
     decision: FirstLayerDecision,
     finalize_style: ActFinalizeStyle,

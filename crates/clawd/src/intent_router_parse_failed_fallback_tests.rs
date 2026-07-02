@@ -63,10 +63,7 @@ fn normalizer_schema_normalization_does_not_invent_contract_from_surface() {
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     let contract = value
         .get("output_contract")
         .and_then(|value| value.as_object())
@@ -108,10 +105,7 @@ fn normalizer_schema_normalization_extracts_fenced_json() {
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     let contract = value
         .get("output_contract")
         .and_then(|value| value.as_object())
@@ -152,10 +146,7 @@ fn normalizer_schema_normalization_preserves_act_when_shape_is_descriptive() {
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "列出 logs 目录下的前 10 个文件名");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value.get("needs_clarify").and_then(|v| v.as_bool()),
         Some(false)

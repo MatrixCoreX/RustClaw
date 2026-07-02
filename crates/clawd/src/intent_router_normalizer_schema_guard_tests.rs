@@ -31,10 +31,7 @@ fn normalizer_schema_normalization_recovers_minimax_file_list_search_payload() {
         "列出 document 目录里所有 .md 文件，但排除 README，告诉我还剩哪些",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -84,10 +81,7 @@ fn normalizer_schema_normalization_does_not_infer_malformed_recipe_array() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
@@ -131,10 +125,7 @@ fn normalizer_schema_normalization_does_not_infer_string_recipe_locator() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
@@ -170,10 +161,7 @@ fn malformed_recipe_array_without_locator_stays_chat() {
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "总结刚才的对话");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
@@ -353,10 +341,7 @@ fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
         "列出 document 目录下有哪些文件，只输出文件名列表",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -411,10 +396,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_file_listing_recipe_text
         "列出 document 目录下有哪些文件，只输出文件名列表",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -469,10 +451,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_text() {
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -519,10 +498,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_array() 
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -570,10 +546,7 @@ fn normalizer_schema_normalization_keeps_structured_contract_over_recipe_text() 
         "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -612,10 +585,7 @@ fn normalizer_schema_normalization_maps_command_payload_to_raw_output_when_seman
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "列出 logs 目录下的前 10 个文件名");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -768,10 +738,7 @@ fn normalizer_schema_normalization_maps_legacy_command_result_contract_to_raw_ou
         super::normalize_intent_normalizer_raw_for_schema(raw, "请执行 pwd，只输出命令结果");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -877,10 +844,7 @@ fn normalizer_schema_normalization_recovers_tool_payload_as_execution_signal() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert!(report.source_csv().contains("tool_payload"));
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")
@@ -909,10 +873,7 @@ fn normalizer_schema_normalization_does_not_infer_check_file_recipe_text() {
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "检查仓库里有没有 rustclaw.service");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -957,10 +918,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_find_recipe_text() {
         "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -1002,10 +960,7 @@ fn normalizer_schema_normalization_does_not_recover_semantic_kind_from_string_co
         "列出 document 目录下有哪些文件，只输出文件名列表",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -1191,10 +1146,7 @@ fn normalizer_schema_normalization_coerces_non_object_self_extension_contract() 
     let normalized =
         super::normalize_intent_normalizer_raw_for_schema(raw, "tell me something short");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value.get("needs_clarify").and_then(|value| value.as_bool()),
         Some(false)
@@ -1441,10 +1393,7 @@ fn normalizer_schema_normalization_coerces_none_schedule_intent_string() {
     assert!(value
         .get("schedule_intent")
         .is_some_and(|value| value.is_null()));
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .get("resolved_user_intent")
@@ -1506,10 +1455,7 @@ fn normalizer_schema_normalization_drops_none_schedule_intent_object_with_string
     assert!(value
         .get("schedule_intent")
         .is_some_and(|value| value.is_null()));
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .get("output_contract")
@@ -1751,10 +1697,7 @@ fn normalizer_schema_normalization_recovers_command_output_contract_with_unknown
         "执行 pwd，直接输出命令结果，不要总结",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -1809,10 +1752,7 @@ fn normalizer_schema_normalization_keeps_chat_raw_contract_non_executing() {
         "do not run anything, just tell me a very short joke",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -1870,10 +1810,7 @@ fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() 
         "请为一个 action=ping 的全新可复用能力生成技能方案，先不要执行，也不要启用。",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/requires_content_evidence")

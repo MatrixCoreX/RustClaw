@@ -5,10 +5,7 @@ fn normalizer_schema_normalization_preserves_direct_answer_decision() {
     let raw = r#"{"resolved_user_intent":"client-like-continuous-123","needs_clarify":false,"clarify_question":"","reason":"recent memory recall","confidence":1.0,"decision":"direct_answer"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value.get("resolved_user_intent").and_then(|v| v.as_str()),
         Some("client-like-continuous-123")
@@ -20,18 +17,12 @@ fn normalizer_schema_normalization_ignores_legacy_planner_decision_without_machi
     let raw = r#"{"resolved_user_intent":"check then explain","needs_clarify":false,"decision":"planner_execute"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
 
     let raw = r#"{"resolved_user_intent":"not an execution request","needs_clarify":false,"decision":"direct_answer"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
 }
 
 #[test]
@@ -53,10 +44,7 @@ fn normalizer_schema_normalization_derives_missing_decision_from_output_contract
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
 }
 
 #[test]
@@ -71,10 +59,7 @@ fn normalizer_schema_normalization_derives_invalid_decision_from_execution_recip
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
 }
 
 #[test]
@@ -89,10 +74,7 @@ fn normalizer_schema_normalization_derives_clarify_from_needs_clarify_signal() {
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("clarify")
-    );
+    assert!(value.get("decision").is_none());
 }
 
 #[test]
@@ -236,10 +218,7 @@ fn normalizer_schema_normalization_accepts_percent_confidence() {
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert_eq!(value.get("confidence").and_then(|v| v.as_f64()), Some(1.0));
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
 }
 
 #[test]
@@ -251,10 +230,7 @@ fn normalizer_schema_normalization_recovers_stray_quote_after_bool() {
         "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -281,10 +257,7 @@ fn normalizer_schema_normalization_recovers_minimax_output_contract_only_payload
         value.get("resolved_user_intent").and_then(|v| v.as_str()),
         Some("列出 logs 目录下的前 10 个文件名，不要读内容")
     );
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -376,10 +349,7 @@ fn normalizer_schema_normalization_preserves_meaningful_duplicate_route_fields()
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -472,10 +442,7 @@ fn normalizer_schema_normalization_maps_process_status_alias_to_service_status()
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
@@ -779,10 +746,7 @@ fn normalizer_schema_normalization_maps_file_basename_semantic() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("direct_answer")
-    );
+    assert!(value.get("decision").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/contract_marker")
