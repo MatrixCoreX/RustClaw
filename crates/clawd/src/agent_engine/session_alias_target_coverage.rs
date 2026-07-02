@@ -1010,7 +1010,6 @@ pub(super) fn file_facts_auto_locator_observation_plan(
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !matches!(

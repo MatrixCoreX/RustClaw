@@ -983,7 +983,7 @@ fn file_facts_auto_locator_builds_stat_paths_synthesis_plan() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1042,7 +1042,7 @@ fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_c
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1075,7 +1075,7 @@ fn file_facts_auto_locator_uses_route_locator_hint_without_auto_locator_path() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1101,7 +1101,7 @@ fn file_facts_auto_locator_accepts_single_directory_metadata_quantity_comparison
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Scalar,
     );
