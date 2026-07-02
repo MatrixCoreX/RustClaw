@@ -1191,6 +1191,43 @@ fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
 }
 
 #[test]
+fn direct_answer_config_contract_preserves_config_edit_plan() {
+    let state = test_state_with_enabled_skills(&["config_edit"]);
+    let mut route = route_result(
+        crate::AskMode::direct_answer(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.route_reason =
+        "capability_ref=config.plan_change field_path=server.port value=8787".to_string();
+    let loop_state = LoopState::new(2);
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: json!({
+            "action": "plan_config_change",
+            "path": "configs/config.toml",
+            "field_path": "server.port",
+            "value": 8787
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original(
+        &state,
+        Some(&route),
+        &loop_state,
+        "structured_config_contract",
+        Some("structured_config_contract"),
+        None,
+        actions,
+    );
+
+    assert!(
+        normalized.iter().any(action_targets_config_edit),
+        "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
 fn rustclaw_config_problem_validation_rewrites_to_guard_config() {
     let mut route = base_route_result();
     route.resolved_intent =
