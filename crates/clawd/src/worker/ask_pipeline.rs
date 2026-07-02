@@ -83,11 +83,11 @@ use execution_context::{
     sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_execution,
 };
 use file_delivery::{
-    active_anchor_file_delivery_without_structured_reference_should_force_clarify,
-    directory_file_delivery_without_structured_selection_should_force_clarify,
+    active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop,
+    directory_file_delivery_without_structured_selection_should_defer_to_agent_loop,
     generated_file_delivery_uses_runtime_target, refine_unresolved_file_delivery_boundary_contract,
     reject_direct_file_delivery_workspace_root_locator, route_has_structured_list_selector,
-    unbound_existing_file_delivery_route_should_force_clarify,
+    unbound_existing_file_delivery_route_should_defer_to_agent_loop,
 };
 use locator_hint_binding::{locator_component_token, resolve_existing_workspace_locator_hint};
 use locator_resolution::{
@@ -742,7 +742,7 @@ fn apply_ask_post_route(
         route_result.clarify_question.clear();
         append_route_reason(&mut route_result, "bare_topic_contextual_clarify_sanitized");
     }
-    if unbound_existing_file_delivery_route_should_force_clarify(
+    if unbound_existing_file_delivery_route_should_defer_to_agent_loop(
         state,
         prompt,
         &route_result,
@@ -773,7 +773,7 @@ fn apply_ask_post_route(
         recent_execution_context,
         &mut route_result,
     );
-    if directory_file_delivery_without_structured_selection_should_force_clarify(
+    if directory_file_delivery_without_structured_selection_should_defer_to_agent_loop(
         state,
         prompt,
         &route_result,
