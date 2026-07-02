@@ -310,7 +310,7 @@ fn agent_loop_boundary_observations_block(
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_required": route.output_contract.delivery_required,
         "content_evidence_required": route.output_contract.requires_content_evidence,
-        "post_route_policy": {
+        "post_route_boundary_record": {
             "owner_layer": post_route.gate_record.owner_layer,
             "reason_code": post_route.gate_record.reason_code,
             "outcome": post_route.gate_record.outcome.as_str(),
@@ -917,7 +917,7 @@ fn apply_ask_post_route(
         );
     }
     info!(
-        "{} worker_once: ask post_route_policy_decision task_id={} owner_layer={} reason_code={} outcome={}",
+        "{} worker_once: ask post_route_boundary_record task_id={} owner_layer={} reason_code={} outcome={}",
         crate::highlight_tag("routing"),
         task.task_id,
         post_route.gate_record.owner_layer,
@@ -926,7 +926,7 @@ fn apply_ask_post_route(
     );
     if post_route.execution_route_result.gate_kind() != route_result.gate_kind() {
         info!(
-            "{} worker_once: ask route_gate_refined_by_auto_locator task_id={} gate={:?}->{:?}",
+            "{} worker_once: ask boundary_mode_refined_by_auto_locator task_id={} gate={:?}->{:?}",
             crate::highlight_tag("routing"),
             task.task_id,
             route_result.gate_kind(),
@@ -934,7 +934,7 @@ fn apply_ask_post_route(
         );
     } else if post_route.execution_route_result.ask_mode != route_result.ask_mode {
         info!(
-            "{} worker_once: ask ask_mode_refined_by_auto_locator task_id={} ask_mode={} -> {} legacy_route_label={} -> {}",
+            "{} worker_once: ask boundary_dispatch_hint_refined_by_auto_locator task_id={} ask_mode={} -> {} legacy_route_label={} -> {}",
             crate::highlight_tag("routing"),
             task.task_id,
             route_result.ask_mode.as_str(),

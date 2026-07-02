@@ -63,7 +63,7 @@ pub(crate) struct PostRouteGateRecord {
 impl Default for PostRouteGateRecord {
     fn default() -> Self {
         Self {
-            owner_layer: "post_route_policy",
+            owner_layer: "post_route_boundary",
             reason_code: "post_route_no_change",
             outcome: PostRoutePolicyOutcome::NoChange,
         }
