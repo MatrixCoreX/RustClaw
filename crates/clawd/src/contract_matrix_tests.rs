@@ -232,6 +232,52 @@ fn service_lifecycle_capability_refs_supply_lifecycle_shape_without_semantic_kin
 }
 
 #[test]
+fn docker_capability_refs_supply_docker_shapes_without_semantic_kind() {
+    for (capability_ref, expected_shape) in [
+        (
+            "capability_ref=docker.list_containers",
+            FinalAnswerShape::ContainerList,
+        ),
+        ("capability_ref=docker.ps", FinalAnswerShape::ContainerList),
+        (
+            "capability_ref=docker.list_images",
+            FinalAnswerShape::ImageList,
+        ),
+        ("capability_ref=docker.images", FinalAnswerShape::ImageList),
+        (
+            "capability_ref=docker.read_logs",
+            FinalAnswerShape::LogExcerptOrSummary,
+        ),
+        (
+            "capability_ref=docker.logs",
+            FinalAnswerShape::LogExcerptOrSummary,
+        ),
+        (
+            "capability_ref=docker.restart_container",
+            FinalAnswerShape::LifecycleResult,
+        ),
+        (
+            "capability_ref=docker.stop",
+            FinalAnswerShape::LifecycleResult,
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        assert_eq!(
+            final_answer_shape_for_route(&route),
+            Some(expected_shape),
+            "{capability_ref}"
+        );
+    }
+
+    let route = route_with_machine_capability_ref("capability_ref=docker.version");
+    assert_ne!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::ContainerList)
+    );
+}
+
+#[test]
 fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semantic_kind() {
     let mut route = route_with_machine_capability_ref("capability_ref=filesystem.count_entries");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
