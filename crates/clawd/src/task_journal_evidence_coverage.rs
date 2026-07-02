@@ -482,7 +482,7 @@ pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, pre
 fn route_final_answer_shape(
     route: &crate::RouteResult,
 ) -> Option<crate::contract_matrix::FinalAnswerShape> {
-    crate::contract_matrix::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_route(route)
 }
 
 fn route_has_docker_answer_shape(route: &crate::RouteResult) -> bool {

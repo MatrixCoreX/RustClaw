@@ -68,23 +68,23 @@ impl PolicyDecision {
     }
 
     pub(crate) fn from_contract_action_policy(
-        decision: crate::contract_matrix::ActionPolicyDecision,
+        decision: crate::evidence_policy::ActionPolicyDecision,
     ) -> Self {
         match decision {
-            crate::contract_matrix::ActionPolicyDecision::Allowed => Self::Allow,
-            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
-            | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
-            | crate::contract_matrix::ActionPolicyDecision::RejectedNoActionsAllowed => Self::Deny,
+            crate::evidence_policy::ActionPolicyDecision::Allowed => Self::Allow,
+            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+            | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
+            | crate::evidence_policy::ActionPolicyDecision::RejectedNoActionsAllowed => Self::Deny,
         }
     }
 
     pub(crate) fn from_contract_arg_policy(
-        decision: crate::contract_matrix::ArgPolicyDecision,
+        decision: crate::evidence_policy::ArgPolicyDecision,
     ) -> Self {
         match decision {
-            crate::contract_matrix::ArgPolicyDecision::Allowed => Self::Allow,
-            crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
-            | crate::contract_matrix::ArgPolicyDecision::MissingTargetBinding => Self::Deny,
+            crate::evidence_policy::ArgPolicyDecision::Allowed => Self::Allow,
+            crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
+            | crate::evidence_policy::ArgPolicyDecision::MissingTargetBinding => Self::Deny,
         }
     }
 }
@@ -151,37 +151,37 @@ mod tests {
     fn contract_matrix_policies_map_to_closed_policy_decisions() {
         assert_eq!(
             PolicyDecision::from_contract_action_policy(
-                crate::contract_matrix::ActionPolicyDecision::Allowed
+                crate::evidence_policy::ActionPolicyDecision::Allowed
             ),
             PolicyDecision::Allow
         );
         assert_eq!(
             PolicyDecision::from_contract_action_policy(
-                crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+                crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
             PolicyDecision::from_contract_action_policy(
-                crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+                crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
             PolicyDecision::from_contract_arg_policy(
-                crate::contract_matrix::ArgPolicyDecision::Allowed
+                crate::evidence_policy::ArgPolicyDecision::Allowed
             ),
             PolicyDecision::Allow
         );
         assert_eq!(
             PolicyDecision::from_contract_arg_policy(
-                crate::contract_matrix::ArgPolicyDecision::MissingTargetBinding
+                crate::evidence_policy::ArgPolicyDecision::MissingTargetBinding
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
             PolicyDecision::from_contract_arg_policy(
-                crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
+                crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
             ),
             PolicyDecision::Deny
         );

@@ -197,7 +197,7 @@ pub(super) fn raw_command_output_without_locator_can_plan_via_contract(
     {
         return false;
     }
-    crate::contract_matrix::final_answer_shape_for_route(route_result)
+    crate::evidence_policy::final_answer_shape_for_route(route_result)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -241,7 +241,7 @@ pub(super) fn runtime_status_query_route_can_plan_without_locator(
         && route_result.output_contract.locator_hint.trim().is_empty()
         && (turn_analysis.turn_type == Some(crate::intent_router::TurnType::StatusQuery)
             || turn_analysis_has_runtime_status_query(turn_analysis))
-        && crate::contract_matrix::final_answer_shape_for_route(route_result)
+        && crate::evidence_policy::final_answer_shape_for_route(route_result)
             .is_some_and(|shape| shape.allows_model_language())
 }
 
