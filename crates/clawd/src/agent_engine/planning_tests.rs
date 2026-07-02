@@ -51,9 +51,9 @@ use super::{
     normalize_system_basic_schema_aliases, normalize_transform_schema_aliases,
     observation_only_plan_can_finalize_from_direct_output,
     path_metadata_compare_deterministic_plan_result, plan_repair_reason,
-    plan_result_with_fallback_reason, planner_notes_for_initial_fallback,
-    planner_notes_for_repair_fallback, planner_notes_for_repair_success,
-    preferred_run_cmd_for_contract_hint, quantity_compare_pair_locator_deterministic_plan_result,
+    plan_result_with_fallback_reason, planner_notes_for_repair_fallback,
+    planner_notes_for_repair_success, preferred_run_cmd_for_contract_hint,
+    quantity_compare_pair_locator_deterministic_plan_result,
     registry_preferred_skill_names_for_route, repair_guard_config_default_path_for_invalid_locator,
     replace_file_delivery_respond_only_with_path_observation,
     replace_scalar_count_plan_with_count_inventory,
@@ -81,7 +81,6 @@ use super::{
     rewrite_terminal_placeholder_respond_to_synthesize_answer,
     rewrite_terminal_synthesis_placeholder_respond,
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
-    route_clarify_terminal_respond_fallback_actions,
     route_contract_defers_literal_command_to_planner, route_uses_runtime_owned_observed_finalizer,
     scalar_content_auto_locator_deterministic_plan_result,
     scalar_content_auto_locator_observation_plan, scalar_count_filter_deterministic_plan_result,
@@ -117,15 +116,6 @@ use crate::{
 use serde_json::{json, Value};
 
 #[test]
-fn planner_notes_record_initial_fallback_reason_code() {
-    assert_eq!(
-        planner_notes_for_initial_fallback(Some("plan_parse_failed_workspace_default_evidence")),
-        "fallback_reason_code=plan_parse_failed_workspace_default_evidence"
-    );
-    assert!(planner_notes_for_initial_fallback(None).is_empty());
-}
-
-#[test]
 fn planner_notes_record_repair_reason_codes() {
     assert_eq!(
         planner_notes_for_repair_success("plan_missing_terminal_user_answer", None),
@@ -143,46 +133,9 @@ fn planner_notes_record_repair_reason_codes() {
 #[test]
 fn planner_notes_record_repair_fallback_reason_codes() {
     assert_eq!(
-        planner_notes_for_repair_fallback(
-            "plan_repair_llm_failed_fallback_to_initial",
-            Some("plan_parse_failed_scalar_path_auto_locator")
-        ),
-        "fallback_reason_code=plan_repair_llm_failed_fallback_to_initial initial_fallback_reason_code=plan_parse_failed_scalar_path_auto_locator"
+        planner_notes_for_repair_fallback("plan_repair_llm_failed_fallback_to_initial"),
+        "fallback_reason_code=plan_repair_llm_failed_fallback_to_initial"
     );
-}
-
-#[test]
-fn route_clarify_fallback_uses_structured_boundary_question() {
-    let mut route = base_route_result();
-    route.needs_clarify = true;
-    route.clarify_question = "Which file should I read?".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-
-    let actions = route_clarify_terminal_respond_fallback_actions(Some(&route))
-        .expect("clarify fallback action");
-
-    assert!(matches!(
-        actions.as_slice(),
-        [AgentAction::Respond { content }] if content == "Which file should I read?"
-    ));
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &LoopState::new(1),
-        &actions
-    ));
-}
-
-#[test]
-fn route_clarify_fallback_rejects_evidence_execution_contract() {
-    let mut route = base_route_result();
-    route.needs_clarify = true;
-    route.clarify_question = "Which file should I read?".to_string();
-    route.output_contract.requires_content_evidence = true;
-
-    assert!(route_clarify_terminal_respond_fallback_actions(Some(&route)).is_none());
 }
 
 #[test]

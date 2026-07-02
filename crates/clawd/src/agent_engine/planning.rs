@@ -351,113 +351,8 @@ pub(super) async fn plan_round_actions(
         loop_state.round_no,
         crate::truncate_for_log(&plan_raw)
     );
-    let parsed_actions = parse_single_plan_actions(&plan_raw, state, task).await;
-    let mut initial_fallback_reason_code: Option<&'static str> = None;
-    let initial_actions = parsed_actions
-        .or_else(|| {
-            let fallback = route_clarify_terminal_respond_fallback_actions(route_result);
-            if fallback.is_some() {
-                initial_fallback_reason_code =
-                    Some("plan_parse_failed_route_clarify_terminal_respond");
-                warn!(
-                    "plan_parse_failed_using_route_clarify_terminal_respond task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback = plain_text_terminal_respond_fallback_actions(route_result, &plan_raw);
-            if fallback.is_some() {
-                initial_fallback_reason_code =
-                    Some("plan_parse_failed_plain_text_terminal_respond");
-                warn!(
-                    "plan_parse_failed_using_plain_text_terminal_respond task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback = scalar_path_directory_locator_search_observation_plan(
-                route_result,
-                auto_locator_path,
-                &original_user_text_for_policy,
-            );
-            if fallback.is_some() {
-                initial_fallback_reason_code =
-                    Some("plan_parse_failed_scalar_path_directory_locator_search");
-                warn!(
-                    "plan_parse_failed_using_scalar_path_directory_locator_search_plan task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback =
-                scalar_content_auto_locator_observation_plan(route_result, auto_locator_path);
-            if fallback.is_some() {
-                initial_fallback_reason_code =
-                    Some("plan_parse_failed_scalar_content_auto_locator");
-                warn!(
-                    "plan_parse_failed_using_scalar_content_auto_locator_plan task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback =
-                scalar_path_auto_locator_observation_plan(route_result, auto_locator_path);
-            if fallback.is_some() {
-                initial_fallback_reason_code = Some("plan_parse_failed_scalar_path_auto_locator");
-                warn!(
-                    "plan_parse_failed_using_auto_locator_observation_plan task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback =
-                file_facts_auto_locator_observation_plan(route_result, auto_locator_path);
-            if fallback.is_some() {
-                initial_fallback_reason_code = Some("plan_parse_failed_file_facts_auto_locator");
-                warn!(
-                    "plan_parse_failed_using_file_facts_auto_locator_plan task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let fallback =
-                generic_directory_auto_locator_observation_plan(route_result, auto_locator_path);
-            if fallback.is_some() {
-                initial_fallback_reason_code =
-                    Some("plan_parse_failed_generic_directory_auto_locator");
-                warn!(
-                    "plan_parse_failed_using_generic_directory_auto_locator_plan task_id={} round={}",
-                    task.task_id, loop_state.round_no
-                );
-            }
-            fallback
-        })
-        .or_else(|| {
-            let route = route_result?;
-            if loop_state.has_tool_or_skill_output
-                || !route_needs_workspace_respond_only_default_evidence(route)
-            {
-                return None;
-            }
-            warn!(
-                "plan_parse_failed_using_workspace_default_evidence_plan task_id={} round={}",
-                task.task_id, loop_state.round_no
-            );
-            initial_fallback_reason_code = Some("plan_parse_failed_workspace_default_evidence");
-            Some(workspace_summary_default_evidence_actions())
-        })
+    let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
+        .await
         .map(|actions| {
             normalize_planned_actions_with_original_and_context(
                 state,
@@ -612,7 +507,6 @@ pub(super) async fn plan_round_actions(
                                         plan_raw.clone(),
                                         planner_notes_for_repair_fallback(
                                             "plan_second_repair_invalid_fallback_to_initial",
-                                            initial_fallback_reason_code,
                                         ),
                                     )
                                 } else {
@@ -646,7 +540,6 @@ pub(super) async fn plan_round_actions(
                                         plan_raw.clone(),
                                         planner_notes_for_repair_fallback(
                                             "plan_second_repair_parse_failed_fallback_to_initial",
-                                            initial_fallback_reason_code,
                                         ),
                                     )
                                 } else {
@@ -682,7 +575,6 @@ pub(super) async fn plan_round_actions(
                                 plan_raw.clone(),
                                 planner_notes_for_repair_fallback(
                                     "plan_repair_parse_failed_fallback_to_initial",
-                                    initial_fallback_reason_code,
                                 ),
                             )
                         } else {
@@ -719,7 +611,6 @@ pub(super) async fn plan_round_actions(
                         plan_raw.clone(),
                         planner_notes_for_repair_fallback(
                             "plan_repair_llm_failed_fallback_to_initial",
-                            initial_fallback_reason_code,
                         ),
                     )
                 } else {
@@ -736,7 +627,7 @@ pub(super) async fn plan_round_actions(
                 PlanKind::Incremental
             },
             plan_raw.clone(),
-            planner_notes_for_initial_fallback(initial_fallback_reason_code),
+            String::new(),
         )
     };
     let plan_result = build_plan_result_with_notes(
@@ -797,71 +688,6 @@ fn plan_result_with_fallback_reason(
     plan_result
 }
 
-fn plain_text_terminal_respond_fallback_actions(
-    route_result: Option<&RouteResult>,
-    raw_plan_text: &str,
-) -> Option<Vec<AgentAction>> {
-    let route = route_result?;
-    let content = raw_plan_text.trim();
-    if content.is_empty() || raw_plan_text_looks_like_structured_plan_fragment(content) {
-        return None;
-    }
-    let chat_like_route = route.is_resume_discussion_mode()
-        || route.uses_chat_finalizer()
-        || route_reason_has_structural_marker(route, "pure_chat_agent_loop_submode");
-    if !chat_like_route
-        || route.needs_clarify
-        || route.wants_file_delivery
-        || route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || !route.output_contract_is_unclassified()
-        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
-        || !route.output_contract.locator_hint.trim().is_empty()
-        || !route_allows_model_language_terminal_respond(Some(route))
-    {
-        return None;
-    }
-    Some(vec![AgentAction::Respond {
-        content: content.to_string(),
-    }])
-}
-
-pub(super) fn route_clarify_terminal_respond_fallback_actions(
-    route_result: Option<&RouteResult>,
-) -> Option<Vec<AgentAction>> {
-    let route = route_result?;
-    let content = route.clarify_question.trim();
-    if !route.needs_clarify
-        || content.is_empty()
-        || route.output_contract.delivery_required
-        || route.wants_file_delivery
-        || route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || !route.output_contract_is_unclassified()
-    {
-        return None;
-    }
-    Some(vec![AgentAction::Respond {
-        content: content.to_string(),
-    }])
-}
-
-fn raw_plan_text_looks_like_structured_plan_fragment(content: &str) -> bool {
-    let content = content.trim_start_matches('\u{feff}').trim_start();
-    let lower = content.to_ascii_lowercase();
-    lower.starts_with('{')
-        || lower.starts_with('[')
-        || lower.starts_with("<tool_call")
-        || lower.starts_with("<tool>")
-}
-
-fn planner_notes_for_initial_fallback(reason_code: Option<&str>) -> String {
-    reason_code
-        .map(|reason| format!("fallback_reason_code={reason}"))
-        .unwrap_or_default()
-}
-
 fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&str>) -> String {
     let mut notes = vec![format!("repair_reason_code={first_reason}")];
     if let Some(second_reason) = second_reason {
@@ -870,12 +696,8 @@ fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&s
     notes.join(" ")
 }
 
-fn planner_notes_for_repair_fallback(reason_code: &str, initial_reason: Option<&str>) -> String {
-    let mut notes = vec![format!("fallback_reason_code={reason_code}")];
-    if let Some(initial_reason) = initial_reason {
-        notes.push(format!("initial_fallback_reason_code={initial_reason}"));
-    }
-    notes.join(" ")
+fn planner_notes_for_repair_fallback(reason_code: &str) -> String {
+    format!("fallback_reason_code={reason_code}")
 }
 
 #[cfg(test)]

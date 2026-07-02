@@ -170,6 +170,7 @@ pub(super) fn scalar_path_current_workspace_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn scalar_path_directory_locator_search_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,

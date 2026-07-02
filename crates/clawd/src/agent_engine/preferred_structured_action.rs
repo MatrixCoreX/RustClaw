@@ -1362,6 +1362,7 @@ fn single_file_delivery_probe_action(
     })
 }
 
+#[cfg(test)]
 pub(super) fn single_filename_target_for_directory_locator(
     route: &RouteResult,
     current_user_text: &str,
@@ -1405,6 +1406,7 @@ pub(super) fn explicit_existence_file_targets(user_text: &str) -> Vec<String> {
     targets
 }
 
+#[cfg(test)]
 pub(super) fn search_name_target_token_is_safe(candidate: &str) -> bool {
     let trimmed = candidate.trim().trim_matches(|ch: char| {
         matches!(
@@ -1454,6 +1456,7 @@ pub(super) fn search_name_target_token_is_safe(candidate: &str) -> bool {
     has_ascii_alnum
 }
 
+#[cfg(test)]
 pub(super) fn push_unique_search_name_candidate(values: &mut Vec<String>, candidate: &str) {
     let trimmed = candidate.trim().trim_matches(|ch: char| {
         matches!(
@@ -1490,6 +1493,7 @@ pub(super) fn push_unique_search_name_candidate(values: &mut Vec<String>, candid
     }
 }
 
+#[cfg(test)]
 fn quoted_search_name_targets(text: &str) -> Vec<String> {
     static QUOTED_RE: OnceLock<Regex> = OnceLock::new();
     let re = QUOTED_RE.get_or_init(|| {
@@ -1532,15 +1536,18 @@ fn fs_basic_stat_paths_has_targets(skill: &str, args: &Value) -> bool {
             })
 }
 
+#[cfg(test)]
 pub(super) fn has_multiple_quoted_search_name_targets(text: &str) -> bool {
     quoted_search_name_targets(text).len() > 1
 }
 
+#[cfg(test)]
 pub(super) fn single_quoted_search_name_target(text: &str) -> Option<String> {
     let mut candidates = quoted_search_name_targets(text);
     (candidates.len() == 1).then(|| candidates.remove(0))
 }
 
+#[cfg(test)]
 pub(super) fn search_name_targets_outside_locators(text: &str) -> Vec<String> {
     let mut remaining = text.to_string();
     for locator in
@@ -1560,11 +1567,13 @@ pub(super) fn search_name_targets_outside_locators(text: &str) -> Vec<String> {
     candidates
 }
 
+#[cfg(test)]
 pub(super) fn single_identifier_search_name_target_outside_locators(text: &str) -> Option<String> {
     let mut candidates = search_name_targets_outside_locators(text);
     (candidates.len() == 1).then(|| candidates.remove(0))
 }
 
+#[cfg(test)]
 pub(super) fn single_existing_name_target_for_directory_locator(
     root: &str,
     route: &RouteResult,

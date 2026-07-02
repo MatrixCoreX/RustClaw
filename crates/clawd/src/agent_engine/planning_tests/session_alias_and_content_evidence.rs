@@ -497,53 +497,6 @@ fn pure_chat_agent_loop_submode_allows_respond_only_plan_before_observation() {
 }
 
 #[test]
-fn chat_plain_text_plan_parse_failure_becomes_terminal_respond() {
-    let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::direct_answer(),
-        false,
-        OutputResponseShape::Free,
-    );
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
-
-    let actions =
-        super::super::plain_text_terminal_respond_fallback_actions(Some(&route), "corrected body")
-            .expect("plain text fallback");
-
-    assert!(matches!(
-        actions.as_slice(),
-        [AgentAction::Respond { content }] if content == "corrected body"
-    ));
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions,
-    ));
-}
-
-#[test]
-fn plain_text_plan_parse_failure_does_not_replace_evidence_route() {
-    let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
-    route.route_reason = "pure_chat_agent_loop_submode".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
-
-    let actions = super::super::plain_text_terminal_respond_fallback_actions(
-        Some(&route),
-        "unobserved answer",
-    );
-
-    assert!(actions.is_none());
-}
-
-#[test]
 fn tool_discovery_route_allows_context_only_respond_plan() {
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::Respond {
