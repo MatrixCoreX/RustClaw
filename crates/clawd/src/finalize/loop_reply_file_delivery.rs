@@ -610,7 +610,7 @@ fn route_requests_generated_file_path_report(agent_run_context: Option<&AgentRun
                 && contract.response_shape == crate::OutputResponseShape::Scalar
                 && route
                     .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
-                && crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
+                && crate::evidence_policy::final_answer_shape_for_output_contract(&contract)
                     == Some(crate::evidence_policy::FinalAnswerShape::SinglePath)
         })
 }
@@ -885,7 +885,7 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
         return None;
     }
     if route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
-        && crate::contract_matrix::final_answer_shape_for_output_contract(
+        && crate::evidence_policy::final_answer_shape_for_output_contract(
             &route.effective_output_contract(),
         )?
         .as_str()
