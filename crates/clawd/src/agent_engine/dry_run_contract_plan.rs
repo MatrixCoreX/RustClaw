@@ -24,7 +24,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &[AgentAction::Respond {
                 content: serde_json::json!({
                     "schema_version": 1,
-                    "semantic_kind": "answer_verifier_contract_dry_run",
+                    "contract_marker": "answer_verifier_contract_dry_run",
                     "would_mutate": false,
                     "required_evidence": [
                         "required_evidence",
@@ -68,7 +68,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &[AgentAction::Respond {
                 content: serde_json::json!({
                     "schema_version": 1,
-                    "semantic_kind": "task_control_cancel_dry_run",
+                    "contract_marker": "task_control_cancel_dry_run",
                     "would_mutate": false,
                     "required_fields": ["task_id", "state", "can_cancel"],
                     "cancel_request": {
@@ -114,7 +114,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &[AgentAction::Respond {
                 content: serde_json::json!({
                     "schema_version": 1,
-                    "semantic_kind": "observed_output_projection_dry_run",
+                    "contract_marker": "observed_output_projection_dry_run",
                     "would_mutate": false,
                     "families": [
                         "scalar",
@@ -142,7 +142,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &[AgentAction::Respond {
                 content: serde_json::json!({
                     "schema_version": 1,
-                    "semantic_kind": "local_process_cancel_dry_run",
+                    "contract_marker": "local_process_cancel_dry_run",
                     "would_mutate": false,
                     "adapter_kind": "local_process_poll",
                     "cancel_ref": "optional_cancel_reference",
@@ -171,7 +171,7 @@ pub(super) fn structured_dry_run_response_deterministic_plan_result(
             &[AgentAction::Respond {
                 content: serde_json::json!({
                     "schema_version": 1,
-                    "semantic_kind": "async_job_poll_contract_dry_run",
+                    "contract_marker": "async_job_poll_contract_dry_run",
                     "would_mutate": false,
                     "adapter_result": {
                         "type": "pending_async_job",
@@ -231,7 +231,7 @@ fn finalizer_language_policy_dry_run_plan(goal: &str) -> PlanResult {
         &[AgentAction::Respond {
             content: serde_json::json!({
                 "schema_version": 1,
-                "semantic_kind": "finalizer_language_policy_dry_run",
+                "contract_marker": "finalizer_language_policy_dry_run",
                 "would_mutate": false,
                 "message_key": "clawd.finalizer.language_policy",
                 "runtime_allowed_outputs": [
