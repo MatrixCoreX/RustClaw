@@ -238,11 +238,20 @@ pub(crate) fn apply_post_route_policy(
         || missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify;
     let force_clarify = force_clarify && !existing_file_delivery_can_try_locator_hint;
+    let content_evidence_has_boundary_scope = execution_route_result
+        .output_contract
+        .requires_content_evidence
+        && (locator_kind_requires_path_binding(
+            execution_route_result.output_contract.locator_kind,
+        ) || execution_route_result.output_contract.delivery_required
+            || !matches!(
+                execution_route_result.output_contract.delivery_intent,
+                crate::OutputDeliveryIntent::None
+            )
+            || current_workspace_content_summary_needs_concrete_locator);
     let clarify_has_boundary_contract = missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify
-        || execution_route_result
-            .output_contract
-            .requires_content_evidence
+        || content_evidence_has_boundary_scope
         || locator_kind_requires_path_binding(execution_route_result.output_contract.locator_kind)
         || execution_route_result.output_contract.delivery_required
         || !matches!(
@@ -254,7 +263,9 @@ pub(crate) fn apply_post_route_policy(
     let apply_force_clarify = force_clarify && !non_boundary_clarify_requested;
     if non_boundary_clarify_requested {
         execution_route_result.needs_clarify = false;
-        if execution_route_result.is_resume_discussion_mode() {
+        if !execution_route_result.is_execute_gate()
+            || execution_route_result.is_resume_discussion_mode()
+        {
             execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         }
     }

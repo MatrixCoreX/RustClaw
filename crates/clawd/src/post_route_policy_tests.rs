@@ -510,6 +510,33 @@ fn non_boundary_clarify_defers_to_agent_loop() {
 }
 
 #[test]
+fn locatorless_capability_evidence_clarify_defers_to_agent_loop() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason = "capability_ref=weather.current; normalizer_requested_clarify".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+    let result = apply_post_route_policy(route, LocatorResolution::None);
+
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::planner_execute_with_chat_finalizer()
+    );
+    assert!(!result.execution_route_result.needs_clarify);
+    assert!(!result.missing_locator_for_path_scoped_content);
+    assert_eq!(
+        result.gate_record.reason_code,
+        "post_route_non_boundary_clarify_deferred_to_agent_loop"
+    );
+    assert_eq!(result.gate_record.owner_layer, "agent_loop_boundary_defer");
+    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::NoChange);
+}
+
+#[test]
 fn filesystem_mutation_with_matching_locator_hint_executes_despite_deictic_marker() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::clarify();
