@@ -435,7 +435,7 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     fs::write(&second, "second file\nbeta\n").expect("write second file");
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -515,7 +515,7 @@ fn content_evidence_partial_multi_file_read_appends_missing_structural_targets()
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -592,7 +592,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -671,7 +671,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
 #[test]
 fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Free,
     );

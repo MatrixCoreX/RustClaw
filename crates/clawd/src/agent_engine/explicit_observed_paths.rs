@@ -146,7 +146,6 @@ pub(super) fn ensure_explicit_multi_file_targets_have_path_facts(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || loop_state.has_tool_or_skill_output
     {
@@ -189,7 +188,6 @@ pub(super) fn ensure_existence_multi_file_targets_have_path_facts(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || loop_state.has_tool_or_skill_output
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
@@ -533,7 +531,6 @@ pub(super) fn replace_content_evidence_synthesize_only_with_file_reads(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || loop_state.has_tool_or_skill_output
@@ -610,7 +607,6 @@ pub(super) fn ensure_explicit_multi_file_targets_have_content_reads(
         return actions;
     };
     if route_has_unresolved_clarify_or_locator_marker(route)
-        || !route.is_execute_gate()
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || loop_state.has_tool_or_skill_output
