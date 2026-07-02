@@ -80,6 +80,11 @@ fn route_contract_marker_is_service_status(route: &RouteResult) -> bool {
 
 fn route_contract_marker_is_archive_unpack(route: &RouteResult) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ArchiveUnpack)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["archive"],
+            &["unpack"],
+        )
 }
 
 fn route_contract_marker_is_git_repository_state(route: &RouteResult) -> bool {
