@@ -599,6 +599,7 @@ async fn active_task_append_current_locator_reaches_planner_path() {
         &policy,
         &loop_state,
         Some(&analysis),
+        None,
         Some(&route),
         Some("/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt"),
     )

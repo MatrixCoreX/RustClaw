@@ -17,12 +17,12 @@ use super::planning_parse::parse_single_plan_actions;
 #[cfg(test)]
 use super::planning_prompt::compact_skill_playbook_from_prompt;
 use super::planning_prompt::{
-    build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
+    PlanningPromptClass, build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     ensure_required_contract_block_present, incremental_prompt_spec_for_class,
-    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
+    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label,
 };
 #[cfg(test)]
 use super::planning_recent_artifacts::recent_artifacts_judgment_deterministic_plan_result;
@@ -43,6 +43,7 @@ use std::sync::OnceLock;
 use tracing::{info, warn};
 
 use super::{
+    AGENT_TOOL_SPEC_PATH, AgentLoopGuardPolicy, LoopState, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
     attempt_ledger::build_attempt_ledger_compact,
     build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text_scoped,
     build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block,
@@ -50,9 +51,8 @@ use super::{
         route_allows_structured_candidate_read_target_repair,
         route_has_unresolved_clarify_or_locator_marker, route_reason_has_structural_marker,
     },
-    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
 };
-use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult};
+use crate::{AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult, llm_gateway};
 
 #[path = "planning_scalar_count_filter.rs"]
 mod scalar_count_filter;
@@ -171,6 +171,7 @@ pub(super) async fn plan_round_actions(
     policy: &AgentLoopGuardPolicy,
     loop_state: &LoopState,
     turn_analysis_for_prompt: Option<&crate::intent_router::TurnAnalysis>,
+    boundary_envelope_for_prompt: Option<&crate::intent_router::BoundaryEnvelope>,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Result<PlanResult, String> {
@@ -215,7 +216,11 @@ pub(super) async fn plan_round_actions(
     } else {
         build_lightweight_tool_spec(route_result, auto_locator_path)
     };
-    let turn_analysis = build_turn_analysis_prompt_block(turn_analysis_for_prompt, route_result);
+    let turn_analysis = build_turn_analysis_prompt_block(
+        turn_analysis_for_prompt,
+        boundary_envelope_for_prompt,
+        route_result,
+    );
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_text);
     let user_request_for_prompt =

@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::info;
 
-use crate::{schedule_service, AppState};
+use crate::{AppState, schedule_service};
 
 #[path = "ask_prepare_field_contract.rs"]
 mod field_contract;
@@ -40,6 +40,7 @@ pub(super) struct PreparedAskRouting {
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(super) boundary_envelope: Option<crate::intent_router::BoundaryEnvelope>,
     pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) resolved_prompt: String,
 }
@@ -1349,6 +1350,7 @@ pub(super) async fn prepare_ask_routing(
             execution_recipe_hint: None,
             execution_recipe_plan_hint: None,
             turn_analysis: None,
+            boundary_envelope: None,
             clarify_fallback_source: None,
             resolved_prompt,
         });
@@ -1414,7 +1416,10 @@ pub(super) async fn prepare_ask_routing(
         normalizer_out.route_trace_record.owner_layer,
         normalizer_out.route_trace_record.reason_code,
         normalizer_out.route_trace_record.outcome,
-        normalizer_out.route_trace_record.route_trace_decision.as_str(),
+        normalizer_out
+            .route_trace_record
+            .route_trace_decision
+            .as_str(),
         normalizer_out.route_trace_record.needs_clarify,
         normalizer_out.route_trace_record.output_contract_ref,
         normalizer_out.route_trace_record.repair_codes.join(","),
@@ -1427,6 +1432,7 @@ pub(super) async fn prepare_ask_routing(
         state.cache_task_schedule_intent(&task.task_id, &normalizer_prompt, intent);
     }
     let turn_analysis = normalizer_out.turn_analysis.clone();
+    let boundary_envelope = normalizer_out.boundary_envelope();
     let clarify_fallback_source = normalizer_out.fallback_source;
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
     let mut execution_recipe_plan_hint = normalizer_out.execution_recipe_plan_hint.clone();
@@ -1510,14 +1516,16 @@ pub(super) async fn prepare_ask_routing(
             turn_analysis.as_ref(),
         ) {
             info!(
-            "{} worker_once: ask task_turn_merge task_id={} turn_type={:?} target_task_policy={:?} merged_prompt={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            turn_analysis.as_ref().and_then(|analysis| analysis.turn_type),
-            turn_analysis
-                .as_ref()
-                .and_then(|analysis| analysis.target_task_policy),
-            crate::truncate_for_log(&merged_prompt)
+                "{} worker_once: ask task_turn_merge task_id={} turn_type={:?} target_task_policy={:?} merged_prompt={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                turn_analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.turn_type),
+                turn_analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.target_task_policy),
+                crate::truncate_for_log(&merged_prompt)
             );
             runtime_prompt = merged_prompt;
             append_active_delivery_content_target_token(&mut runtime_prompt, &route_result);
@@ -1592,6 +1600,7 @@ pub(super) async fn prepare_ask_routing(
         execution_recipe_hint,
         execution_recipe_plan_hint,
         turn_analysis,
+        boundary_envelope: Some(boundary_envelope),
         clarify_fallback_source,
         resolved_prompt,
     })

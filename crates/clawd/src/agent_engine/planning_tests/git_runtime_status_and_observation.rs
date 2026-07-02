@@ -544,6 +544,7 @@ async fn runtime_status_query_reaches_planner_without_literal_command_fast_path(
         &policy,
         &loop_state,
         Some(&analysis),
+        None,
         Some(&route),
         None,
     )

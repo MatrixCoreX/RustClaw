@@ -18,6 +18,7 @@ pub(in crate::worker) fn build_agent_run_context_from_prepared_flow(
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
         execution_recipe_plan_hint: prepared_flow.execution_recipe_plan_hint.clone(),
         turn_analysis: prepared_flow.turn_analysis.clone(),
+        boundary_envelope: prepared_flow.boundary_envelope.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         session_alias_bindings: prepared_flow.session_alias_bindings.clone(),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),

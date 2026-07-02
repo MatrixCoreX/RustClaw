@@ -1279,6 +1279,7 @@ reqwest = { version = "0.12" }
         &policy,
         &loop_state,
         None,
+        None,
         Some(&route),
         None,
     )
@@ -1358,6 +1359,7 @@ reqwest = { version = "0.12" }
         &planner_user_text,
         &policy,
         &loop_state,
+        None,
         None,
         Some(&route),
         Some(cargo_auto.as_str()),
