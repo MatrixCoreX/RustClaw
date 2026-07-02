@@ -34,8 +34,8 @@ fn compact_normalizer_prompt_pins_boundary_schema() {
     assert!(prompt.contains("Boundary extraction scope"));
     assert!(prompt.contains("Do not classify ordinary capability families"));
     assert!(prompt.contains("let the planner/resolver choose from CAPABILITIES"));
-    assert!(prompt.contains("Prefer semantic_kind=\"none\""));
-    assert!(prompt.contains("never create a new feature enum"));
+    assert!(prompt.contains("Set semantic_kind=\"none\" in normalizer output"));
+    assert!(prompt.contains("Never create or select feature semantic_kind values"));
     assert!(prompt.contains("Allowed output_contract keys only"));
     assert!(
         prompt.contains("Allowed response_shape: free, one_sentence, strict, scalar, file_token")
