@@ -828,7 +828,7 @@ fn recover_normalizer_text_from_openai_tool_calls(
             "delivery_required": false,
             "locator_kind": locator_kind,
             "delivery_intent": "none",
-            "semantic_kind": "none",
+            "contract_marker": "none",
             "locator_hint": locator_hint,
             "self_extension": {
                 "mode": "none",

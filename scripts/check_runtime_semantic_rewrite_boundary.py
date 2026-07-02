@@ -102,6 +102,12 @@ ROUTE_RESULT_RAW_SEMANTIC_CLEAR = re.compile(
     r"\b(?:route|route_result|execution_route_result)\.output_contract\.semantic_kind"
     r"\s*=\s*(?:crate::)?OutputSemanticKind::None\b"
 )
+LEGACY_JSON_SEMANTIC_FIELD_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r'"semantic_kind"\s*:'),
+    re.compile(r'\.get\("semantic_kind"\)'),
+    re.compile(r'contains_key\("semantic_kind"\)'),
+    re.compile(r'"semantic_kind"\.to_string\(\)'),
+)
 
 ALLOWED_PRODUCTION_FILES: set[str] = set()
 
@@ -299,6 +305,7 @@ def scan_repo() -> list[Finding]:
         text = path.read_text(encoding="utf-8")
         findings.extend(scan_text(rel_path, text))
         findings.extend(scan_route_result_raw_semantic_access(rel_path, text))
+        findings.extend(scan_legacy_json_semantic_fields(rel_path, text))
     findings.extend(scan_normalizer_route_result_boundary())
     findings.extend(scan_journal_output_contract_ref_boundary())
     findings.extend(scan_static_capability_compat_boundary())
@@ -375,6 +382,23 @@ def scan_route_result_raw_semantic_access(rel_path: str, text: str) -> list[Find
                 line.strip(),
             )
         )
+    return findings
+
+
+def scan_legacy_json_semantic_fields(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for pattern in LEGACY_JSON_SEMANTIC_FIELD_PATTERNS:
+            if not pattern.search(line):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "legacy_json_semantic_kind_field",
+                    line.strip(),
+                )
+            )
     return findings
 
 
