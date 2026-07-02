@@ -1349,6 +1349,7 @@ fn route_machine_value_from_text(text: &str, key: &str) -> Option<String> {
         })
 }
 
+#[cfg(test)]
 pub(super) fn async_job_start_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1384,6 +1385,7 @@ pub(super) fn async_job_start_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn loop_state_async_start_command(loop_state: &LoopState) -> Option<String> {
     let command = loop_state
         .output_vars
@@ -1644,6 +1646,7 @@ fn route_mentions_task_control_get(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action(route, &["task_control"], &["get"])
 }
 
+#[cfg(test)]
 fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
     route_reason_has_marker(route, "async_job_protocol")
         || route_reason_has_marker(route, "required_job_fields=")
@@ -1653,6 +1656,7 @@ fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
             .any(|token| route_mentions_machine_token(route, token))
 }
 
+#[cfg(test)]
 fn route_mentions_machine_token(route: &RouteResult, token: &str) -> bool {
     let token = token.to_ascii_lowercase();
     [route.route_reason.as_str(), route.resolved_intent.as_str()]

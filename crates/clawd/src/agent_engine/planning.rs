@@ -260,16 +260,6 @@ pub(super) async fn plan_round_actions(
         ),
         "plan_deterministic_subagent_review_boundary_surface"
     );
-    return_deterministic_plan!(
-        async_job_start_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-        ),
-        "plan_deterministic_async_job_start"
-    );
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
             state,
