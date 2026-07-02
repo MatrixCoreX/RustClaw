@@ -13,16 +13,6 @@ pub(crate) enum TaskIntentKind {
     PlannerExecute,
 }
 
-impl TaskIntentKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Clarify => "clarify",
-            Self::DirectAnswer => "direct_answer",
-            Self::PlannerExecute => "planner_execute",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskTargetObject {
     Path,
@@ -219,8 +209,7 @@ impl TaskContract {
             serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
         };
         format!(
-            "- task_contract intent_kind={} targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
-            self.intent_kind.as_str(),
+            "- task_contract targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
             targets,
             self.target_object.as_str(),
             self.structured_field_selector
