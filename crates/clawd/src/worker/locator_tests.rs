@@ -66,6 +66,16 @@ fn concrete_locator_hint_rejects_dotted_version_numbers() {
 }
 
 #[test]
+fn concrete_locator_hint_rejects_protocol_field_selector_paths() {
+    assert!(!super::has_concrete_locator_hint("text/error_text"));
+    assert!(!super::has_concrete_locator_hint(
+        "RepairEnvelope/issue_codes checkpoint_id"
+    ));
+    assert!(super::has_concrete_locator_hint("src/main.rs"));
+    assert!(super::has_concrete_locator_hint("./document"));
+}
+
+#[test]
 fn filename_like_tokens_extracts_expected_items() {
     let tokens =
         super::extract_filename_like_tokens("please open Config.toml and README.md plus README");
