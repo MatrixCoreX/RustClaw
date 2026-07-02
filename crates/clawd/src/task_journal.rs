@@ -441,10 +441,10 @@ fn plan_step_action_ref(
     step: &crate::PlanStep,
     route: Option<&crate::RouteResult>,
 ) -> Option<String> {
-    let action = crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)?;
+    let action = crate::evidence_policy::ActionRef::from_skill_args(&step.skill, &step.args)?;
     let raw_key = action.as_key();
     if let Some(compact) = route.and_then(|route| {
-        crate::contract_matrix::contract_trace_action_key_for_route(route, &raw_key)
+        crate::evidence_policy::contract_trace_action_key_for_route(route, &raw_key)
     }) {
         return Some(compact);
     }
@@ -452,7 +452,7 @@ fn plan_step_action_ref(
 }
 
 fn plan_step_raw_action_ref(step: &crate::PlanStep) -> Option<String> {
-    crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)
+    crate::evidence_policy::ActionRef::from_skill_args(&step.skill, &step.args)
         .map(|action| action.as_key())
 }
 

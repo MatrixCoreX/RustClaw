@@ -454,7 +454,7 @@ fn plan_step_action_key(state: &AppState, step: &PlanStep) -> Option<String> {
         return None;
     }
     let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
-    crate::contract_matrix::ActionRef::from_skill_args(&normalized_skill, &step.args)
+    crate::evidence_policy::ActionRef::from_skill_args(&normalized_skill, &step.args)
         .map(|action| action.as_key())
 }
 
@@ -1810,7 +1810,7 @@ pub(crate) fn verify_plan(
                 }
             } else if route_requires_contract(input.route_result)
                 && !route_contract_missing
-                && crate::contract_matrix::ActionRef::from_skill_args(&normalized_skill, &step.args)
+                && crate::evidence_policy::ActionRef::from_skill_args(&normalized_skill, &step.args)
                     .is_none()
                 && !subagent_review_boundary_surface_action_allowed
             {
