@@ -659,6 +659,7 @@ pub(super) fn replace_structured_keys_read_plan(
     }]
 }
 
+#[cfg(test)]
 pub(super) fn has_structured_keys_observation(loop_state: &LoopState, path: &str) -> bool {
     let requested_path = path.trim();
     loop_state.executed_step_results.iter().rev().any(|step| {
@@ -699,6 +700,7 @@ pub(super) fn has_structured_keys_observation(loop_state: &LoopState, path: &str
     })
 }
 
+#[cfg(test)]
 pub(super) fn structured_keys_deterministic_plan_result(
     state: &AppState,
     goal: &str,

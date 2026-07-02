@@ -787,7 +787,7 @@ fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
 }
 
 #[test]
-fn registry_prefers_config_basic_for_structured_keys_contract() {
+fn registry_does_not_prefer_config_basic_from_structured_keys_marker_only() {
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
         true,
@@ -797,7 +797,10 @@ fn registry_prefers_config_basic_for_structured_keys_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "package.json".to_string();
     let preferred = registry_preferred_skill_names_for_route(&test_state_with_registry(), &route);
-    assert!(preferred.iter().any(|skill| skill == "config_basic"));
+    assert!(
+        preferred.is_empty(),
+        "ordinary structured_keys markers should not lock capability choice before planner: {preferred:?}"
+    );
 }
 
 #[test]
