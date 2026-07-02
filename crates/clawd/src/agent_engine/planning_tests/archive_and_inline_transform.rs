@@ -199,11 +199,13 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
     route.resolved_intent = format!(
         "archive.list archive.read database.list_tables archive={archive} member=notes.txt db_path={db_path}"
     );
-    route.route_reason = "machine_plan: archive.list archive.read database.list_tables".to_string();
+    route.route_reason =
+        "capability_ref=archive.list capability_ref=archive.read capability_ref=database.list_tables"
+            .to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_hint = format!("{archive} | {db_path}");
     let loop_state = LoopState::new(1);

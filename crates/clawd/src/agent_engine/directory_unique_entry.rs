@@ -1334,12 +1334,12 @@ pub(super) fn route_allows_archive_list_auto_locator(
         return true;
     }
     match route.effective_output_contract_semantic_kind() {
-        crate::OutputSemanticKind::ArchiveRead => false,
+        crate::OutputSemanticKind::ArchiveRead | crate::OutputSemanticKind::ArchiveList => false,
         crate::OutputSemanticKind::ExistenceWithPath => {
             archive_entry_target_for_route_or_text(route, &route.resolved_intent, archive_path)
                 .is_some()
         }
-        crate::OutputSemanticKind::ArchiveList | crate::OutputSemanticKind::ScalarCount => true,
+        crate::OutputSemanticKind::ScalarCount => true,
         _ => route_expects_terminal_user_answer(route),
     }
 }
@@ -1349,12 +1349,7 @@ fn route_requests_archive_read(route: &RouteResult) -> bool {
 }
 
 fn route_requests_archive_list(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["archive"],
-            &["list"],
-        )
+    crate::machine_capability_ref::route_has_capability_action_name(route, &["archive"], &["list"])
 }
 
 pub(super) fn archive_list_auto_locator_deterministic_plan_result(
