@@ -1,5 +1,7 @@
+#[cfg(test)]
+use super::planning_actions::build_plan_result;
 use super::planning_actions::{
-    build_plan_result, build_plan_result_with_notes, contains_unavailable_skill_action,
+    build_plan_result_with_notes, contains_unavailable_skill_action,
     has_executable_observation_or_action, has_tool_or_skill_observation, planned_action_skill_name,
 };
 use super::planning_followup::{
@@ -179,49 +181,6 @@ pub(super) async fn plan_round_actions(
     let planning_class = classify_planning_prompt_class(route_result, user_text, loop_state);
     let original_user_text_for_policy = crate::language_policy::task_original_user_text(task)
         .unwrap_or_else(|| user_text.to_string());
-    let explicit_command_request = explicit_command_request_present(
-        &state.policy.command_intent,
-        &original_user_text_for_policy,
-        route_result,
-    );
-    let explicit_command_scalar_path_current_workspace =
-        explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
-            &state.policy.command_intent,
-            &original_user_text_for_policy,
-            route_result,
-        );
-    let route_contract_defers_literal_command =
-        route_contract_defers_literal_command_to_planner(route_result)
-            && !explicit_command_scalar_path_current_workspace;
-    let literal_command_should_use_run_cmd =
-        explicit_command_request && !route_contract_defers_literal_command;
-    macro_rules! return_deterministic_plan {
-        ($maybe_plan:expr, $reason_code:literal) => {
-            if let Some(plan_result) = $maybe_plan {
-                info!(
-                    concat!($reason_code, " task_id={} round={}"),
-                    task.task_id, loop_state.round_no
-                );
-                return Ok(plan_result_with_fallback_reason(plan_result, $reason_code));
-            }
-        };
-    }
-
-    if literal_command_should_use_run_cmd
-        && runtime_status_query_kind(turn_analysis_for_prompt).is_none()
-    {
-        return_deterministic_plan!(
-            explicit_command_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                &original_user_text_for_policy,
-                turn_analysis_for_prompt,
-            ),
-            "plan_deterministic_explicit_command_run_cmd"
-        );
-    }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
             state,
@@ -797,6 +756,7 @@ pub(super) async fn plan_round_actions(
     Ok(plan_result)
 }
 
+#[cfg(test)]
 fn explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
     command_runtime: &crate::CommandIntentRuntime,
     original_user_text: &str,
@@ -822,6 +782,7 @@ fn explicit_command_scalar_path_current_workspace_should_prefer_run_cmd(
         })
 }
 
+#[cfg(test)]
 fn plan_result_with_fallback_reason(
     mut plan_result: PlanResult,
     reason_code: &'static str,

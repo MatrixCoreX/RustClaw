@@ -806,7 +806,7 @@ async fn plan_round_scalar_path_current_workspace_reaches_planner_without_pre_ll
 }
 
 #[tokio::test]
-async fn explicit_command_scalar_path_current_workspace_uses_run_cmd_plan() {
+async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
     let root = TempDirGuard::new("explicit_command_scalar_current_workspace_plan_round");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
@@ -852,7 +852,7 @@ async fn explicit_command_scalar_path_current_workspace_uses_run_cmd_plan() {
         )
     );
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -864,27 +864,20 @@ async fn explicit_command_scalar_path_current_workspace_uses_run_cmd_plan() {
         None,
     )
     .await
-    .expect("explicit current workspace command should use run_cmd plan");
+    .expect_err("explicit current workspace command should reach planner path");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan
-        .planner_notes
-        .split_whitespace()
-        .any(|note| note == "fallback_reason_code=plan_deterministic_explicit_command_run_cmd"));
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after explicit-command preplan removal, got: {err}"
     );
-    assert_eq!(
-        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
+    assert!(
+        !err.contains("plan_deterministic_explicit_command_run_cmd"),
+        "old explicit-command deterministic fallback leaked into planner error: {err}"
     );
 }
 
 #[tokio::test]
-async fn explicit_command_scalar_path_auto_locator_conflict_uses_run_cmd_plan() {
+async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path() {
     let root = TempDirGuard::new("explicit_command_scalar_auto_locator_conflict");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
@@ -934,7 +927,7 @@ async fn explicit_command_scalar_path_auto_locator_conflict_uses_run_cmd_plan() 
         )
     );
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -946,22 +939,15 @@ async fn explicit_command_scalar_path_auto_locator_conflict_uses_run_cmd_plan() 
         Some(&route.output_contract.locator_hint),
     )
     .await
-    .expect("explicit command should override conflicting auto-locator path");
+    .expect_err("explicit command should reach planner despite auto-locator conflict");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan
-        .planner_notes
-        .split_whitespace()
-        .any(|note| note == "fallback_reason_code=plan_deterministic_explicit_command_run_cmd"));
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after explicit-command preplan removal, got: {err}"
     );
-    assert_eq!(
-        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
+    assert!(
+        !err.contains("plan_deterministic_explicit_command_run_cmd"),
+        "old explicit-command deterministic fallback leaked into planner error: {err}"
     );
 }
 
