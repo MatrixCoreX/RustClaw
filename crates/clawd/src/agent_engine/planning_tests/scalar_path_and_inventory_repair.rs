@@ -1303,7 +1303,7 @@ fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::OneSentence,
     );
