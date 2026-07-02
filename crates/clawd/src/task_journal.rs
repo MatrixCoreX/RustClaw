@@ -1597,7 +1597,7 @@ impl TaskJournal {
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
-            "contract_matrix": self
+            "evidence_policy": self
                 .route_result
                 .as_ref()
                 .and_then(crate::contract_matrix::trace_snapshot_for_route),

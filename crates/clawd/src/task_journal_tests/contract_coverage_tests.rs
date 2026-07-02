@@ -1357,7 +1357,7 @@ fn trace_json_counts_nested_builtin_tool_evidence() {
 }
 
 #[test]
-fn trace_json_includes_task_level_contract_matrix_snapshot() {
+fn trace_json_includes_task_level_evidence_policy_snapshot() {
     let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
@@ -1386,8 +1386,8 @@ fn trace_json_includes_task_level_contract_matrix_snapshot() {
 
     let trace = journal.to_trace_json();
     let snapshot = trace
-        .get("contract_matrix")
-        .expect("contract matrix snapshot should be present");
+        .get("evidence_policy")
+        .expect("evidence-policy snapshot should be present");
 
     assert_eq!(
         snapshot.get("contract_match").and_then(Value::as_str),

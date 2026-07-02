@@ -1043,11 +1043,11 @@ fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
         .starts_with("fnv64:"));
     assert!(
         trace
-            .get("contract_matrix")
+            .get("evidence_policy")
             .and_then(|value| value.get("contract_match"))
             .and_then(Value::as_str)
             .is_some(),
-        "contract snapshot should survive trace compaction"
+        "evidence-policy snapshot should survive trace compaction"
     );
     assert!(
         trace.get("evidence_coverage").is_some(),
