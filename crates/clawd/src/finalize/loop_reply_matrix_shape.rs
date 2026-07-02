@@ -404,6 +404,7 @@ pub(super) fn matrix_strict_list_observed_answer(
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
     route_requests_archive_list(route)
+        || route_requests_filesystem_path_list(route)
         || matches!(
             route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::FileNames
@@ -413,6 +414,14 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
                 | crate::OutputSemanticKind::StructuredKeys
                 | crate::OutputSemanticKind::SqliteTableNamesOnly
         )
+}
+
+fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["filesystem", "fs", "fs_basic"],
+        &["find_entries"],
+    )
 }
 
 fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
