@@ -342,7 +342,6 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task(
 ) -> bool {
     if turn_analysis.is_some()
         || route_result.needs_clarify
-        || !route_result.is_execute_gate()
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || matches!(
@@ -363,7 +362,6 @@ fn unannotated_structured_listing_starts_primary_task(
 ) -> bool {
     turn_analysis.is_none()
         && !route_result.needs_clarify
-        && route_result.is_execute_gate()
         && !crate::followup_frame::derive_ordered_entries_from_journal(journal).is_empty()
 }
 
