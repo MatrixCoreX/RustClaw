@@ -341,27 +341,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_directory_purpose_representative_reads"
         );
         return_deterministic_plan!(
-            recent_scalar_file_pair_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                &original_user_text_for_policy,
-                Some(&original_user_text_for_policy),
-                auto_locator_path,
-            ),
-            "plan_deterministic_recent_scalar_file_pair"
-        );
-        return_deterministic_plan!(
-            recent_scalar_current_workspace_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-            ),
-            "plan_deterministic_recent_scalar_current_workspace"
-        );
-        return_deterministic_plan!(
             scalar_content_auto_locator_deterministic_plan_result(
                 state,
                 goal,

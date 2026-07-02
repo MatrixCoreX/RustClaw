@@ -1226,7 +1226,7 @@ version = "0.1.0"
 }
 
 #[tokio::test]
-async fn plan_round_recent_scalar_file_pair_uses_deterministic_plan_before_llm() {
+async fn plan_round_recent_scalar_file_pair_reaches_planner_without_pre_llm_shortcut() {
     let root = TempDirGuard::new("recent_scalar_plan_round_relative_pair");
     fs::write(
         root.path.join("Cargo.toml"),
@@ -1275,7 +1275,7 @@ reqwest = { version = "0.12" }
     loop_state.round_no = 1;
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -1287,31 +1287,19 @@ reqwest = { version = "0.12" }
         None,
     )
     .await
-    .expect("plan round should use deterministic scalar compare plan");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
+    .expect_err("recent scalar pair should reach planner instead of pre-LLM deterministic plan");
     assert!(
-        plan.planner_notes
-            .split_whitespace()
-            .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"),
-        "planner_notes={} steps={:?}",
-        plan.planner_notes,
-        plan.steps
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
     );
-    assert!(matches!(
-        plan.steps
-            .first()
-            .and_then(|step| step.to_agent_action())
-            .as_ref(),
-        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-    ));
+    assert!(
+        !err.contains("plan_deterministic_recent_scalar_file_pair"),
+        "old recent scalar deterministic fallback leaked into planner error: {err}"
+    );
 }
 
 #[tokio::test]
-async fn plan_round_recent_scalar_file_pair_uses_prompt_targets_when_route_has_single_auto_locator()
-{
+async fn plan_round_recent_scalar_file_pair_single_auto_locator_uses_planner_path() {
     let root = TempDirGuard::new("recent_scalar_plan_round_single_locator");
     let cargo = root.path.join("Cargo.toml");
     fs::write(
@@ -1379,15 +1367,14 @@ reqwest = { version = "0.12" }
         Some(cargo_auto.as_str()),
     )
     .await
-    .expect("single auto locator route should still use prompt file targets");
+    .expect("single auto locator route should reach planner path");
 
-    assert!(matches!(
-        plan.steps
-            .first()
-            .and_then(|step| step.to_agent_action())
-            .as_ref(),
-        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-    ));
+    assert!(
+        !plan
+            .planner_notes
+            .split_whitespace()
+            .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"),
+        "old recent scalar deterministic fallback leaked into planner notes: {}",
+        plan.planner_notes
+    );
 }
