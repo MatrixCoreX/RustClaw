@@ -207,7 +207,13 @@ fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() 
     );
     assert_eq!(
         contract.get("semantic_kind").and_then(|v| v.as_str()),
-        Some("sqlite_table_names_only")
+        Some("none")
+    );
+    assert_eq!(
+        contract
+            .get("requires_content_evidence")
+            .and_then(|v| v.as_bool()),
+        Some(true)
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
