@@ -895,7 +895,7 @@ fn unknown_route_capability_ref_does_not_fall_back_to_semantic_matrix_actions() 
 }
 
 #[test]
-fn route_policy_does_not_allow_config_action_without_capability_ref() {
+fn route_policy_without_capability_ref_does_not_reject_config_action() {
     let mut route = route_with_machine_capability_ref("machine_context=no_capability_ref");
     route.route_reason.clear();
     route.resolved_intent.clear();
@@ -904,11 +904,9 @@ fn route_policy_does_not_allow_config_action_without_capability_ref() {
         Some(&route),
         "config_basic",
         &serde_json::json!({"action":"validate","path":"configs/config.toml"}),
-    )
-    .expect("generic policy decision");
+    );
 
-    assert_eq!(policy.decision, ActionPolicyDecision::RejectedNotAllowed);
-    assert_ne!(policy.contract_match, "capability_ref");
+    assert!(policy.is_none());
 }
 
 #[test]
@@ -2359,8 +2357,7 @@ fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
         Some(&route),
         "git_basic",
         &serde_json::json!({"action": "status"}),
-    )
-    .expect("route policy");
+    );
 
     assert_eq!(
         route.output_contract.semantic_kind,
@@ -2370,8 +2367,7 @@ fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
         route.effective_output_contract_semantic_kind(),
         OutputSemanticKind::WorkspaceProjectSummary
     );
-    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
-    assert_eq!(policy.contract_match, "workspace_project_summary");
+    assert!(policy.is_none());
 }
 
 #[test]

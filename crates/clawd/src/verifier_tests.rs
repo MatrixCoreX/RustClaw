@@ -745,7 +745,7 @@ fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
 }
 
 #[test]
-fn observe_mode_records_contract_action_rejection_for_structured_route() {
+fn observe_mode_does_not_reject_actions_from_semantic_matrix_only() {
     let state = test_state();
     let task = test_task();
     let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
@@ -770,14 +770,11 @@ fn observe_mode_records_contract_action_rejection_for_structured_route() {
     );
 
     assert!(result.approved);
-    assert!(result.issues.iter().any(|issue| {
-        matches!(issue.kind, VerifyIssueKind::ContractActionRejected)
-            && issue.kind.failure_attribution() == FailureAttribution::ContractGap
-    }));
-    assert!(result
-        .shadow_blocked_reason
-        .as_deref()
-        .is_some_and(|reason| reason.contains("rejected by contract")));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+    assert!(result.shadow_blocked_reason.is_none());
 }
 
 #[test]
@@ -861,7 +858,7 @@ fn summary_contract_allows_registry_observe_config_preview_without_confirmation(
 }
 
 #[test]
-fn summary_contract_still_rejects_registry_mutating_config_apply() {
+fn summary_contract_does_not_reject_registry_config_apply_by_semantic_matrix() {
     let state = test_state();
     let task = test_task();
     let route = route_result_with_semantic(crate::OutputSemanticKind::CommandOutputSummary);
@@ -890,7 +887,7 @@ fn summary_contract_still_rejects_registry_mutating_config_apply() {
         VerifyMode::ObserveOnly,
     );
 
-    assert!(result
+    assert!(!result
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
@@ -973,7 +970,7 @@ fn verifier_issue_kinds_expose_stable_machine_fields() {
 }
 
 #[test]
-fn observe_mode_records_preferred_contract_action_without_blocking() {
+fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
     let state = test_state();
     let task = test_task();
     let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
@@ -998,7 +995,7 @@ fn observe_mode_records_preferred_contract_action_without_blocking() {
     );
 
     assert!(result.approved, "issues: {:?}", result.issues);
-    assert!(result.issues.iter().any(|issue| matches!(
+    assert!(!result.issues.iter().any(|issue| matches!(
         issue.kind,
         VerifyIssueKind::ContractPreferredActionAvailable
     )));

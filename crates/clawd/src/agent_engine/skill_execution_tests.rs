@@ -7,14 +7,14 @@ use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
-    merge_isolation_artifact_refs, preflight_failure_metadata, record_subagent_step_execution,
-    skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
-    AgentLoopGuardPolicy, LoopState,
+    merge_isolation_artifact_refs, preflight_failure_metadata, preflight_permission_decision,
+    record_subagent_step_execution, skill_extra_requests_user_input,
+    structured_extra_evidence_output, structured_observation_path_argument_error,
+    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
-    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
 };
 use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
@@ -165,8 +165,6 @@ fn test_policy() -> AgentLoopGuardPolicy {
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
-        semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
@@ -256,7 +254,7 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
 }
 
 #[test]
-fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
+fn contract_matrix_preflight_does_not_reject_action_from_semantic_matrix_only() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -266,65 +264,7 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
     });
     let args = serde_json::json!({"command": "ls"});
 
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
-        .expect("contract matrix should reject run_cmd for file_names");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("contract policy error should be structured");
-
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
-    assert!(parsed
-        .error_text
-        .contains("prefer action(s): fs_basic.list_dir"));
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("reason_code")),
-        Some(&serde_json::json!("contract_action_rejected"))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("decision")),
-        Some(&serde_json::json!("rejected_not_allowed"))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("failure_attribution")),
-        Some(&serde_json::json!("contract_gap"))
-    );
-    let permission = parsed
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get("permission_decision"))
-        .expect("permission_decision");
-    assert_eq!(permission["allowed"], false);
-    assert_eq!(permission["decision"], serde_json::json!("deny"));
-    assert_eq!(permission["denied_by_policy"], true);
-    assert_eq!(permission["needs_confirmation"], false);
-    assert_eq!(permission["dry_run_required"], false);
-    assert_eq!(permission["external_provider_blocked"], false);
-    assert_eq!(
-        permission["owner_layer"],
-        serde_json::json!("contract_matrix_preflight")
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("original_action_ref")),
-        Some(&serde_json::json!("run_cmd"))
-    );
-    let metadata = preflight_failure_metadata(&err);
-    assert_eq!(metadata.reason, "contract_action_rejected");
-    assert_eq!(metadata.error_kind, "contract_action_rejected");
-    assert!(metadata
-        .retry_instruction
-        .contains("contract_policy_decision=rejected_not_allowed"));
-    assert!(metadata.retry_instruction.contains("fs_basic.list_dir"));
+    assert!(contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none());
 }
 
 #[test]
@@ -398,7 +338,7 @@ fn contract_matrix_preflight_rejects_unbounded_async_start_without_runtime_marke
 }
 
 #[test]
-fn contract_matrix_preflight_allows_registry_observe_config_preview_for_summary() {
+fn contract_matrix_preflight_does_not_reject_config_actions_from_summary_semantic_only() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -441,11 +381,10 @@ planner_capabilities = [
         contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &preview_args)
             .is_none()
     );
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
-        .expect("mutating config apply must still be rejected");
-    let parsed =
-        crate::skills::parse_structured_skill_error(&err).expect("preflight error is structured");
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
+    assert!(
+        contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
+            .is_none()
+    );
 }
 
 #[test]
@@ -541,7 +480,7 @@ fn contract_matrix_preflight_does_not_block_literal_media_run_cmd() {
 }
 
 #[test]
-fn contract_matrix_preflight_permission_decision_uses_registry_policy() {
+fn preflight_permission_decision_uses_registry_policy() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -560,23 +499,15 @@ planner_capabilities = [
 "#,
         &["run_cmd"],
     );
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        ..crate::IntentOutputContract::default()
-    });
     let args = serde_json::json!({"command": "ls"});
 
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
-        .expect("contract matrix should reject run_cmd for file_names");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("contract policy error should be structured");
-    let permission = parsed
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get("permission_decision"))
-        .expect("permission_decision");
+    let permission = preflight_permission_decision(
+        &state,
+        "run_cmd",
+        &args,
+        "registry_policy_probe",
+        "registry_policy_probe",
+    );
 
     assert_eq!(permission["risk_level"], serde_json::json!("high"));
     assert_eq!(permission["decision"], serde_json::json!("deny"));
@@ -648,7 +579,7 @@ planner_capabilities = [
 }
 
 #[test]
-fn contract_matrix_preflight_marks_package_dry_run_as_low_risk_observe() {
+fn preflight_permission_decision_marks_package_dry_run_as_low_risk_observe() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -670,27 +601,19 @@ planner_capabilities = [
 "#,
         &["package_manager"],
     );
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        ..crate::IntentOutputContract::default()
-    });
     let args = serde_json::json!({
         "action": "smart_install",
         "packages": ["jq"],
         "dry_run": true
     });
 
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "package_manager", &args)
-        .expect("file_names contract should reject package dry-run and expose permission");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("contract policy error should be structured");
-    let permission = parsed
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get("permission_decision"))
-        .expect("permission_decision");
+    let permission = preflight_permission_decision(
+        &state,
+        "package_manager",
+        &args,
+        "package_dry_run_probe",
+        "package_dry_run_probe",
+    );
 
     assert_eq!(permission["risk_level"], serde_json::json!("low"));
     assert_eq!(permission["decision"], serde_json::json!("deny"));
@@ -814,8 +737,8 @@ fn contract_matrix_preflight_allows_task_control_lifecycle_dry_run_only() {
     });
     assert!(
         contract_matrix_action_policy_error(&state, &loop_state, "task_control", &real_args)
-            .is_some(),
-        "real task_control resume must remain governed by the service_status contract"
+            .is_none(),
+        "semantic matrix must not reject real task_control resume before permission policy"
     );
 }
 
