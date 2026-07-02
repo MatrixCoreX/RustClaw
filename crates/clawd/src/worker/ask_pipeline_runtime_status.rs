@@ -40,14 +40,13 @@ fn route_has_runtime_status_capability_context(route_result: &crate::RouteResult
         route_result,
         &["system"],
         &["runtime_status", "health_check"],
-    ) || super::route_reason_has_marker(route_result, LEGACY_HEALTH_CHECK_CAPABILITY_REF)
+    )
 }
 
 const SYSTEM_HEALTH_CHECK_CAPABILITY_REF: &str =
     concat!("capability_ref=", "system", ".", "health_check");
 const SYSTEM_RUNTIME_STATUS_CAPABILITY_REF: &str =
     concat!("capability_ref=", "system", ".", "runtime_status");
-const LEGACY_HEALTH_CHECK_CAPABILITY_REF: &str = concat!("capability_ref=", "health_check");
 
 pub(super) fn turn_analysis_has_runtime_status_query(
     turn_analysis: &crate::intent_router::TurnAnalysis,

@@ -545,6 +545,38 @@ fn generic_service_status_with_model_background_locator_requires_capability_ref(
 }
 
 #[test]
+fn legacy_health_check_capability_ref_no_longer_bypasses_background_locator_guard() {
+    let state = test_state_with_root(make_temp_root("legacy_health_background_locator"));
+    let mut route = executable_filename_route();
+    route.resolved_intent =
+        "Collect baseline runtime health observations and summarize the primary finding."
+            .to_string();
+    route.route_reason = "capability_ref=health_check".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/model-supplied-context".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(background_only_locator_route_should_force_clarify(
+        &state,
+        "run a basic health check here and summarize only the most important findings",
+        &route.resolved_intent,
+        "<none>",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
 fn runtime_status_scalar_path_query_enters_planner_without_locator_prebind() {
     let state = test_state_with_root(make_temp_root("runtime_status_scalar_path"));
     let mut route = executable_filename_route();
