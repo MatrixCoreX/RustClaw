@@ -398,6 +398,22 @@ fn capability_ref_scopes_planner_skills_from_registry() {
 }
 
 #[test]
+fn wrong_boundary_hint_does_not_constrain_capability_family() {
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
+    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("capability scope");
+
+    assert_eq!(scope.len(), 1);
+    assert!(scope.contains("db_basic"));
+    assert!(!scope.contains("fs_basic"));
+}
+
+#[test]
 fn lightweight_contract_scope_without_capability_refs_leaves_skills_open() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;

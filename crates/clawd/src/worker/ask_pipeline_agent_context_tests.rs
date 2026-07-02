@@ -107,6 +107,24 @@ fn agent_loop_default_context_demotes_post_route_clarify_to_loop_context() {
     assert!(route.route_reason.contains("agent_loop_default_entry"));
 }
 
+#[test]
+fn agent_loop_decides_respond_without_normalizer_direct_answer() {
+    let mut route = base_route();
+    route.set_ask_mode(crate::AskMode::direct_answer());
+    route.route_reason = "direct_answer_trace_inferred".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let loop_ctx = agent_loop_default_context(Some(ctx)).expect("loop context");
+    let route = loop_ctx.route_result.expect("route context");
+
+    assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
+    assert!(!route.needs_clarify);
+    assert!(route.route_reason.contains("agent_loop_default_entry"));
+}
+
 fn claimed_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
         task_id: task_id.to_string(),
@@ -187,6 +205,37 @@ fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
         post_route.gate_record.reason_code,
         "post_route_missing_path_scoped_locator_deferred_to_agent_loop"
     );
+}
+
+#[test]
+fn agent_loop_decides_clarify_without_post_route_force_clarify() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = claimed_task("loop-owned-clarify-boundary");
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut post_route = boundary_locator_post_route("post_route_missing_path_scoped_locator");
+    let mut candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "inspect project file",
+        None,
+        &session_snapshot,
+        &mut candidates,
+        &mut post_route,
+    );
+
+    assert!(!post_route.execution_route_result.needs_clarify);
+    assert_eq!(
+        post_route.execution_route_result.gate_kind(),
+        crate::RouteGateKind::Execute
+    );
+    assert_eq!(candidates, vec!["post_route_missing_path_scoped_locator"]);
 }
 
 #[test]
