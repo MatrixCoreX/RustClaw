@@ -1136,7 +1136,7 @@ fn matrix_table_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing) {
+    if !route_requests_table_listing(route) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -1164,6 +1164,12 @@ fn matrix_table_observed_answer(
         }
     }
     None
+}
+
+fn route_requests_table_listing(route: &crate::RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_route(route)
+        == Some(crate::contract_matrix::FinalAnswerShape::TableListing)
+        || route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing)
 }
 
 fn matrix_markdown_table_from_json(value: &serde_json::Value) -> Option<String> {

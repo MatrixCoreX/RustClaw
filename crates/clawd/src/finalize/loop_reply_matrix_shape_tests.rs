@@ -752,3 +752,44 @@ fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
     );
     assert!(finalizer_summary.is_some());
 }
+
+#[test]
+fn matrix_shape_guard_uses_database_capability_ref_without_semantic_kind() {
+    let state = test_state();
+    let task = claimed_task("task-matrix-shape-guard-table-capability-ref");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "data/app.sqlite".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason = "capability_ref=database.list_tables".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+    ));
+    let mut delivery = vec!["orders and users".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "list database tables",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(delivery, vec!["| name |\n| --- |\n| orders |\n| users |"]);
+    assert!(finalizer_summary.is_some());
+}
