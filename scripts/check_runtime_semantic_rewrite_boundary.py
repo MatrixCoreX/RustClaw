@@ -37,6 +37,7 @@ PRE_ROUTE_REPAIR_MARKER_ALLOWLIST_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_observation_repair.rs",
 )
 ANSWER_VERIFIER_FILE = SRC_ROOT / "answer_verifier.rs"
+ANSWER_VERIFIER_RUNTIME_FILE = SRC_ROOT / "answer_verifier_runtime.rs"
 PROMPT_UTILS_OUTPUT_CONTRACT_FILE = SRC_ROOT / "prompt_utils_output_contract.rs"
 EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_execution_recipe_schema.rs",
@@ -301,6 +302,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_binding_repair_registry_bridge_markers())
     findings.extend(scan_pre_route_repair_marker_allowlists())
     findings.extend(scan_answer_verifier_registry_bridge_markers())
+    findings.extend(scan_answer_verifier_output_contract_prompt_marker())
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
     findings.extend(scan_execution_recipe_registry_bridge_tokens())
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
@@ -805,6 +807,43 @@ def scan_answer_verifier_registry_bridge_markers() -> list[Finding]:
         ),
         "answer_verifier_registry_bridge_marker",
     )
+
+
+def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
+    rel_path = rel(ANSWER_VERIFIER_RUNTIME_FILE)
+    text = ANSWER_VERIFIER_RUNTIME_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("pub(super) fn output_contract_prompt_block(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "answer_verifier_output_contract_prompt_missing",
+                "missing output_contract_prompt_block",
+            )
+        ]
+    fn_end = text.find("\nfn verifier_contract_matrix_prompt_trace", fn_start)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker": route_result.effective_output_contract_semantic_kind().as_str()' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "answer_verifier_contract_marker_missing",
+                "answer verifier output contract prompt should expose contract_marker",
+            )
+        )
+    if '"semantic_kind": route_result.effective_output_contract_semantic_kind().as_str()' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "answer_verifier_semantic_kind_emission",
+                "answer verifier output contract prompt must not expose legacy semantic_kind",
+            )
+        )
+    return findings
 
 
 def scan_prompt_utils_output_contract_registry_bridge_tokens() -> list[Finding]:

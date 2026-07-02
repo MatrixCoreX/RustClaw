@@ -1206,7 +1206,7 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
         "delivery_required": route_result.output_contract.delivery_required,
         "locator_kind": route_result.output_contract.locator_kind.as_str(),
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
-        "semantic_kind": route_result.effective_output_contract_semantic_kind().as_str(),
+        "contract_marker": route_result.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
         "contract_matrix": contract_matrix_trace,
     }))
