@@ -68,7 +68,7 @@ fn answer_verifier_output_format_machine_payload_gap(
                 || object.contains_key("reason_code")
                 || object.contains_key("candidates")
                 || object.contains_key("risks")
-                || object.contains_key("semantic_kind")
+                || object.contains_key("contract_marker")
                 || object
                     .get("output_format")
                     .and_then(Value::as_str)

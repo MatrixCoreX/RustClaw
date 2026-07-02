@@ -159,7 +159,7 @@ fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
         confidence: 0.95,
     });
     let mut reply = AskReply::non_llm(
-        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","effective_status":"ok","effective_success":true,"idempotent_success":true,"result_kinds":["already_indexed"],"paths":["README.md"],"namespaces":["demo_docs_nl"],"steps":[{"status":"ok","action":"ingest","path":"README.md","namespace":"demo_docs_nl","result_kind":"already_indexed","stats":{"total_chunks":59}}]}"#
+        r#"{"contract_marker":"filesystem_mutation_result","status":"ok","effective_status":"ok","effective_success":true,"idempotent_success":true,"result_kinds":["already_indexed"],"paths":["README.md"],"namespaces":["demo_docs_nl"],"steps":[{"status":"ok","action":"ingest","path":"README.md","namespace":"demo_docs_nl","result_kind":"already_indexed","stats":{"total_chunks":59}}]}"#
             .to_string(),
     )
     .with_task_journal(journal);

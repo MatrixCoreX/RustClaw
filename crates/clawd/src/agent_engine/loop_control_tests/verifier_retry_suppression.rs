@@ -27,7 +27,7 @@ fn output_format_machine_payload_gap_detects_structured_reply_only() {
     ));
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
-        r#"{"semantic_kind":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+        r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
     ));
     assert!(!answer_verifier_output_format_machine_payload_gap(
         &verifier,
