@@ -94,7 +94,7 @@ pub(super) fn refine_unresolved_file_delivery_boundary_contract(
         post_route.missing_locator_for_path_scoped_content = true;
         post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
             "post_route_unresolved_file_delivery_requires_locator",
-            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
         );
         return false;
     };

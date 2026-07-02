@@ -127,7 +127,7 @@ fn boundary_observation_block_filters_natural_language_route_reason() {
         clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
         gate_record: crate::post_route_policy::PostRouteGateRecord::new(
             "post_route_locator_boundary",
-            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
         ),
     };
     let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {

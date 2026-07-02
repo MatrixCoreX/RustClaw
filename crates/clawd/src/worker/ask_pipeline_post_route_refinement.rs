@@ -67,7 +67,7 @@ pub(super) fn apply_post_route_refinements(
             .set_planner_execute_finalize(finalize);
         post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
             "post_route_locator_guard_deferred_to_prompt_targets",
-            crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
         );
         append_route_reason(
             &mut post_route.execution_route_result,
@@ -98,7 +98,7 @@ pub(super) fn apply_post_route_refinements(
             post_route.auto_locator_resolved_direct = true;
             post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
                 "post_route_structural_file_delivery_bound_target",
-                crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+                crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
             );
         }
     }
@@ -124,7 +124,7 @@ pub(super) fn apply_post_route_refinements(
         post_route.missing_locator_for_path_scoped_content = true;
         post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
             "post_route_directory_file_delivery_requires_structured_selection",
-            crate::post_route_policy::PostRoutePolicyOutcome::Clarify,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
         );
     }
 }

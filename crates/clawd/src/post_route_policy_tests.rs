@@ -51,7 +51,10 @@ fn fuzzy_candidates_force_clarify_for_locator_requests() {
         "post_route_fuzzy_locator_candidates"
     );
     assert_eq!(result.gate_record.owner_layer, "boundary_locator_gate");
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryClarify
+    );
 }
 
 #[test]
@@ -68,7 +71,10 @@ fn missing_locator_still_forces_clarify() {
         "post_route_missing_path_scoped_locator"
     );
     assert_eq!(result.gate_record.owner_layer, "boundary_locator_gate");
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryClarify
+    );
 }
 
 #[test]
@@ -150,7 +156,10 @@ fn existing_file_delivery_with_locator_hint_executes_for_runtime_not_found() {
         "post_route_file_delivery_locator_hint_deferred_to_execution"
     );
     assert_eq!(result.gate_record.owner_layer, "boundary_delivery_gate");
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -423,7 +432,10 @@ fn filename_scope_with_direct_auto_locator_rescues_clarify() {
         result.gate_record.reason_code,
         "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -447,7 +459,10 @@ fn background_locator_clarify_is_satisfied_by_direct_auto_locator() {
         result.gate_record.reason_code,
         "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -484,7 +499,10 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
         "post_route_boundary_clarify_required"
     );
     assert_eq!(result.gate_record.owner_layer, "boundary_clarify_gate");
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Clarify);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryClarify
+    );
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
@@ -571,7 +589,10 @@ fn filesystem_mutation_with_matching_locator_hint_executes_despite_deictic_marke
         result.gate_record.reason_code,
         "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -634,7 +655,10 @@ fn document_heading_missing_read_target_with_matching_locator_hint_executes() {
         result.gate_record.reason_code,
         "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -691,7 +715,10 @@ fn deictic_bare_locator_marker_no_longer_blocks_direct_auto_locator() {
         result.gate_record.reason_code,
         "post_route_auto_locator_satisfied_path_scoped_content"
     );
-    assert_eq!(result.gate_record.outcome, PostRoutePolicyOutcome::Execute);
+    assert_eq!(
+        result.gate_record.outcome,
+        PostRoutePolicyOutcome::BoundaryReady
+    );
 }
 
 #[test]
@@ -979,7 +1006,7 @@ fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
 }
 
 #[test]
-fn contract_matrix_snapshot_uses_post_route_policy_execution_contract() {
+fn contract_matrix_snapshot_uses_post_route_policy_boundary_contract_marker() {
     let mut route = route_result();
     route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
     route.route_reason = "scalar_count".to_string();
@@ -1006,10 +1033,11 @@ fn contract_matrix_snapshot_uses_post_route_policy_execution_contract() {
     );
     assert_eq!(
         post_snapshot
-            .get("semantic_kind")
+            .get("contract_marker")
             .and_then(serde_json::Value::as_str),
         Some("none")
     );
+    assert!(post_snapshot.get("semantic_kind").is_none());
     assert_eq!(
         post_snapshot
             .get("contract_match")

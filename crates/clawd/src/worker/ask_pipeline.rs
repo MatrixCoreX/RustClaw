@@ -970,7 +970,7 @@ fn apply_ask_post_route(
             .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
         post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
             "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
-            crate::post_route_policy::PostRoutePolicyOutcome::Execute,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
         );
         append_route_reason(
             &mut post_route.execution_route_result,
