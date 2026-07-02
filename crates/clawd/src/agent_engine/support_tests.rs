@@ -1324,6 +1324,21 @@ fn route_contract_selects_grounded_summary_budget() {
 }
 
 #[test]
+fn route_contract_budget_does_not_depend_on_legacy_route_trace() {
+    let recipe = ExecutionRecipeRuntimeState::default();
+    let mut route = route_with_contract(
+        OutputSemanticKind::CommandOutputSummary,
+        OutputLocatorKind::None,
+    );
+    route.ask_mode = crate::AskMode::direct_answer();
+
+    assert_eq!(
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
+        LoopBudgetProfile::GroundedSummary
+    );
+}
+
+#[test]
 fn workspace_delivery_contract_selects_multi_step_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
