@@ -90,7 +90,7 @@ impl TaskJournalRolloutAttribution {
             owner_layer: Some("answer_verifier".to_string()),
             decision: Some("blocked".to_string()),
             failure_attribution: Some(
-                crate::contract_matrix::FailureAttribution::ContractGap
+                crate::evidence_policy::FailureAttribution::ContractGap
                     .as_str()
                     .to_string(),
             ),
@@ -120,7 +120,7 @@ impl TaskJournalRolloutAttribution {
             owner_layer: Some("answer_verifier".to_string()),
             decision: Some("blocked".to_string()),
             failure_attribution: Some(
-                crate::contract_matrix::FailureAttribution::ContractGap
+                crate::evidence_policy::FailureAttribution::ContractGap
                     .as_str()
                     .to_string(),
             ),

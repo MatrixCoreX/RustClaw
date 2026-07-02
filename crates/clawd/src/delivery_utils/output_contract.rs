@@ -107,7 +107,7 @@ fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputCon
     if output_contract.semantic_kind == OutputSemanticKind::None {
         return true;
     }
-    !crate::contract_matrix::final_answer_shape_for_output_contract(output_contract)
+    !crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
         .is_some_and(|shape| shape.allows_model_language())
 }
 

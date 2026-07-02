@@ -678,8 +678,8 @@ pub(super) fn synthesize_contract_matrix_direct_observed_fallback_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)?;
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigMutation {
+    crate::evidence_policy::final_answer_shape_for_route(route)?;
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation) {
         return None;
     }
     if crate::agent_engine::observed_output::route_disallows_direct_observation_passthrough(route) {
@@ -710,12 +710,10 @@ fn route_needs_synthesis_for_multi_observation_grounded_summary(
     if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
         return false;
     }
-    let Some(shape) =
-        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
-    else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
         return false;
     };
-    if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary {
+    if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary {
         return false;
     }
     successful_observation_step_count(loop_state) >= 2

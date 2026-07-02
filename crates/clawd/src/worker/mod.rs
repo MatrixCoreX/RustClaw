@@ -72,7 +72,7 @@ pub(crate) fn schedule_notify_observation(outcome: &ScheduleNotifyOutcome) -> Va
             obj.insert("error_kind".to_string(), json!("channel_send_failed"));
             obj.insert(
                 "failure_attribution".to_string(),
-                json!(crate::contract_matrix::FailureAttribution::DeliveryError.as_str()),
+                json!(crate::evidence_policy::FailureAttribution::DeliveryError.as_str()),
             );
             if let Some(error_text) = outcome.error_text.as_deref() {
                 obj.insert(
