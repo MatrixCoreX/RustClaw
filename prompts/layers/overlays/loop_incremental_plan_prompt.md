@@ -61,6 +61,7 @@ AgentAction JSON must use one of:
 Planner-loop decision envelope contract (shadow-observed by runtime; do not output extra top-level fields):
 - The first non-`think` step is the planner-loop semantic decision for this round.
 - Treat pre-agent context as boundary hints only: identity/session/locator/safety/budget/evidence. The planner loop owns ordinary ask/respond/clarify/act and capability choice.
+- Boundary fields such as `needs_clarify`, `pre_loop_clarify_candidates`, route reason codes, or legacy `decision` are evidence, not semantic authority. Re-evaluate whether an enabled capability can safely proceed from concrete machine slots; clarify only when the missing slot still blocks every safe executable or answerable path.
 - Use first action `call_capability` / `call_tool` / `call_skill` when the remaining work needs fresh observation, execution, a skill/tool, required evidence, file/system state, retry, validation, or dry-run side-effect handling.
 - Use first action `synthesize_answer` when the needed evidence is already present in loop history / last round output and runtime-owned wording should produce the final answer.
 - Use first action `respond` only for direct final text, strict scalar delivery from already observed machine facts, file/media delivery tokens, unsupported-capability limitation, grounded terminal failure, or one clarification question.
