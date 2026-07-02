@@ -611,7 +611,7 @@ fn route_requests_generated_file_path_report(agent_run_context: Option<&AgentRun
                 && route
                     .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
                 && crate::contract_matrix::final_answer_shape_for_output_contract(&contract)
-                    == Some(crate::contract_matrix::FinalAnswerShape::SinglePath)
+                    == Some(crate::evidence_policy::FinalAnswerShape::SinglePath)
         })
 }
 
@@ -917,8 +917,8 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
 
 fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
-        || crate::contract_matrix::final_answer_shape_for_route(route)
-            == Some(crate::contract_matrix::FinalAnswerShape::CreatedArchivePath)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
 }
 
 fn archive_pack_has_later_terminal_respond(loop_state: &LoopState) -> bool {
