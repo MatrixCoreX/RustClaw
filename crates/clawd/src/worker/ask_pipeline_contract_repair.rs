@@ -137,8 +137,7 @@ fn contract_candidate_json(
 fn command_observation_marker_contract_candidate(
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -179,8 +178,7 @@ fn sqlite_path_excerpt_judgment_contract_candidate(
     resolved_prompt: &str,
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !super::route_reason_has_marker(route_result, "excerpt_kind_judgment")
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -213,8 +211,7 @@ fn sqlite_structured_version_contract_candidate(
     resolved_prompt: &str,
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -241,8 +238,7 @@ fn sqlite_structured_table_listing_contract_candidate(
     resolved_prompt: &str,
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -269,8 +265,7 @@ fn sqlite_route_reason_table_contract_candidate(
     resolved_prompt: &str,
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -303,8 +298,7 @@ fn config_validation_findings_contract_candidate(
     resolved_prompt: &str,
     route_result: &crate::RouteResult,
 ) -> Option<Value> {
-    if !route_result.is_execute_gate()
-        || route_result.needs_clarify
+    if route_result.needs_clarify
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
