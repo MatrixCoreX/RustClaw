@@ -54,7 +54,7 @@ flowchart TD
     AS --> ASP[进度机器回复<br/>checkpoint_id + poll_ref + next_check_after + can_poll/can_cancel]
     QP -->|call_tool| T[工具执行]
     QP -->|call_skill| U[共享技能调度]
-    RS --> RSG[不经过 normalizer / planner / resolver 选择<br/>不做 PlanVerifier 语义选择]
+    RS --> RSG[不经过 normalizer / planner / resolver 选择<br/>不做 verifier 语义选择]
     RSG --> U
     T --> V[观测结果]
     U --> V
@@ -96,7 +96,7 @@ flowchart TD
 | --- | --- | --- |
 | 是否运行 intent normalizer？ | 是，作为结构化提示和兼容输入。 | 否。调用方已经提供目标技能。 |
 | 是否进入 planner / agent loop？ | 普通自然语言工作默认进入；显式调度、安全、协议和已有观测完成路径可不要求 planner 重新选择能力而收尾。 | 否。不会让 planner 选择技能或 action。 |
-| 是否用 `CapabilityResolver` / `PlanVerifier` 做语义选择？ | 是，planner step 会先解析和验证再执行。 | 否，不做语义选择；显式 skill call 仍走调度和协议校验。 |
+| 是否把 `CapabilityResolver` / `PlanVerifier` 当作语义选择器？ | 否。普通语义选择由 planner 负责；resolver/verifier 只解析和校验 planner step，再允许执行。 | 否。直接技能任务绕过语义选择；显式 skill call 仍走调度和协议校验。 |
 | 是否使用共享 skill dispatcher？ | 是，planner 选择 `call_skill` 或 capability 解析到 skill 时使用。 | 是。把 `payload.skill_name` 派发到同一套 builtin / external / runner 技能协议。 |
 | 结果是否能用 `task_id` 查询？ | 是。 | 是。直接技能结果保存到原始 task row，可通过 `GET /v1/tasks/{task_id}` 或 `clawcli get` 读取。 |
 
