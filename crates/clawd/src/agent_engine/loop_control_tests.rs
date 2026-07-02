@@ -1,10 +1,11 @@
 use super::{
-    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, evaluate_round_outcome,
-    initial_execution_recipe_spec, machine_status_visible_output_format_gap,
-    mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
-    record_agent_loop_decision_envelope_output_vars, selected_contract_structured_evidence_gap,
-    should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
+    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
+    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
+    evaluate_round_outcome, initial_execution_recipe_spec,
+    machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
+    parse_log_analyze_finding, record_agent_loop_decision_envelope_output_vars,
+    selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
+    structured_respond_terminal_intent_from_plan,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
@@ -1482,6 +1483,17 @@ fn selected_contract_structured_evidence_gate_respects_switch() {
         crate::task_journal::TaskJournal::for_task("task-evidence-off", "ask", "read field");
 
     assert!(selected_contract_structured_evidence_gap(&policy, &route, &journal).is_none());
+}
+
+#[test]
+fn answer_verifier_retry_budget_does_not_depend_on_global_multi_round_switch() {
+    let mut policy = test_policy();
+    policy.multi_round_enabled = false;
+    policy.answer_verifier_retry_limit = 2;
+
+    assert!(answer_verifier_retry_budget_available(&policy, 0));
+    assert!(answer_verifier_retry_budget_available(&policy, 1));
+    assert!(!answer_verifier_retry_budget_available(&policy, 2));
 }
 
 #[test]

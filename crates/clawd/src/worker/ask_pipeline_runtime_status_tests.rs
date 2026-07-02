@@ -259,6 +259,25 @@ fn scalar_status_query_with_runtime_kind_adds_capability_context() {
 }
 
 #[test]
+fn scalar_status_query_with_string_runtime_kind_adds_capability_context() {
+    let mut route = executable_route();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let analysis = status_query_analysis(Some(serde_json::json!({
+        "runtime_status_query": "awaiting_user_approval"
+    })));
+
+    assert!(append_runtime_status_capability_context(
+        &mut route,
+        Some(&analysis),
+    ));
+    assert!(super::super::route_reason_has_marker(
+        &route,
+        "capability_ref=system.runtime_status"
+    ));
+}
+
+#[test]
 fn runtime_status_scalar_query_can_plan_without_locator_prebind() {
     let state = test_state_with_root(make_temp_root("runtime_status_scalar_no_prebind"));
     let mut route = executable_route();

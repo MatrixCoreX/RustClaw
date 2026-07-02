@@ -1163,9 +1163,7 @@ pub(super) async fn run_agent_with_loop_seeded(
                     }
                 }
             }
-            if answer_verifier_retry_count < policy.answer_verifier_retry_limit
-                && policy.multi_round_enabled
-            {
+            if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
                 loop_state = pre_finalize_loop_state;
                 answer_verifier_retry_count += 1;
                 loop_state.has_recoverable_failure_context = true;
@@ -1274,6 +1272,13 @@ pub(super) async fn run_agent_with_loop_seeded(
         }
         return Ok(reply);
     }
+}
+
+fn answer_verifier_retry_budget_available(
+    policy: &AgentLoopGuardPolicy,
+    answer_verifier_retry_count: usize,
+) -> bool {
+    answer_verifier_retry_count < policy.answer_verifier_retry_limit
 }
 
 async fn attach_answer_verifier_if_missing(

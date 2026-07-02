@@ -220,6 +220,7 @@ fn append_agent_loop_boundary_observations(
     state: &AppState,
     post_route: &crate::post_route_policy::PostRoutePolicyResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     prompt: &str,
     resolved_prompt: &str,
     pre_loop_clarify_candidates: &[&'static str],
@@ -230,6 +231,7 @@ fn append_agent_loop_boundary_observations(
         state,
         post_route,
         session_snapshot,
+        turn_analysis,
         prompt,
         resolved_prompt,
         pre_loop_clarify_candidates,
@@ -256,6 +258,7 @@ fn agent_loop_boundary_observations_block(
     state: &AppState,
     post_route: &crate::post_route_policy::PostRoutePolicyResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     prompt: &str,
     resolved_prompt: &str,
     pre_loop_clarify_candidates: &[&'static str],
@@ -272,6 +275,7 @@ fn agent_loop_boundary_observations_block(
         registry_capability_contract_observation(resolved_prompt, route);
     let contract_repair_candidates =
         contract_repair_candidate_observations(state, prompt, resolved_prompt, route);
+    let runtime_session_state = runtime_session_state_observation(session_snapshot, turn_analysis);
     let has_auto_locator = post_route
         .auto_locator_path
         .as_deref()
@@ -293,6 +297,7 @@ fn agent_loop_boundary_observations_block(
         && default_main_config_contract.is_none()
         && registry_capability_contract.is_none()
         && contract_repair_candidates.is_empty()
+        && runtime_session_state.is_none()
         && pre_loop_clarify_candidates.is_empty()
     {
         return None;
@@ -323,6 +328,7 @@ fn agent_loop_boundary_observations_block(
         "default_main_config_contract": default_main_config_contract,
         "registry_capability_contract": registry_capability_contract,
         "contract_repair_candidates": contract_repair_candidates,
+        "runtime_session_state": runtime_session_state,
         "pre_loop_clarify_candidates": pre_loop_clarify_candidates,
         "route_reason_codes": route_reason_codes,
     });
@@ -330,6 +336,51 @@ fn agent_loop_boundary_observations_block(
     Some(format!(
         "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{encoded}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS"
     ))
+}
+
+fn runtime_session_state_observation(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> Option<serde_json::Value> {
+    let active_followup_present = session_snapshot.active_followup_frame.is_some()
+        || session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.active_followup_task_id.as_deref())
+            .map(str::trim)
+            .is_some_and(|task_id| !task_id.is_empty());
+    let active_clarify_present = session_snapshot.active_clarify_state.is_some()
+        || session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.active_clarify_task_id.as_deref())
+            .map(str::trim)
+            .is_some_and(|task_id| !task_id.is_empty());
+    let active_observed_facts_present = session_snapshot.active_observed_facts.is_some()
+        || session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.active_observed_facts_task_id.as_deref())
+            .map(str::trim)
+            .is_some_and(|task_id| !task_id.is_empty());
+    let runtime_status_query_requested =
+        turn_analysis.is_some_and(turn_analysis_has_runtime_status_query);
+    if !runtime_status_query_requested
+        && !active_followup_present
+        && !active_clarify_present
+        && !active_observed_facts_present
+    {
+        return None;
+    }
+    Some(serde_json::json!({
+        "source": "active_session_snapshot",
+        "runtime_status_query_requested": runtime_status_query_requested,
+        "active_followup_present": active_followup_present,
+        "active_clarify_present": active_clarify_present,
+        "active_observed_facts_present": active_observed_facts_present,
+        "active_task_present": active_followup_present || active_clarify_present || active_observed_facts_present,
+        "pending_user_boundary_present": active_clarify_present,
+    }))
 }
 
 fn current_request_locator_observation(
@@ -938,6 +989,7 @@ fn apply_ask_post_route(
         state,
         &post_route,
         &session_snapshot,
+        turn_analysis,
         prompt,
         resolved_prompt,
         &pre_loop_clarify_candidates,

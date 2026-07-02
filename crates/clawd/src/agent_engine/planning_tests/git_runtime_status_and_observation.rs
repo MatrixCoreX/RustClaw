@@ -340,6 +340,48 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
 }
 
 #[test]
+fn runtime_status_scalar_string_patch_plans_current_user_system_basic_status() {
+    let state = test_state_with_enabled_skills(&["system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "runtime_status_query": "current_user"
+        })),
+        attachment_processing_required: false,
+    };
+
+    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+        &state,
+        "return current user",
+        Some(&route),
+        &loop_state,
+        Some(&analysis),
+    )
+    .expect("runtime status string patch should produce deterministic plan");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "system_basic");
+    assert_eq!(
+        plan.steps[0].args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
+    );
+    assert_eq!(
+        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        Some("current_user")
+    );
+}
+
+#[test]
 fn runtime_status_scalar_patch_does_not_depend_on_route_trace() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);

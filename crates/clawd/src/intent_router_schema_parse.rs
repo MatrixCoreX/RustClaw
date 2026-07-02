@@ -159,7 +159,7 @@ pub(super) fn parse_turn_type(s: &str) -> Option<TurnType> {
         "task_scope_update" => Some(TurnType::TaskScopeUpdate),
         "run_control" => Some(TurnType::RunControl),
         "approval_decision" => Some(TurnType::ApprovalDecision),
-        "status_query" => Some(TurnType::StatusQuery),
+        "status_query" | "runtime_status_query" => Some(TurnType::StatusQuery),
         "feedback_or_error" => Some(TurnType::FeedbackOrError),
         "preference_or_memory" => Some(TurnType::PreferenceOrMemory),
         _ => None,

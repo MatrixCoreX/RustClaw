@@ -55,11 +55,21 @@ pub(super) fn turn_analysis_has_runtime_status_query(
         .state_patch
         .as_ref()
         .and_then(|patch| patch.get("runtime_status_query"))
-        .and_then(serde_json::Value::as_object)
-        .and_then(|query| query.get("kind"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
+        .and_then(runtime_status_query_kind_value)
         .is_some_and(|kind| !kind.is_empty())
+}
+
+fn runtime_status_query_kind_value(value: &serde_json::Value) -> Option<&str> {
+    value
+        .as_str()
+        .or_else(|| {
+            value
+                .as_object()
+                .and_then(|query| query.get("kind"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
 }
 
 pub(super) fn route_or_turn_has_system_health_selector(

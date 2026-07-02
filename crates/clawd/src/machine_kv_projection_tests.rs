@@ -1,5 +1,7 @@
 use super::{
-    collect_machine_text_fragments_from_output, requested_machine_kv_summary_from_observations,
+    collect_machine_text_fragments_from_output,
+    collect_requested_machine_kv_surfaces_from_state_patch,
+    requested_machine_kv_summary_from_observations,
 };
 
 #[test]
@@ -410,6 +412,25 @@ fn machine_summary_requires_values_for_task_control_presence_markers() {
     );
 
     assert!(summary.is_none());
+}
+
+#[test]
+fn state_patch_machine_summary_surfaces_ignore_runtime_status_query_kind() {
+    let mut surfaces = Vec::new();
+    collect_requested_machine_kv_surfaces_from_state_patch(
+        &serde_json::json!({
+            "runtime_status_query": {"kind": "awaiting_user_approval", "scope": "session"},
+            "required_machine_fields": ["can_poll", "can_cancel"],
+            "required_field": "state=completed"
+        }),
+        &mut surfaces,
+    );
+
+    assert!(surfaces.contains(&"can_cancel can_poll".to_string()));
+    assert!(surfaces.contains(&"state=completed".to_string()));
+    assert!(!surfaces
+        .iter()
+        .any(|surface| surface.contains("awaiting_user_approval")));
 }
 
 #[test]
