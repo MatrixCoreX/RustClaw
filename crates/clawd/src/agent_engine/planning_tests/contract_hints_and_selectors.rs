@@ -1914,6 +1914,7 @@ fn archive_read_contract_plans_direct_member_read() {
     route.resolved_intent =
         "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
             .to_string();
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -1952,6 +1953,7 @@ fn archive_read_contract_ignores_non_archive_auto_locator() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = format!("Read notes.txt from {archive}");
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;

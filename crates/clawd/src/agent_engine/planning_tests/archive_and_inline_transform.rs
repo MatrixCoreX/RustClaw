@@ -9,6 +9,7 @@ fn archive_read_contract_recovers_explicit_archive_path_when_locator_hint_is_emp
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = request.clone();
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -43,6 +44,7 @@ fn archive_read_contract_prefers_complete_request_path_over_basename_locator_hin
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = request.clone();
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -143,6 +145,7 @@ fn archive_read_structural_member_target_plans_direct_read_without_semantic_labe
 fn archive_read_contract_rejects_unsafe_member_locator() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -158,6 +161,29 @@ fn archive_read_contract_rejects_unsafe_member_locator() {
         &loop_state,
         Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
         "Read member ../secret.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+    )
+    .is_none());
+}
+
+#[test]
+fn archive_read_semantic_kind_without_capability_ref_does_not_plan() {
+    let state = test_state_with_enabled_skills(&["archive_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt".to_string();
+    let loop_state = LoopState::new(1);
+
+    assert!(archive_read_deterministic_plan_result(
+        "read archive member",
+        &state,
+        Some(&route),
+        &loop_state,
+        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+        "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
     )
     .is_none());
 }
