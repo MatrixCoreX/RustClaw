@@ -59,6 +59,7 @@ use scalar_count_filter::{
 
 #[path = "action_route_locator_artifact.rs"]
 mod action_route_locator_artifact;
+#[cfg(test)]
 #[path = "archive_database_aggregate_plan.rs"]
 mod archive_database_aggregate_plan;
 #[path = "concrete_respond_structural_observation.rs"]
@@ -118,6 +119,7 @@ mod system_basic_action_path;
 mod value_string_list;
 use super::planning_recent_artifacts::recent_artifacts_judgment_deterministic_plan_result;
 use action_route_locator_artifact::*;
+#[cfg(test)]
 use archive_database_aggregate_plan::*;
 use concrete_respond_structural_observation::*;
 use config_guard_capability_repair::*;
@@ -356,17 +358,6 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
         ),
         "plan_deterministic_filesystem_mutation"
-    );
-    return_deterministic_plan!(
-        archive_database_aggregate_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            auto_locator_path,
-        ),
-        "plan_deterministic_archive_database_aggregate"
     );
     if allow_structural_deterministic_plans {
         return_deterministic_plan!(
