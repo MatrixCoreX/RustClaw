@@ -22,7 +22,7 @@ Compatibility fields:
 - Always emit all top-level schema keys: `resolved_user_intent`, `answer_candidate`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `decision`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, `attachment_processing_required`.
 - `decision` is a derived trace field only: `clarify` when `needs_clarify=true`; `planner_execute` when machine boundary fields require observation, delivery, scheduling, side effects, or background execution; otherwise `direct_answer`.
 - `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
-- Set `output_contract.contract_marker="none"` in normalizer output. Older `semantic_kind` tokens may still be parsed for historical/journal compatibility, but they are not a live normalizer output target.
+- Set `output_contract.contract_marker="none"` in normalizer output. Do not emit legacy semantic-route field names.
 - Never create or select feature-specific semantic kinds to make one NL case pass.
 
 Execution signals:
@@ -53,7 +53,7 @@ State patch discipline:
 
 Schema discipline:
 - `output_contract` must be a JSON object, never a string.
-- Allowed `output_contract` keys: `response_shape`, `exact_sentence_count`, `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `contract_marker`, `locator_hint`, `scalar_count_filter`, `list_selector`, `self_extension`. `semantic_kind` is accepted only as legacy compatibility input and should not be emitted by this prompt.
+- Allowed `output_contract` keys: `response_shape`, `exact_sentence_count`, `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `contract_marker`, `locator_hint`, `scalar_count_filter`, `list_selector`, `self_extension`. Do not emit extra legacy route fields.
 - Allowed `response_shape`: `free`, `one_sentence`, `strict`, `scalar`, `file_token`.
 - Allowed `locator_kind`: `none`, `path`, `current_workspace`, `url`, `filename`.
 - Allowed `delivery_intent`: `none`, `file_single`, `directory_lookup`, `directory_batch_files`.

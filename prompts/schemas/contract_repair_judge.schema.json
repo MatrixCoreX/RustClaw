@@ -37,7 +37,11 @@
     },
     "decision": {
       "type": "string",
-      "enum": ["clarify", "direct_answer", "planner_execute"]
+      "enum": [
+        "clarify",
+        "direct_answer",
+        "planner_execute"
+      ]
     },
     "needs_clarify": {
       "type": "boolean"
@@ -64,10 +68,19 @@
       "properties": {
         "response_shape": {
           "type": "string",
-          "enum": ["free", "one_sentence", "strict", "scalar", "file_token"]
+          "enum": [
+            "free",
+            "one_sentence",
+            "strict",
+            "scalar",
+            "file_token"
+          ]
         },
         "exact_sentence_count": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
         "requires_content_evidence": {
@@ -78,50 +91,26 @@
         },
         "locator_kind": {
           "type": "string",
-          "enum": ["none", "path", "current_workspace", "url", "filename"]
+          "enum": [
+            "none",
+            "path",
+            "current_workspace",
+            "url",
+            "filename"
+          ]
         },
         "delivery_intent": {
           "type": "string",
-          "enum": ["none", "file_single", "directory_lookup", "directory_batch_files"]
+          "enum": [
+            "none",
+            "file_single",
+            "directory_lookup",
+            "directory_batch_files"
+          ]
         },
         "contract_marker": {
           "type": "string",
-          "description": "Preferred machine output-contract marker. Accepts the same stable marker tokens as legacy semantic_kind.",
-          "enum": [
-            "none",
-            "raw_command_output",
-            "command_output_summary",
-            "service_status",
-            "hidden_entries_check",
-            "file_names",
-            "directory_names",
-            "directory_entry_groups",
-            "file_paths",
-            "directory_purpose_summary",
-            "content_excerpt_summary",
-            "document_heading",
-            "content_excerpt_with_summary",
-            "content_presence_check",
-            "excerpt_kind_judgment",
-            "recent_artifacts_judgment",
-            "workspace_project_summary",
-            "scalar_count",
-            "quantity_comparison",
-            "execution_failed_step",
-            "generated_file_delivery",
-            "generated_file_path_report",
-            "filesystem_mutation_result",
-            "scalar_path_only",
-            "file_basename",
-            "existence_with_path",
-            "existence_with_path_summary",
-            "recent_scalar_equality_check",
-            "structured_keys"
-          ]
-        },
-        "semantic_kind": {
-          "type": "string",
-          "description": "Legacy compatibility input. New repair judge prompts should emit contract_marker.",
+          "description": "Preferred machine output-contract marker for bounded boundary repair. Repair judge prompts must emit this field and must not expose legacy semantic-route field names.",
           "enum": [
             "none",
             "raw_command_output",
@@ -158,53 +147,102 @@
           "type": "string"
         },
         "scalar_count_filter": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
             "target_kind": {
               "type": "string",
-              "enum": ["any", "file", "dir", ""]
+              "enum": [
+                "any",
+                "file",
+                "dir",
+                ""
+              ]
             },
             "include_hidden": {
-              "type": ["boolean", "null"]
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "recursive": {
-              "type": ["boolean", "null"]
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           }
         },
         "list_selector": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
             "target_kind": {
               "type": "string",
-              "enum": ["any", "file", "dir", ""]
+              "enum": [
+                "any",
+                "file",
+                "dir",
+                ""
+              ]
             },
             "limit": {
-              "type": ["integer", "string", "null"]
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
             },
             "sort_by": {
               "type": "string",
-              "enum": ["name", "name_desc", "size_desc", "size_asc", "mtime_desc", "mtime_asc", ""]
+              "enum": [
+                "name",
+                "name_desc",
+                "size_desc",
+                "size_asc",
+                "mtime_desc",
+                "mtime_asc",
+                ""
+              ]
             },
             "include_metadata": {
-              "type": ["boolean", "null"]
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           }
         },
         "self_extension": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "trigger", "execute_now"],
+          "required": [
+            "mode",
+            "trigger",
+            "execute_now"
+          ],
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["none", "temporary_fix", "permanent_extension"]
+              "enum": [
+                "none",
+                "temporary_fix",
+                "permanent_extension"
+              ]
             },
             "trigger": {
               "type": "string",
-              "enum": ["none", "explicit_user_request", "capability_gap"]
+              "enum": [
+                "none",
+                "explicit_user_request",
+                "capability_gap"
+              ]
             },
             "execute_now": {
               "type": "boolean"
@@ -216,11 +254,18 @@
     "execution_recipe": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "profile", "target_scope"],
+      "required": [
+        "kind",
+        "profile",
+        "target_scope"
+      ],
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["none", "ops_closed_loop"]
+          "enum": [
+            "none",
+            "ops_closed_loop"
+          ]
         },
         "profile": {
           "type": "string",
@@ -268,10 +313,19 @@
     },
     "target_task_policy": {
       "type": "string",
-      "enum": ["", "reuse_active", "replace_active", "pause_and_queue", "standalone"]
+      "enum": [
+        "",
+        "reuse_active",
+        "replace_active",
+        "pause_and_queue",
+        "standalone"
+      ]
     },
     "state_patch": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Optional structured runtime/session patch to preserve when repairing malformed normalizer output. May include ordered_entry_ref ({\"index\":N,\"index_base\":1} or {\"relative_offset\":K}) for active ordered-entry selection. For active-task corrections, may include required_content_literals, forbidden_visible_literals, and replacement_pairs [{\"from\":\"old literal\",\"to\":\"new literal\"}] as exact current-turn content literals; output-control wording belongs in the intent/output contract, not required_content_literals."
     }
   }

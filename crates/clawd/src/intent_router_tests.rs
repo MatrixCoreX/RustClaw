@@ -718,59 +718,18 @@ fn intent_normalizer_schema_drift() {
             token
         );
     }
-    for token in enum_strings(
-        &schema,
-        &[
-            "properties",
-            "output_contract",
-            "properties",
-            "semantic_kind",
-        ],
-    ) {
-        if token.is_empty() || token == "none" {
-            continue;
-        }
-        if token == "scalar" {
-            assert_eq!(
-                super::parse_output_semantic_kind(&token),
-                OutputSemanticKind::None,
-                "semantic_kind `scalar` is a legacy LLM alias and should normalize to none"
-            );
-            continue;
-        }
-        assert_ne!(
-            super::parse_output_semantic_kind(&token),
-            OutputSemanticKind::None,
-            "semantic_kind `{}` not recognized",
-            token
-        );
-    }
-    let schema_semantic_kinds = enum_strings(
-        &schema,
-        &[
-            "properties",
-            "output_contract",
-            "properties",
-            "semantic_kind",
-        ],
-    )
-    .into_iter()
-    .collect::<std::collections::BTreeSet<_>>();
-    for kind in OutputSemanticKind::ALL {
-        if kind.is_normalizer_schema_capability_bridge() {
-            assert!(
-                !schema_semantic_kinds.contains(kind.as_str()),
-                "intent_normalizer schema must not expose registry capability bridge semantic_kind `{}`; planner capability metadata owns this routing",
-                kind.as_str()
-            );
-            continue;
-        }
-        assert!(
-            schema_semantic_kinds.contains(kind.as_str()),
-            "intent_normalizer schema missing canonical semantic_kind `{}`",
-            kind.as_str()
-        );
-    }
+    let output_contract_properties = schema
+        .pointer("/properties/output_contract/properties")
+        .and_then(|value| value.as_object())
+        .expect("schema must declare output_contract properties");
+    assert!(
+        output_contract_properties.contains_key("contract_marker"),
+        "intent_normalizer schema must expose contract_marker"
+    );
+    assert!(
+        !output_contract_properties.contains_key("semantic_kind"),
+        "intent_normalizer schema must not expose legacy semantic_kind"
+    );
     for token in enum_strings(
         &schema,
         &[

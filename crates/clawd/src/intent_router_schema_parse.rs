@@ -29,8 +29,6 @@ pub(super) struct IntentOutputContractOut {
     #[serde(default)]
     pub(super) contract_marker: String,
     #[serde(default)]
-    pub(super) semantic_kind: String,
-    #[serde(default)]
     pub(super) locator_hint: String,
     #[serde(default)]
     pub(super) scalar_count_filter: Option<Value>,
@@ -41,12 +39,7 @@ pub(super) struct IntentOutputContractOut {
 }
 
 fn output_contract_marker_token(raw: &IntentOutputContractOut) -> &str {
-    let contract_marker = raw.contract_marker.trim();
-    if contract_marker.is_empty() {
-        raw.semantic_kind.trim()
-    } else {
-        contract_marker
-    }
+    raw.contract_marker.trim()
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

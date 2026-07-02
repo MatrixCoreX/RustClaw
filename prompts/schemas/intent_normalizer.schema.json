@@ -26,12 +26,29 @@
     "resume_behavior": {
       "type": "string",
       "description": "Whether the message resumes a paused task. `parse_resume_behavior` accepts these tokens (case-insensitive); anything else maps to `none`.",
-      "enum": ["none", "resume_execute", "resume", "resume_discuss", "defer", ""]
+      "enum": [
+        "none",
+        "resume_execute",
+        "resume",
+        "resume_discuss",
+        "defer",
+        ""
+      ]
     },
     "schedule_kind": {
       "type": "string",
       "description": "Optional schedule operation classification. `parse_schedule_kind` accepts these operation tokens. Frequency/type tokens such as `daily`, `weekly`, `interval`, `once`, and `cron` belong in `schedule_intent.schedule.type`, not here.",
-      "enum": ["none", "create", "update", "pause", "resume", "delete", "query", "list", ""]
+      "enum": [
+        "none",
+        "create",
+        "update",
+        "pause",
+        "resume",
+        "delete",
+        "query",
+        "list",
+        ""
+      ]
     },
     "wants_file_delivery": {
       "type": "boolean",
@@ -66,30 +83,62 @@
     "decision": {
       "type": "string",
       "description": "Initial machine hint for the legacy first-layer boundary. Planner-loop decision envelopes are the semantic authority when agent-loop routing is enabled.",
-      "enum": ["clarify", "direct_answer", "planner_execute", ""],
+      "enum": [
+        "clarify",
+        "direct_answer",
+        "planner_execute",
+        ""
+      ],
       "default": ""
     },
     "schedule_intent": {
       "description": "Optional structured schedule output. Schema deferred; parsed by claw-core schedule_intent decoder.",
-      "type": ["object", "null"]
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "output_contract": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Output contract used by finalize layers. The prompt must emit this object; parser recovery still accepts null/missing values and normalizes them to defaults.",
       "properties": {
         "response_shape": {
           "type": "string",
-          "enum": ["free", "one_sentence", "strict", "scalar", "file_token", ""]
+          "enum": [
+            "free",
+            "one_sentence",
+            "strict",
+            "scalar",
+            "file_token",
+            ""
+          ]
         },
         "exact_sentence_count": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
-        "requires_content_evidence": {"type": "boolean"},
-        "delivery_required": {"type": "boolean"},
+        "requires_content_evidence": {
+          "type": "boolean"
+        },
+        "delivery_required": {
+          "type": "boolean"
+        },
         "locator_kind": {
           "type": "string",
-          "enum": ["none", "path", "current_workspace", "url", "filename", ""]
+          "enum": [
+            "none",
+            "path",
+            "current_workspace",
+            "url",
+            "filename",
+            ""
+          ]
         },
         "delivery_intent": {
           "type": "string",
@@ -108,135 +157,44 @@
         },
         "contract_marker": {
           "type": "string",
-          "description": "Preferred machine output-contract marker. Accepts the same stable marker tokens as legacy semantic_kind; normalizer prompts should emit this field instead of semantic_kind."
+          "description": "Preferred machine output-contract marker. Normalizer prompts should emit this field and should not expose legacy semantic-route field names."
         },
-        "semantic_kind": {
-          "type": "string",
-          "description": "Legacy compatibility input for historical normalizer output. New normalizer prompts should use contract_marker.",
-          "enum": [
-            "none",
-            "raw_command_output",
-            "raw_output",
-            "command_output",
-            "command_output_summary",
-            "command_result_summary",
-            "command_output_synthesis",
-            "service_status",
-            "hidden_entries_check",
-            "file_names",
-            "names_only",
-            "entry_names",
-            "directory_entry_names",
-            "directory_names",
-            "directory_names_only",
-            "dir_names",
-            "folder_names",
-            "folder_names_only",
-            "folders_only",
-            "directory_entry_groups",
-            "directory_file_groups",
-            "file_directory_groups",
-            "entry_kind_groups",
-            "entries_by_kind",
-            "grouped_entries",
-            "grouped_entry_names",
-            "file_paths",
-            "file_paths_only",
-            "path_list",
-            "paths_list",
-            "file_path_list",
-            "repository_file_paths",
-            "workspace_file_paths",
-            "directory_purpose_summary",
-            "listing_purpose_summary",
-            "directory_listing_summary",
-            "content_excerpt_summary",
-            "document_excerpt_summary",
-            "file_excerpt_summary",
-            "document_heading",
-            "document_title",
-            "markdown_heading",
-            "markdown_title",
-            "file_heading",
-            "file_title",
-            "content_excerpt_with_summary",
-            "excerpt_with_summary",
-            "raw_excerpt_with_summary",
-            "bounded_excerpt_with_summary",
-            "content_presence_check",
-            "content_contains_check",
-            "content_match_check",
-            "identifier_presence_check",
-            "field_presence_check",
-            "text_presence_check",
-            "excerpt_kind_judgment",
-            "content_excerpt_judgment",
-            "log_vs_checklist",
-            "recent_artifacts_judgment",
-            "artifact_style_classification",
-            "workspace_project_summary",
-            "project_overview",
-            "workspace_overview_summary",
-            "scalar",
-            "scalar_count",
-            "count",
-            "quantity_comparison",
-            "comparison",
-            "execution_failed_step",
-            "failed_step",
-            "failed_command_step",
-            "execution_failure_step",
-            "generated_file_delivery",
-            "new_file_delivery",
-            "created_file_delivery",
-            "write_then_send_file",
-            "generated_file_path_report",
-            "new_file_path_report",
-            "created_file_path_report",
-            "write_then_report_path",
-            "saved_file_path_report",
-            "filesystem_mutation_result",
-        "filesystem_mutation",
-        "fs_mutation_result",
-        "file_mutation_result",
-        "path_mutation_result",
-        "scalar_path_only",
-        "path_only",
-        "file_basename",
-        "single_file_basename",
-        "bound_file_basename",
-        "existence_with_path",
-            "exists_with_path",
-            "existence_with_path_summary",
-            "exists_with_path_summary",
-            "existence_with_path_purpose",
-            "exists_with_path_purpose",
-            "recent_scalar_equality_check",
-            "same_or_different",
-            "equality_check",
-            "structured_keys",
-            "structured_key_names",
-            "structured_top_level_keys",
-            "top_level_keys",
-            "object_keys",
-            "config_keys",
-            ""
-          ]
+        "locator_hint": {
+          "type": "string"
         },
-        "locator_hint": {"type": "string"},
         "scalar_count_filter": {
           "description": "Optional machine filter for filesystem scalar-count contracts. Use null when not applicable. target_kind: any=file+dir direct entries, file=files only, dir=directories only. extensions is a list of language-neutral file-extension tokens without dots, such as md/json/log/toml.",
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
             "target_kind": {
               "type": "string",
-              "enum": ["any", "file", "dir", ""]
+              "enum": [
+                "any",
+                "file",
+                "dir",
+                ""
+              ]
             },
-            "include_hidden": {"type": ["boolean", "null"]},
-            "recursive": {"type": ["boolean", "null"]},
+            "include_hidden": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "recursive": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "extensions": {
               "type": "array",
-              "items": {"type": "string"},
+              "items": {
+                "type": "string"
+              },
               "default": []
             }
           },
@@ -245,35 +203,82 @@
         },
         "list_selector": {
           "description": "Optional machine selector for filesystem and archive listing contracts. Use null when not applicable. target_kind constrains object class; limit is a positive bounded result count; sort_by is a stable machine sort token; include_metadata means observed metadata must be available for final output; include_hidden controls whether dot-prefixed entries are included in directory inventory.",
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
             "target_kind": {
               "type": "string",
-              "enum": ["any", "file", "dir", ""]
+              "enum": [
+                "any",
+                "file",
+                "dir",
+                ""
+              ]
             },
-            "limit": {"type": ["integer", "string", "null"]},
+            "limit": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            },
             "sort_by": {
               "type": "string",
-              "enum": ["name", "name_desc", "size_desc", "size_asc", "mtime_desc", "mtime_asc", ""]
+              "enum": [
+                "name",
+                "name_desc",
+                "size_desc",
+                "size_asc",
+                "mtime_desc",
+                "mtime_asc",
+                ""
+              ]
             },
-            "include_metadata": {"type": ["boolean", "null"]},
-            "include_hidden": {"type": ["boolean", "null"]}
+            "include_metadata": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "include_hidden": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
           },
           "additionalProperties": false,
           "default": null
         },
         "self_extension": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["none", "temporary_fix", "permanent_extension", ""]
+              "enum": [
+                "none",
+                "temporary_fix",
+                "permanent_extension",
+                ""
+              ]
             },
             "trigger": {
               "type": "string",
-              "enum": ["none", "explicit_user_request", "capability_gap", ""]
+              "enum": [
+                "none",
+                "explicit_user_request",
+                "capability_gap",
+                ""
+              ]
             },
-            "execute_now": {"type": "boolean"}
+            "execute_now": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         }
@@ -281,12 +286,21 @@
       "additionalProperties": false
     },
     "execution_recipe": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Optional ops/closed-loop hint. `kind=none` means normalizer explicitly classified the request as NOT an ops loop (B1 fix); `null` means normalizer abstained.",
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["none", "ops_closed_loop", "ops", "closed_loop", ""]
+          "enum": [
+            "none",
+            "ops_closed_loop",
+            "ops",
+            "closed_loop",
+            ""
+          ]
         },
         "profile": {
           "type": "string",
@@ -375,7 +389,10 @@
     },
     "state_patch": {
       "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, temporary alias_bindings, ordered_entry_ref ({\"index\":N,\"index_base\":1} or {\"relative_offset\":K}), quantity_comparison ({\"selection\":\"max\"|\"min\",\"source\":\"recent_count_inventory\"}) for direct answers over prior count_inventory observations, scalar_count_filter ({\"target_kind\":\"any|file|dir\",\"include_hidden\":true|false,\"recursive\":true|false,\"extensions\":[\"ext\"]}) for filesystem scalar-count object/extension/hidden/recursive filters, structured_field_selector (exact machine field/key/path for JSON/TOML/YAML field-value extraction when known, including clarify turns where the file/path locator is still missing; also accepts service-status field family selectors such as system_health.* for host/system-only health projections), runtime_async_job_start ({\"command\":\"...\",\"execution_mode\":\"async_start\",\"async_adapter_kind\":\"local_process_poll\",\"poll_after_seconds\":N,\"expires_in_seconds\":N}) for explicit async/background local command starts, required_machine_fields ([exact agent/runtime machine field paths such as decision_envelope.control_intent when final output must include protocol/control fields; use task_lifecycle.state, task_lifecycle.can_poll, task_lifecycle.can_cancel, and task_lifecycle.checkpoint_id for task runtime/lifecycle/status-field observations]), required_content_literals ([exact current-turn replacement/added content literals that must visibly remain in an active-task rewrite; not output-control wording]), forbidden_visible_literals ([exact current-turn old/rejected content literals to omit from an active-task rewrite]), replacement_pairs ([{\"from\":\"old literal\",\"to\":\"new literal\"}]), primary_task_update=\"replace\" with active_task_boundary=\"new_deliverable\" for a standalone new deliverable that should become the editable active task, deictic_reference ({\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}), and similar turn-level updates.",
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "default": null
     },
     "attachment_processing_required": {
