@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    ResumeBehavior, RiskCeiling, ScheduleKind,
+    OutputSemanticKind, ResumeBehavior, RiskCeiling, ScheduleKind,
 };
 
 fn route_result() -> RouteResult {
@@ -986,7 +986,7 @@ fn act_directory_listing_does_not_default_to_directory_purpose_summary() {
 }
 
 #[test]
-fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
+fn scalar_count_contract_hint_is_ignored_for_non_scalar_shape() {
     let mut route = route_result();
     route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
     route.route_reason = "scalar_count".to_string();
@@ -996,17 +996,23 @@ fn scalar_count_contract_is_cleared_for_non_scalar_shape() {
     let result = apply_post_route_policy(route, LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.output_contract.semantic_kind,
+        OutputSemanticKind::ScalarCount
+    );
+    assert_eq!(
+        result
+            .execution_route_result
+            .effective_output_contract_semantic_kind(),
         OutputSemanticKind::None
     );
     assert_eq!(result.gate_record.owner_layer, "boundary_contract_gate");
     assert_eq!(
         result.gate_record.reason_code,
-        "post_route_contract_refined"
+        "post_route_contract_hint_ignored"
     );
 }
 
 #[test]
-fn contract_matrix_snapshot_uses_post_route_policy_boundary_contract_marker() {
+fn contract_matrix_snapshot_ignores_incompatible_scalar_count_hint() {
     let mut route = route_result();
     route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
     route.route_reason = "scalar_count".to_string();
@@ -1016,10 +1022,24 @@ fn contract_matrix_snapshot_uses_post_route_policy_boundary_contract_marker() {
     let pre_snapshot =
         crate::contract_matrix::trace_snapshot_for_route(&route).expect("pre snapshot");
     assert_eq!(
+        route.output_contract.semantic_kind,
+        OutputSemanticKind::ScalarCount
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        OutputSemanticKind::None
+    );
+    assert_eq!(
+        pre_snapshot
+            .get("contract_marker")
+            .and_then(serde_json::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
         pre_snapshot
             .get("contract_match")
             .and_then(serde_json::Value::as_str),
-        Some("scalar_count")
+        Some("generic_path_content")
     );
 
     let result = apply_post_route_policy(route, LocatorResolution::None);
@@ -1029,6 +1049,12 @@ fn contract_matrix_snapshot_uses_post_route_policy_boundary_contract_marker() {
 
     assert_eq!(
         result.execution_route_result.output_contract.semantic_kind,
+        OutputSemanticKind::ScalarCount
+    );
+    assert_eq!(
+        result
+            .execution_route_result
+            .effective_output_contract_semantic_kind(),
         OutputSemanticKind::None
     );
     assert_eq!(
@@ -1237,7 +1263,7 @@ fn scalar_path_only_output_without_input_locator_can_execute() {
 }
 
 #[test]
-fn scalar_path_only_contract_is_cleared_when_no_locator_binding_exists() {
+fn scalar_path_only_contract_hint_is_ignored_when_no_locator_binding_exists() {
     let mut route = route_result();
     route.resolved_intent = "只输出当前机器 hostname".to_string();
     route.route_reason = "scalar_path_only".to_string();
@@ -1249,6 +1275,12 @@ fn scalar_path_only_contract_is_cleared_when_no_locator_binding_exists() {
     let result = apply_post_route_policy(route, LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.output_contract.semantic_kind,
+        OutputSemanticKind::ScalarPathOnly
+    );
+    assert_eq!(
+        result
+            .execution_route_result
+            .effective_output_contract_semantic_kind(),
         OutputSemanticKind::None
     );
 }
