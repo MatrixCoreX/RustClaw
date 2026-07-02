@@ -54,6 +54,7 @@ VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
 LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
 DRY_RUN_CONTRACT_PLAN_FILE = SRC_ROOT / "agent_engine/dry_run_contract_plan.rs"
+OBSERVED_OUTPUT_FILE = SRC_ROOT / "agent_engine/observed_output.rs"
 PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
 READ_RANGE_ACTION_FILE = SRC_ROOT / "agent_engine/read_range_action.rs"
 SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE = (
@@ -309,6 +310,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_answer_verifier_output_contract_prompt_marker())
     findings.extend(scan_loop_control_output_contract_marker_key())
     findings.extend(scan_dry_run_contract_plan_marker_payloads())
+    findings.extend(scan_observed_output_contract_marker_payload())
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
     findings.extend(scan_execution_recipe_registry_bridge_tokens())
     findings.extend(scan_contract_matrix_registry_bridge_bypass())
@@ -938,6 +940,43 @@ def scan_dry_run_contract_plan_marker_payloads() -> list[Finding]:
                 1,
                 "dry_run_contract_semantic_kind_payload",
                 "dry-run response payloads must use contract_marker, not semantic_kind",
+            )
+        )
+    return findings
+
+
+def scan_observed_output_contract_marker_payload() -> list[Finding]:
+    rel_path = rel(OBSERVED_OUTPUT_FILE)
+    text = OBSERVED_OUTPUT_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn observed_contract_json(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "observed_contract_json_missing",
+                "missing observed_contract_json",
+            )
+        ]
+    fn_end = text.find("\nfn observed_answer_fallback_prompt_logical_path", fn_start)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '"contract_marker": route.effective_output_contract_semantic_kind().as_str()' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "observed_contract_marker_missing",
+                "observed fallback contract JSON should expose contract_marker",
+            )
+        )
+    if '"semantic_kind": route.effective_output_contract_semantic_kind().as_str()' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "observed_contract_semantic_kind_payload",
+                "observed fallback contract JSON must not expose legacy semantic_kind",
             )
         )
     return findings
