@@ -90,8 +90,8 @@ fn service_status_target_label(error: &str, agent_run_context: Option<&AgentRunC
 }
 
 fn service_status_failure_answer(
-    state: &AppState,
-    user_text: &str,
+    _state: &AppState,
+    _user_text: &str,
     error: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
@@ -100,34 +100,7 @@ fn service_status_failure_answer(
     }
     let observation = service_status_observation_from_error(error)?;
     let target = service_status_target_label(error, agent_run_context);
-    if agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(route_has_service_status_capability_ref)
-    {
-        return Some(service_status_failure_envelope(error, &target, observation));
-    }
-    let prefer_english =
-        prefer_english_for_agent_contextual_user_text(state, user_text, agent_run_context);
-    Some(match (prefer_english, observation) {
-        (true, ServiceStatusFailureObservation::UnitNotFound) => {
-            format!("`{target}` is not active: systemd has no service unit with that name.")
-        }
-        (true, ServiceStatusFailureObservation::Inactive) => {
-            format!("`{target}` is not active; systemd reports it as inactive.")
-        }
-        (true, ServiceStatusFailureObservation::Failed) => {
-            format!("`{target}` is not active; systemd reports it as failed.")
-        }
-        (false, ServiceStatusFailureObservation::UnitNotFound) => {
-            format!("`{target}` 现在不是 active：systemd 没有找到这个服务单元。")
-        }
-        (false, ServiceStatusFailureObservation::Inactive) => {
-            format!("`{target}` 现在不是 active：systemd 显示它处于 inactive 状态。")
-        }
-        (false, ServiceStatusFailureObservation::Failed) => {
-            format!("`{target}` 现在不是 active：systemd 显示它处于 failed 状态。")
-        }
-    })
+    Some(service_status_failure_envelope(error, &target, observation))
 }
 
 fn service_status_failure_envelope(

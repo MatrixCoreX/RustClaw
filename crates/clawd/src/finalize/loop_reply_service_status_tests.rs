@@ -576,9 +576,24 @@ async fn finalize_loop_reply_uses_structured_service_error_kind() {
     .expect("finalize should return a service status answer");
 
     assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("telegramd"));
-    assert!(reply.text.contains("not active"));
-    assert!(reply.text.contains("no service unit"));
+    let envelope: serde_json::Value =
+        serde_json::from_str(&reply.text).expect("structured service failure envelope");
+    assert_eq!(
+        envelope
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("service.status.failure")
+    );
+    assert_eq!(
+        envelope
+            .get("status_code")
+            .and_then(serde_json::Value::as_str),
+        Some("service_unit_not_found")
+    );
+    assert_eq!(
+        envelope.get("target").and_then(serde_json::Value::as_str),
+        Some("telegramd")
+    );
     assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
 }
 
