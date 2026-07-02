@@ -806,6 +806,7 @@ pub(super) fn content_slice_spec_from_sources<'a>(
     (!merged.is_empty()).then_some(merged)
 }
 
+#[cfg(test)]
 pub(super) fn route_content_slice_spec(route: &RouteResult) -> Option<ContentSliceSpec> {
     content_slice_spec_from_sources([route.resolved_intent.as_str(), route.route_reason.as_str()])
 }

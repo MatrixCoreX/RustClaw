@@ -631,6 +631,7 @@ pub(super) fn directory_child_name_pattern_selector(
         .map(|(token, _)| token)
 }
 
+#[cfg(test)]
 pub(super) fn directory_child_name_pattern_selector_from_texts(
     raw_path: &str,
     directory: &Path,
