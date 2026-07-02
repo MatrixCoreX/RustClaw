@@ -485,6 +485,7 @@ fn directory_pair_evidence_scan_reaches_late_structural_directory_tokens() {
     let mut state = test_state_with_root(root.clone());
     state.skill_rt.locator_scan_max_files = 10;
     let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint.clear();
