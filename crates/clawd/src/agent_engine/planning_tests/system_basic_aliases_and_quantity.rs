@@ -486,7 +486,7 @@ fn quantity_comparison_single_directory_count_observation_is_nonrecursive() {
     fs::write(root.path.join("nested/deep.txt"), "deep").expect("write deep");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::direct_answer(),
         true,
         OutputResponseShape::Scalar,
     );
