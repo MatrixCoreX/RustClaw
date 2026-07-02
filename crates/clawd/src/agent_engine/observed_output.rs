@@ -1153,7 +1153,7 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
         "direct_observation_passthrough_allowed": direct_observation_passthrough_allowed,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_intent": route.output_contract.delivery_intent.as_str(),
-        "semantic_kind": route.effective_output_contract_semantic_kind().as_str(),
+        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route.output_contract.locator_hint,
         "needs_clarify": route.needs_clarify,
     })

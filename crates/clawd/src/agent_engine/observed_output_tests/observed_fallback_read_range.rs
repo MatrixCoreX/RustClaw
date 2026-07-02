@@ -10,7 +10,7 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
                 ),
                 (
                     "__OUTPUT_CONTRACT__",
-                    r#"{"response_shape":"one_sentence","semantic_kind":"content_excerpt_summary"}"#,
+                    r#"{"response_shape":"one_sentence","contract_marker":"content_excerpt_summary"}"#,
                 ),
                 (
                     "__OBSERVED_OUTPUTS__",
