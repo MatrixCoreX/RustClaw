@@ -23,7 +23,7 @@ use super::{
 fn matrix_final_answer_shape_class(
     route: &crate::RouteResult,
 ) -> Option<crate::contract_matrix::FinalAnswerShapeClass> {
-    if route_has_docker_text_list_capability_marker(route) {
+    if route_requests_docker_text_list_projection(route) {
         return Some(crate::contract_matrix::FinalAnswerShapeClass::StrictList);
     }
     crate::contract_matrix::final_answer_shape_for_route(route).map(|shape| shape.class())
@@ -83,7 +83,7 @@ pub(super) fn matrix_candidate_satisfies_final_shape(
     if candidate.is_empty() {
         return false;
     }
-    if route_has_docker_text_list_capability_marker(route)
+    if route_requests_docker_text_list_projection(route)
         && docker_text_list_candidate_is_observed(route, loop_state, candidate)
     {
         return true;
@@ -160,11 +160,8 @@ pub(super) fn archive_member_list_prefers_observed_projection(route: &crate::Rou
 
 fn route_requests_archive_list(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["archive"],
-            &["list"],
-        )
+        || crate::contract_matrix::final_answer_shape_for_route(route)
+            == Some(crate::contract_matrix::FinalAnswerShape::ArchiveMemberList)
 }
 
 pub(super) fn file_name_list_prefers_observed_projection(
@@ -417,11 +414,8 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
 }
 
 fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action_name(
-        route,
-        &["filesystem", "fs", "fs_basic"],
-        &["find_entries"],
-    )
+    crate::contract_matrix::final_answer_shape_for_route(route)
+        == Some(crate::contract_matrix::FinalAnswerShape::PathList)
 }
 
 fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
@@ -729,7 +723,7 @@ fn matrix_docker_text_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_has_docker_text_list_capability_marker(route) {
+    if !route_requests_docker_text_list_projection(route) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -763,7 +757,7 @@ fn docker_text_list_candidate_is_observed(
     loop_state: &LoopState,
     candidate: &str,
 ) -> bool {
-    if !route_has_docker_text_list_capability_marker(route) {
+    if !route_requests_docker_text_list_projection(route) {
         return false;
     }
     let candidate = candidate.trim();
@@ -781,11 +775,13 @@ fn docker_text_list_candidate_is_observed(
     })
 }
 
-fn route_has_docker_text_list_capability_marker(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["docker"],
-        &["list", "containers", "images"],
+fn route_requests_docker_text_list_projection(route: &crate::RouteResult) -> bool {
+    matches!(
+        crate::contract_matrix::final_answer_shape_for_route(route),
+        Some(
+            crate::contract_matrix::FinalAnswerShape::ContainerList
+                | crate::contract_matrix::FinalAnswerShape::ImageList
+        )
     )
 }
 
