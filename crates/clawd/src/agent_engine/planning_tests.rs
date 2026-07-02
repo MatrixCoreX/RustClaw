@@ -493,6 +493,8 @@ mod config_guard_capability_repair;
 mod config_structured_field_reads;
 #[path = "planning_tests/content_excerpt_and_log_synthesis.rs"]
 mod content_excerpt_and_log_synthesis;
+#[path = "planning_tests/contract_hint_agent_loop.rs"]
+mod contract_hint_agent_loop;
 #[path = "planning_tests/contract_hints_and_selectors.rs"]
 mod contract_hints_and_selectors;
 #[path = "planning_tests/delivery_archive_config_edit.rs"]

@@ -280,11 +280,7 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
     auto_locator_path: Option<&str>,
 ) -> Option<PlanResult> {
     let route = route_result?;
-    if loop_state.round_no > 1
-        || loop_state.has_tool_or_skill_output
-        || route.needs_clarify
-        || !route.is_execute_gate()
-    {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output || route.needs_clarify {
         return None;
     }
     if !route_has_contract_hint_context(route, original_user_text) {
