@@ -1,4 +1,4 @@
-use super::auto_locator_scalar_file_without_current_locator_should_force_clarify;
+use super::auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop;
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
 use std::collections::{HashMap, HashSet};
@@ -76,7 +76,7 @@ fn executable_filename_route() -> crate::RouteResult {
 }
 
 #[test]
-fn auto_locator_scalar_file_without_current_locator_requires_clarify() {
+fn auto_locator_scalar_file_without_current_locator_defers_to_agent_loop() {
     let root = make_temp_root("auto_locator_scalar_file");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("config dir");
@@ -94,7 +94,7 @@ fn auto_locator_scalar_file_without_current_locator_requires_clarify() {
         .structured_field_selector = Some("app.name".to_string());
 
     assert!(
-        auto_locator_scalar_file_without_current_locator_should_force_clarify(
+        auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
             &state,
             "read app.name from that config and output only the value",
             &route,
@@ -104,7 +104,7 @@ fn auto_locator_scalar_file_without_current_locator_requires_clarify() {
 }
 
 #[test]
-fn session_alias_prebound_scalar_file_allows_auto_locator_guard() {
+fn session_alias_prebound_scalar_file_avoids_agent_loop_deferral() {
     let root = make_temp_root("auto_locator_session_alias");
     let docs_dir = root.join("docs");
     std::fs::create_dir_all(&docs_dir).expect("docs dir");
@@ -124,7 +124,7 @@ fn session_alias_prebound_scalar_file_allows_auto_locator_guard() {
     route.route_reason = "session_alias_locator_prebound_from_current_request".to_string();
 
     assert!(
-        !auto_locator_scalar_file_without_current_locator_should_force_clarify(
+        !auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
             &state,
             "read the heading from alias file and output only the heading",
             &route,
@@ -134,7 +134,7 @@ fn session_alias_prebound_scalar_file_allows_auto_locator_guard() {
 }
 
 #[test]
-fn explicit_file_scalar_route_allows_auto_locator_field_route() {
+fn explicit_file_scalar_route_avoids_auto_locator_deferral() {
     let root = make_temp_root("auto_locator_field_selector_explicit");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("config dir");
@@ -153,7 +153,7 @@ fn explicit_file_scalar_route_allows_auto_locator_field_route() {
         .structured_field_selector = Some("app.name".to_string());
 
     assert!(
-        !auto_locator_scalar_file_without_current_locator_should_force_clarify(
+        !auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
             &state,
             "read configs/app_config.toml app.name and output only the value",
             &route,
@@ -163,7 +163,7 @@ fn explicit_file_scalar_route_allows_auto_locator_field_route() {
 }
 
 #[test]
-fn scalar_file_without_structured_field_contract_does_not_force_clarify() {
+fn scalar_file_without_structured_field_contract_does_not_defer() {
     let root = make_temp_root("auto_locator_scalar_no_field_contract");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("config dir");
@@ -177,7 +177,7 @@ fn scalar_file_without_structured_field_contract_does_not_force_clarify() {
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
 
     assert!(
-        !auto_locator_scalar_file_without_current_locator_should_force_clarify(
+        !auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
             &state,
             "read the scalar value from that config",
             &route,

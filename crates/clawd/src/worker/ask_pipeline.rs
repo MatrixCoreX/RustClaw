@@ -103,7 +103,8 @@ use locatorless_observation_guard::{
     raw_command_request_has_structural_input_locator, route_can_execute_without_locator,
 };
 use post_route_binding::{
-    auto_locator_scalar_file_without_current_locator_should_force_clarify, direct_auto_locator_path,
+    auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop,
+    direct_auto_locator_path,
 };
 use post_route_refinement::apply_post_route_refinements;
 use quantity_pair_binding::{

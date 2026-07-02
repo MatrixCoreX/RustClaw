@@ -29,7 +29,7 @@ pub(super) fn direct_auto_locator_path(
     })
 }
 
-pub(super) fn auto_locator_scalar_file_without_current_locator_should_force_clarify(
+pub(super) fn auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop(
     state: &crate::AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
