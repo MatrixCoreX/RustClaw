@@ -371,6 +371,58 @@ fn route_capability_ref_allows_process_and_task_control_policy_without_semantic_
 }
 
 #[test]
+fn route_capability_ref_uses_registry_metadata_for_exact_skill_actions_without_semantic_kind() {
+    for (capability_ref, skill, args, expected_action) in [
+        (
+            "capability_ref=weather.current",
+            "weather",
+            serde_json::json!({"action":"query","city":"Shanghai"}),
+            "weather.query",
+        ),
+        (
+            "capability_ref=web.search_results",
+            "web_search_extract",
+            serde_json::json!({"action":"search_extract","query":"rustclaw"}),
+            "web_search_extract.search_extract",
+        ),
+        (
+            "capability_ref=kb.search",
+            "kb",
+            serde_json::json!({"action":"search","namespace":"docs","query":"agent loop"}),
+            "kb.search",
+        ),
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        let policy = action_policy_for_route(Some(&route), skill, &args)
+            .unwrap_or_else(|| panic!("policy decision for {expected_action}"));
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action);
+        assert_eq!(policy.contract_match, "capability_ref");
+        assert_eq!(policy.contract_repair_source, "capability_ref_route_policy");
+    }
+}
+
+#[test]
+fn route_capability_ref_rejects_registry_action_mismatch_without_semantic_kind() {
+    let route = route_with_machine_capability_ref("capability_ref=weather.current");
+
+    let policy = action_policy_for_route(
+        Some(&route),
+        "kb",
+        &serde_json::json!({"action":"search","namespace":"docs","query":"weather"}),
+    );
+
+    assert!(
+        policy
+            .as_ref()
+            .is_none_or(|policy| policy.contract_match != "capability_ref"),
+        "{policy:?}"
+    );
+}
+
+#[test]
 fn route_capability_ref_overrides_bridge_semantic_policy_match() {
     for (semantic_kind, capability_ref, skill, args) in [
         (

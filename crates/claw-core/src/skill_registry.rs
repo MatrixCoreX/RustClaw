@@ -964,6 +964,15 @@ impl SkillsRegistry {
             }
             Err(e) => return Err(format!("read registry failed: {}: {}", path.display(), e)),
         };
+        Self::load_from_str_with_source(&content, path)
+    }
+
+    /// Load a registry from TOML text for bundled config, tests, or embedded config.
+    pub fn load_from_str(content: &str) -> Result<Self, String> {
+        Self::load_from_str_with_source(content, Path::new("<inline>"))
+    }
+
+    fn load_from_str_with_source(content: &str, path: &Path) -> Result<Self, String> {
         let file: SkillsRegistryFile = toml::from_str(&content)
             .map_err(|e| format!("parse registry failed: {}: {}", path.display(), e))?;
         let mut by_name = HashMap::new();

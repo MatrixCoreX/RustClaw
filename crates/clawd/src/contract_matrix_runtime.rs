@@ -5,9 +5,11 @@ use super::{
     BUNDLED_CONTRACT_MATRIX,
 };
 #[cfg(test)]
-use claw_core::skill_registry::{SkillKind, SkillsRegistry};
+use claw_core::skill_registry::SkillKind;
+use claw_core::skill_registry::SkillsRegistry;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContractActionPolicy {
@@ -89,6 +91,17 @@ pub(crate) fn bundled_contract_matrix_result() -> Result<&'static ContractMatrix
 
 pub(crate) fn bundled_contract_matrix() -> Option<&'static ContractMatrix> {
     bundled_contract_matrix_result().ok()
+}
+
+static BUNDLED_SKILLS_REGISTRY: OnceLock<Result<SkillsRegistry, String>> = OnceLock::new();
+
+fn bundled_skills_registry() -> Option<&'static SkillsRegistry> {
+    BUNDLED_SKILLS_REGISTRY
+        .get_or_init(|| {
+            SkillsRegistry::load_from_str(include_str!("../../../configs/skills_registry.toml"))
+        })
+        .as_ref()
+        .ok()
 }
 
 pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<String> {
@@ -917,6 +930,9 @@ fn route_capability_ref_allows_action(
 }
 
 fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
+    if route_registry_capability_ref_allows_action_ref(route, action) {
+        return true;
+    }
     let action_name = action.action.as_deref().unwrap_or_default();
     match (action.skill.as_str(), action_name) {
         ("config_basic", "validate")
@@ -1255,6 +1271,31 @@ fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRe
         ),
         _ => false,
     }
+}
+
+fn route_registry_capability_ref_allows_action_ref(
+    route: &RouteResult,
+    action: &ActionRef,
+) -> bool {
+    let Some(action_name) = action.action.as_deref() else {
+        return false;
+    };
+    let Some(registry) = bundled_skills_registry() else {
+        return false;
+    };
+    let Some(manifest) = registry.manifest(&action.skill) else {
+        return false;
+    };
+    let route_refs = crate::machine_capability_ref::route_capability_ref_tokens(route);
+    if route_refs.is_empty() {
+        return false;
+    }
+    manifest.planner_capabilities.iter().any(|mapping| {
+        mapping.action.as_deref() == Some(action_name)
+            && route_refs
+                .iter()
+                .any(|capability| capability == &mapping.name)
+    })
 }
 
 pub(crate) fn arg_policy_decision(
