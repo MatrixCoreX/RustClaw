@@ -12,7 +12,6 @@ pub(super) fn archive_database_aggregate_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !route_requests_archive_database_aggregate_capabilities(route)
