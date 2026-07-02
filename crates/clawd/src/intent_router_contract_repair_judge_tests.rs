@@ -3,15 +3,15 @@ use crate::IntentOutputContract;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-fn contract_repair_semantic_kind_enum() -> BTreeSet<String> {
+fn contract_repair_contract_marker_enum() -> BTreeSet<String> {
     let schema: serde_json::Value = serde_json::from_str(include_str!(
         "../../../prompts/schemas/contract_repair_judge.schema.json"
     ))
     .expect("contract repair judge schema parses");
     schema
-        .pointer("/properties/output_contract/properties/semantic_kind/enum")
+        .pointer("/properties/output_contract/properties/contract_marker/enum")
         .and_then(|value| value.as_array())
-        .expect("semantic_kind enum")
+        .expect("contract_marker enum")
         .iter()
         .filter_map(|value| value.as_str().map(str::to_string))
         .collect()
@@ -19,13 +19,13 @@ fn contract_repair_semantic_kind_enum() -> BTreeSet<String> {
 
 #[test]
 fn contract_repair_judge_schema_hides_registry_capability_semantic_kinds() {
-    let schema_semantic_kinds = contract_repair_semantic_kind_enum();
+    let schema_contract_markers = contract_repair_contract_marker_enum();
 
     for kind in OutputSemanticKind::ALL {
         if kind.is_normalizer_schema_capability_bridge() {
             assert!(
-                !schema_semantic_kinds.contains(kind.as_str()),
-                "contract repair judge schema must not expose registry-owned semantic_kind `{}`; preserve capability_ref machine tokens instead",
+                !schema_contract_markers.contains(kind.as_str()),
+                "contract repair judge schema must not expose registry-owned contract_marker `{}`; preserve capability_ref machine tokens instead",
                 kind.as_str()
             );
         }
@@ -49,7 +49,7 @@ fn contract_repair_judge_schema_accepts_canonical_payload() {
             "delivery_required": false,
             "locator_kind": "path",
             "delivery_intent": "none",
-            "semantic_kind": "file_names",
+            "contract_marker": "file_names",
             "locator_hint": "logs",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
           },
