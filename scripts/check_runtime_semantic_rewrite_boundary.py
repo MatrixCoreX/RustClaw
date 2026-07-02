@@ -479,12 +479,13 @@ def scan_static_capability_compat_boundary() -> list[Finding]:
 
 def scan_contract_repair_judge_boundary() -> list[Finding]:
     path = SRC_ROOT / "intent_router_normalizer_answer_repair.rs"
-    rel_path = rel(path)
-    text = path.read_text(encoding="utf-8")
+    return scan_contract_repair_judge_boundary_text(rel(path), path.read_text(encoding="utf-8"))
+
+
+def scan_contract_repair_judge_boundary_text(rel_path: str, text: str) -> list[Finding]:
     required_tokens = [
-        "fn contract_repair_judge_runtime_enabled() -> bool",
-        "cfg!(test)",
-        "contract_repair_judge_runtime_enabled()",
+        "#[cfg(test)]\nasync fn apply_contract_judge_repair(",
+        "#[cfg(not(test))]\nasync fn apply_contract_judge_repair(",
         "contract_repair_report.needs_llm_contract_integrity_repair()",
     ]
     findings: list[Finding] = []
@@ -499,6 +500,15 @@ def scan_contract_repair_judge_boundary() -> list[Finding]:
                 f"missing required boundary token: {token}",
             )
         )
+    if "contract_repair_judge_runtime_enabled" in text or "cfg!(test)" in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_repair_judge_runtime_switch",
+                "pre-agent LLM repair must be compile-time test-only, not a runtime switch",
+            )
+        )
     findings.extend(scan_semantic_suspect_report_boundary(rel_path, text))
     return findings
 
@@ -507,14 +517,10 @@ def scan_semantic_suspect_report_boundary(rel_path: str, text: str) -> list[Find
     semantic_report_pos = text.find('contract_repair_report.add("semantic_suspect"')
     if semantic_report_pos < 0:
         return []
-    guard_pos = text.find("if contract_repair_judge_runtime_enabled() {")
-    judge_call_pos = text.find(
-        "if contract_repair_judge_runtime_enabled()\n"
-        "        && contract_repair_report.needs_llm_contract_integrity_repair()"
+    test_only_repair_pos = text.find(
+        "#[cfg(test)]\nasync fn apply_contract_judge_repair("
     )
-    if 0 <= guard_pos < semantic_report_pos and (
-        judge_call_pos < 0 or semantic_report_pos < judge_call_pos
-    ):
+    if 0 <= test_only_repair_pos < semantic_report_pos:
         return []
     return [
         Finding(
@@ -2156,13 +2162,20 @@ def run_self_test() -> int:
     )
     allowed_semantic_suspect = scan_semantic_suspect_report_boundary(
         "crates/clawd/src/intent_router_normalizer_answer_repair.rs",
-        "if contract_repair_judge_runtime_enabled() {\n"
+        "#[cfg(test)]\nasync fn apply_contract_judge_repair() {\n"
         '    contract_repair_report.add("semantic_suspect", detail);\n'
-        "}\n"
-        "if contract_repair_judge_runtime_enabled()\n"
-        "        && contract_repair_report.needs_llm_contract_integrity_repair() {}\n",
+        "}\n",
     )
     assert not allowed_semantic_suspect
+    blocked_runtime_repair_switch = scan_contract_repair_judge_boundary_text(
+        "crates/clawd/src/intent_router_normalizer_answer_repair.rs",
+        "fn contract_repair_judge_runtime_enabled() -> bool { cfg!(test) }\n",
+    )
+    assert (
+        blocked_runtime_repair_switch
+        and blocked_runtime_repair_switch[0].kind
+        == "contract_repair_judge_boundary_missing"
+    )
     blocked_prompt = scan_prompt_layer_text(
         "prompts/layers/overlays/intent_normalizer_prompt.md",
         "`weather_query`\n",

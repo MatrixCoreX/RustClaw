@@ -5,13 +5,17 @@ use serde_json::{json, Value};
 
 use crate::AppState;
 
+#[cfg(test)]
 #[path = "prompt_utils_contract_repair_judge.rs"]
 mod contract_repair_judge;
+#[cfg(test)]
 #[path = "prompt_utils_output_contract.rs"]
 mod output_contract;
 #[path = "prompt_utils_schema.rs"]
 mod schema_validation;
+#[cfg(test)]
 use contract_repair_judge::canonicalize_contract_repair_judge_object;
+#[cfg(test)]
 use output_contract::{
     canonicalize_output_contract, normalize_output_contract_delivery_intent,
     normalize_output_contract_locator_kind, normalize_output_contract_semantic_kind,
@@ -81,6 +85,7 @@ pub(crate) fn log_prompt_render_with_version(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptSchemaId {
     IntentNormalizer,
+    #[cfg(test)]
     ContractRepairJudge,
     AnswerVerifier,
     UserResponseContractValidator,
@@ -97,6 +102,7 @@ impl PromptSchemaId {
     fn as_str(self) -> &'static str {
         match self {
             Self::IntentNormalizer => "intent_normalizer",
+            #[cfg(test)]
             Self::ContractRepairJudge => "contract_repair_judge",
             Self::AnswerVerifier => "answer_verifier",
             Self::UserResponseContractValidator => "user_response_contract_validator",
@@ -116,6 +122,7 @@ impl PromptSchemaId {
         }
 
         static INTENT_NORMALIZER: OnceLock<Value> = OnceLock::new();
+        #[cfg(test)]
         static CONTRACT_REPAIR_JUDGE: OnceLock<Value> = OnceLock::new();
         static ANSWER_VERIFIER: OnceLock<Value> = OnceLock::new();
         static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
@@ -133,6 +140,7 @@ impl PromptSchemaId {
                     "../../../prompts/schemas/intent_normalizer.schema.json"
                 ))
             }),
+            #[cfg(test)]
             Self::ContractRepairJudge => CONTRACT_REPAIR_JUDGE.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/contract_repair_judge.schema.json"
@@ -621,6 +629,7 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
         (PromptSchemaId::ScheduleIntent, Value::Object(map)) => {
             canonicalize_schedule_intent_schema_object(map)
         }
+        #[cfg(test)]
         (PromptSchemaId::ContractRepairJudge, Value::Object(map)) => {
             canonicalize_contract_repair_judge_object(map)
         }
