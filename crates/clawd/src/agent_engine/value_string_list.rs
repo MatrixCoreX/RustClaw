@@ -636,6 +636,7 @@ pub(super) fn git_repository_state_action_from_route(route: &RouteResult) -> Opt
     }
 }
 
+#[cfg(test)]
 pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -690,6 +691,7 @@ pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -1024,6 +1026,7 @@ pub(super) fn structured_field_selector_can_yield_scalar(
     })
 }
 
+#[cfg(test)]
 pub(super) fn structured_field_leaf_query(field_path: &str) -> Option<String> {
     field_path
         .split('.')
