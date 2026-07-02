@@ -792,24 +792,25 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
     if route_path_locator_plain_act_allows_observed_listing(route) {
         return true;
     }
-    let contract = crate::TaskContract::from_route_result(route);
-    if contract
-        .required_evidence_fields
+    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
+    if required_evidence_fields
         .iter()
         .any(|field| field == "content_excerpt")
     {
         return false;
     }
-    if contract.required_evidence_fields.is_empty() {
+    if required_evidence_fields.is_empty() {
         return false;
     }
-    match contract.delivery_shape {
+    let delivery_shape = crate::task_contract::delivery_shape_for_route(route);
+    let operation = crate::task_contract::operation_for_route(route);
+    match delivery_shape {
         crate::task_contract::TaskDeliveryShape::Raw
         | crate::task_contract::TaskDeliveryShape::List
         | crate::task_contract::TaskDeliveryShape::File => true,
         crate::task_contract::TaskDeliveryShape::OneSentence
         | crate::task_contract::TaskDeliveryShape::Summary => matches!(
-            contract.operation,
+            operation,
             crate::task_contract::TaskOperation::Inspect
                 | crate::task_contract::TaskOperation::List
                 | crate::task_contract::TaskOperation::Count

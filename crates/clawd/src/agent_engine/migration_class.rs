@@ -164,14 +164,16 @@ pub(crate) fn agent_decides_eligible_migration_class(route: &RouteResult) -> &'s
 }
 
 pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibility {
-    let contract = crate::TaskContract::from_route_result(route);
+    let evidence_required = crate::task_contract::evidence_required_for_route(route);
+    let missing_parameters = crate::task_contract::missing_parameters_for_route(route);
+    let operation = crate::task_contract::operation_for_route(route);
     if route.risk_ceiling == RiskCeiling::High {
         return AgentLoopEligibility::blocked("risk_ceiling_high");
     }
     if route.schedule_kind != ScheduleKind::None {
         return AgentLoopEligibility::blocked("schedule_active");
     }
-    if route_is_low_risk_single_file_delivery(route, &contract) {
+    if route_is_low_risk_single_file_delivery(route, operation) {
         return AgentLoopEligibility::eligible_with_requirements(
             AgentLoopEligibilityBucket::LowRiskSingleFileDelivery,
             LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS,
@@ -194,14 +196,14 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
             LOW_RISK_DIRECT_RESPONSE_BOUNDARY_REQUIREMENTS,
         );
     }
-    if !contract.evidence_required {
+    if !evidence_required {
         return AgentLoopEligibility::blocked("evidence_not_required");
     }
-    if !contract.missing_parameters.is_empty() {
+    if !missing_parameters.is_empty() {
         return AgentLoopEligibility::blocked("missing_parameters");
     }
     if matches!(
-        contract.operation,
+        operation,
         crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
     ) {
         return AgentLoopEligibility::blocked("side_effect_operation");
@@ -342,13 +344,13 @@ fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
 
 fn route_is_low_risk_single_file_delivery(
     route: &RouteResult,
-    contract: &crate::TaskContract,
+    operation: crate::task_contract::TaskOperation,
 ) -> bool {
     if !(route.wants_file_delivery || route.output_contract.delivery_required) {
         return false;
     }
     if matches!(
-        contract.operation,
+        operation,
         crate::task_contract::TaskOperation::Write | crate::task_contract::TaskOperation::Modify
     ) {
         return false;

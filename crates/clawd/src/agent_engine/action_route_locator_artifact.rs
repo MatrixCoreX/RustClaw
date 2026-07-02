@@ -840,15 +840,14 @@ pub(super) fn path_matches_workspace_scope_hint(path: &str, scope_hint: &str) ->
 }
 
 pub(super) fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
-    let contract = crate::TaskContract::from_route_result(route);
+    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
     !route.needs_clarify
         && !route.output_contract.delivery_required
         && route.output_contract_marker_is_any(&[
             crate::OutputSemanticKind::QuantityComparison,
             crate::OutputSemanticKind::RecentScalarEqualityCheck,
         ])
-        && contract
-            .required_evidence_fields
+        && required_evidence_fields
             .iter()
             .any(|field| matches!(field.as_str(), "field_value" | "size_bytes"))
 }
