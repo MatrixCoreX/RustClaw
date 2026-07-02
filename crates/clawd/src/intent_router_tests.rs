@@ -49,7 +49,6 @@ fn runtime_async_job_start_state_patch_survives_schema_and_becomes_plan_hint() {
         "delivery_required":false,
         "locator_kind":"none",
         "delivery_intent":"none",
-        "semantic_kind":"service_status",
         "locator_hint":"",
         "scalar_count_filter":null,
         "list_selector":null,
