@@ -202,14 +202,14 @@ pub(super) fn implicit_workspace_file_locator_route_should_defer_to_agent_loop(
         || !route_result.is_execute_gate()
         || !route_result.output_contract.requires_content_evidence
         || generated_file_delivery_uses_runtime_target(route_result)
-        || !locator_kind_accepts_workspace_child_prebind(route_result.output_contract.locator_kind)
+        || !locator_kind_accepts_workspace_child_boundary(route_result.output_contract.locator_kind)
         || !route_result.output_contract.locator_hint.trim().is_empty()
         || current_request_has_concrete_locator_surface(prompt)
         || current_request_has_self_contained_structured_payload(prompt)
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || active_session_has_structured_observation_anchor(session_snapshot)
-        || route_should_skip_workspace_child_prebind(route_result)
+        || route_should_skip_workspace_child_boundary_binding(route_result)
         || command_observation_route_has_runtime_evidence(state, prompt, route_result)
         || archive_unpack_requires_structural_locator_pair(route_result)
         || super::has_multiple_distinct_explicit_local_path_locators(state, prompt, None)
@@ -227,10 +227,10 @@ fn scalar_equality_route_requests_workspace_child_locator(
 ) -> bool {
     route_result.output_contract.requires_content_evidence
         && route_has_recent_scalar_equality_machine_signal(route_result)
-        && locator_kind_accepts_workspace_child_prebind(route_result.output_contract.locator_kind)
+        && locator_kind_accepts_workspace_child_boundary(route_result.output_contract.locator_kind)
 }
 
-fn route_should_skip_workspace_child_prebind(route_result: &crate::RouteResult) -> bool {
+fn route_should_skip_workspace_child_boundary_binding(route_result: &crate::RouteResult) -> bool {
     route_can_execute_without_locator(route_result)
         && !scalar_equality_route_requests_workspace_child_locator(route_result)
 }
@@ -251,7 +251,7 @@ pub(super) fn workspace_root_name_token_present(
         .any(|token| token == normalized_root)
 }
 
-fn locator_kind_accepts_workspace_child_prebind(kind: crate::OutputLocatorKind) -> bool {
+fn locator_kind_accepts_workspace_child_boundary(kind: crate::OutputLocatorKind) -> bool {
     matches!(
         kind,
         crate::OutputLocatorKind::None
