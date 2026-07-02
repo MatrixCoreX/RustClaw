@@ -34,7 +34,6 @@ const LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "agent_loop_entry",
     "non_high_risk",
     "no_schedule",
-    "no_clarify",
     "delivery_required",
     "file_token_delivery",
     "single_file_delivery",
