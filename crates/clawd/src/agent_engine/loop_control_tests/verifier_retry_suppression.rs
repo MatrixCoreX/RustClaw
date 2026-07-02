@@ -53,6 +53,28 @@ fn answer_verifier_retry_summary_requires_retryable_high_confidence_gap() {
 }
 
 #[test]
+fn answer_verifier_retry_summary_allows_recoverable_verifier_failure_reply() {
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.final_failure_attribution = Some("contract_gap".to_string());
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "field label instead of clear final answer".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed machine state".to_string(),
+        confidence: 0.62,
+    });
+    let mut reply =
+        AskReply::non_llm("approval_pending_task".to_string()).with_task_journal(journal);
+    reply.should_fail_task = true;
+
+    let summary = answer_verifier_retry_summary(&reply, None).expect("recoverable verifier gap");
+
+    assert_eq!(summary.missing_evidence_fields, vec!["output_format"]);
+}
+
+#[test]
 fn answer_verifier_retry_summary_uses_high_confidence_gap_even_without_flag() {
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {

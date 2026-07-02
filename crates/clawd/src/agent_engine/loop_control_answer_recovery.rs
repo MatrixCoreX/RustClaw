@@ -4,13 +4,16 @@ pub(super) fn answer_verifier_retry_summary<'a>(
     reply: &'a AskReply,
     route_result: Option<&RouteResult>,
 ) -> Option<&'a crate::task_journal::TaskJournalAnswerVerifierSummary> {
-    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
+    if reply_final_status_is_clarify(reply) {
         return None;
     }
     let summary = reply
         .task_journal
         .as_ref()
         .and_then(|journal| journal.answer_verifier_summary.as_ref())?;
+    if reply.should_fail_task && !reply_failure_is_recoverable_answer_verifier_gap(reply, summary) {
+        return None;
+    }
     if answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
         return None;
     }
@@ -21,6 +24,25 @@ pub(super) fn answer_verifier_retry_summary<'a>(
         return None;
     }
     summary.high_confidence_retry_gap().then_some(summary)
+}
+
+fn reply_failure_is_recoverable_answer_verifier_gap(
+    reply: &AskReply,
+    summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    if journal.final_status != Some(crate::task_journal::TaskJournalFinalStatus::Failure) {
+        return false;
+    }
+    matches!(
+        journal.final_failure_attribution.as_deref(),
+        None | Some("answer_verifier_gap") | Some("contract_gap")
+    )
 }
 
 pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
