@@ -217,17 +217,26 @@ fn summary_json_includes_finalizer_and_task_metrics() {
     assert_eq!(
         summary
             .get("route_result")
-            .and_then(|v| v.get("initial_gate_ref"))
+            .and_then(|v| v.get("boundary_mode"))
             .and_then(Value::as_str),
         Some("execute")
     );
     assert_eq!(
         summary
             .get("route_result")
-            .and_then(|v| v.get("initial_hint_ref"))
+            .and_then(|v| v.get("route_trace_decision"))
             .and_then(Value::as_str),
         Some("planner_execute")
     );
+    for legacy_field in ["route_gate_kind", "initial_gate_ref", "initial_hint_ref"] {
+        assert!(
+            summary
+                .get("route_result")
+                .and_then(|v| v.get(legacy_field))
+                .is_none(),
+            "route_result should not expose legacy field `{legacy_field}`"
+        );
+    }
     assert_eq!(
         summary
             .get("route_result")
