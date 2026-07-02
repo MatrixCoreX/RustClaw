@@ -147,6 +147,11 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
             if let Some(credential_access) = capability.credential_access {
                 attrs.push(format!("credential_access={credential_access}"));
             }
+            if let Some(final_answer_shape) = capability.final_answer_shape.as_deref() {
+                if !final_answer_shape.trim().is_empty() {
+                    attrs.push(format!("final_answer_shape={}", final_answer_shape.trim()));
+                }
+            }
             if attrs.is_empty() {
                 name.to_string()
             } else {

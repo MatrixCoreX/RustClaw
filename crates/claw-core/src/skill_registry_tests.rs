@@ -306,7 +306,7 @@ fn registry_manifest_exposes_planner_metadata() {
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
 	planner_capabilities = [
-	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true, execution_mode = "async_preferred", async_adapter_kind = "HTTP-Job-Poll", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+		  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low", once_per_task = false, dedup_scope = "args", idempotent = true, execution_mode = "async_preferred", async_adapter_kind = "HTTP-Job-Poll", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, final_answer_shape = "Table-Listing" },
 	  { name = "database::list-tables", action = "duplicate-ignored" }
 	]
 	matrix_admission = { eligible = true, declared_actions = ["List-Tables"], evidence_sources = ["structured-json"], required_extra_fields = ["extra.tables", "extra.count", "extra.tables"], extractor_kind = "Structured-Json", admission_version = "external-v1" }
@@ -387,6 +387,10 @@ fn registry_manifest_exposes_planner_metadata() {
     assert_eq!(capability.filesystem_write, Some(false));
     assert_eq!(capability.external_publish, Some(false));
     assert_eq!(capability.credential_access, Some(false));
+    assert_eq!(
+        capability.final_answer_shape.as_deref(),
+        Some("table_listing")
+    );
     assert_eq!(manifest.once_per_task, Some(true));
     assert_eq!(manifest.dedup_scope, Some(RegistryDedupScope::Action));
     assert_eq!(manifest.idempotent, Some(false));
