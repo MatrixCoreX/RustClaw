@@ -728,14 +728,14 @@ pub(super) fn successful_observed_evidence_items_for_route(
 }
 
 pub(super) fn route_requires_strict_extractor_eligibility(route: &RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route).is_some_and(|shape| {
+    crate::evidence_policy::final_answer_shape_for_route(route).is_some_and(|shape| {
         matches!(
             shape.class(),
-            crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
-                | crate::contract_matrix::FinalAnswerShapeClass::StrictList
-                | crate::contract_matrix::FinalAnswerShapeClass::Table
-                | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
-                | crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
+            crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
+                | crate::evidence_policy::FinalAnswerShapeClass::StrictList
+                | crate::evidence_policy::FinalAnswerShapeClass::Table
+                | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
+                | crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
         )
     })
 }

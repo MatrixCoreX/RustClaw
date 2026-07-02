@@ -299,7 +299,7 @@ pub(super) fn workspace_project_summary_requires_model_verifier(
     if !route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
         return false;
     }
-    crate::contract_matrix::final_answer_shape_for_route(route_result)
+    crate::evidence_policy::final_answer_shape_for_route(route_result)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -307,7 +307,7 @@ pub(super) fn finalizer_summary_can_skip_answer_verifier(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route_result) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) else {
         return false;
     };
     if shape.allows_model_language() {
@@ -829,10 +829,10 @@ pub(super) fn scalar_field_value_gap_is_grounded_in_structured_read(
     {
         return false;
     }
-    let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
         return false;
     };
-    if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
+    if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
         || !scalar_answer_is_strict_for_shape(shape, candidate_answer)
     {
         return false;
@@ -1223,7 +1223,7 @@ fn verifier_evidence_policy_prompt_trace(route_result: &RouteResult) -> Option<s
         obj.insert(
             "compact_line".to_string(),
             serde_json::Value::String(
-                crate::contract_matrix::compact_prompt_line_for_route(route_result)
+                crate::evidence_policy::compact_prompt_line_for_route(route_result)
                     .unwrap_or_default(),
             ),
         );

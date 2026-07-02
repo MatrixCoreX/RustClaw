@@ -296,36 +296,36 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
-    if let Some(shape) = crate::contract_matrix::final_answer_shape_for_route(route_result) {
-        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
+    if let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) {
+        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::ScalarValue {
             return evidence_policy_scalar_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
-        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::StrictList {
+        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::StrictList {
             return evidence_policy_strict_list_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
-        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Table {
+        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::Table {
             return evidence_policy_table_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
-        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::SinglePath {
+        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath {
             return evidence_policy_single_path_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
                 candidate_answer,
             );
         }
-        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact {
+        if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact {
             return evidence_policy_delivery_artifact_answer_is_grounded_in_successful_observation(
                 route_result,
                 journal,
