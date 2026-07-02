@@ -240,3 +240,61 @@ fn git_repository_state_strict_requested_machine_fields_drop_changed_list() {
     );
     assert!(finalizer_summary.is_some());
 }
+
+#[test]
+fn git_status_capability_ref_strict_requested_machine_fields_without_semantic_kind() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "git_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            serde_json::json!({
+                "extra": {
+                    "action": "status",
+                    "branch": "main",
+                    "changed_count": 2,
+                    "output": "exit=0\n## main...origin/main\n M Cargo.toml\n?? README.md\n",
+                    "worktree_state": "dirty"
+                },
+                "text": "exit=0\n## main...origin/main\n M Cargo.toml\n?? README.md\n"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.delivery_messages.push(
+        "git.branch=main\ngit.worktree=dirty\ngit.changed.count=2\ngit.changed[0]=M Cargo.toml"
+            .to_string(),
+    );
+
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.route_reason = "capability_ref=git.status".to_string();
+    route.resolved_intent = "field=branch field=worktree_state".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        user_request: Some("branch worktree_state".to_string()),
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(
+        replace_git_repository_state_delivery_with_requested_machine_fields(
+            &claimed_task("task-git-machine-fields-capability-ref"),
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut finalizer_summary,
+        )
+    );
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["branch=main worktree_state=dirty".to_string()]
+    );
+    assert!(finalizer_summary.is_some());
+}

@@ -19,7 +19,7 @@ struct GitMachineState {
 }
 
 fn route_git_repository_state_requires_language_synthesis(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::GitRepositoryState
+    route_requests_git_repository_state(route)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && (matches!(
@@ -112,7 +112,7 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
+    if !route_requests_git_repository_state(route)
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Strict
     {
@@ -162,6 +162,15 @@ pub(super) fn replace_git_repository_state_delivery_with_requested_machine_field
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn route_requests_git_repository_state(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["git", "git_basic"],
+            &["status"],
+        )
 }
 
 fn requested_git_machine_fields(
