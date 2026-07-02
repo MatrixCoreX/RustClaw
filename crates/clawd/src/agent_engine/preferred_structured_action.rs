@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn preferred_structured_action_for_contract_hint(
     state: &AppState,
     route: &RouteResult,
-    preferred: &crate::contract_matrix::ActionRef,
+    preferred: &crate::evidence_policy::ActionRef,
     auto_locator_path: Option<&str>,
     original_user_text: &str,
 ) -> Option<AgentAction> {
@@ -156,7 +156,7 @@ pub(super) fn preferred_structured_action_for_contract_hint(
 
 fn preferred_docker_basic_for_contract_hint(
     route: &RouteResult,
-    preferred: &crate::contract_matrix::ActionRef,
+    preferred: &crate::evidence_policy::ActionRef,
     auto_locator_path: Option<&str>,
 ) -> Option<AgentAction> {
     let action = preferred_docker_basic_action(route, preferred);
@@ -176,7 +176,7 @@ fn docker_basic_action_requires_container(action: &str) -> bool {
 
 fn preferred_docker_basic_action(
     route: &RouteResult,
-    preferred: &crate::contract_matrix::ActionRef,
+    preferred: &crate::evidence_policy::ActionRef,
 ) -> &'static str {
     if let Some(action) = preferred.action.as_deref() {
         return match action {
@@ -249,7 +249,7 @@ pub(super) fn contract_hint_existence_summary_deterministic_plan_result(
         let Some((skill, args)) = planned_execution_action_ref(action) else {
             return false;
         };
-        crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
             .is_some_and(|policy| policy.is_allowed())
     }) {
         return None;
@@ -337,7 +337,7 @@ pub(super) fn contract_hint_preferred_action_deterministic_plan_result(
 #[cfg(test)]
 fn capability_ref_preferred_action_refs_for_route(
     route: &RouteResult,
-) -> Vec<crate::contract_matrix::ActionRef> {
+) -> Vec<crate::evidence_policy::ActionRef> {
     if let Some(action) =
         crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["config"])
     {
@@ -349,7 +349,7 @@ fn capability_ref_preferred_action_refs_for_route(
             "list_keys" => "list_keys",
             _ => return Vec::new(),
         };
-        return vec![crate::contract_matrix::ActionRef {
+        return vec![crate::evidence_policy::ActionRef {
             skill: "config_basic".to_string(),
             action: Some(action.to_string()),
         }];
@@ -361,7 +361,7 @@ fn capability_ref_preferred_action_refs_for_route(
             "list" | "read" | "pack" | "unpack" => action,
             _ => return Vec::new(),
         };
-        return vec![crate::contract_matrix::ActionRef {
+        return vec![crate::evidence_policy::ActionRef {
             skill: "archive_basic".to_string(),
             action: Some(action.to_string()),
         }];
@@ -371,7 +371,7 @@ fn capability_ref_preferred_action_refs_for_route(
 
 #[cfg(test)]
 fn contract_hint_preferred_action_allowed(route: &RouteResult, skill: &str, args: &Value) -> bool {
-    if crate::contract_matrix::capability_ref_action_policy_for_route(Some(route), skill, args)
+    if crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
         .is_some_and(|policy| policy.is_allowed())
     {
         return true;
@@ -544,7 +544,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
         return actions;
     };
     let preferred_actions =
-        crate::contract_matrix::capability_ref_action_refs_for_route(route, true);
+        crate::evidence_policy::capability_ref_action_refs_for_route(route, true);
     if preferred_actions.is_empty() {
         return actions;
     }
@@ -585,7 +585,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             let Some((skill, args)) = planned_execution_action_ref(&action) else {
                 return action;
             };
-            let Some(policy) = crate::contract_matrix::capability_ref_action_policy_for_route(
+            let Some(policy) = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
                 skill,
                 args,
@@ -688,7 +688,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 if let Some((candidate_skill, candidate_args)) =
                     planned_execution_action_ref(&candidate)
                 {
-                    if crate::contract_matrix::capability_ref_action_policy_for_route(
+                    if crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
                         candidate_skill,
                         candidate_args,
@@ -709,7 +709,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 if let Some((candidate_skill, candidate_args)) =
                     planned_execution_action_ref(&candidate)
                 {
-                    if crate::contract_matrix::capability_ref_action_policy_for_route(
+                    if crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
                         candidate_skill,
                         candidate_args,
@@ -770,7 +770,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                         if let Some((candidate_skill, candidate_args)) =
                             planned_execution_action_ref(&candidate)
                         {
-                            if crate::contract_matrix::capability_ref_action_policy_for_route(
+                            if crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
                                 candidate_skill,
                                 candidate_args,
@@ -823,7 +823,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                     continue;
                 };
                 let Some(candidate_policy) =
-                    crate::contract_matrix::capability_ref_action_policy_for_route(
+                    crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
                         candidate_skill,
                         candidate_args,
@@ -855,7 +855,7 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
 
 fn preferred_action_may_replace_contract_rejected_action(
     route: &RouteResult,
-    preferred: &crate::contract_matrix::ActionRef,
+    preferred: &crate::evidence_policy::ActionRef,
 ) -> bool {
     !preferred.skill.eq_ignore_ascii_case("docker_basic")
         || crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
@@ -864,13 +864,13 @@ fn preferred_action_may_replace_contract_rejected_action(
 fn structured_run_cmd_async_start_allows_planner_authority_despite_contract(
     normalized_skill: &str,
     args: &Value,
-    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+    policy_decision: crate::evidence_policy::ActionPolicyDecision,
 ) -> bool {
     if !normalized_skill.eq_ignore_ascii_case("run_cmd")
         || !matches!(
             policy_decision,
-            crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
-                | crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed
+            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+                | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
         )
         || args.get("async_start").and_then(Value::as_bool) != Some(true)
         || run_cmd_command_from_args(args).is_none()
@@ -941,9 +941,9 @@ fn active_ops_recipe_allows_mutation_despite_summary_contract(
     loop_state: &LoopState,
     normalized_skill: &str,
     args: &Value,
-    policy_decision: crate::contract_matrix::ActionPolicyDecision,
+    policy_decision: crate::evidence_policy::ActionPolicyDecision,
 ) -> bool {
-    if policy_decision != crate::contract_matrix::ActionPolicyDecision::RejectedNotAllowed {
+    if policy_decision != crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed {
         return false;
     }
     let recipe = loop_state.execution_recipe;
