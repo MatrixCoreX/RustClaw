@@ -75,6 +75,7 @@ mod direct_observed_finalize_support;
 mod directory_entry_group_locator;
 #[path = "directory_unique_entry.rs"]
 mod directory_unique_entry;
+#[cfg(test)]
 #[path = "dry_run_contract_plan.rs"]
 mod dry_run_contract_plan;
 #[path = "explicit_observed_paths.rs"]
@@ -133,6 +134,7 @@ use directory_entry_group_locator::executed_step_is_successful_text_read;
 #[cfg(test)]
 use directory_entry_group_locator::*;
 use directory_unique_entry::*;
+#[cfg(test)]
 use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
 #[cfg(test)]
@@ -203,10 +205,6 @@ pub(super) async fn plan_round_actions(
         };
     }
 
-    return_deterministic_plan!(
-        structured_dry_run_response_deterministic_plan_result(goal, route_result, loop_state),
-        "plan_deterministic_structured_dry_run_response"
-    );
     if literal_command_should_use_run_cmd
         && runtime_status_query_kind(turn_analysis_for_prompt).is_none()
     {
