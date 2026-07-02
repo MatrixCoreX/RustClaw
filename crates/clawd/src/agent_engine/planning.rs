@@ -383,15 +383,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_content_presence_query"
         );
         return_deterministic_plan!(
-            git_repository_state_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                &original_user_text_for_policy,
-            ),
-            "plan_deterministic_git_repository_state"
-        );
-        return_deterministic_plan!(
             recent_scalar_file_pair_deterministic_plan_result(
                 state,
                 goal,

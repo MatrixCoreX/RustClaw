@@ -603,6 +603,7 @@ pub(super) fn normalize_git_basic_schema_aliases(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn git_repository_state_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -625,6 +626,7 @@ pub(super) fn git_repository_state_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn git_repository_state_action_from_route(route: &RouteResult) -> Option<&'static str> {
     match crate::machine_capability_ref::route_capability_action_for_namespaces(route, &["git"])? {
         "remote" => Some("remote"),
