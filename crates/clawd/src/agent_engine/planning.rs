@@ -398,25 +398,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_existing_file_delivery_probe"
         );
         return_deterministic_plan!(
-            existence_with_path_locator_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-                &original_user_text_for_policy,
-            ),
-            "plan_deterministic_existence_with_path_locator"
-        );
-        return_deterministic_plan!(
-            file_paths_locator_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_file_paths_locator"
-        );
-        return_deterministic_plan!(
             file_names_auto_locator_deterministic_plan_result(
                 state,
                 goal,
@@ -471,15 +452,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_directory_purpose_auto_locator"
         );
         return_deterministic_plan!(
-            content_excerpt_summary_directory_log_slice_deterministic_plan_result(
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_content_excerpt_summary_directory_log_slice"
-        );
-        return_deterministic_plan!(
             content_excerpt_explicit_file_targets_deterministic_plan_result(
                 state,
                 goal,
@@ -492,16 +464,6 @@ pub(super) async fn plan_round_actions(
             "plan_deterministic_content_excerpt_explicit_file_targets"
         );
         return_deterministic_plan!(
-            generic_path_content_log_analyze_deterministic_plan_result(
-                goal,
-                state,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_generic_path_content_log_analyze"
-        );
-        return_deterministic_plan!(
             directory_tree_auto_locator_deterministic_plan_result(
                 state,
                 goal,
@@ -512,16 +474,6 @@ pub(super) async fn plan_round_actions(
                 auto_locator_path,
             ),
             "plan_deterministic_directory_tree_auto_locator"
-        );
-        return_deterministic_plan!(
-            content_excerpt_summary_auto_locator_deterministic_plan_result(
-                state,
-                goal,
-                route_result,
-                loop_state,
-                auto_locator_path,
-            ),
-            "plan_deterministic_content_excerpt_summary_auto_locator"
         );
     }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {

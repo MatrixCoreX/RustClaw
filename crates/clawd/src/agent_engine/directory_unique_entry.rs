@@ -199,6 +199,7 @@ pub(super) fn archive_entry_target_candidate_has_extension(candidate: &str) -> b
         && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
+#[cfg(test)]
 pub(super) fn existence_with_path_locator_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -225,6 +226,7 @@ pub(super) fn existence_with_path_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn file_paths_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -353,6 +355,7 @@ pub(super) fn file_paths_locator_observation_plan(
     }])
 }
 
+#[cfg(test)]
 pub(super) fn split_path_like_file_locator_hint(hint: &str) -> Option<(String, String)> {
     let trimmed = hint.trim();
     if trimmed.is_empty() || (!trimmed.contains('/') && !trimmed.contains('\\')) {
@@ -376,6 +379,7 @@ pub(super) fn split_path_like_file_locator_hint(hint: &str) -> Option<(String, S
     Some((root.to_string(), file_name.to_string()))
 }
 
+#[cfg(test)]
 pub(super) fn file_paths_locator_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -428,6 +432,7 @@ pub(super) fn log_analyze_supported_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(test)]
 pub(super) fn directory_contains_log_like_files(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
@@ -445,6 +450,7 @@ pub(super) fn directory_contains_log_like_files(path: &Path) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn log_analyze_supported_target(path: &str) -> bool {
     let path = Path::new(path);
     if path.is_file() {
@@ -463,6 +469,7 @@ pub(super) fn contract_allows_log_analyze_for_path(route: &RouteResult, path: &s
         .unwrap_or(true)
 }
 
+#[cfg(test)]
 pub(super) fn generic_path_content_log_analyze_target_path(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -508,6 +515,7 @@ pub(super) fn generic_path_content_log_analyze_target_path(
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 pub(super) fn explicit_log_file_target_under_directory_locator(
     route: &RouteResult,
     auto_locator_path: Option<&str>,
@@ -571,6 +579,7 @@ pub(super) fn explicit_log_file_target_under_directory_locator(
         })
 }
 
+#[cfg(test)]
 fn route_machine_token_value(text: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     text.split_whitespace().find_map(|token| {
@@ -581,6 +590,7 @@ fn route_machine_token_value(text: &str, key: &str) -> Option<String> {
     })
 }
 
+#[cfg(test)]
 fn machine_token_outer_delimiter(ch: char) -> bool {
     matches!(
         ch,
@@ -601,6 +611,7 @@ fn machine_token_outer_delimiter(ch: char) -> bool {
     )
 }
 
+#[cfg(test)]
 fn route_log_name_filter(route: &RouteResult) -> Option<String> {
     [route.resolved_intent.as_str(), route.route_reason.as_str()]
         .into_iter()
@@ -609,6 +620,7 @@ fn route_log_name_filter(route: &RouteResult) -> Option<String> {
         .filter(|value| value.len() >= 2)
 }
 
+#[cfg(test)]
 fn unique_log_file_matching_name_filter(directory: &Path, filter: &str) -> Option<String> {
     let entries = fs::read_dir(directory).ok()?;
     let mut matches = Vec::new();
@@ -635,6 +647,7 @@ fn unique_log_file_matching_name_filter(directory: &Path, filter: &str) -> Optio
     matches.pop().map(|path| path.display().to_string())
 }
 
+#[cfg(test)]
 fn filename_prefix_pattern(path: &str) -> Option<String> {
     let file_name = Path::new(path)
         .file_name()
@@ -650,6 +663,7 @@ fn filename_prefix_pattern(path: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
+#[cfg(test)]
 fn explicit_log_file_target_for_slice_plan(
     route: &RouteResult,
     auto_locator_path: Option<&str>,
@@ -669,6 +683,7 @@ fn explicit_log_file_target_for_slice_plan(
     explicit_log_file_target_under_directory_locator(route, auto_locator_path)
 }
 
+#[cfg(test)]
 pub(super) fn content_excerpt_summary_directory_log_slice_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -733,6 +748,7 @@ pub(super) fn content_excerpt_summary_directory_log_slice_deterministic_plan_res
     ))
 }
 
+#[cfg(test)]
 pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
     goal: &str,
     state: &AppState,
@@ -776,6 +792,7 @@ pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
     [
         crate::OutputSemanticKind::ContentExcerptSummary,
@@ -794,6 +811,7 @@ pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult
         )
 }
 
+#[cfg(test)]
 pub(super) fn single_file_content_understanding_target_path(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -831,6 +849,7 @@ pub(super) fn single_file_content_understanding_target_path(
     })
 }
 
+#[cfg(test)]
 pub(super) fn content_excerpt_summary_auto_locator_observation_plan(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -908,11 +927,13 @@ pub(super) fn repo_text_artifact_prefers_bounded_fs_read(path: &str) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn repo_prompt_artifact_allows_default_head(path: &str) -> bool {
     let normalized = path.replace('\\', "/").to_ascii_lowercase();
     normalized.contains("/prompts/layers/generated/skills/") && normalized.ends_with(".md")
 }
 
+#[cfg(test)]
 pub(super) fn content_excerpt_summary_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,

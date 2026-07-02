@@ -1126,6 +1126,7 @@ fn action_has_any_segment(action: &str, needles: &[&str]) -> bool {
         })
 }
 
+#[cfg(test)]
 pub(super) fn existence_with_path_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
