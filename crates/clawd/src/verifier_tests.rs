@@ -372,6 +372,7 @@ fn locatorless_runtime_status_plan_does_not_trip_route_clarify_block() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result(true);
+    route.ask_mode = crate::AskMode::direct_answer();
     route.route_reason = "locatorless_observation_requires_clarify".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
