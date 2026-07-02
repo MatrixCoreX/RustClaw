@@ -209,6 +209,29 @@ fn service_status_capability_refs_supply_status_shape_without_semantic_kind() {
 }
 
 #[test]
+fn service_lifecycle_capability_refs_supply_lifecycle_shape_without_semantic_kind() {
+    for capability_ref in [
+        "capability_ref=service.start",
+        "capability_ref=service.stop",
+        "capability_ref=service.restart",
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        assert_eq!(
+            final_answer_shape_for_route(&route),
+            Some(FinalAnswerShape::LifecycleResult),
+            "{capability_ref}"
+        );
+    }
+
+    let route = route_with_machine_capability_ref("capability_ref=service.verify");
+    assert_ne!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::LifecycleResult)
+    );
+}
+
+#[test]
 fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semantic_kind() {
     let mut route = route_with_machine_capability_ref("capability_ref=filesystem.count_entries");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
