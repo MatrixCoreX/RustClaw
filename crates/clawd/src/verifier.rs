@@ -4,7 +4,7 @@ use std::path::{Component, Path};
 use claw_core::skill_registry::{PlannerCapabilityEffect, PrimaryFallbackRole, SkillRiskLevel};
 use serde_json::{json, Value};
 
-use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
+use crate::{evidence_policy::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
 
 #[path = "verifier_risk_policy.rs"]
 mod risk_policy;
@@ -461,7 +461,7 @@ fn plan_step_action_key(state: &AppState, step: &PlanStep) -> Option<String> {
 fn plan_has_generated_file_path_write_step(state: &AppState, plan_result: &PlanResult) -> bool {
     plan_result.steps.iter().any(|step| {
         plan_step_action_key(state, step).is_some_and(|action_key| {
-            crate::contract_matrix::action_matches_policy_tokens(
+            crate::evidence_policy::action_matches_policy_tokens(
                 &action_key,
                 &["fs_basic.write_text".to_string()],
             )

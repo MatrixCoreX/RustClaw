@@ -276,7 +276,7 @@ fn action_ref(tool_or_skill: &str) -> String {
 }
 
 fn args_fingerprint(action_ref: &str, args_summary: &str) -> String {
-    crate::contract_matrix::fnv1a_hex(&format!("{}\n{}", action_ref.trim(), args_summary.trim()))
+    crate::evidence_policy::fnv1a_hex(&format!("{}\n{}", action_ref.trim(), args_summary.trim()))
 }
 
 fn forbidden_repeat_signature(action_ref: &str, args_fingerprint: &str) -> String {
