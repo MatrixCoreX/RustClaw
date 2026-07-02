@@ -640,7 +640,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && output_contract.semantic_kind_is_unclassified()
         && req_surface.inline_json_shape.is_none()
-        && !finalizer_language_policy_dry_run_contract_context(route_reason, req, answer_candidate)
+        && !finalizer_language_policy_dry_run_contract_context(route_reason)
         && planner_locator_surface_should_require_evidence(req_surface, answer_candidate)
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
         && !req_surface.is_structural_locator_only_reply()
@@ -892,34 +892,16 @@ fn normalize_machine_context_token_part(part: &str) -> String {
     part.trim().trim_matches('.').trim().to_ascii_lowercase()
 }
 
-fn finalizer_language_policy_dry_run_contract_context(
-    route_reason: &str,
-    req: &str,
-    answer_candidate: &str,
-) -> bool {
-    machine_context_has_any_token(route_reason, req, answer_candidate, &["dry_run", "dry-run"])
-        && machine_context_has_any_token(route_reason, req, answer_candidate, &["message_key"])
-        && machine_context_has_any_token(route_reason, req, answer_candidate, &["finalizer"])
-        && machine_context_has_any_token(route_reason, req, answer_candidate, &["i18n"])
-        && machine_context_has_any_token(
-            route_reason,
-            req,
-            answer_candidate,
-            &["structured_evidence", "evidence"],
-        )
-}
-
-fn machine_context_has_any_token(
-    route_reason: &str,
-    req: &str,
-    answer_candidate: &str,
-    tokens: &[&str],
-) -> bool {
-    tokens.iter().any(|token| {
-        machine_context_has_token(route_reason, token)
-            || machine_context_has_token(req, token)
-            || machine_context_has_token(answer_candidate, token)
-    })
+fn finalizer_language_policy_dry_run_contract_context(route_reason: &str) -> bool {
+    ["dry_run", "dry-run"]
+        .iter()
+        .any(|token| machine_context_has_token(route_reason, token))
+        && machine_context_has_token(route_reason, "message_key")
+        && machine_context_has_token(route_reason, "finalizer")
+        && machine_context_has_token(route_reason, "i18n")
+        && ["structured_evidence", "evidence"]
+            .iter()
+            .any(|token| machine_context_has_token(route_reason, token))
 }
 
 pub(super) fn contract_uses_locatorless_system_observation(route_reason: &str) -> bool {

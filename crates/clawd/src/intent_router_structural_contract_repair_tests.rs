@@ -1150,7 +1150,36 @@ fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
 
 #[test]
 fn finalizer_language_policy_dry_run_keeps_locatorless_contract() {
-    let req = "Dry-run only: finalizer/LLM/i18n may render user language, but runtime returns message_key or structured_evidence.";
+    let req = "Render the final answer through the language policy.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "dry_run message_key=clawd.finalizer.language_policy finalizer i18n structured_evidence",
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn prompt_only_finalizer_language_policy_words_do_not_skip_locator_repair() {
+    let req = "Read configs/config.toml. Dry-run only: finalizer/LLM/i18n may render user language, but runtime returns message_key or structured_evidence.";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -1171,10 +1200,10 @@ fn finalizer_language_policy_dry_run_keeps_locatorless_contract() {
         None,
     );
 
-    assert_eq!(reason, None);
-    assert!(!contract.requires_content_evidence);
-    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(reason, Some("planner_locator_requires_evidence"));
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "configs/config.toml");
 }
 
 #[test]
