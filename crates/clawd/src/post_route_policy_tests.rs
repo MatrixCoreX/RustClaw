@@ -35,7 +35,7 @@ fn route_result() -> RouteResult {
 }
 
 #[test]
-fn fuzzy_candidates_force_clarify_for_locator_requests() {
+fn fuzzy_candidates_record_boundary_clarify_for_locator_requests() {
     let result = apply_post_route_policy(
         route_result(),
         LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
@@ -58,7 +58,7 @@ fn fuzzy_candidates_force_clarify_for_locator_requests() {
 }
 
 #[test]
-fn missing_locator_still_forces_clarify() {
+fn missing_locator_records_boundary_clarify_candidate() {
     let result = apply_post_route_policy(route_result(), LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.ask_mode,
