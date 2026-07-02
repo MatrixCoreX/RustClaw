@@ -58,8 +58,7 @@ pub(super) fn file_delivery_can_materialize_target_without_existing_locator(
 pub(super) fn scalar_path_output_can_be_observed_without_input_locator(
     route_result: &crate::RouteResult,
 ) -> bool {
-    route_result.is_execute_gate()
-        && !route_result.needs_clarify
+    !route_result.needs_clarify
         && route_result.output_contract.response_shape == OutputResponseShape::Scalar
         && route_reason_has_marker(route_result, "scalar_path_only")
         && !route_result.output_contract.delivery_required
