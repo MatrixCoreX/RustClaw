@@ -39,16 +39,16 @@ pub(crate) fn content_evidence_execution_finalize_style(
 }
 
 fn evidence_policy_finalize_style(contract: &IntentOutputContract) -> Option<ActFinalizeStyle> {
-    let shape = crate::contract_matrix::final_answer_shape_for_output_contract(contract)?;
+    let shape = crate::evidence_policy::final_answer_shape_for_output_contract(contract)?;
     match shape.class() {
-        crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
-        | crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
-        | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
-        | crate::contract_matrix::FinalAnswerShapeClass::StrictList
-        | crate::contract_matrix::FinalAnswerShapeClass::Table => Some(ActFinalizeStyle::Plain),
-        crate::contract_matrix::FinalAnswerShapeClass::Freeform
-        | crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
-        | crate::contract_matrix::FinalAnswerShapeClass::Verdict => {
+        crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
+        | crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
+        | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
+        | crate::evidence_policy::FinalAnswerShapeClass::StrictList
+        | crate::evidence_policy::FinalAnswerShapeClass::Table => Some(ActFinalizeStyle::Plain),
+        crate::evidence_policy::FinalAnswerShapeClass::Freeform
+        | crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
+        | crate::evidence_policy::FinalAnswerShapeClass::Verdict => {
             Some(ActFinalizeStyle::ChatWrapped)
         }
     }

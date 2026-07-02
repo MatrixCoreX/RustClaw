@@ -481,7 +481,7 @@ pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, pre
 
 fn route_final_answer_shape(
     route: &crate::RouteResult,
-) -> Option<crate::contract_matrix::FinalAnswerShape> {
+) -> Option<crate::evidence_policy::FinalAnswerShape> {
     crate::evidence_policy::final_answer_shape_for_route(route)
 }
 
@@ -493,7 +493,7 @@ fn route_has_docker_answer_shape(route: &crate::RouteResult) -> bool {
 fn route_has_docker_field_value_answer_shape(route: &crate::RouteResult) -> bool {
     matches!(
         route_final_answer_shape(route),
-        Some(crate::contract_matrix::FinalAnswerShape::LifecycleResult)
+        Some(crate::evidence_policy::FinalAnswerShape::LifecycleResult)
     )
 }
 
@@ -501,9 +501,9 @@ fn route_has_docker_candidate_answer_shape(route: &crate::RouteResult) -> bool {
     matches!(
         route_final_answer_shape(route),
         Some(
-            crate::contract_matrix::FinalAnswerShape::ContainerList
-                | crate::contract_matrix::FinalAnswerShape::ImageList
-                | crate::contract_matrix::FinalAnswerShape::LogExcerptOrSummary
+            crate::evidence_policy::FinalAnswerShape::ContainerList
+                | crate::evidence_policy::FinalAnswerShape::ImageList
+                | crate::evidence_policy::FinalAnswerShape::LogExcerptOrSummary
         )
     )
 }
@@ -524,8 +524,8 @@ fn route_has_service_status_answer_shape(route: &crate::RouteResult) -> bool {
     matches!(
         route_final_answer_shape(route),
         Some(
-            crate::contract_matrix::FinalAnswerShape::LifecycleResult
-                | crate::contract_matrix::FinalAnswerShape::StatusWithSource
+            crate::evidence_policy::FinalAnswerShape::LifecycleResult
+                | crate::evidence_policy::FinalAnswerShape::StatusWithSource
         )
     )
 }

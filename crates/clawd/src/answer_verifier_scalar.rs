@@ -748,14 +748,14 @@ pub(super) fn scalar_token_occurs_in_text(text: &str, scalar: &str) -> bool {
 }
 
 pub(super) fn scalar_answer_is_strict_for_shape(
-    shape: crate::contract_matrix::FinalAnswerShape,
+    shape: crate::evidence_policy::FinalAnswerShape,
     candidate_answer: &str,
 ) -> bool {
     let candidate_answer = candidate_answer.trim();
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
     }
-    if shape == crate::contract_matrix::FinalAnswerShape::SingleCommitSubject {
+    if shape == crate::evidence_policy::FinalAnswerShape::SingleCommitSubject {
         return !candidate_answer.ends_with('.') && !candidate_answer.ends_with('。');
     }
     let lower = candidate_answer.to_ascii_lowercase();

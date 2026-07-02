@@ -22,11 +22,11 @@ use super::{
 
 fn evidence_policy_final_answer_shape_class(
     route: &crate::RouteResult,
-) -> Option<crate::contract_matrix::FinalAnswerShapeClass> {
+) -> Option<crate::evidence_policy::FinalAnswerShapeClass> {
     if route_requests_docker_text_list_projection(route) {
-        return Some(crate::contract_matrix::FinalAnswerShapeClass::StrictList);
+        return Some(crate::evidence_policy::FinalAnswerShapeClass::StrictList);
     }
-    crate::contract_matrix::final_answer_shape_for_route(route).map(|shape| shape.class())
+    crate::evidence_policy::final_answer_shape_for_route(route).map(|shape| shape.class())
 }
 
 pub(super) fn route_requires_evidence_policy_deterministic_final_answer(
@@ -156,15 +156,15 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
 
 pub(super) fn archive_member_list_prefers_observed_projection(route: &crate::RouteResult) -> bool {
     route_requests_archive_list(route)
-        && (crate::contract_matrix::final_answer_shape_for_route(route)
-            == Some(crate::contract_matrix::FinalAnswerShape::ArchiveMemberList)
+        && (crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
             || route.output_contract.response_shape == crate::OutputResponseShape::Strict)
 }
 
 fn route_requests_archive_list(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveList)
-        || crate::contract_matrix::final_answer_shape_for_route(route)
-            == Some(crate::contract_matrix::FinalAnswerShape::ArchiveMemberList)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::ArchiveMemberList)
 }
 
 pub(super) fn file_name_list_prefers_observed_projection(
@@ -279,11 +279,11 @@ fn matrix_observed_answer_candidate_for_shape(
     state: &AppState,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
-    shape_class: crate::contract_matrix::FinalAnswerShapeClass,
+    shape_class: crate::evidence_policy::FinalAnswerShapeClass,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     match shape_class {
-        crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact => {
+        crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact => {
             direct_file_token_from_observed_auto_locator_filename(loop_state, agent_run_context)
                 .or_else(|| {
                     direct_file_token_from_observed_find_entries(
@@ -296,8 +296,8 @@ fn matrix_observed_answer_candidate_for_shape(
                     direct_file_token_from_observed_inventory(loop_state, agent_run_context)
                 })
         }
-        crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
-        | crate::contract_matrix::FinalAnswerShapeClass::SinglePath => {
+        crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
+        | crate::evidence_policy::FinalAnswerShapeClass::SinglePath => {
             direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
                 .or_else(|| {
                     direct_generated_file_path_report_from_written_path(
@@ -321,7 +321,7 @@ fn matrix_observed_answer_candidate_for_shape(
                     direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
                 })
         }
-        crate::contract_matrix::FinalAnswerShapeClass::StrictList => route
+        crate::evidence_policy::FinalAnswerShapeClass::StrictList => route
             .and_then(|route| {
                 matrix_grouped_name_list_observed_answer(route, loop_state)
                     .or_else(|| matrix_docker_text_list_observed_answer(route, loop_state))
@@ -334,7 +334,7 @@ fn matrix_observed_answer_candidate_for_shape(
                     agent_run_context,
                 )
             }),
-        crate::contract_matrix::FinalAnswerShapeClass::Table => route
+        crate::evidence_policy::FinalAnswerShapeClass::Table => route
             .and_then(|route| matrix_table_observed_answer(route, loop_state))
             .or_else(|| {
                 direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
@@ -343,9 +343,9 @@ fn matrix_observed_answer_candidate_for_shape(
                     agent_run_context,
                 )
             }),
-        crate::contract_matrix::FinalAnswerShapeClass::Freeform
-        | crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
-        | crate::contract_matrix::FinalAnswerShapeClass::Verdict => None,
+        crate::evidence_policy::FinalAnswerShapeClass::Freeform
+        | crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
+        | crate::evidence_policy::FinalAnswerShapeClass::Verdict => None,
     }
 }
 
@@ -417,8 +417,8 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
 }
 
 fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
-        == Some(crate::contract_matrix::FinalAnswerShape::PathList)
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        == Some(crate::evidence_policy::FinalAnswerShape::PathList)
 }
 
 fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
@@ -615,8 +615,8 @@ pub(super) fn matrix_grouped_name_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if crate::contract_matrix::final_answer_shape_for_route(route)
-        != Some(crate::contract_matrix::FinalAnswerShape::GroupedNameList)
+    if crate::evidence_policy::final_answer_shape_for_route(route)
+        != Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
         || !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
     {
         return None;
@@ -780,10 +780,10 @@ fn docker_text_list_candidate_is_observed(
 
 fn route_requests_docker_text_list_projection(route: &crate::RouteResult) -> bool {
     matches!(
-        crate::contract_matrix::final_answer_shape_for_route(route),
+        crate::evidence_policy::final_answer_shape_for_route(route),
         Some(
-            crate::contract_matrix::FinalAnswerShape::ContainerList
-                | crate::contract_matrix::FinalAnswerShape::ImageList
+            crate::evidence_policy::FinalAnswerShape::ContainerList
+                | crate::evidence_policy::FinalAnswerShape::ImageList
         )
     )
 }
@@ -1175,8 +1175,8 @@ fn matrix_table_observed_answer(
 }
 
 fn route_requests_table_listing(route: &crate::RouteResult) -> bool {
-    crate::contract_matrix::final_answer_shape_for_route(route)
-        == Some(crate::contract_matrix::FinalAnswerShape::TableListing)
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        == Some(crate::evidence_policy::FinalAnswerShape::TableListing)
         || route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing)
 }
 
