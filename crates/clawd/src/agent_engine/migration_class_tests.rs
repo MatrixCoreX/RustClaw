@@ -429,6 +429,10 @@ fn low_risk_single_file_delivery_accepts_bound_file_token_contracts() {
     assert!(eligibility
         .boundary_requirements
         .contains(&"delivery_consistency_gate"));
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"loop_owned_clarify"));
+    assert!(!eligibility.boundary_requirements.contains(&"no_clarify"));
 }
 
 #[test]
