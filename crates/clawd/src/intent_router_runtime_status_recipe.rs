@@ -228,8 +228,8 @@ fn output_contract_declares_scalar_locatorless_observation(value: Option<&Value>
         .and_then(scalar_json_value_text)
         .map(|value| parse_output_delivery_intent(&value))
         .unwrap_or_default();
-    let semantic_kind = contract
-        .get("semantic_kind")
+    let contract_marker = contract
+        .get("contract_marker")
         .and_then(scalar_json_value_text)
         .map(|value| parse_output_semantic_kind(&value))
         .unwrap_or_default();
@@ -248,7 +248,7 @@ fn output_contract_declares_scalar_locatorless_observation(value: Option<&Value>
         )
         && matches!(delivery_intent, OutputDeliveryIntent::None)
         && matches!(
-            semantic_kind,
+            contract_marker,
             OutputSemanticKind::None | OutputSemanticKind::ScalarPathOnly
         )
 }

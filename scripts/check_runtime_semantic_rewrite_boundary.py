@@ -28,6 +28,9 @@ TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
 INTENT_ROUTER_CONTRACT_HINT_FILE = SRC_ROOT / "intent_router_contract_hint.rs"
 INTENT_ROUTER_EXECUTION_CONTRACT_FILE = SRC_ROOT / "intent_router_execution_contract.rs"
+INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE = (
+    SRC_ROOT / "intent_router_runtime_status_recipe.rs"
+)
 INTENT_ROUTER_BINDING_REPAIR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_answer_candidate_binding.rs",
     SRC_ROOT / "intent_router_active_task_repair.rs",
@@ -325,6 +328,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_task_journal_step_contract_marker())
     findings.extend(scan_schedule_preview_contract_marker())
     findings.extend(scan_current_workspace_scope_legacy_semantic_marker_removed())
+    findings.extend(scan_runtime_status_recipe_contract_marker())
     findings.extend(scan_task_context_builder_registry_bridge_budget())
     findings.extend(scan_task_contract_registry_bridge_semantic_defaults())
     findings.extend(scan_git_deterministic_user_text_action_selection())
@@ -1245,6 +1249,43 @@ def scan_current_workspace_scope_legacy_semantic_marker_removed() -> list[Findin
             )
         ]
     return []
+
+
+def scan_runtime_status_recipe_contract_marker() -> list[Finding]:
+    rel_path = rel(INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE)
+    text = INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn output_contract_declares_scalar_locatorless_observation(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "runtime_status_recipe_contract_reader_missing",
+                "missing output_contract_declares_scalar_locatorless_observation",
+            )
+        ]
+    fn_end = text.find("\nfn ", fn_start + 1)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    if '.get("contract_marker")' not in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "runtime_status_recipe_contract_marker_missing",
+                "runtime status recipe should read output_contract.contract_marker",
+            )
+        )
+    if '.get("semantic_kind")' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "runtime_status_recipe_semantic_kind_reader",
+                "runtime status recipe must not read legacy output_contract.semantic_kind",
+            )
+        )
+    return findings
 
 
 def scan_task_context_builder_registry_bridge_budget() -> list[Finding]:
