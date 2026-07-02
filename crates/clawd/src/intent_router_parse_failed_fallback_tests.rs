@@ -72,7 +72,7 @@ fn normalizer_schema_normalization_does_not_invent_contract_from_surface() {
         .and_then(|value| value.as_object())
         .expect("output contract");
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("none")
     );
     assert_eq!(
@@ -117,7 +117,7 @@ fn normalizer_schema_normalization_extracts_fenced_json() {
         .and_then(|value| value.as_object())
         .expect("output contract");
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("hidden_entries_check")
     );
     assert_eq!(
@@ -169,7 +169,7 @@ fn normalizer_schema_normalization_preserves_act_when_shape_is_descriptive() {
         Some("strict")
     );
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("file_names")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
@@ -197,7 +197,7 @@ fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() 
         .and_then(|value| value.as_object())
         .expect("output contract");
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("none")
     );
 
@@ -220,7 +220,7 @@ fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() 
         Some("strict")
     );
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("none")
     );
     assert_eq!(

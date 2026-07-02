@@ -106,8 +106,13 @@
             ""
           ]
         },
+        "contract_marker": {
+          "type": "string",
+          "description": "Preferred machine output-contract marker. Accepts the same stable marker tokens as legacy semantic_kind; normalizer prompts should emit this field instead of semantic_kind."
+        },
         "semantic_kind": {
           "type": "string",
+          "description": "Legacy compatibility input for historical normalizer output. New normalizer prompts should use contract_marker.",
           "enum": [
             "none",
             "raw_command_output",

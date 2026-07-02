@@ -122,6 +122,36 @@ fn normalizer_schema_normalization_preserves_filesystem_mutation_result_contract
 }
 
 #[test]
+fn normalizer_schema_contract_marker_parses_to_internal_output_contract() {
+    let raw = r#"{"resolved_user_intent":"report whether the target exists","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"strict","requires_content_evidence":true,"delivery_required":false,"locator_kind":"current_workspace","delivery_intent":"none","contract_marker":"existence_with_path","locator_hint":"AGENTS.md"}}"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/contract_marker")
+            .and_then(|value| value.as_str()),
+        Some("existence_with_path")
+    );
+    assert!(
+        value.pointer("/output_contract/semantic_kind").is_none(),
+        "new normalizer output should not add the legacy semantic_kind field"
+    );
+
+    let parsed = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation")
+    .value;
+    let contract = super::parse_output_contract(parsed.output_contract, false);
+    assert_eq!(
+        contract.semantic_kind,
+        crate::OutputSemanticKind::ExistenceWithPath
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_demotes_capability_owned_weather_semantic_kind() {
     let raw = r#"{
           "resolved_user_intent":"capability_ref=weather.current place=Tokyo forecast_days=2",

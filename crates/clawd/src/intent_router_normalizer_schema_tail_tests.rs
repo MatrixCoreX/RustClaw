@@ -71,7 +71,7 @@ fn normalizer_schema_normalization_does_not_recover_filename_listing_from_string
         .and_then(|value| value.as_object())
         .expect("output contract");
     assert_eq!(
-        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        contract.get("contract_marker").and_then(|v| v.as_str()),
         Some("none")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(

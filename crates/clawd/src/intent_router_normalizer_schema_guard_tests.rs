@@ -43,7 +43,7 @@ fn normalizer_schema_normalization_recovers_minimax_file_list_search_payload() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("file_names")
     );
@@ -192,6 +192,7 @@ fn parse_output_contract_clears_inconsistent_inline_delivery_flag() {
             delivery_required: true,
             locator_kind: "path".to_string(),
             delivery_intent: "response".to_string(),
+            contract_marker: String::new(),
             semantic_kind: "file_names".to_string(),
             locator_hint: "logs".to_string(),
             scalar_count_filter: None,
@@ -217,6 +218,7 @@ fn parse_output_contract_clears_file_delivery_for_inline_raw_output_contract() {
             delivery_required: true,
             locator_kind: "path".to_string(),
             delivery_intent: "file_single".to_string(),
+            contract_marker: String::new(),
             semantic_kind: "raw_command_output".to_string(),
             locator_hint: "/tmp/app.log".to_string(),
             scalar_count_filter: None,
@@ -242,6 +244,7 @@ fn parse_output_contract_preserves_exact_sentence_count_as_strict_contract() {
             delivery_required: false,
             locator_kind: "path".to_string(),
             delivery_intent: "none".to_string(),
+            contract_marker: String::new(),
             semantic_kind: "content_excerpt_summary".to_string(),
             locator_hint: "/tmp/report.md".to_string(),
             scalar_count_filter: None,
@@ -269,6 +272,7 @@ fn parse_output_contract_preserves_list_selector_contract() {
             delivery_required: false,
             locator_kind: "path".to_string(),
             delivery_intent: "none".to_string(),
+            contract_marker: String::new(),
             semantic_kind: "file_names".to_string(),
             locator_hint: "logs".to_string(),
             scalar_count_filter: Some(serde_json::json!(0)),
@@ -318,7 +322,7 @@ fn normalizer_schema_normalization_coerces_string_bool_contract_fields() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("file_names")
     );
@@ -371,7 +375,7 @@ fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -423,7 +427,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_file_listing_recipe_text
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -481,7 +485,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_text() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -531,7 +535,7 @@ fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_array() 
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -576,7 +580,7 @@ fn normalizer_schema_normalization_keeps_structured_contract_over_recipe_text() 
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("existence_with_path")
     );
@@ -624,7 +628,7 @@ fn normalizer_schema_normalization_maps_command_payload_to_raw_output_when_seman
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -673,7 +677,7 @@ fn normalizer_schema_normalization_maps_health_check_tool_recipe_to_service_stat
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("service_status")
     );
@@ -728,7 +732,7 @@ fn normalizer_schema_normalization_detects_nested_command_payload() {
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -774,7 +778,7 @@ fn normalizer_schema_normalization_maps_legacy_command_result_contract_to_raw_ou
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -844,7 +848,7 @@ fn normalizer_schema_normalization_clears_empty_path_locator_for_command_payload
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("raw_command_output")
     );
@@ -921,7 +925,7 @@ fn normalizer_schema_normalization_does_not_infer_check_file_recipe_text() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -969,7 +973,7 @@ fn normalizer_schema_normalization_does_not_infer_shell_find_recipe_text() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -1014,7 +1018,7 @@ fn normalizer_schema_normalization_does_not_recover_semantic_kind_from_string_co
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
         Some("none")
     );
@@ -1815,7 +1819,7 @@ fn normalizer_schema_normalization_keeps_chat_raw_contract_non_executing() {
     );
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("none")
     );
