@@ -57,7 +57,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 #[test]
 fn registry_capability_observation_records_locatorless_contract_conflict() {
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.resolved_intent =
         "List knowledge base namespaces capability_ref=kb.list_namespaces field=names field=count"
             .to_string();
@@ -101,7 +101,7 @@ fn registry_capability_observation_records_locatorless_contract_conflict() {
 
 #[test]
 fn registry_capability_observation_keeps_spurious_delivery_as_evidence() {
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.resolved_intent =
         "Search KB namespace capability_ref=kb.search namespace=docs query=service_status top_k=3"
             .to_string();
@@ -147,9 +147,9 @@ fn registry_capability_observation_keeps_spurious_delivery_as_evidence() {
     );
 }
 
-fn executable_filename_route() -> crate::RouteResult {
+fn filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::direct_answer(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -218,7 +218,7 @@ fn assert_candidate(
 
 #[test]
 fn command_observation_marker_repair_preserves_command_summary_contract() {
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.route_reason =
         "explicit_command_requires_command_output_summary_execution; command_result_synthesis"
             .to_string();
@@ -243,7 +243,7 @@ fn sqlite_path_excerpt_judgment_contract_repair_uses_db_kind() {
     std::fs::create_dir_all(root.join("data")).expect("data directory");
     std::fs::write(root.join("data/db-basic-contract.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.route_reason = "excerpt_kind_judgment".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -275,7 +275,7 @@ fn sqlite_structured_version_contract_repair_uses_schema_version_contract() {
     std::fs::create_dir_all(root.join("data")).expect("data directory");
     std::fs::write(root.join("data/skill-calls-smoke.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -310,7 +310,7 @@ fn sqlite_structured_version_selector_overrides_spurious_semantic_kind() {
     std::fs::create_dir_all(root.join("data")).expect("data directory");
     std::fs::write(root.join("data/app.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -341,7 +341,7 @@ fn sqlite_structured_table_selector_repairs_to_table_listing_contract() {
     std::fs::create_dir_all(root.join("data")).expect("data directory");
     std::fs::write(root.join("data/test_contract.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -376,7 +376,7 @@ fn sqlite_route_reason_table_token_repairs_raw_command_contract() {
     std::fs::create_dir_all(root.join("data")).expect("data directory");
     std::fs::write(root.join("data/test_contract.sqlite"), "").expect("sqlite file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.route_reason =
         "sqlite_table_listing; semantic_contract_requires_evidence; explicit_command_requires_fresh_execution"
             .to_string();
@@ -414,7 +414,7 @@ fn config_validation_findings_selector_repairs_to_config_risk_contract() {
     )
     .expect("config file");
     let state = test_state_with_root(root.clone());
-    let mut route = executable_filename_route();
+    let mut route = filename_route();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
