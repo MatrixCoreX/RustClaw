@@ -414,6 +414,39 @@ fn wrong_boundary_hint_does_not_constrain_capability_family() {
 }
 
 #[test]
+fn agent_loop_selects_photo_capability_without_semantic_kind() {
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=photo.preview_organization".to_string();
+    route.route_reason = "capability_ref=photo.preview_organization".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("photo capability scope");
+
+    assert_eq!(scope.len(), 1);
+    assert!(scope.contains("photo_organize"));
+}
+
+#[test]
+fn agent_loop_selects_weather_capability_without_semantic_kind() {
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=weather.current".to_string();
+    route.route_reason = "capability_ref=weather.current".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+
+    let scope =
+        contract_scoped_planner_skill_scope(Some(&route)).expect("weather capability scope");
+
+    assert_eq!(scope.len(), 1);
+    assert!(scope.contains("weather"));
+}
+
+#[test]
 fn lightweight_contract_scope_without_capability_refs_leaves_skills_open() {
     let mut route = base_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
