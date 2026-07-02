@@ -1,5 +1,16 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "ask_pipeline_boundary_preflight_tests.rs"]
+mod tests;
+
+pub(super) fn defer_locator_binding_to_agent_loop(route_result: &mut crate::RouteResult) {
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.requires_content_evidence = false;
+}
+
 pub(super) fn boundary_safety_preflight(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -16,8 +27,7 @@ pub(super) fn boundary_safety_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "deictic_memory_only");
         log_route_guard_record(
             task,
@@ -56,8 +66,7 @@ pub(super) fn boundary_safety_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "bare_topic_model_supplied_locator",
@@ -79,8 +88,7 @@ pub(super) fn boundary_safety_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "implicit_workspace_file_locator",
@@ -113,8 +121,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "model_completed_workspace_file_locator",
@@ -136,8 +143,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "inferred_missing_workspace_locator",
@@ -158,8 +164,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "active_anchor_file_delivery_without_structured_reference",
@@ -180,8 +185,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(
             pre_loop_clarify_candidates,
             "bare_topic_model_supplied_locator",
@@ -218,8 +222,7 @@ pub(super) fn boundary_context_locator_preflight(
         session_snapshot,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "background_only_locator");
         log_route_guard_record(
             task,
@@ -256,8 +259,7 @@ pub(super) fn boundary_context_locator_preflight(
         recent_execution_context,
     ) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(route_result);
         push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "unbound_targeted_evidence");
         log_route_guard_record(
             task,
