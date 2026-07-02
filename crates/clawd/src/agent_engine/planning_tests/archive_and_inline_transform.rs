@@ -460,7 +460,7 @@ fn lightweight_skill_playbook_keeps_config_entry_points() {
 }
 
 #[test]
-fn lightweight_tool_spec_includes_route_task_contract() {
+fn lightweight_tool_spec_includes_route_evidence_policy_context() {
     let mut route = base_route_result();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -469,7 +469,7 @@ fn lightweight_tool_spec_includes_route_task_contract() {
 
     let spec = build_lightweight_tool_spec(Some(&route), None);
 
-    assert!(spec.contains("task_contract"));
+    assert!(spec.contains("evidence_policy_context"));
     assert!(spec.contains("boundary_contract_hint"));
     assert!(!spec.contains("route_gate_kind="));
     assert!(spec.lines().any(|line| line
