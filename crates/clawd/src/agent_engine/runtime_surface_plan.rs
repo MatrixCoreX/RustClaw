@@ -5,7 +5,7 @@ pub(super) fn http_download_artifact_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
@@ -20,7 +20,7 @@ pub(super) fn http_download_artifact_deterministic_plan_result(
         return None;
     }
 
-    let url = service_status_url_locator(route, user_text)?;
+    let url = service_status_url_locator(route)?;
     let output_path = http_download_output_path_from_route(route)?;
     let action = AgentAction::CallSkill {
         skill: "http_basic".to_string(),

@@ -1037,10 +1037,7 @@ pub(super) fn structured_field_leaf_query(field_path: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(super) fn service_status_requests_system_basic_identity(
-    route: &RouteResult,
-    _user_text: &str,
-) -> bool {
+pub(super) fn service_status_requests_system_basic_identity(route: &RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_action_name(
         route,
         &["system"],
@@ -1080,7 +1077,7 @@ pub(super) fn service_status_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
@@ -1093,7 +1090,7 @@ pub(super) fn service_status_deterministic_plan_result(
     if route_requests_runtime_async_job_contract(route) {
         return None;
     }
-    if let Some(url) = service_status_url_locator(route, user_text) {
+    if let Some(url) = service_status_url_locator(route) {
         let action = AgentAction::CallSkill {
             skill: "http_basic".to_string(),
             args: serde_json::json!({
@@ -1205,7 +1202,7 @@ pub(super) fn service_status_deterministic_plan_result(
         }
     }
     if system_basic_available_for_plan(state)
-        && service_status_requests_system_basic_identity(route, user_text)
+        && service_status_requests_system_basic_identity(route)
     {
         if let Some(plan) = service_status_system_basic_info_plan(goal, route) {
             return Some(plan);
@@ -1570,7 +1567,7 @@ pub(super) fn browser_http_url_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
-    user_text: &str,
+    _user_text: &str,
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
@@ -1584,7 +1581,7 @@ pub(super) fn browser_http_url_deterministic_plan_result(
     {
         return None;
     }
-    let url = service_status_url_locator(route, user_text)?;
+    let url = service_status_url_locator(route)?;
     let actions = vec![
         AgentAction::CallTool {
             tool: "browser_web".to_string(),
@@ -1849,7 +1846,7 @@ fn is_uuid_like_token(token: &str) -> bool {
     })
 }
 
-pub(super) fn service_status_url_locator(route: &RouteResult, _user_text: &str) -> Option<String> {
+pub(super) fn service_status_url_locator(route: &RouteResult) -> Option<String> {
     if !crate::machine_capability_ref::route_has_capability_action_name(
         route,
         &["http", "http_basic"],
