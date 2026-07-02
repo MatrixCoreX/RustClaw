@@ -1069,11 +1069,7 @@ fn recent_scalar_contract_overrides_literal_command_guard_for_deterministic_plan
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
 
-    assert!(
-        super::super::structural_contract_deterministic_plan_overrides_literal_command_guard(Some(
-            &route
-        ))
-    );
+    assert!(super::super::route_contract_defers_literal_command_to_planner(Some(&route)));
 }
 
 #[test]

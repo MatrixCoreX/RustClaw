@@ -833,7 +833,7 @@ pub(super) fn literal_command_failure_can_replan(route_result: Option<&RouteResu
     })
 }
 
-pub(super) fn structural_contract_deterministic_plan_overrides_literal_command_guard(
+pub(super) fn route_contract_defers_literal_command_to_planner(
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
@@ -1063,7 +1063,7 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
 ) -> Vec<AgentAction> {
     if loop_state.has_tool_or_skill_output
         || !route_allows_explicit_command_preservation(route_result)
-        || structural_contract_deterministic_plan_overrides_literal_command_guard(route_result)
+        || route_contract_defers_literal_command_to_planner(route_result)
         || !run_cmd_available_for_plan(state)
     {
         return actions;

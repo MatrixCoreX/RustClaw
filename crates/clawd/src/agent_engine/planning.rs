@@ -186,9 +186,11 @@ pub(super) async fn plan_round_actions(
             &original_user_text_for_policy,
             route_result,
         );
-    let allow_structural_deterministic_plans = !explicit_command_request
-        || (structural_contract_deterministic_plan_overrides_literal_command_guard(route_result)
-            && !explicit_command_scalar_path_current_workspace);
+    let route_contract_defers_literal_command =
+        route_contract_defers_literal_command_to_planner(route_result)
+            && !explicit_command_scalar_path_current_workspace;
+    let literal_command_should_use_run_cmd =
+        explicit_command_request && !route_contract_defers_literal_command;
     macro_rules! return_deterministic_plan {
         ($maybe_plan:expr, $reason_code:literal) => {
             if let Some(plan_result) = $maybe_plan {
@@ -215,8 +217,7 @@ pub(super) async fn plan_round_actions(
         ),
         "plan_deterministic_inline_json_transform"
     );
-    if explicit_command_request
-        && !allow_structural_deterministic_plans
+    if literal_command_should_use_run_cmd
         && runtime_status_query_kind(turn_analysis_for_prompt).is_none()
     {
         return_deterministic_plan!(
