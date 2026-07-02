@@ -1,7 +1,7 @@
 use super::super::{apply_ask_post_route, apply_post_route_refinements, route_reason_has_marker};
 use super::{
     reject_direct_file_delivery_workspace_root_locator,
-    unbound_existing_file_delivery_route_should_force_clarify,
+    unbound_existing_file_delivery_route_should_defer_to_agent_loop,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -115,7 +115,7 @@ fn active_anchor_file_delivery_requires_structured_reference() {
     };
 
     assert!(
-        super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send the config file",
             &route,
             None,
@@ -151,7 +151,7 @@ fn active_anchor_file_delivery_accepts_structured_reference() {
     };
 
     assert!(
-        !super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        !super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send the config file",
             &route,
             Some(&turn_analysis),
@@ -192,7 +192,7 @@ fn active_anchor_file_delivery_accepts_ordered_entry_reference() {
     };
 
     assert!(
-        !super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        !super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send the selected file",
             &route,
             Some(&turn_analysis),
@@ -231,7 +231,7 @@ fn active_anchor_file_delivery_accepts_reuse_active_turn_binding() {
     };
 
     assert!(
-        !super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        !super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send this file",
             &route,
             Some(&turn_analysis),
@@ -270,7 +270,7 @@ fn active_anchor_file_delivery_accepts_reuse_active_task_request_binding() {
     };
 
     assert!(
-        !super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        !super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send this file",
             &route,
             Some(&turn_analysis),
@@ -312,7 +312,7 @@ fn active_anchor_file_delivery_accepts_repaired_active_task_binding_marker() {
     };
 
     assert!(
-        !super::active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+        !super::active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
             "send this file",
             &route,
             Some(&turn_analysis),
@@ -448,8 +448,23 @@ fn explicit_missing_filename_delivery_contract_defers_not_found_to_execution() {
 
     assert!(
         !applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
+        "route_reason={} gate_reason={} delivery_required={} response_shape={} locator_kind={}",
+        applied.execution_route_result.route_reason,
+        applied.gate_record.reason_code,
+        applied
+            .execution_route_result
+            .output_contract
+            .delivery_required,
+        applied
+            .execution_route_result
+            .output_contract
+            .response_shape
+            .as_str(),
+        applied
+            .execution_route_result
+            .output_contract
+            .locator_kind
+            .as_str()
     );
     assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
@@ -591,7 +606,7 @@ fn unresolved_file_delivery_without_current_request_locator_defers_to_loop_evide
 }
 
 #[test]
-fn unbound_existing_file_delivery_with_model_locator_forces_clarify() {
+fn unbound_existing_file_delivery_with_model_locator_defers_to_agent_loop() {
     let root = make_temp_root("unbound_delivery_model_locator");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
@@ -604,12 +619,14 @@ fn unbound_existing_file_delivery_with_model_locator_forces_clarify() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
 
-    assert!(unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "please send the referenced local configuration as a file",
-        &route,
-        false,
-    ));
+    assert!(
+        unbound_existing_file_delivery_route_should_defer_to_agent_loop(
+            &state,
+            "please send the referenced local configuration as a file",
+            &route,
+            false,
+        )
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -627,12 +644,14 @@ fn unbound_existing_file_delivery_allows_current_request_locator() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
 
-    assert!(!unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "please send configs/config.toml as a file",
-        &route,
-        false,
-    ));
+    assert!(
+        !unbound_existing_file_delivery_route_should_defer_to_agent_loop(
+            &state,
+            "please send configs/config.toml as a file",
+            &route,
+            false,
+        )
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -650,12 +669,14 @@ fn unbound_existing_file_delivery_allows_authoritative_anchor() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
 
-    assert!(!unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "please send it as a file",
-        &route,
-        true,
-    ));
+    assert!(
+        !unbound_existing_file_delivery_route_should_defer_to_agent_loop(
+            &state,
+            "please send it as a file",
+            &route,
+            true,
+        )
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -674,12 +695,14 @@ fn unbound_existing_file_delivery_allows_generated_file_delivery() {
     route.output_contract.locator_hint.clear();
     route.route_reason = "generated_file_delivery".to_string();
 
-    assert!(!unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "generate a small report and send it as a file",
-        &route,
-        false,
-    ));
+    assert!(
+        !unbound_existing_file_delivery_route_should_defer_to_agent_loop(
+            &state,
+            "generate a small report and send it as a file",
+            &route,
+            false,
+        )
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -698,17 +721,19 @@ fn unbound_existing_file_delivery_allows_resolved_workspace_child() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "document".to_string();
 
-    assert!(!unbound_existing_file_delivery_route_should_force_clarify(
-        &state,
-        "please send document as a file",
-        &route,
-        false,
-    ));
+    assert!(
+        !unbound_existing_file_delivery_route_should_defer_to_agent_loop(
+            &state,
+            "please send document as a file",
+            &route,
+            false,
+        )
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn directory_file_delivery_without_structured_selection_requires_boundary_clarify() {
+fn directory_file_delivery_without_structured_selection_defers_to_loop_evidence() {
     let root = make_temp_root("directory_delivery_requires_selection");
     let device_dir = root.join("device_local");
     std::fs::create_dir_all(&device_dir).expect("device dir");
@@ -750,9 +775,24 @@ fn directory_file_delivery_without_structured_selection_requires_boundary_clarif
     );
 
     assert!(
-        applied.execution_route_result.needs_clarify,
-        "{}",
-        applied.execution_route_result.route_reason
+        !applied.execution_route_result.needs_clarify,
+        "route_reason={} gate_reason={} delivery_required={} response_shape={} locator_kind={}",
+        applied.execution_route_result.route_reason,
+        applied.gate_record.reason_code,
+        applied
+            .execution_route_result
+            .output_contract
+            .delivery_required,
+        applied
+            .execution_route_result
+            .output_contract
+            .response_shape
+            .as_str(),
+        applied
+            .execution_route_result
+            .output_contract
+            .locator_kind
+            .as_str()
     );
     assert_eq!(
         applied.execution_route_result.gate_kind(),
@@ -766,6 +806,10 @@ fn directory_file_delivery_without_structured_selection_requires_boundary_clarif
         &applied.execution_route_result,
         "unresolved_file_delivery_requires_clarify"
     ));
+    assert!(route_reason_has_marker(
+        &applied.execution_route_result,
+        "unresolved_file_delivery_deferred_to_agent_loop"
+    ));
     assert!(!route_reason_has_marker(
         &applied.execution_route_result,
         "clarify_reason_code:missing_delivery_locator"
@@ -774,6 +818,13 @@ fn directory_file_delivery_without_structured_selection_requires_boundary_clarif
         applied.execution_route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
+    assert_eq!(
+        applied.gate_record.reason_code,
+        "post_route_unresolved_file_delivery_deferred_to_agent_loop"
+    );
+    assert!(applied
+        .prompt_with_memory_for_execution
+        .contains("post_route_unresolved_file_delivery_requires_locator"));
     let _ = std::fs::remove_dir_all(root);
 }
 

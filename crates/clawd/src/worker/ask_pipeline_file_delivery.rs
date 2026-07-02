@@ -168,7 +168,7 @@ fn current_request_has_file_delivery_locator_binding(
         || super::current_request_resolves_workspace_child_locator(state, prompt).is_some()
 }
 
-pub(super) fn unbound_existing_file_delivery_route_should_force_clarify(
+pub(super) fn unbound_existing_file_delivery_route_should_defer_to_agent_loop(
     state: &crate::AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
@@ -184,7 +184,7 @@ pub(super) fn unbound_existing_file_delivery_route_should_force_clarify(
     true
 }
 
-pub(super) fn directory_file_delivery_without_structured_selection_should_force_clarify(
+pub(super) fn directory_file_delivery_without_structured_selection_should_defer_to_agent_loop(
     state: &crate::AppState,
     prompt: &str,
     route_result: &crate::RouteResult,
@@ -269,7 +269,7 @@ fn route_locator_hint_resolves_to_existing_directory(
     .is_some_and(|path| std::path::Path::new(&path).is_dir())
 }
 
-pub(super) fn active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+pub(super) fn active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,

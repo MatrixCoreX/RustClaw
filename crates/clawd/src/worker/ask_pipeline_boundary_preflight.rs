@@ -157,7 +157,7 @@ pub(super) fn boundary_post_binding_locator_preflight(
             route_result,
         );
     }
-    if active_anchor_file_delivery_without_structured_reference_should_force_clarify(
+    if active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop(
         prompt,
         route_result,
         turn_analysis,
