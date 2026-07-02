@@ -1345,12 +1345,7 @@ pub(super) fn route_allows_archive_list_auto_locator(
 }
 
 fn route_requests_archive_read(route: &RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ArchiveRead)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["archive"],
-            &["read"],
-        )
+    crate::machine_capability_ref::route_has_capability_action_name(route, &["archive"], &["read"])
 }
 
 fn route_requests_archive_list(route: &RouteResult) -> bool {
