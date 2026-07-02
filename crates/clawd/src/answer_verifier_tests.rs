@@ -670,6 +670,20 @@ fn non_tool_discovery_contract_marker_still_uses_answer_verifier() {
 }
 
 #[test]
+fn output_contract_marker_verification_does_not_depend_on_route_trace() {
+    let mut route = route_with_mode(crate::AskMode::direct_answer());
+    route.route_reason = "content_excerpt_summary".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "summarize");
+
+    assert!(should_verify_answer(&route, &journal, "summary"));
+}
+
+#[test]
 fn clarify_final_status_skips_answer_verifier() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.requires_content_evidence = true;
@@ -704,6 +718,29 @@ fn local_missing_evidence_gap_reports_required_fields() {
     assert_eq!(gap.missing_evidence_fields, vec!["kind"]);
     assert!(gap.should_retry);
     assert!(gap.high_confidence_gap());
+}
+
+#[test]
+fn local_missing_evidence_gap_uses_contract_not_route_trace() {
+    let mut route = route_with_mode(crate::AskMode::direct_answer());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-local-gap-trace", "ask", "exists?");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(json!({"path": "/tmp/a.txt", "exists": true}).to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let gap = local_missing_evidence_verifier_gap(&route, &journal)
+        .expect("evidence contract should not depend on legacy route trace");
+    assert_eq!(gap.missing_evidence_fields, vec!["kind"]);
+    assert!(gap.should_retry);
 }
 
 #[test]
