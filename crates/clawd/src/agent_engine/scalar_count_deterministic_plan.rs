@@ -490,7 +490,7 @@ pub(super) fn shell_single_quote(value: &str) -> String {
 }
 
 pub(super) fn route_locator_targets(route: &RouteResult) -> Vec<String> {
-    crate::task_contract::target_locators_for_route(route)
+    crate::evidence_policy::target_locators_for_route(route)
         .into_iter()
         .filter(|value| !value.trim().is_empty())
         .collect()

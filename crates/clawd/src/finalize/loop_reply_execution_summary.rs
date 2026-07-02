@@ -27,7 +27,7 @@ pub(super) fn should_attach_execution_summary(
 
 #[cfg(test)]
 pub(super) fn route_requires_content_excerpt_evidence(route: &crate::RouteResult) -> bool {
-    crate::task_contract::required_evidence_fields_for_route(route)
+    crate::evidence_policy::required_evidence_fields_for_route(route)
         .iter()
         .any(|field| field == "content_excerpt")
 }

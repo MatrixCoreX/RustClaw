@@ -230,7 +230,7 @@ pub(super) fn build_lightweight_tool_spec(
         "- Prefer the most specific enabled skill whose interface covers the request; use generic filesystem/system skills only when no dedicated skill fits.".to_string(),
     ];
     if let Some(route) = route_result {
-        lines.push(crate::task_contract::evidence_policy_context_prompt_line_for_route(route));
+        lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
         lines.push(format!(
             "- boundary_contract_hint response_shape={} contract_marker={} locator_kind={}",
             route.output_contract.response_shape.as_str(),

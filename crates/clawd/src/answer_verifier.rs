@@ -202,7 +202,7 @@ fn route_has_output_contract_marker(route_result: &RouteResult) -> bool {
 fn evidence_policy_requires_observation(route_result: &RouteResult) -> bool {
     route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
-        || !crate::task_contract::required_evidence_fields_for_route(route_result).is_empty()
+        || !crate::evidence_policy::required_evidence_fields_for_route(route_result).is_empty()
 }
 
 fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {

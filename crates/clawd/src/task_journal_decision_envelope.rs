@@ -202,8 +202,9 @@ pub(super) fn agent_loop_decision_envelope_json(
     source: &str,
     semantic_authority: &str,
 ) -> Value {
-    let missing_parameters = crate::task_contract::missing_parameters_for_route(route);
-    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
+    let missing_parameters = crate::evidence_policy::missing_parameters_for_route(route);
+    let required_evidence_fields =
+        crate::evidence_policy::required_evidence_fields_for_route(route);
     let decision = agent_loop_decision_from_first_action(actions);
     let (validation_status, validation_reason_code) =
         agent_loop_decision_validation(route, actions, decision, &missing_parameters);
