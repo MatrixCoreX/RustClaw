@@ -1717,6 +1717,7 @@ fn service_status_http_url(value: &str) -> Option<String> {
     (value.starts_with("http://") || value.starts_with("https://")).then(|| value.to_string())
 }
 
+#[cfg(test)]
 pub(super) fn runtime_status_query_kind(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Option<&str> {
@@ -1727,6 +1728,7 @@ pub(super) fn runtime_status_query_kind(
         .and_then(runtime_status_query_kind_value)
 }
 
+#[cfg(test)]
 fn runtime_status_query_kind_value(value: &Value) -> Option<&str> {
     value
         .as_str()

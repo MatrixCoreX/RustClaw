@@ -248,6 +248,7 @@ pub(super) fn configured_standalone_command_sequence_from_segment(
     (commands.len() >= 2).then(|| commands.join("; "))
 }
 
+#[cfg(test)]
 pub(super) fn configured_distinct_standalone_command_sequence_from_text(
     runtime: &crate::CommandIntentRuntime,
     text: &str,
@@ -768,6 +769,7 @@ pub(in crate::agent_engine) fn explicit_execution_command_segment(
         })
 }
 
+#[cfg(test)]
 pub(super) fn explicit_command_single_step_segment(
     runtime: &crate::CommandIntentRuntime,
     request: &str,

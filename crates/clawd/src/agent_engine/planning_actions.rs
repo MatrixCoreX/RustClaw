@@ -1,6 +1,7 @@
 use super::plan_step_label;
 use crate::{plan_step_from_agent_action, AgentAction, AppState, PlanKind, PlanResult};
 
+#[cfg(test)]
 pub(super) fn build_plan_result(
     goal: &str,
     raw_plan_text: &str,

@@ -230,6 +230,7 @@ pub(super) fn scalar_path_directory_locator_search_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn explicit_command_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -338,6 +339,7 @@ pub(super) fn explicit_command_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn explicit_command_request_present(
     runtime: &crate::CommandIntentRuntime,
     request: &str,
@@ -356,6 +358,7 @@ pub(super) fn explicit_command_request_present(
     })
 }
 
+#[cfg(test)]
 pub(super) fn append_terminal_synthesis_for_step_evidence(actions: &mut Vec<AgentAction>) {
     let evidence_refs = (1..=actions.len())
         .map(|idx| format!("step_{idx}"))
@@ -366,6 +369,7 @@ pub(super) fn append_terminal_synthesis_for_step_evidence(actions: &mut Vec<Agen
     });
 }
 
+#[cfg(test)]
 pub(super) fn explicit_run_cmd_observation_actions(
     state: &AppState,
     request_text: &str,
@@ -392,6 +396,7 @@ pub(super) fn explicit_run_cmd_observation_actions(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn explicit_command_deterministic_command_segment(
     runtime: &crate::CommandIntentRuntime,
     request: &str,
@@ -456,6 +461,7 @@ pub(super) fn conditional_step_update_immediate_command_count(
     step_to_modify.checked_sub(1).filter(|limit| *limit > 0)
 }
 
+#[cfg(test)]
 pub(super) fn explicit_command_plan_needs_terminal_synthesis(
     route_result: Option<&RouteResult>,
 ) -> bool {
