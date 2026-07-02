@@ -1553,7 +1553,7 @@ pub(super) async fn prepare_ask_routing(
         reason: route_result.route_reason.clone(),
     };
     let resolved_prompt = context_resolution.resolved_user_intent.clone();
-    if route_result.needs_clarify || !route_result.is_execute_gate() {
+    if route_result.needs_clarify {
         execution_recipe_hint = None;
         execution_recipe_plan_hint = None;
     }
