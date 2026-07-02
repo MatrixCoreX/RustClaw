@@ -436,7 +436,8 @@ pub(super) fn augment_route_canonical_evidence(
             observed_canonical.insert("candidates".to_string());
         }
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+    if (route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || route_has_service_status_capability_marker(route))
         && (observed_canonical.contains("status")
             || observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
@@ -491,6 +492,18 @@ fn route_has_docker_list_capability_marker(route: &crate::RouteResult) -> bool {
         route,
         &["docker"],
         &["image", "images", "list", "log", "logs", "read"],
+    )
+}
+
+fn route_has_service_status_capability_marker(route: &crate::RouteResult) -> bool {
+    crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["service", "service_control"],
+        &["logs", "restart", "start", "status", "stop", "verify"],
+    ) || crate::machine_capability_ref::route_has_capability_action(
+        route,
+        &["system", "system_basic"],
+        &["health_check", "runtime_status"],
     )
 }
 

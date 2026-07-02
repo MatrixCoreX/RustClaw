@@ -1729,5 +1729,9 @@ mod decision_envelope_tests;
 mod recent_artifacts_tests;
 
 #[cfg(test)]
+#[path = "task_journal_service_capability_evidence_tests.rs"]
+mod service_capability_evidence_tests;
+
+#[cfg(test)]
 #[path = "task_journal_tests.rs"]
 mod tests;
