@@ -257,6 +257,57 @@ fn pure_chat_agent_loop_side_answer_preserves_existing_primary_task() {
 }
 
 #[test]
+fn direct_answer_pure_chat_side_answer_preserves_existing_primary_task() {
+    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    route_result.route_reason = "pure_chat_agent_loop_submode".to_string();
+    route_result.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route_result.output_contract.requires_content_evidence = false;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a short release note for RustClaw.".to_string()),
+        last_primary_task_output: Some("RustClaw shipped a focused runtime update.".to_string()),
+        ..ConversationState::default()
+    };
+    let resolved =
+        "Answer the side question in one sentence.\nanswer_candidate: SQLite is a local SQL database.";
+
+    let prompt = next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        "BTW, what is SQLite in one sentence? Do not change the release task.",
+        resolved,
+    );
+    let output = next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        Some(&turn_analysis),
+        resolved,
+        "SQLite is a local SQL database.",
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some("Write a short release note for RustClaw.")
+    );
+    assert_eq!(
+        output.as_deref(),
+        Some("RustClaw shipped a focused runtime update.")
+    );
+}
+
+#[test]
 fn standalone_new_deliverable_replaces_existing_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
