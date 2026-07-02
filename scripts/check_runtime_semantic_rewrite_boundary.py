@@ -1034,13 +1034,13 @@ def scan_verifier_contract_missing_detail_marker() -> list[Finding]:
     rel_path = rel(VERIFIER_FILE)
     text = VERIFIER_FILE.read_text(encoding="utf-8")
     findings: list[Finding] = []
-    if "error_code=contract_matrix_entry_missing contract_marker=" not in text:
+    if "error_code=evidence_policy_entry_missing contract_marker=" not in text:
         findings.append(
             Finding(
                 rel_path,
                 1,
                 "verifier_contract_marker_detail_missing",
-                "contract-missing verifier detail should emit machine fields with contract_marker",
+                "evidence-policy missing verifier detail should emit machine fields with contract_marker",
             )
         )
     if "no contract matrix entry matched semantic kind" in text:

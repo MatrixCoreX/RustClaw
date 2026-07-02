@@ -154,7 +154,7 @@ pub(super) fn ensure_required_contract_block_present(
     let Some(route) = route_result else {
         return Ok(());
     };
-    let Some(contract_line) = crate::contract_matrix::compact_prompt_line_for_route(route) else {
+    let Some(contract_line) = crate::evidence_policy::compact_prompt_line_for_route(route) else {
         return Ok(());
     };
     if prompt_text.contains(&contract_line) {
@@ -162,7 +162,7 @@ pub(super) fn ensure_required_contract_block_present(
     } else {
         Err(format!(
             "prompt_budget_error: compact contract block missing from planner prompt; contract_line_hash={}",
-            crate::contract_matrix::fnv1a_hex(&contract_line)
+            crate::evidence_policy::fnv1a_hex(&contract_line)
         ))
     }
 }
@@ -539,7 +539,7 @@ pub(super) fn contract_scoped_planner_skill_scope(
     if route.needs_clarify || route.output_contract_is_unclassified() {
         return None;
     }
-    let skills = crate::contract_matrix::capability_ref_action_refs_for_route(route, false)
+    let skills = crate::evidence_policy::capability_ref_action_refs_for_route(route, false)
         .into_iter()
         .map(|action| action.skill)
         .filter(|skill| !skill.trim().is_empty())
@@ -562,7 +562,7 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
         return Some(scope);
     }
     let skills = skills_from_action_refs_capped(
-        crate::contract_matrix::capability_ref_action_refs_for_route(route, true),
+        crate::evidence_policy::capability_ref_action_refs_for_route(route, true),
         8,
     );
     if skills.is_empty() {
@@ -577,7 +577,7 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
 mod tests;
 
 fn skills_from_action_refs_capped(
-    action_refs: Vec<crate::contract_matrix::ActionRef>,
+    action_refs: Vec<crate::evidence_policy::ActionRef>,
     max_skills: usize,
 ) -> BTreeSet<String> {
     let mut ordered = Vec::new();
