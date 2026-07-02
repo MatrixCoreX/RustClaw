@@ -213,8 +213,57 @@ pub(crate) fn final_answer_shape_for_output_contract(
 }
 
 pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalAnswerShape> {
+    if let Some(shape) = final_answer_shape_for_route_capability_ref(route) {
+        return Some(shape);
+    }
     let output_contract = route.effective_output_contract();
     final_answer_shape_for_output_contract(&output_contract)
+}
+
+fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<FinalAnswerShape> {
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["archive"],
+        &["list"],
+    ) {
+        return Some(FinalAnswerShape::ArchiveMemberList);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["archive"],
+        &["read"],
+    ) {
+        return Some(FinalAnswerShape::ArchiveMemberExcerpt);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["archive"],
+        &["pack"],
+    ) {
+        return Some(FinalAnswerShape::CreatedArchivePath);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["archive"],
+        &["unpack"],
+    ) {
+        return Some(FinalAnswerShape::UnpackDestinationSummary);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["database", "db", "sqlite"],
+        &["list_tables", "list"],
+    ) {
+        return Some(FinalAnswerShape::TableListing);
+    }
+    if crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["database", "db", "sqlite"],
+        &["schema_version"],
+    ) {
+        return Some(FinalAnswerShape::SchemaVersion);
+    }
+    None
 }
 
 fn final_answer_shape_override_for_output_contract(
