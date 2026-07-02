@@ -12,7 +12,6 @@ pub(super) fn kb_chain_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
