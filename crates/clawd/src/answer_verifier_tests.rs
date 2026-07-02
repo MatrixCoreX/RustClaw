@@ -2046,5 +2046,8 @@ mod matrix_shape_contracts;
 #[path = "answer_verifier_tests/matrix_grounding.rs"]
 mod matrix_grounding;
 
+#[path = "answer_verifier_tests/scalar_capability_shape.rs"]
+mod scalar_capability_shape;
+
 #[path = "answer_verifier_tests/text_protocol_boundary.rs"]
 mod text_protocol_boundary;

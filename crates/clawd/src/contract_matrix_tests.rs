@@ -168,6 +168,17 @@ fn config_list_keys_capability_ref_supplies_key_list_shape_without_semantic_kind
 }
 
 #[test]
+fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semantic_kind() {
+    let mut route = route_with_machine_capability_ref("capability_ref=filesystem.count_entries");
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::Scalar)
+    );
+}
+
+#[test]
 fn route_capability_ref_arg_policy_does_not_require_semantic_bridge() {
     let route = route_with_machine_capability_ref("capability_ref=config.validate");
 
