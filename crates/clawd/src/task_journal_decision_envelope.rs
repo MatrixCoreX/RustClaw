@@ -202,10 +202,11 @@ pub(super) fn agent_loop_decision_envelope_json(
     source: &str,
     semantic_authority: &str,
 ) -> Value {
-    let contract = crate::TaskContract::from_route_result(route);
+    let missing_parameters = crate::task_contract::missing_parameters_for_route(route);
+    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
     let decision = agent_loop_decision_from_first_action(actions);
     let (validation_status, validation_reason_code) =
-        agent_loop_decision_validation(route, actions, decision, &contract);
+        agent_loop_decision_validation(route, actions, decision, &missing_parameters);
     let terminal_intent = agent_loop_terminal_intent(decision);
     let control_intent = agent_loop_control_intent(
         decision,
@@ -221,7 +222,7 @@ pub(super) fn agent_loop_decision_envelope_json(
         validation_reason_code,
         actions,
     );
-    let missing_slot = contract.missing_parameters.first().map(String::as_str);
+    let missing_slot = missing_parameters.first().map(String::as_str);
     let answer_shape = agent_loop_answer_shape(route);
     json!({
         "schema_version": 1,
@@ -239,12 +240,12 @@ pub(super) fn agent_loop_decision_envelope_json(
         "validation_status": validation_status,
         "validation_reason_code": validation_reason_code,
         "confidence": null,
-        "missing_slots": &contract.missing_parameters,
+        "missing_slots": &missing_parameters,
         "missing_slot": missing_slot,
         "capability_ref": first_non_think_action_capability_ref(actions),
         "output_contract_ref": output_contract_ref,
-        "required_evidence": &contract.required_evidence_fields,
-        "evidence_needed": &contract.required_evidence_fields,
+        "required_evidence": &required_evidence_fields,
+        "evidence_needed": &required_evidence_fields,
         "answer_shape": answer_shape,
         "risk_level": route.risk_ceiling.as_str(),
         "delivery_required": route.output_contract.delivery_required || route.wants_file_delivery,
@@ -402,7 +403,7 @@ fn agent_loop_decision_validation(
     route: &crate::RouteResult,
     actions: &[crate::AgentAction],
     decision: &str,
-    contract: &crate::TaskContract,
+    missing_parameters: &[String],
 ) -> (&'static str, &'static str) {
     if decision == "respond"
         && route.output_contract.requires_content_evidence
@@ -410,7 +411,7 @@ fn agent_loop_decision_validation(
     {
         return ("shadow_invalid", "respond_requires_evidence_observation");
     }
-    if decision == "clarify" && contract.missing_parameters.is_empty() {
+    if decision == "clarify" && missing_parameters.is_empty() {
         return ("shadow_invalid", "clarify_missing_structured_slots");
     }
     ("valid", "agent_loop_decision_shadow_valid")
