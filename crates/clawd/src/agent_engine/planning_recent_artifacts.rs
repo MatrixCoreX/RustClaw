@@ -2,12 +2,14 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tracing::info;
 
+#[cfg(test)]
 use super::planning_actions::build_plan_result;
 use super::LoopState;
-use crate::{
-    AgentAction, OutputScalarCountTargetKind, OutputSemanticKind, PlanKind, PlanResult, RouteResult,
-};
+use crate::{AgentAction, OutputScalarCountTargetKind, OutputSemanticKind, RouteResult};
+#[cfg(test)]
+use crate::{PlanKind, PlanResult};
 
+#[cfg(test)]
 pub(super) fn recent_artifacts_judgment_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -84,6 +86,7 @@ pub(super) fn recent_artifacts_judgment_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn recent_artifacts_directory_locator_path(
     route: &RouteResult,
     auto_locator_path: Option<&str>,
@@ -117,6 +120,7 @@ fn recent_artifacts_directory_locator_path(
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 fn locator_path_matches_hint(path: &str, hint: &str) -> bool {
     let path = path.trim().trim_end_matches(['/', '\\']);
     let hint = hint.trim().trim_end_matches(['/', '\\']);
