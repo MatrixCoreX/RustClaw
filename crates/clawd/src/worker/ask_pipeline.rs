@@ -64,7 +64,7 @@ use bare_topic_guard::{
 };
 use boundary_preflight::{
     boundary_context_locator_preflight, boundary_post_binding_locator_preflight,
-    boundary_safety_preflight,
+    boundary_safety_preflight, defer_locator_binding_to_agent_loop,
 };
 use contract_repair::{
     contract_repair_candidate_observations, registry_capability_contract_observation,
@@ -801,8 +801,7 @@ fn apply_ask_post_route(
     }
     if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis, &session_snapshot) {
         let before_gate_kind = route_result.gate_kind();
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
+        defer_locator_binding_to_agent_loop(&mut route_result);
         push_pre_loop_clarify_candidate(&mut pre_loop_clarify_candidates, "deictic_bare_locator");
         log_route_guard_record(
             task,
