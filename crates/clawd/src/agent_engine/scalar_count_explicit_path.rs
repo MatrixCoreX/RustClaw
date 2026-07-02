@@ -948,7 +948,7 @@ pub(super) fn route_allows_single_document_parse_synthesis(route: &RouteResult) 
 }
 
 pub(super) fn route_contract_allows_doc_parse(route: &RouteResult) -> bool {
-    crate::contract_matrix::capability_ref_action_refs_for_route(route, false)
+    crate::evidence_policy::capability_ref_action_refs_for_route(route, false)
         .iter()
         .any(|action_ref| {
             action_ref.skill == "doc_parse"

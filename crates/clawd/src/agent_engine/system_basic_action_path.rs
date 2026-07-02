@@ -243,7 +243,7 @@ pub(super) fn rewrite_file_paths_grep_text_to_find_entries(
     if !action_name.eq_ignore_ascii_case("grep_text") {
         return false;
     }
-    if crate::contract_matrix::capability_ref_action_policy_for_route(
+    if crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
         "fs_basic",
         &Value::Object(obj.clone()),
