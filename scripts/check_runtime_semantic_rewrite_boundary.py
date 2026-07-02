@@ -64,6 +64,9 @@ SCHEDULE_SERVICE_FILE = SRC_ROOT / "schedule_service.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
 LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
+LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE = (
+    SRC_ROOT / "agent_engine/loop_control_filesystem_mutation_recovery.rs"
+)
 DRY_RUN_CONTRACT_PLAN_FILE = SRC_ROOT / "agent_engine/dry_run_contract_plan.rs"
 OBSERVED_OUTPUT_FILE = SRC_ROOT / "agent_engine/observed_output.rs"
 PLANNING_PROMPT_FILE = SRC_ROOT / "agent_engine/planning_prompt.rs"
@@ -322,6 +325,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_verifier_contract_missing_detail_marker())
     findings.extend(scan_route_guard_record_contract_marker())
     findings.extend(scan_loop_control_output_contract_marker_key())
+    findings.extend(scan_loop_recovery_contract_marker_fields())
     findings.extend(scan_dry_run_contract_plan_marker_payloads())
     findings.extend(scan_observed_output_contract_marker_payload())
     findings.extend(scan_prompt_utils_output_contract_registry_bridge_tokens())
@@ -990,6 +994,49 @@ def scan_loop_control_output_contract_marker_key() -> list[Finding]:
                 1,
                 "loop_control_semantic_kind_key",
                 "loop output vars must not expose legacy effective_output_contract_semantic_kind key",
+            )
+        )
+    return findings
+
+
+def scan_loop_recovery_contract_marker_fields() -> list[Finding]:
+    findings: list[Finding] = []
+    loop_text = LOOP_CONTROL_FILE.read_text(encoding="utf-8")
+    if 'object.contains_key("contract_marker")' not in loop_text:
+        findings.append(
+            Finding(
+                rel(LOOP_CONTROL_FILE),
+                1,
+                "loop_control_contract_marker_reader_missing",
+                "loop control machine JSON detection should read contract_marker",
+            )
+        )
+    if 'object.contains_key("semantic_kind")' in loop_text:
+        findings.append(
+            Finding(
+                rel(LOOP_CONTROL_FILE),
+                1,
+                "loop_control_semantic_kind_reader",
+                "loop control machine JSON detection must not read legacy semantic_kind",
+            )
+        )
+    fs_text = LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE.read_text(encoding="utf-8")
+    if '.get("contract_marker")' not in fs_text:
+        findings.append(
+            Finding(
+                rel(LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE),
+                1,
+                "filesystem_mutation_recovery_contract_marker_missing",
+                "filesystem mutation recovery should read contract_marker",
+            )
+        )
+    if '.get("semantic_kind")' in fs_text:
+        findings.append(
+            Finding(
+                rel(LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE),
+                1,
+                "filesystem_mutation_recovery_semantic_kind_reader",
+                "filesystem mutation recovery must not read legacy semantic_kind",
             )
         )
     return findings

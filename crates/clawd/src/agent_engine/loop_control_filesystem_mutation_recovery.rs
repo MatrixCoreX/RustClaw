@@ -135,8 +135,8 @@ fn collect_filesystem_mutation_success_findings_from_value(
 fn filesystem_mutation_success_finding_from_object(
     object: &serde_json::Map<String, Value>,
 ) -> Option<FilesystemMutationSuccessFinding> {
-    let semantic_kind = object
-        .get("semantic_kind")
+    let contract_marker = object
+        .get("contract_marker")
         .and_then(Value::as_str)
         .map(str::trim);
     let action = first_string_field_or_array_item(object, &["action", "observed_actions"]);
@@ -152,7 +152,7 @@ fn filesystem_mutation_success_finding_from_object(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let has_filesystem_mutation_signal =
-        matches!(semantic_kind, Some("filesystem_mutation_result"))
+        matches!(contract_marker, Some("filesystem_mutation_result"))
             || action
                 .as_deref()
                 .is_some_and(filesystem_mutation_success_action)
