@@ -1266,6 +1266,7 @@ pub(super) fn existence_with_path_locator_observation_plan(
     }
 }
 
+#[cfg(test)]
 pub(super) fn existing_file_delivery_probe_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -1304,6 +1305,7 @@ pub(super) fn existing_file_delivery_probe_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 fn route_requests_single_file_delivery_probe(route: &RouteResult) -> bool {
     route.output_contract.delivery_required
         && route.output_contract.response_shape == crate::OutputResponseShape::FileToken
@@ -1311,6 +1313,7 @@ fn route_requests_single_file_delivery_probe(route: &RouteResult) -> bool {
         && route.wants_file_delivery
 }
 
+#[cfg(test)]
 fn single_file_delivery_probe_action(
     route: &RouteResult,
     auto_locator_path: Option<&str>,
@@ -1372,6 +1375,7 @@ pub(super) fn single_filename_target_for_directory_locator(
     (filenames.len() == 1).then(|| filenames[0].clone())
 }
 
+#[cfg(test)]
 pub(super) fn explicit_existence_file_targets(user_text: &str) -> Vec<String> {
     let mut targets = Vec::new();
     for locator in
