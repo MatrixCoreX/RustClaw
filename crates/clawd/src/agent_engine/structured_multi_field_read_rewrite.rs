@@ -986,7 +986,7 @@ pub(super) fn current_turn_requests_config_edit(
     let Some(route) = route_result else {
         return false;
     };
-    if route.needs_clarify || !route.is_execute_gate() {
+    if route.needs_clarify {
         return false;
     }
     let request = original_user_text.unwrap_or(user_text).trim();
