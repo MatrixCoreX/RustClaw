@@ -147,14 +147,31 @@ pub(super) fn preferred_structured_action_for_contract_hint(
                 }),
             })
         }
-        "docker_basic" if docker_basic_available_for_plan(state) => Some(AgentAction::CallSkill {
-            skill: "docker_basic".to_string(),
-            args: serde_json::json!({
-                "action": preferred_docker_basic_action(route, preferred),
-            }),
-        }),
+        "docker_basic" if docker_basic_available_for_plan(state) => {
+            preferred_docker_basic_for_contract_hint(route, preferred, auto_locator_path)
+        }
         _ => None,
     }
+}
+
+fn preferred_docker_basic_for_contract_hint(
+    route: &RouteResult,
+    preferred: &crate::contract_matrix::ActionRef,
+    auto_locator_path: Option<&str>,
+) -> Option<AgentAction> {
+    let action = preferred_docker_basic_action(route, preferred);
+    let mut args = serde_json::json!({ "action": action });
+    if docker_basic_action_requires_container(action) {
+        args["container"] = Value::String(first_route_locator_target(route, auto_locator_path)?);
+    }
+    Some(AgentAction::CallSkill {
+        skill: "docker_basic".to_string(),
+        args,
+    })
+}
+
+fn docker_basic_action_requires_container(action: &str) -> bool {
+    matches!(action, "logs" | "inspect" | "start" | "stop" | "restart")
 }
 
 fn preferred_docker_basic_action(
@@ -783,6 +800,9 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             }
 
             for preferred in &preferred_actions {
+                if !preferred_action_may_replace_contract_rejected_action(route, preferred) {
+                    continue;
+                }
                 let Some(candidate) = preferred_structured_action_for_contract_hint(
                     state,
                     route,
@@ -826,6 +846,14 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             action
         })
         .collect()
+}
+
+fn preferred_action_may_replace_contract_rejected_action(
+    route: &RouteResult,
+    preferred: &crate::contract_matrix::ActionRef,
+) -> bool {
+    !preferred.skill.eq_ignore_ascii_case("docker_basic")
+        || crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
 }
 
 fn structured_run_cmd_async_start_allows_planner_authority_despite_contract(

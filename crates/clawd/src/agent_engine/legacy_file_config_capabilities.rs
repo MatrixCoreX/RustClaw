@@ -175,9 +175,12 @@ pub(super) fn normalize_legacy_compatibility_actions(
         original_user_text,
         actions,
     );
+    let preserve_unqualified_docker_command = route_result.is_some_and(|route| {
+        !crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
+    });
     let actions = rewrite_docker_readonly_run_cmd_to_docker_basic(
         state,
-        skip_legacy_semantic_rewrites,
+        skip_legacy_semantic_rewrites || preserve_unqualified_docker_command,
         actions,
     );
     let actions = rewrite_archive_unpack_run_cmd_to_archive_basic(
