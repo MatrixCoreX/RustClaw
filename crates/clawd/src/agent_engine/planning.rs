@@ -242,17 +242,6 @@ pub(super) async fn plan_round_actions(
         "plan_deterministic_active_task_append_current_locator"
     );
     return_deterministic_plan!(
-        contract_hint_preferred_action_deterministic_plan_result(
-            state,
-            goal,
-            route_result,
-            loop_state,
-            &original_user_text_for_policy,
-            auto_locator_path,
-        ),
-        "plan_deterministic_contract_hint_preferred_action"
-    );
-    return_deterministic_plan!(
         runtime_status_scalar_deterministic_plan_result(
             state,
             goal,

@@ -470,6 +470,7 @@ pub(super) fn explicit_command_plan_needs_terminal_synthesis(
     })
 }
 
+#[cfg(test)]
 pub(super) fn contract_hint_preferred_action_ref(
     original_user_text: &str,
 ) -> Option<crate::contract_matrix::ActionRef> {

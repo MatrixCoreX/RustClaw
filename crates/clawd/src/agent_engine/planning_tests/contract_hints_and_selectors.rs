@@ -1343,7 +1343,7 @@ fn structured_dry_run_response_emits_task_cancel_machine_contract() {
     };
     let value: Value = serde_json::from_str(&content).expect("structured JSON response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("task_control_cancel_dry_run")
     );
     assert_eq!(
