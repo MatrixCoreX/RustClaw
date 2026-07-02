@@ -116,6 +116,9 @@ pub(super) fn build_normalizer_output_with_final_gate(
         &output_contract,
         route_trace_repair_codes,
     );
+    let attachment_processing_required = turn_analysis
+        .as_ref()
+        .is_some_and(|analysis| analysis.attachment_processing_required);
     info!(
         "{} intent_normalizer_route_trace task_id={} owner_layer={} reason_code={} outcome={} route_trace_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         crate::highlight_tag("routing"),
@@ -129,7 +132,8 @@ pub(super) fn build_normalizer_output_with_final_gate(
         route_trace_record.repair_codes.join(","),
         route_trace_record.repair_classes.join(","),
     );
-    IntentNormalizerOutput {
+    let output = IntentNormalizerOutput {
+        raw_user_request: req.trim().to_string(),
         resolved_user_intent,
         resume_behavior,
         schedule_kind,
@@ -147,7 +151,31 @@ pub(super) fn build_normalizer_output_with_final_gate(
         route_trace_decision: legacy_normalizer_decision_eff,
         execution_finalize_style: execution_finalize_style_eff,
         turn_analysis,
+        attachment_processing_required,
         fallback_source: None,
         route_trace_record,
-    }
+    };
+    log_boundary_envelope(task, &output);
+    output
+}
+
+fn log_boundary_envelope(task: &crate::ClaimedTask, output: &IntentNormalizerOutput) {
+    let envelope = output.boundary_envelope();
+    info!(
+        "{} intent_normalizer_boundary_envelope task_id={} raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
+        crate::highlight_tag("routing"),
+        task.task_id,
+        envelope.raw_user_request.chars().count(),
+        envelope
+            .schedule_intent
+            .as_ref()
+            .map(|intent| intent.kind.as_str())
+            .unwrap_or("none"),
+        envelope.attachment_refs.len(),
+        envelope.explicit_locators.len(),
+        envelope.active_task_reference.as_deref().unwrap_or("none"),
+        envelope.session_binding.as_deref().unwrap_or("none"),
+        envelope.language_hint.as_deref().unwrap_or("none"),
+        envelope.safety_budget_hint.as_deref().unwrap_or("none"),
+    );
 }

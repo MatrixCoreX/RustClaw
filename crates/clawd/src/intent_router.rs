@@ -439,6 +439,10 @@ pub(crate) use normalizer_run::run_intent_normalizer;
 mod test_support;
 
 #[cfg(test)]
+#[path = "intent_router_output_types_tests.rs"]
+mod output_types_tests;
+
+#[cfg(test)]
 #[path = "intent_router_contract_repair_judge_tests.rs"]
 mod contract_repair_judge_tests;
 

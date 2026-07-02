@@ -1,6 +1,7 @@
 use super::{route_trace::RouteTraceRecord, turn_analysis::TurnAnalysis};
 use crate::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
+    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, OutputLocatorKind, ResumeBehavior,
+    ScheduleKind,
 };
 
 #[derive(Debug, Clone)]
@@ -14,6 +15,7 @@ pub(crate) struct ContextResolution {
 /// Output of the unified intent normalizer (replaces resume_followup_intent + context_resolver + schedule_intent + intent_router in one LLM call).
 #[derive(Debug, Clone)]
 pub(crate) struct IntentNormalizerOutput {
+    pub(crate) raw_user_request: String,
     pub(crate) resolved_user_intent: String,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
@@ -37,8 +39,69 @@ pub(crate) struct IntentNormalizerOutput {
     /// Execution finalization style. This is not a semantic gate.
     pub(crate) execution_finalize_style: ActFinalizeStyle,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
+    pub(crate) attachment_processing_required: bool,
     pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(crate) route_trace_record: RouteTraceRecord,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BoundaryEnvelope {
+    pub(crate) language_hint: Option<String>,
+    pub(crate) schedule_intent: Option<crate::ScheduleIntentOutput>,
+    pub(crate) attachment_refs: Vec<String>,
+    pub(crate) explicit_locators: Vec<String>,
+    pub(crate) active_task_reference: Option<String>,
+    pub(crate) session_binding: Option<String>,
+    pub(crate) safety_budget_hint: Option<String>,
+    pub(crate) raw_user_request: String,
+}
+
+impl IntentNormalizerOutput {
+    pub(crate) fn boundary_envelope(&self) -> BoundaryEnvelope {
+        BoundaryEnvelope {
+            language_hint: None,
+            schedule_intent: self.schedule_intent.clone(),
+            attachment_refs: attachment_refs_for_boundary(self.attachment_processing_required),
+            explicit_locators: explicit_locator_refs_for_boundary(&self.output_contract),
+            active_task_reference: self
+                .turn_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.target_task_policy)
+                .map(|policy| policy.as_str().to_string()),
+            session_binding: resume_behavior_boundary_token(self.resume_behavior)
+                .map(str::to_string),
+            safety_budget_hint: None,
+            raw_user_request: self.raw_user_request.clone(),
+        }
+    }
+}
+
+fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {
+    if contract.locator_kind == OutputLocatorKind::None {
+        return Vec::new();
+    }
+    let locator = contract.locator_hint.trim();
+    if locator.is_empty() {
+        Vec::new()
+    } else {
+        vec![locator.to_string()]
+    }
+}
+
+fn attachment_refs_for_boundary(required: bool) -> Vec<String> {
+    if required {
+        vec!["current_request_attachments".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+fn resume_behavior_boundary_token(resume_behavior: ResumeBehavior) -> Option<&'static str> {
+    match resume_behavior {
+        ResumeBehavior::None => None,
+        ResumeBehavior::ResumeExecute => Some("resume_execute"),
+        ResumeBehavior::ResumeDiscuss => Some("resume_discuss"),
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
