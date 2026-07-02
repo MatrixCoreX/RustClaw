@@ -519,7 +519,7 @@ mod tests {
                 "step_2",
                 "service_control",
                 json!({
-                    "text": json!({
+                    "extra": {
                         "status": "ok",
                         "target": "clawd",
                         "service_name": "clawd",
@@ -528,8 +528,7 @@ mod tests {
                         "executed_actions": ["status"],
                         "post_state": "clawd=running",
                         "verified": true
-                    })
-                    .to_string()
+                    }
                 })
                 .to_string(),
             ));
