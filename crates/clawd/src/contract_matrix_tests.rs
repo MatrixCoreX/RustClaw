@@ -53,6 +53,27 @@ fn route_capability_ref_allows_config_archive_policy_without_semantic_kind() {
             vec!["valid"],
         ),
         (
+            "capability_ref=config.read_field",
+            "system_basic",
+            serde_json::json!({"action":"extract_field","path":"configs/config.toml","field_path":"server.port"}),
+            "config_basic.read_field",
+            vec!["field_value"],
+        ),
+        (
+            "capability_ref=config.read_fields",
+            "config_basic",
+            serde_json::json!({"action":"read_fields","path":"configs/config.toml","field_paths":["server.port"]}),
+            "config_basic.read_fields",
+            vec!["field_value"],
+        ),
+        (
+            "capability_ref=config.list_keys",
+            "system_basic",
+            serde_json::json!({"action":"structured_keys","path":"configs/config.toml"}),
+            "config_basic.list_keys",
+            vec!["field_value"],
+        ),
+        (
             "capability_ref=archive.pack",
             "archive_basic",
             serde_json::json!({"action":"pack","source":"tmp/report","archive":"tmp/report.zip"}),
