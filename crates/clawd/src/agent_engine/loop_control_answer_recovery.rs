@@ -36,7 +36,13 @@ fn reply_failure_is_recoverable_answer_verifier_gap(
     let Some(journal) = reply.task_journal.as_ref() else {
         return false;
     };
-    if journal.final_status != Some(crate::task_journal::TaskJournalFinalStatus::Failure) {
+    if matches!(
+        journal.final_status,
+        Some(
+            crate::task_journal::TaskJournalFinalStatus::Clarify
+                | crate::task_journal::TaskJournalFinalStatus::ResumeFailure
+        )
+    ) {
         return false;
     }
     matches!(
