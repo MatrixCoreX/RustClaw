@@ -125,6 +125,7 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     fs::write(plan_dir.join("current_runtime_plan.md"), "# Current Plan\n")
         .expect("write plan file");
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
