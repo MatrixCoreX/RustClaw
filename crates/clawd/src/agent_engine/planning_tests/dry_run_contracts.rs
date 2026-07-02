@@ -33,9 +33,10 @@ fn answer_verifier_contract_dry_run_returns_machine_contract_fields() {
     };
     let value: Value = serde_json::from_str(&content).expect("json response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("answer_verifier_contract_dry_run")
     );
+    assert!(value.get("semantic_kind").is_none());
     assert!(value.get("required_evidence").is_some());
     assert!(value.get("missing_evidence_fields").is_some());
     assert!(value.get("contract_boundary").is_some());
@@ -120,9 +121,10 @@ fn structured_dry_run_response_emits_async_job_poll_contract() {
     };
     let value: Value = serde_json::from_str(&content).expect("structured JSON response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("async_job_poll_contract_dry_run")
     );
+    assert!(value.get("semantic_kind").is_none());
     assert_eq!(
         value.get("would_mutate").and_then(Value::as_bool),
         Some(false)
@@ -334,9 +336,10 @@ fn observed_output_projection_dry_run_prefers_projection_contract() {
     };
     let value: Value = serde_json::from_str(&content).expect("json response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("observed_output_projection_dry_run")
     );
+    assert!(value.get("semantic_kind").is_none());
     let families = value
         .get("families")
         .and_then(Value::as_array)
@@ -385,9 +388,10 @@ fn finalizer_language_policy_dry_run_returns_machine_policy_contract() {
     };
     let value: Value = serde_json::from_str(&content).expect("json response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("finalizer_language_policy_dry_run")
     );
+    assert!(value.get("semantic_kind").is_none());
     assert_eq!(
         value.get("message_key").and_then(Value::as_str),
         Some("clawd.finalizer.language_policy")
@@ -451,9 +455,10 @@ fn finalizer_language_policy_dry_run_accepts_json_policy_envelope() {
     };
     let value: Value = serde_json::from_str(&content).expect("json response");
     assert_eq!(
-        value.get("semantic_kind").and_then(Value::as_str),
+        value.get("contract_marker").and_then(Value::as_str),
         Some("finalizer_language_policy_dry_run")
     );
+    assert!(value.get("semantic_kind").is_none());
 }
 
 #[test]
