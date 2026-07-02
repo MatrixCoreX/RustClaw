@@ -116,6 +116,7 @@ fn plan_result_with_raw_and_steps(
 
 #[test]
 fn structured_respond_clarify_step_marks_loop_pending_user_input() {
+    let question = "Which file should I read?";
     let plan = plan_result_with_raw_and_steps(
         "{}",
         vec![crate::PlanStep {
@@ -123,7 +124,7 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
             action_type: "respond".to_string(),
             skill: "respond".to_string(),
             args: json!({
-                "content": "",
+                "content": question,
                 "terminal_intent": "clarify",
                 "clarify_reason_code": "missing_locator",
                 "missing_slot": "locator",
@@ -140,6 +141,11 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
 
     assert!(loop_state.pending_user_input_required);
+    assert_eq!(loop_state.delivery_messages, vec![question.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(question)
+    );
     assert_eq!(outcome.executed_actions, 0);
     assert_eq!(
         outcome.stop_signal.as_deref(),

@@ -56,7 +56,7 @@ AgentAction JSON must use one of:
 2) {"type":"call_tool","tool":"<tool_name>","args":{...}}  (legacy-compatible direct tool call; use only when the concrete tool contract is the better or only exposed contract)
 3) {"type":"call_skill","skill":"<skill_name>","args":{...}}  (legacy-compatible direct skill/workflow call; use for concrete skill/workflow contracts that are not exposed as planner capabilities)
 4) {"type":"synthesize_answer","evidence_refs":["last_output","s1",...]}  (use this when the remaining user-facing answer should be synthesized from observed execution evidence by runtime-owned wording logic)
-5) {"type":"respond","content":"<text>"}
+5) {"type":"respond","content":"<text>"}; for clarification, include optional machine fields such as `"terminal_intent":"clarify"`, `"clarify_reason_code":"missing_locator"`, `"missing_slot":"locator"`, `"locator_kind":"path"`, or `"message_key":"<stable_key>"` when known.
 
 Planner-loop decision envelope contract (shadow-observed by runtime; do not output extra top-level fields):
 - The first non-`think` step is the planner-loop semantic decision for this round.
@@ -64,6 +64,7 @@ Planner-loop decision envelope contract (shadow-observed by runtime; do not outp
 - Boundary fields such as `needs_clarify`, `pre_loop_clarify_candidates`, route reason codes, or legacy `decision` are evidence, not semantic authority. Re-evaluate whether an enabled capability can safely proceed from concrete machine slots; clarify only when the missing slot still blocks every safe executable or answerable path.
 - If boundary evidence shows an unresolved deictic target or missing required locator and there is no concrete path/name/URL/alias/locator fragment to resolve, do not run broad workspace discovery (`list_dir`, `tree_summary`, fuzzy search, or shell find) just to guess the referent. The first action should be a clarification `respond`.
 - For a clarification under a one-sentence or scalar output contract, make that single sentence the question itself. Do not lead with a declarative missing-context statement that could be kept as the only visible sentence.
+- When a `respond` is a clarification, set `terminal_intent="clarify"` and use stable machine tokens for `clarify_reason_code` / `missing_slot` where possible. Keep `content` as the user-visible question in the request language; do not encode the question itself as a machine token.
 - Use first action `call_capability` / `call_tool` / `call_skill` when the remaining work needs fresh observation, execution, a skill/tool, required evidence, file/system state, retry, validation, or dry-run side-effect handling.
 - Use first action `synthesize_answer` when the needed evidence is already present in loop history / last round output and runtime-owned wording should produce the final answer.
 - Use first action `respond` only for direct final text, strict scalar delivery from already observed machine facts, file/media delivery tokens, unsupported-capability limitation, grounded terminal failure, or one clarification question.
