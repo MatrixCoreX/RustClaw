@@ -1358,6 +1358,7 @@ fn service_status_generic_status_without_machine_target_defers_to_planner() {
 fn package_manager_dry_run_uses_structured_route_package_and_ignores_legacy_answer_candidate() {
     let state = test_state_with_enabled_skills(&["package_manager"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.route_reason =

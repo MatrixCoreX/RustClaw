@@ -1106,7 +1106,6 @@ pub(super) fn package_manager_detect_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route_has_package_detect_machine_signal(route)
         || !package_manager_available_for_plan(state)
     {
@@ -1151,7 +1150,6 @@ pub(super) fn package_docker_readonly_probe_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !package_manager_available_for_plan(state)
@@ -1273,7 +1271,6 @@ pub(super) fn package_manager_dry_run_deterministic_plan_result(
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
         || route.needs_clarify
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !package_manager_available_for_plan(state)
