@@ -723,6 +723,7 @@ pub(super) fn scalar_path_auto_locator_observation_plan(
     }])
 }
 
+#[cfg(test)]
 pub(super) fn route_requires_scalar_content_observation(route: &RouteResult) -> bool {
     route.output_contract.requires_content_evidence
         || route
@@ -733,6 +734,7 @@ pub(super) fn route_requires_scalar_content_observation(route: &RouteResult) -> 
             .contains("request_requires_fresh_file_observation_to_extract_title")
 }
 
+#[cfg(test)]
 pub(super) fn scalar_content_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -798,6 +800,7 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
     ])
 }
 
+#[cfg(test)]
 fn route_requests_config_validation(route: &RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
         || crate::contract_matrix::final_answer_shape_for_route(route)
@@ -925,6 +928,7 @@ pub(super) fn scalar_content_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn file_facts_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -1151,6 +1155,7 @@ pub(super) fn file_facts_auto_locator_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn generic_directory_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,

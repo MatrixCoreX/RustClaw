@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn directory_has_unique_entry_for_search_name(root: &str, token: &str) -> bool {
     let root = Path::new(root);
     if !root.is_dir() {
@@ -44,6 +45,7 @@ pub(super) fn directory_has_unique_entry_for_search_name(root: &str, token: &str
     matches == 1
 }
 
+#[cfg(test)]
 pub(super) fn single_name_target_for_directory_locator(
     route: &RouteResult,
     current_user_text: &str,
