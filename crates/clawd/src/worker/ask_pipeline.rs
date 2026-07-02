@@ -270,6 +270,8 @@ fn agent_loop_boundary_observations_block(
     let route_reason_codes = boundary_observation_route_reason_codes(route);
     let session_alias_bindings = session_alias_binding_observations(session_snapshot);
     let active_bound_targets = active_bound_target_observations(session_snapshot);
+    let file_delivery_target_candidates =
+        file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
     let current_request_locator = current_request_locator_observation(state, prompt, route);
     let default_main_config_contract =
@@ -295,6 +297,7 @@ fn agent_loop_boundary_observations_block(
         && route_reason_codes.is_empty()
         && session_alias_bindings.is_empty()
         && active_bound_targets.is_empty()
+        && file_delivery_target_candidates.is_empty()
         && current_workspace_scope.is_none()
         && current_request_locator.is_none()
         && default_main_config_contract.is_none()
@@ -326,6 +329,7 @@ fn agent_loop_boundary_observations_block(
         },
         "session_alias_bindings": session_alias_bindings,
         "active_bound_targets": active_bound_targets,
+        "file_delivery_target_candidates": file_delivery_target_candidates,
         "current_workspace_scope": current_workspace_scope,
         "current_request_locator": current_request_locator,
         "default_main_config_contract": default_main_config_contract,
@@ -555,6 +559,54 @@ fn active_bound_target_observations(
                 "target": target,
                 "ordered_entry_count": facts.ordered_entries.len(),
                 "observed_entry_count": facts.observed_entry_count,
+            }));
+        }
+    }
+    out
+}
+
+fn file_delivery_target_candidate_observations(
+    route: &crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Vec<serde_json::Value> {
+    let route_requests_file_delivery = route.wants_file_delivery
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+        || route.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle;
+    if !route_requests_file_delivery || !route.output_contract.locator_hint.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
+        if matches!(
+            frame.op_kind,
+            crate::followup_frame::FollowupOpKind::Read
+                | crate::followup_frame::FollowupOpKind::Delivery
+        ) {
+            if let Some(target) = frame
+                .bound_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+            {
+                out.push(serde_json::json!({
+                    "source": "active_followup_frame",
+                    "op_kind": followup_op_kind_token(frame.op_kind),
+                    "target": target,
+                }));
+            }
+        }
+    }
+    if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            out.push(serde_json::json!({
+                "source": "active_observed_facts",
+                "target": target,
             }));
         }
     }

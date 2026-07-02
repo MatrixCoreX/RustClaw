@@ -103,6 +103,37 @@ fn quick_index_includes_planner_capability_metadata() {
 }
 
 #[test]
+fn seed_loop_state_extracts_file_delivery_target_candidates() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "file_delivery_target_candidates": [{
+            "source": "active_followup_frame",
+            "op_kind": "read",
+            "target": "/tmp/README.md"
+        }]
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("deliver active file\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("file_delivery_target_candidates"),
+        Some(&"[\"/tmp/README.md\"]".to_string())
+    );
+}
+
+#[test]
 fn loop_state_seeds_session_alias_targets_from_original_request() {
     let mut loop_state = LoopState::new(2);
     let ctx = AgentRunContext {
