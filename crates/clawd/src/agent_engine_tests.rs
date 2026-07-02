@@ -251,7 +251,8 @@ fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
         "current_workspace_scope": {
             "source": "current_workspace_scope",
             "target": "/tmp/work",
-            "semantic_kind": "scalar_count",
+            "task_shape": "scalar_count",
+            "contract_marker": "scalar_count",
             "response_shape": "scalar"
         }
     });
@@ -296,6 +297,38 @@ fn loop_state_seeds_active_bound_targets_from_boundary_observation_block() {
         .output_vars
         .get("current_workspace_scalar_count_targets")
         .expect("current workspace scope should seed scalar count target");
+    let targets: Vec<String> =
+        serde_json::from_str(raw).expect("workspace scalar targets must be JSON encoded");
+    assert_eq!(targets, vec!["/tmp/work".to_string()]);
+}
+
+#[test]
+fn loop_state_still_reads_legacy_current_workspace_scope_semantic_marker() {
+    let mut loop_state = LoopState::new(2);
+    let observation = json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "current_workspace_scope": {
+            "source": "current_workspace_scope",
+            "target": "/tmp/work",
+            "semantic_kind": "scalar_count",
+            "response_shape": "scalar"
+        }
+    });
+    let ctx = AgentRunContext {
+        context_bundle_summary: Some(format!(
+            "legacy boundary\n\n### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS\n",
+            observation
+        )),
+        ..AgentRunContext::default()
+    };
+
+    seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
+
+    let raw = loop_state
+        .output_vars
+        .get("current_workspace_scalar_count_targets")
+        .expect("legacy scope marker should remain readable for historical journals");
     let targets: Vec<String> =
         serde_json::from_str(raw).expect("workspace scalar targets must be JSON encoded");
     assert_eq!(targets, vec!["/tmp/work".to_string()]);

@@ -21,6 +21,7 @@ PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_pla
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
+ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
 INTENT_ROUTER_CONTRACT_HINT_FILE = SRC_ROOT / "intent_router_contract_hint.rs"
@@ -290,6 +291,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_preferred_structured_action_registry_bridge_fallback())
     findings.extend(scan_migration_class_registry_bridge_fallback())
     findings.extend(scan_ask_prepare_registry_bridge_marker_preservation())
+    findings.extend(scan_current_workspace_scope_boundary_marker())
     findings.extend(scan_task_journal_evidence_registry_bridge_markers())
     findings.extend(scan_observation_repair_registry_bridge_markers())
     findings.extend(scan_contract_hint_registry_bridge_semantic_markers())
@@ -654,6 +656,55 @@ def scan_binding_repair_registry_bridge_markers() -> list[Finding]:
                     "photo_organization",
                 ),
                 "binding_repair_registry_bridge_marker",
+            )
+        )
+    return findings
+
+
+def scan_current_workspace_scope_boundary_marker() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE)
+    text = ASK_PIPELINE_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn current_workspace_scope_observation(")
+    if fn_start < 0:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "current_workspace_scope_observation_missing",
+                "missing current_workspace_scope_observation boundary helper",
+            )
+        ]
+    fn_end = text.find("\nfn current_workspace_scope_has_count_shape", fn_start)
+    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+    findings: list[Finding] = []
+    required_tokens = [
+        '"task_shape": "scalar_count"',
+        '"contract_marker": route.effective_output_contract_semantic_kind().as_str()',
+    ]
+    for token in required_tokens:
+        if token in body:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "current_workspace_scope_marker_missing",
+                f"missing required boundary token: {token}",
+            )
+        )
+    forbidden_tokens = [
+        '"semantic_kind": route.effective_output_contract_semantic_kind().as_str()',
+        '"semantic_kind": crate::OutputSemanticKind::ScalarCount.as_str()',
+    ]
+    for token in forbidden_tokens:
+        if token not in body:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "current_workspace_scope_semantic_kind_emission",
+                f"forbidden boundary token: {token}",
             )
         )
     return findings

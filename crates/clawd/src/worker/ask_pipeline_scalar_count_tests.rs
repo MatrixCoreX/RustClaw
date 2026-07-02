@@ -4,6 +4,38 @@ use super::{
     unbound_targeted_evidence_route_should_force_clarify,
 };
 
+fn assert_current_workspace_scope_boundary(prompt: &str, root: &std::path::Path) {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let block = prompt
+        .split(START)
+        .nth(1)
+        .and_then(|tail| tail.split(END).next())
+        .expect("boundary observation block should be present")
+        .trim();
+    let observation: serde_json::Value =
+        serde_json::from_str(block).expect("boundary observation should be JSON");
+    let scope = observation
+        .get("current_workspace_scope")
+        .expect("current workspace scope should be present");
+    assert_eq!(
+        scope.get("task_shape").and_then(serde_json::Value::as_str),
+        Some("scalar_count")
+    );
+    assert_eq!(
+        scope
+            .get("contract_marker")
+            .and_then(serde_json::Value::as_str),
+        Some("scalar_count")
+    );
+    assert!(scope.get("semantic_kind").is_none());
+    let root_display = root.display().to_string();
+    assert_eq!(
+        scope.get("target").and_then(serde_json::Value::as_str),
+        Some(root_display.as_str())
+    );
+}
+
 #[test]
 fn unbound_targeted_evidence_allows_current_workspace_scalar_count_scope() {
     let mut route = executable_filename_route();
@@ -89,12 +121,7 @@ fn current_workspace_scalar_count_structured_locator_exports_boundary_scope() {
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains("\"current_workspace_scope\""));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains(&root.display().to_string()));
+    assert_current_workspace_scope_boundary(&applied.prompt_with_memory_for_execution, &root);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -158,12 +185,7 @@ fn current_workspace_scalar_count_marker_from_clarify_route_exports_boundary_sco
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains("\"current_workspace_scope\""));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains(&root.display().to_string()));
+    assert_current_workspace_scope_boundary(&applied.prompt_with_memory_for_execution, &root);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -230,12 +252,7 @@ fn current_workspace_scalar_count_one_sentence_exports_boundary_scope() {
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains("\"current_workspace_scope\""));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains(&root.display().to_string()));
+    assert_current_workspace_scope_boundary(&applied.prompt_with_memory_for_execution, &root);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -298,12 +315,7 @@ fn clarify_current_workspace_scalar_count_with_resolved_root_exports_boundary_sc
         &applied.execution_route_result,
         "unbound_targeted_evidence_requires_clarify"
     ));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains("\"current_workspace_scope\""));
-    assert!(applied
-        .prompt_with_memory_for_execution
-        .contains(&root.display().to_string()));
+    assert_current_workspace_scope_boundary(&applied.prompt_with_memory_for_execution, &root);
     let _ = std::fs::remove_dir_all(root);
 }
 

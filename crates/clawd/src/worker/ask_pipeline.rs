@@ -416,7 +416,7 @@ fn current_workspace_scope_observation(
         || route.output_contract.delivery_required
         || route.wants_file_delivery
         || !current_workspace_scope_has_count_shape(route)
-        || route.effective_output_contract_semantic_kind() != crate::OutputSemanticKind::ScalarCount
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
     {
         return None;
     }
@@ -429,7 +429,8 @@ fn current_workspace_scope_observation(
     Some(serde_json::json!({
         "source": "current_workspace_scope",
         "target": state.skill_rt.workspace_root.display().to_string(),
-        "semantic_kind": route.effective_output_contract_semantic_kind().as_str(),
+        "task_shape": "scalar_count",
+        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "response_shape": route.output_contract.response_shape.as_str(),
     }))
 }

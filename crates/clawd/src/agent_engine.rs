@@ -1176,11 +1176,7 @@ fn current_workspace_scalar_count_targets_from_boundary_observation_blocks(
         let Some(scope) = value.get("current_workspace_scope") else {
             continue;
         };
-        let semantic_kind = scope
-            .get("semantic_kind")
-            .and_then(Value::as_str)
-            .map(str::trim);
-        if semantic_kind != Some(crate::OutputSemanticKind::ScalarCount.as_str()) {
+        if !current_workspace_scope_marks_scalar_count(scope) {
             continue;
         }
         let Some(target) = scope
@@ -1194,6 +1190,16 @@ fn current_workspace_scalar_count_targets_from_boundary_observation_blocks(
         out.push(target.to_string());
     }
     out
+}
+
+fn current_workspace_scope_marks_scalar_count(scope: &Value) -> bool {
+    const SCALAR_COUNT_MARKER: &str = "scalar_count";
+    ["task_shape", "contract_marker", "output_contract_marker"]
+        .into_iter()
+        .chain(["semantic_kind"])
+        .filter_map(|key| scope.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .any(|value| value == SCALAR_COUNT_MARKER)
 }
 
 fn active_listing_bound_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
