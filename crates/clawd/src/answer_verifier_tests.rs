@@ -260,7 +260,7 @@ fn answer_verifier_output_contract_exposes_evidence_profile() {
     let output_contract: serde_json::Value =
         serde_json::from_str(&block).expect("output contract prompt block should be JSON");
 
-    assert!(block.contains("\"contract_matrix\""));
+    assert!(block.contains("\"evidence_policy\""));
     assert!(block.contains("\"compact_line\""));
     assert!(block.contains("\"evidence_profile\""));
     assert!(block.contains("\"workspace_user_docs_first\""));

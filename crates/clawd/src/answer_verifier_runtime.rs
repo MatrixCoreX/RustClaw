@@ -1195,7 +1195,7 @@ pub(super) fn task_contract_prompt_block(route_result: &RouteResult) -> String {
 }
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {
-    let contract_matrix_trace = verifier_contract_matrix_prompt_trace(route_result);
+    let evidence_policy_trace = verifier_evidence_policy_prompt_trace(route_result);
     serde_json::to_string_pretty(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
         "requires_content_evidence": route_result.output_contract.requires_content_evidence,
@@ -1204,12 +1204,12 @@ pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
         "contract_marker": route_result.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
-        "contract_matrix": contract_matrix_trace,
+        "evidence_policy": evidence_policy_trace,
     }))
     .unwrap_or_else(|_| "{}".to_string())
 }
 
-fn verifier_contract_matrix_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
+fn verifier_evidence_policy_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
     let mut trace = crate::contract_matrix::trace_snapshot_for_route(route_result)?;
     if let Some(obj) = trace.as_object_mut() {
         obj.remove("trace_policy");
