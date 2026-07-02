@@ -1275,7 +1275,7 @@ fn contract_hint_preferred_run_cmd_uses_machine_hint_not_request_words() {
 }
 
 #[test]
-fn contract_hint_preferred_run_cmd_sqlite_uses_structured_locator() {
+fn contract_hint_preferred_run_cmd_sqlite_without_database_capability_is_rejected() {
     let state = test_state_with_enabled_skills(&["run_cmd", "db_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -1293,19 +1293,12 @@ fn contract_hint_preferred_run_cmd_sqlite_uses_structured_locator() {
         &LoopState::new(1),
         request,
         None,
-    )
-    .expect("machine hint should select sqlite run_cmd probe");
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    let command = plan.steps[0]
-        .args
-        .get("command")
-        .and_then(Value::as_str)
-        .expect("command");
-    assert!(command.contains("sqlite3"));
-    assert!(command.contains("test_contract.sqlite"));
-    assert!(command.contains(".tables"));
+    assert!(
+        plan.is_none(),
+        "sqlite semantic marker alone must not authorize a run_cmd database probe"
+    );
 }
 
 #[test]
