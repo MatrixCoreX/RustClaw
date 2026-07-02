@@ -79,7 +79,7 @@ fn route_contract_marker_is_service_status(route: &RouteResult) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
         || crate::machine_capability_ref::route_has_capability_namespace(
             route,
-            &["service", "system", "health"],
+            &["service", "service_control", "system", "health"],
         )
 }
 
