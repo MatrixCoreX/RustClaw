@@ -1,61 +1,5 @@
 use super::*;
 
-pub(super) fn http_download_artifact_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    _user_text: &str,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
-        )
-        || !runtime_surface_skill_available_for_plan(state, "http_basic")
-    {
-        return None;
-    }
-
-    let url = service_status_url_locator(route)?;
-    let output_path = http_download_output_path_from_route(route)?;
-    let action = AgentAction::CallSkill {
-        skill: "http_basic".to_string(),
-        args: serde_json::json!({
-            "action": "get",
-            "url": url,
-            "download": true,
-            "output_path": output_path,
-        }),
-    };
-    if let AgentAction::CallSkill { skill, args } = &action {
-        if !crate::contract_matrix::action_policy_for_route(Some(route), skill, args)
-            .is_some_and(|policy| policy.is_allowed())
-        {
-            return None;
-        }
-    }
-
-    let actions = vec![
-        action,
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["step_1".to_string()],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ];
-    Some(build_plan_result(
-        goal,
-        "deterministic:http_basic_download_artifact",
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
 pub(super) fn hook_permission_surface_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -538,16 +482,4 @@ fn current_top_level_plan_markdown_path(state: &AppState) -> Option<String> {
         .into_iter()
         .map(|(_, name)| format!("plan/{name}"))
         .next()
-}
-
-fn http_download_output_path_from_route(route: &RouteResult) -> Option<String> {
-    let path = route.output_contract.locator_hint.trim();
-    if path.starts_with("http://")
-        || path.starts_with("https://")
-        || path.contains("://")
-        || !shell_file_path_token_is_safe(path)
-    {
-        return None;
-    }
-    Some(path.to_string())
 }
