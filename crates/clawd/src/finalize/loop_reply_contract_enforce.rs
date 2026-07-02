@@ -179,11 +179,11 @@ pub(super) async fn enforce_delivery_output_contract(
         match &verdict {
             crate::output_contract_verifier::OutputContractVerdict::Pass => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=pass response_shape={:?} semantic_kind={:?}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=pass response_shape={:?} contract_marker={:?}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.output_contract.semantic_kind,
+                    route.effective_output_contract_semantic_kind(),
                 );
             }
             crate::output_contract_verifier::OutputContractVerdict::Reshape {
@@ -192,11 +192,11 @@ pub(super) async fn enforce_delivery_output_contract(
                 reshaped,
             } => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=reshape response_shape={:?} semantic_kind={:?} reason_code={} reason={} from={} to={}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=reshape response_shape={:?} contract_marker={:?} reason_code={} reason={} from={} to={}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.output_contract.semantic_kind,
+                    route.effective_output_contract_semantic_kind(),
                     reason_code,
                     reason,
                     crate::truncate_for_log(&normalized_text),
@@ -214,11 +214,11 @@ pub(super) async fn enforce_delivery_output_contract(
                 reason,
             } => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=reject response_shape={:?} semantic_kind={:?} reason_code={} reason={} dropped_candidate={}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=reject response_shape={:?} contract_marker={:?} reason_code={} reason={} dropped_candidate={}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.output_contract.semantic_kind,
+                    route.effective_output_contract_semantic_kind(),
                     reason_code,
                     reason,
                     crate::truncate_for_log(&normalized_text),
@@ -229,7 +229,7 @@ pub(super) async fn enforce_delivery_output_contract(
                     user_text,
                     &route.resolved_intent,
                     &format!("{:?}", route.output_contract.response_shape),
-                    &format!("{:?}", route.output_contract.semantic_kind),
+                    &format!("{:?}", route.effective_output_contract_semantic_kind()),
                     reason_code,
                     reason,
                     &language_hint,
@@ -256,7 +256,7 @@ pub(super) fn route_accepts_filesystem_mutation_synthesis(
     route: &crate::RouteResult,
     synthesis: &str,
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::FilesystemMutationResult
+    route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
         && filesystem_mutation_synthesis_payload_is_complete(synthesis)
 }
 
@@ -265,7 +265,7 @@ fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
         return false;
     };
     payload
-        .pointer("/semantic_kind")
+        .pointer("/contract_marker")
         .and_then(serde_json::Value::as_str)
         == Some("filesystem_mutation_result")
         && payload
@@ -352,9 +352,7 @@ pub(super) fn should_drop_passthrough_delivery_for_content_evidence(
 
     let route_has_semantic_answer_contract = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| {
-            route.output_contract.semantic_kind != crate::OutputSemanticKind::None
-        });
+        .is_some_and(|route| !route.output_contract_is_unclassified());
     let direct_structured_answer = route_has_semantic_answer_contract
         .then(|| direct_structured_observed_answer(None, loop_state, agent_run_context))
         .flatten()
@@ -421,13 +419,13 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
         return false;
     }
     if matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::RawCommandOutput
     ) {
         return strict_raw_command_output_exact_observation_answer(route, loop_state, respond);
     }
     let has_answer_semantic = !matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::None
     );
     let has_constrained_answer_shape = matches!(

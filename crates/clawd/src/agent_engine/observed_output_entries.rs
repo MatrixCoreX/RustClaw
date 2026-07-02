@@ -189,7 +189,7 @@ pub(super) fn execution_failed_step_guard_entry(
         return None;
     }
     let mut lines = vec![
-        "contract_semantic_kind=execution_failed_step".to_string(),
+        "contract_marker=execution_failed_step".to_string(),
         "answer_scope=failed_steps_only".to_string(),
         "successful_step_outputs_are_not_final_answer=true".to_string(),
     ];
