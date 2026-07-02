@@ -77,6 +77,7 @@ pub(super) fn path_metadata_compare_deterministic_plan_result(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn resolve_directory_locator_for_dir_compare(
     workspace_root: &Path,
     raw: &str,
