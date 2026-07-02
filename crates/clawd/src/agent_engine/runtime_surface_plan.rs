@@ -384,15 +384,15 @@ pub(super) fn subagent_bounded_batch_surface_deterministic_plan_result(
 }
 
 fn subagent_review_boundary_surface_gate_allows(route: &RouteResult) -> bool {
-    route.is_execute_gate()
-        || (route.needs_clarify
-            && route.output_contract.requires_content_evidence
-            && matches!(
-                route.output_contract.locator_kind,
-                crate::OutputLocatorKind::Filename
-                    | crate::OutputLocatorKind::Path
-                    | crate::OutputLocatorKind::CurrentWorkspace
-            ))
+    route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
 }
 
 fn subagent_review_boundary_machine_projection(plan_path: &str) -> Value {
