@@ -1460,7 +1460,7 @@ fn normalize_output_contract_for_schema_keeps_generated_file_path_report_non_del
             "delivery_required":true,
             "locator_kind":"filename",
             "delivery_intent":"file_single",
-            "semantic_kind":"write_then_report_path",
+            "contract_marker":"write_then_report_path",
             "locator_hint":"pwd_line_abs.txt"
           }
         }"#;
@@ -1470,7 +1470,7 @@ fn normalize_output_contract_for_schema_keeps_generated_file_path_report_non_del
 
     assert_eq!(
         value
-            .pointer("/output_contract/semantic_kind")
+            .pointer("/output_contract/contract_marker")
             .and_then(|value| value.as_str()),
         Some("generated_file_path_report")
     );
