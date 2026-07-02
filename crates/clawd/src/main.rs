@@ -183,7 +183,6 @@ use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
     list_active_tasks, list_automation_runs, pause_task_by_id, resume_task_by_id,
 };
-pub(crate) use task_contract::TaskContract;
 pub(crate) use worker::task_payload_value;
 use worker::{
     recover_stale_running_tasks_on_startup, spawn_cleanup_worker, spawn_schedule_worker,

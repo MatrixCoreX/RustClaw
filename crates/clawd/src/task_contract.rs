@@ -136,6 +136,7 @@ impl TargetContract {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskContract {
     pub(crate) targets: Vec<TargetContract>,
@@ -149,12 +150,11 @@ pub(crate) struct TaskContract {
     pub(crate) failure_policy: TaskFailurePolicy,
 }
 
+#[cfg(test)]
 impl TaskContract {
     pub(crate) fn from_route_result(route: &RouteResult) -> Self {
         let missing_parameters = missing_parameters_for_route(route);
-        let evidence_required = route.output_contract.requires_content_evidence
-            || route.output_contract.delivery_required
-            || !required_evidence_fields_for_route(route).is_empty();
+        let evidence_required = evidence_required_for_route(route);
         Self {
             targets: targets_for_route(route),
             target_object: target_object_for_route(route),
@@ -509,7 +509,7 @@ fn delivery_shape_for_capability_ref(route: &RouteResult) -> Option<TaskDelivery
     None
 }
 
-fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
+pub(crate) fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
     if let Some(shape) = delivery_shape_for_capability_ref(route) {
         return shape;
     }
@@ -552,6 +552,12 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
         return Vec::new();
     }
     required_evidence_fields_for_output_contract(&output_contract)
+}
+
+pub(crate) fn evidence_required_for_route(route: &RouteResult) -> bool {
+    route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !required_evidence_fields_for_route(route).is_empty()
 }
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
