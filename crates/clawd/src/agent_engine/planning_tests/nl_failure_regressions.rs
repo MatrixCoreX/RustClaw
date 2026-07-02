@@ -306,6 +306,7 @@ fn main_config_content_excerpt_deterministic_fast_path_uses_guard_observation() 
 fn browser_http_summary_uses_both_observations_and_explicit_evidence_refs() {
     let state = test_state_with_enabled_skills(&["browser_web", "http_basic"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Url;
@@ -349,6 +350,7 @@ fn browser_http_summary_uses_both_observations_and_explicit_evidence_refs() {
 fn web_search_summary_uses_machine_query_not_instruction_text() {
     let state = test_state_with_enabled_skills(&["web_search_extract"]);
     let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.resolved_intent = "capability_ref=web.search_results".to_string();

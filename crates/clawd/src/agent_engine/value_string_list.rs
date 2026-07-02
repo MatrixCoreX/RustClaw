@@ -1075,7 +1075,6 @@ pub(super) fn service_status_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !route_requests_service_status(route)
     {
@@ -1412,7 +1411,6 @@ pub(super) fn task_control_get_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !task_control_available_for_plan(state)
         || !route_mentions_task_control_get(route)
@@ -1451,7 +1449,6 @@ pub(super) fn task_control_list_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !task_control_available_for_plan(state)
         || !route_mentions_task_control_list(route)
@@ -1504,7 +1501,6 @@ pub(super) fn web_search_summary_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !route_requests_web_search_summary(route)
         || !web_search_extract_available_for_plan(state)
@@ -1565,7 +1561,6 @@ pub(super) fn browser_http_url_deterministic_plan_result(
 ) -> Option<PlanResult> {
     let route = route_result?;
     if loop_state.has_tool_or_skill_output
-        || !route.is_execute_gate()
         || !route.output_contract.requires_content_evidence
         || !route_requests_browser_open_extract(route)
         || !skill_available_for_plan(state, "browser_web")
