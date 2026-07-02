@@ -239,7 +239,7 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
 }
 
 #[test]
-fn archive_database_aggregate_handles_content_excerpt_fallback_route() {
+fn archive_database_aggregate_without_capability_refs_does_not_plan_from_content_excerpt() {
     let state = test_state_with_enabled_skills(&["archive_basic", "db_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
@@ -265,19 +265,12 @@ fn archive_database_aggregate_handles_content_excerpt_fallback_route() {
         &loop_state,
         &request,
         None,
-    )
-    .expect("fallback content excerpt route should preserve compound structured observations");
-
-    assert_eq!(plan.steps.len(), 5);
-    let read_action = plan.steps[1].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&read_action, "archive_basic", "read");
-    assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
     );
-    let db_action = plan.steps[2].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&db_action, "db_basic", "list_tables");
-    assert_eq!(args.get("db_path").and_then(Value::as_str), Some(db_path));
+
+    assert!(
+        plan.is_none(),
+        "content-excerpt fallback route must not choose compound archive/database skills without capability refs"
+    );
 }
 
 #[test]
