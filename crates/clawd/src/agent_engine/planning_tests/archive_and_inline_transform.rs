@@ -307,266 +307,50 @@ fn transform_action_alias_and_sort_args_normalize_to_transform_data_ops() {
     assert!(args.get("sort_by").is_none());
 }
 
-#[test]
-fn inline_json_transform_deterministic_plan_uses_current_payload() {
+#[tokio::test]
+async fn inline_json_transform_reaches_planner_path() {
     let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"filter","where":{"field":"score","gte":7}}]}"#;
-    let goal = r#"older context: {"action":"transform_data","data":[{"stale":true}],"ops":[{"op":"project","fields":["stale"]}]}"#;
-
-    let plan =
-        inline_json_transform_deterministic_plan_result(goal, &state, &loop_state, current, None)
-            .expect("inline transform should produce deterministic plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    let step = &plan.steps[0];
-    assert_eq!(step.action_type, "call_skill");
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("action").and_then(Value::as_str),
-        Some("transform_data")
-    );
-    assert_eq!(
-        step.args
-            .get("data")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("name"))
-            .and_then(Value::as_str),
-        Some("alpha")
-    );
-    let op = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(Value::as_object)
-        .expect("normalized filter op");
-    assert_eq!(op.get("field").and_then(Value::as_str), Some("score"));
-    assert_eq!(op.get("cmp").and_then(Value::as_str), Some("gte"));
-    assert_eq!(op.get("value").and_then(Value::as_i64), Some(7));
-}
-
-#[test]
-fn inline_json_transform_does_not_derive_group_sum_from_answer_candidate() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"对这个 JSON 数组按 team 分组求 amount 总和，只输出 JSON：[{"team":"A","amount":3},{"team":"A","amount":4},{"team":"B","amount":2}]"#;
+    let request = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"filter","where":{"field":"score","gte":7}}]}"#;
+    let task = ClaimedTask {
+        task_id: "inline-transform-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": request }).to_string(),
+    };
     let mut route = base_route_result();
-    route.route_reason = "inline_json_transform_structured_execute".to_string();
-    route.resolved_intent =
-            "group inline records\nanswer_candidate: [{\"team\":\"A\",\"amount\":7},{\"team\":\"B\",\"amount\":2}]".to_string();
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        current,
-        &state,
-        &loop_state,
-        current,
-        Some(&route),
-    );
-
-    assert!(plan.is_none());
-}
-
-#[test]
-fn contextual_inline_payload_does_not_guess_default_numeric_sort_table() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
-    let mut route = base_route_result();
-    route.route_reason = "inline_structured_payload_context_execute:test".to_string();
+    route.resolved_intent = request.to_string();
+    route.route_reason = "capability_ref=transform.transform_data".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        current,
-        &state,
-        &loop_state,
-        current,
-        Some(&route),
-    );
-
-    assert!(plan.is_none());
-}
-
-#[test]
-fn repaired_inline_transform_contract_does_not_guess_default_numeric_sort_table() {
-    let state = test_state_with_enabled_skills(&["transform"]);
     let loop_state = LoopState::new(1);
-    let current = r#"Sort this JSON array by score descending and output only a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
-    let mut route = base_route_result();
-    route.route_reason = "inline_structured_transform_contract_repair".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = inline_json_transform_deterministic_plan_result(
-        current,
+    let err = super::super::plan_round_actions(
         &state,
+        &task,
+        request,
+        request,
+        &policy,
         &loop_state,
-        current,
+        None,
         Some(&route),
-    );
-
-    assert!(plan.is_none());
-}
-
-#[test]
-fn inline_json_transform_derives_single_object_rename_after_context_json() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"把这个 JSON 对象里的 old_name 改成 new_name，只输出 JSON：{"old_name":"alpha","count":2}"#;
-    let goal = format!(
-        r#"background example: {{"kind":"ask","payload":{{"text":"hello"}}}}
-
-Structured inline transform request:
-{current}"#
-    );
-    let mut route = base_route_result();
-    route.route_reason = "inline_json_transform_structured_execute".to_string();
-    route.resolved_intent = r#"rename inline object
-answer_candidate: {"new_name":"alpha","count":2}"#
-        .to_string();
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        &goal,
-        &state,
-        &loop_state,
-        "",
-        Some(&route),
+        None,
     )
-    .expect("context JSON should not steal inline object transform");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("result_shape").and_then(Value::as_str),
-        Some("single_object")
+    .await
+    .expect_err("inline transform should reach planner instead of pre-LLM transform plan");
+    assert!(
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
     );
-    assert!(step.args.get("data").is_some_and(Value::is_object));
-}
-
-#[test]
-fn inline_json_transform_derives_single_object_rename_without_answer_candidate() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let req = r#"把这个 JSON 对象里的 old_name 改成 new_name，只输出 JSON：{"old_name":"alpha","count":2}"#;
-
-    let plan = inline_json_transform_deterministic_plan_result(req, &state, &loop_state, req, None)
-        .expect("single object rename should produce deterministic plan");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert!(step.args.get("data").is_some_and(Value::is_object));
-    assert_eq!(
-        step.args.get("result_shape").and_then(Value::as_str),
-        Some("single_object")
-    );
-    assert_eq!(
-        step.args
-            .get("ops")
-            .and_then(Value::as_array)
-            .and_then(|ops| ops.first())
-            .and_then(|op| op.get("op"))
-            .and_then(Value::as_str),
-        Some("rename")
-    );
-}
-
-#[test]
-fn inline_json_transform_does_not_derive_scalar_sum_from_answer_candidate() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"计算这个 JSON 数组里 value 的总和，只输出数字：[ {"value": 4}, {"value": 6}, {"value": 5} ]"#;
-    let goal = format!(
-        r#"background example: {{"kind":"ask","payload":{{"text":"hello"}}}}
-
-Structured inline transform request:
-{current}"#
-    );
-    let mut route = base_route_result();
-    route.route_reason = "inline_json_transform_structured_execute".to_string();
-    route.resolved_intent = "sum inline records\nanswer_candidate: 15".to_string();
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        &goal,
-        &state,
-        &loop_state,
-        "",
-        Some(&route),
-    );
-
-    assert!(plan.is_none());
-}
-
-#[test]
-fn inline_json_transform_derives_count_from_scalar_count_contract() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = r#"统计这个 JSON 数组中对象数量，只输出数字：[{"x":1},{"x":2},{"x":3},{"x":4}]"#;
-    let mut route = base_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        current,
-        &state,
-        &loop_state,
-        current,
-        Some(&route),
-    )
-    .expect("inline scalar count should produce deterministic transform");
-
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("result_shape").and_then(Value::as_str),
-        Some("scalar")
-    );
-    let agg = step
-        .args
-        .get("ops")
-        .and_then(Value::as_array)
-        .and_then(|ops| ops.first())
-        .and_then(|op| op.get("aggregations"))
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .expect("count aggregation");
-    assert_eq!(agg.get("op").and_then(Value::as_str), Some("count"));
-}
-
-#[test]
-fn inline_csv_transform_derives_markdown_table_from_escaped_newlines() {
-    let state = test_state_with_enabled_skills(&["transform"]);
-    let loop_state = LoopState::new(1);
-    let current = "把这个 CSV 转成 markdown 表格：name,score\\nalpha,7\\nbeta,9";
-    let mut route = base_route_result();
-    route.resolved_intent =
-            "render inline records\nanswer_candidate: | name | score |\n|------|-------|\n| alpha | 7 |\n| beta | 9 |".to_string();
-
-    let plan = inline_json_transform_deterministic_plan_result(
-        current,
-        &state,
-        &loop_state,
-        current,
-        Some(&route),
-    )
-    .expect("escaped newline CSV should produce deterministic transform");
-
-    assert_eq!(plan.steps.len(), 1);
-    let step = &plan.steps[0];
-    assert_eq!(step.skill, "transform");
-    assert_eq!(
-        step.args.get("csv_text").and_then(Value::as_str),
-        Some("name,score\nalpha,7\nbeta,9")
-    );
-    assert_eq!(
-        step.args.get("output_format").and_then(Value::as_str),
-        Some("md_table")
+    assert!(
+        !err.contains("plan_deterministic_inline_json_transform"),
+        "old inline transform deterministic fallback leaked into planner error: {err}"
     );
 }
 

@@ -207,16 +207,6 @@ pub(super) async fn plan_round_actions(
         structured_dry_run_response_deterministic_plan_result(goal, route_result, loop_state),
         "plan_deterministic_structured_dry_run_response"
     );
-    return_deterministic_plan!(
-        inline_json_transform_deterministic_plan_result(
-            goal,
-            state,
-            loop_state,
-            &original_user_text_for_policy,
-            route_result,
-        ),
-        "plan_deterministic_inline_json_transform"
-    );
     if literal_command_should_use_run_cmd
         && runtime_status_query_kind(turn_analysis_for_prompt).is_none()
     {
