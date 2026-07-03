@@ -785,6 +785,34 @@ fn subagent_boundary_clarify_should_enter_agent_loop(
     current_top_level_plan_markdown_path(state).is_some()
 }
 
+fn defer_subagent_boundary_clarify_to_agent_loop(
+    task: &crate::ClaimedTask,
+    post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
+) {
+    let before_gate_kind = post_route.execution_route_result.gate_kind();
+    post_route.execution_route_result.needs_clarify = false;
+    post_route.execution_route_result.clarify_question.clear();
+    post_route
+        .execution_route_result
+        .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
+        "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
+        crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+    );
+    append_route_reason(
+        &mut post_route.execution_route_result,
+        "subagent_boundary_clarify_deferred_to_agent_loop",
+    );
+    log_route_guard_record(
+        task,
+        "worker_agent_loop_boundary",
+        "subagent_boundary_clarify_deferred_to_agent_loop",
+        "deferred",
+        before_gate_kind,
+        &post_route.execution_route_result,
+    );
+}
+
 fn current_top_level_plan_markdown_path(state: &crate::AppState) -> Option<String> {
     let plan_dir = state.skill_rt.workspace_root.join("plan");
     let mut files = std::fs::read_dir(&plan_dir)
@@ -1065,28 +1093,7 @@ fn build_loop_context_after_boundary_preflight(
     );
     if subagent_boundary_clarify_should_enter_agent_loop(state, &post_route.execution_route_result)
     {
-        let before_gate_kind = post_route.execution_route_result.gate_kind();
-        post_route.execution_route_result.needs_clarify = false;
-        post_route.execution_route_result.clarify_question.clear();
-        post_route
-            .execution_route_result
-            .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
-            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
-        );
-        append_route_reason(
-            &mut post_route.execution_route_result,
-            "subagent_boundary_clarify_deferred_to_agent_loop",
-        );
-        log_route_guard_record(
-            task,
-            "worker_agent_loop_boundary",
-            "subagent_boundary_clarify_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
-            &post_route.execution_route_result,
-        );
+        defer_subagent_boundary_clarify_to_agent_loop(task, &mut post_route);
     }
     append_agent_loop_boundary_observations(
         state,
