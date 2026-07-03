@@ -86,9 +86,6 @@ mod preferred_structured_action;
 mod read_range_action;
 #[path = "runtime_status_scalar_plan.rs"]
 mod runtime_status_scalar_plan;
-#[cfg(test)]
-#[path = "runtime_surface_plan.rs"]
-mod runtime_surface_plan;
 #[path = "scalar_compare_observation.rs"]
 mod scalar_compare_observation;
 #[path = "scalar_count_deterministic_plan.rs"]
@@ -128,8 +125,6 @@ use media_artifact_plan::*;
 use preferred_structured_action::*;
 use read_range_action::*;
 use runtime_status_scalar_plan::*;
-#[cfg(test)]
-use runtime_surface_plan::*;
 use scalar_compare_observation::*;
 use scalar_count_deterministic_plan::*;
 use scalar_count_explicit_path::*;
