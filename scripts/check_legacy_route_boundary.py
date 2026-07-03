@@ -23,6 +23,10 @@ LEGACY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("derived_route_label", re.compile(r"\bderived_route_label\b")),
     ("route_label_call", re.compile(r"\.route_label\s*\(")),
     ("intent_normalizer_decision_log", re.compile(r"\bintent_normalizer\b.*\bdecision=")),
+    (
+        "boundary_envelope_raw_text_copy",
+        re.compile(r"raw_user_request\s*:\s*self\.raw_user_request\b"),
+    ),
 )
 
 ALLOWED_FIRST_LAYER_TYPE_FILES = {
@@ -90,6 +94,10 @@ def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
         # Normalizer may emit route_trace_decision, but not a generic
         # decision= log field that looks like current route authority.
         return False
+    if kind == "boundary_envelope_raw_text_copy":
+        # BoundaryEnvelope should carry machine request-length metadata, not the
+        # raw natural-language request before the planner loop.
+        return False
     if kind == "FirstLayerDecision":
         return rel_path in ALLOWED_FIRST_LAYER_TYPE_FILES or is_intent_router_compat_file(rel_path)
     if kind == "first_layer_decision":
@@ -155,6 +163,14 @@ def run_self_test() -> int:
     assert not scan_text(
         "crates/clawd/src/intent_router_normalizer_run.rs",
         '"{} intent_normalizer task_id={} route_trace_decision={:?}"',
+    )
+    assert scan_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "raw_user_request: self.raw_user_request.clone(),",
+    )
+    assert not scan_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        'raw_user_request: format!("raw_chars:{}", self.raw_user_request.chars().count()),',
     )
     print("SELF_TEST_OK")
     return 0
