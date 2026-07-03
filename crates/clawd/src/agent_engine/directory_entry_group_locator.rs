@@ -286,7 +286,7 @@ pub(super) fn directory_tree_auto_locator_observation_plan(
     {
         return None;
     }
-    if crate::task_contract::target_locators_for_route(route).len() > 1 {
+    if crate::evidence_policy::target_locators_for_route(route).len() > 1 {
         return None;
     }
     if directory_purpose_extension_locator(route).is_some() {
@@ -690,7 +690,7 @@ pub(super) fn directory_purpose_auto_locator_deterministic_plan_result(
     {
         return None;
     }
-    if crate::task_contract::target_locators_for_route(route).len() > 1 {
+    if crate::evidence_policy::target_locators_for_route(route).len() > 1 {
         return None;
     }
     let path = route_directory_locator_path(route, auto_locator_path)?;
@@ -1072,7 +1072,7 @@ pub(super) fn directory_compare_locator_deterministic_plan_result(
     {
         return None;
     }
-    let targets = crate::task_contract::target_locators_for_route(route);
+    let targets = crate::evidence_policy::target_locators_for_route(route);
     if targets.len() != 2 {
         return None;
     }
@@ -1123,7 +1123,7 @@ pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
     {
         return None;
     }
-    let mut targets = crate::task_contract::target_locators_for_route(route);
+    let mut targets = crate::evidence_policy::target_locators_for_route(route);
     if targets.len() != 2 {
         if let Some(text_targets) = original_user_text
             .and_then(|text| explicit_existing_metadata_locator_pair_from_text(state, text))
