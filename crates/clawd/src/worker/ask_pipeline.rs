@@ -47,8 +47,8 @@ mod unbound_context_guard;
 #[path = "ask_pipeline_workspace_locator_binding.rs"]
 mod workspace_locator_binding;
 use active_binding::{
-    SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST, active_observed_facts_have_bound_target,
-    active_session_has_bound_target, single_component_locator_hint,
+    active_observed_facts_have_bound_target, active_session_has_bound_target,
+    single_component_locator_hint, SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
 };
 pub(super) use agent_context::build_agent_run_context_from_prepared_flow;
 use background_locator_guard::{
@@ -219,6 +219,78 @@ fn agent_loop_default_context(
 fn push_pre_loop_clarify_candidate(candidates: &mut Vec<&'static str>, candidate: &'static str) {
     if !candidates.contains(&candidate) {
         candidates.push(candidate);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkerLoopBoundaryDeferral {
+    BareTopicContextExpansion,
+    UnboundExistingFileDelivery,
+    DirectoryFileDeliveryWithoutStructuredSelection,
+    DeicticBareLocator,
+}
+
+impl WorkerLoopBoundaryDeferral {
+    fn observation_token(self) -> &'static str {
+        match self {
+            Self::BareTopicContextExpansion => "bare_topic_context_expansion",
+            Self::UnboundExistingFileDelivery => "unbound_existing_file_delivery",
+            Self::DirectoryFileDeliveryWithoutStructuredSelection => {
+                "directory_file_delivery_without_structured_selection"
+            }
+            Self::DeicticBareLocator => "deictic_bare_locator",
+        }
+    }
+
+    fn guard_reason_code(self) -> Option<&'static str> {
+        match self {
+            Self::BareTopicContextExpansion => None,
+            Self::UnboundExistingFileDelivery => {
+                Some("unbound_existing_file_delivery_deferred_to_agent_loop")
+            }
+            Self::DirectoryFileDeliveryWithoutStructuredSelection => {
+                Some("directory_file_delivery_deferred_to_agent_loop")
+            }
+            Self::DeicticBareLocator => Some("deictic_bare_locator_deferred_to_agent_loop"),
+        }
+    }
+
+    fn apply_boundary_contract(self, route_result: &mut crate::RouteResult) {
+        match self {
+            Self::BareTopicContextExpansion => {}
+            Self::UnboundExistingFileDelivery
+            | Self::DirectoryFileDeliveryWithoutStructuredSelection => {
+                route_result.wants_file_delivery = true;
+                route_result.output_contract.delivery_required = true;
+                route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+                route_result.output_contract.delivery_intent =
+                    crate::OutputDeliveryIntent::FileSingle;
+                route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+                route_result.output_contract.locator_hint.clear();
+            }
+            Self::DeicticBareLocator => defer_locator_binding_to_agent_loop(route_result),
+        }
+    }
+
+    fn record(
+        self,
+        task: &crate::ClaimedTask,
+        pre_loop_clarify_candidates: &mut Vec<&'static str>,
+        route_result: &mut crate::RouteResult,
+    ) {
+        let before_gate_kind = route_result.gate_kind();
+        self.apply_boundary_contract(route_result);
+        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, self.observation_token());
+        if let Some(reason_code) = self.guard_reason_code() {
+            log_route_guard_record(
+                task,
+                "worker_locator_guard",
+                reason_code,
+                "deferred",
+                before_gate_kind,
+                route_result,
+            );
+        }
     }
 }
 
@@ -793,7 +865,11 @@ fn build_loop_context_after_boundary_preflight(
         turn_analysis,
         &session_snapshot,
     ) {
-        pre_loop_clarify_candidates.push("bare_topic_context_expansion");
+        WorkerLoopBoundaryDeferral::BareTopicContextExpansion.record(
+            task,
+            &mut pre_loop_clarify_candidates,
+            &mut route_result,
+        );
     }
     if bare_topic_clarify_question_should_drop_context_target(prompt, &route_result) {
         route_result.clarify_question.clear();
@@ -805,24 +881,10 @@ fn build_loop_context_after_boundary_preflight(
         &route_result,
         has_authoritative_deictic_anchor,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        route_result.wants_file_delivery = true;
-        route_result.output_contract.delivery_required = true;
-        route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-        route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        push_pre_loop_clarify_candidate(
-            &mut pre_loop_clarify_candidates,
-            "unbound_existing_file_delivery",
-        );
-        log_route_guard_record(
+        WorkerLoopBoundaryDeferral::UnboundExistingFileDelivery.record(
             task,
-            "worker_locator_guard",
-            "unbound_existing_file_delivery_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
-            &route_result,
+            &mut pre_loop_clarify_candidates,
+            &mut route_result,
         );
     }
     reject_direct_file_delivery_workspace_root_locator(
@@ -837,24 +899,10 @@ fn build_loop_context_after_boundary_preflight(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        route_result.wants_file_delivery = true;
-        route_result.output_contract.delivery_required = true;
-        route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-        route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-        route_result.output_contract.locator_hint.clear();
-        push_pre_loop_clarify_candidate(
-            &mut pre_loop_clarify_candidates,
-            "directory_file_delivery_without_structured_selection",
-        );
-        log_route_guard_record(
+        WorkerLoopBoundaryDeferral::DirectoryFileDeliveryWithoutStructuredSelection.record(
             task,
-            "worker_locator_guard",
-            "directory_file_delivery_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
-            &route_result,
+            &mut pre_loop_clarify_candidates,
+            &mut route_result,
         );
     }
     if deictic_bare_locator_should_defer_to_agent_loop(
@@ -862,16 +910,10 @@ fn build_loop_context_after_boundary_preflight(
         turn_analysis,
         &session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(&mut route_result);
-        push_pre_loop_clarify_candidate(&mut pre_loop_clarify_candidates, "deictic_bare_locator");
-        log_route_guard_record(
+        WorkerLoopBoundaryDeferral::DeicticBareLocator.record(
             task,
-            "worker_locator_guard",
-            "deictic_bare_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
-            &route_result,
+            &mut pre_loop_clarify_candidates,
+            &mut route_result,
         );
     }
     if structured_anchor_route_requires_evidence_repair(
